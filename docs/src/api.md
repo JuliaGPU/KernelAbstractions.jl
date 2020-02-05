@@ -12,3 +12,10 @@
 ```
 
 ## Host interface
+
+## Internal
+
+```@docs
+KernelAbstractions.Kernel
+KernelAbstractions.partition
+```

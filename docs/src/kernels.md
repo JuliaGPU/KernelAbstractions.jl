@@ -3,27 +3,18 @@
 These kernel language constructs are intended to be used as part
 of [`@kernel`](@ref) functions and not outside that context.
 
-```@docs
-@kernel
-```
-
 ## Constant arguments
 
-```@docs
-@const
-```
+[`@Const`](@ref)
 
 ## Indexing
 
-```@docs
-@index
-```
-
+There are several [`@index`](@ref) variants.
 
 ## Local memory, variable lifetime and private memory
 
-```@docs
-@localmem
-@synchronize
-@private
-```
+[`@localmem`](@ref), [`@synchronize`](@ref), [`@private`](@ref)
+
+# Launching kernels
+
+## [Kernel dependencies](@id dependencies)

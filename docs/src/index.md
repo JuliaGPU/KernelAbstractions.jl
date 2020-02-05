@@ -47,7 +47,7 @@ all(A .== 2.0)
 !!! danger
     All kernel launches are asynchronous, each kernel produces an event token that
     has to be waited upon, before reading or writing memory that was passed as an
-    argument to the kernel. See [dependencies](@id dependencies) for a full
+    argument to the kernel. See [dependencies](@ref dependencies) for a full
     explanation.
 
 ## Important difference to Julia

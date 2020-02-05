@@ -7,12 +7,15 @@ makedocs(
         prettyurls = get(ENV, "CI", nothing) == "true"
     ),
     pages = [
-        "Home"    => "index.md",
+        "Home" => "index.md",
         "Writing kernels" => "kernels.md",
-        "Examples"     => [
+        "Examples" => [
             "examples/memcopy.md"
         ],
         "API"          => "api.md",
+        "Extras" => [
+            "extras/unrolling.md"
+        ]
     ],
     doctest = true
 )

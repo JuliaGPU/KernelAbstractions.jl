@@ -1,7 +1,7 @@
 module KernelAbstractions
 
 export @kernel
-export @Const, @local, @private, @synchronize, @index
+export @Const, @localmem, @private, @synchronize, @index
 export Device, GPU, CPU, CUDA 
 
 using StaticArrays
@@ -12,6 +12,11 @@ using Requires
    @kernel function f(args) end
 """
 macro kernel end
+
+"""
+   @Const(A)
+"""
+macro Const end
 
 abstract type Event end
 import Base.wait
