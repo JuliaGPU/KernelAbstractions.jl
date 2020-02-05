@@ -11,17 +11,17 @@ struct CompilerMetadata{StaticWorkgroupSize, StaticNDRange, CheckBounds, I, NDRa
         return new{WorkgroupSize, NDRange, CB, typeof(idx), typeof(ndrange), typeof(workgroupsize)}(idx, ndrange, workgroupsize)
     end
 
-    # GPU variante index is given implicit
-    function CompilerMetadata{WorkgroupSize, NDRange, CB}(ndrange, workgroupsize) where {WorkgroupSize, NDRange, CB}
+    # GPU variante: index and dynamic blocksize is given implicit
+    function CompilerMetadata{WorkgroupSize, NDRange, CB}(ndrange) where {WorkgroupSize, NDRange, CB}
         if ndrange !== nothing
             ndrange = CartesianIndices(ndrange)
         end
-        return new{WorkgroupSize, NDRange, CB, Nothing, typeof(ndrange), typeof(workgroupsize)}(nothing, ndrange, workgroupsize)
+        return new{WorkgroupSize, NDRange, CB, Nothing, typeof(ndrange), Nothing}(nothing, ndrange, nothing)
     end
 end
 
 @inline __groupsize(::CompilerMetadata{WorkgroupSize}) where {WorkgroupSize<:StaticSize} = get(WorkgroupSize)[1]
-@inline __groupsize(::CompilerMetadata{WorkgroupSize}) where {WorkgroupSize<:DynamicSize} = cm.workgroupsize
+@inline __groupsize(cm::CompilerMetadata{WorkgroupSize}) where {WorkgroupSize<:DynamicSize} = cm.workgroupsize
 @inline __groupindex(cm::CompilerMetadata) = cm.groupindex
 @inline __dynamic_checkbounds(::CompilerMetadata{WorkgroupSize, NDRange, CB}) where {WorkgroupSize, NDRange, CB} = CB
 @inline __ndrange(cm::CompilerMetadata{WorkgroupSize, NDRange}) where {WorkgroupSize, NDRange<:StaticSize}  = CartesianIndices(get(NDRange))

@@ -67,7 +67,7 @@ macro index(locale, args...)
     end
     
     index_function = Symbol(:__index_, locale, :_, indexkind)
-    esc(Expr(:call, GlobalRef(KernelAbstractions, index_function), args...))
+    Expr(:call, GlobalRef(KernelAbstractions, index_function), map(esc, args)...)
 end
 
 ###

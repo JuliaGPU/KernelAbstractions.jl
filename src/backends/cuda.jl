@@ -1,6 +1,6 @@
-using CUDAnative
+import CUDAnative, CUDAdrv
 import CUDAnative: cufunction
-using CUDAdrv
+import CUDAdrv: CuEvent, CuStream, CuDefaultStream
 
 STREAMS = CuStream[]
 let id = 1
@@ -50,18 +50,20 @@ function (obj::Kernel{CUDA})(args...; ndrange=nothing, dependencies=nothing, wor
         stream = next_stream()
     end
 
-    for event in dependencies
-        @assert event isa CudaEvent
-        CUDAdrv.wait(event.event, stream)
+    if dependencies !== nothing
+        for event in dependencies
+            @assert event isa CudaEvent
+            CUDAdrv.wait(event.event, stream)
+        end
     end
 
     event = CuEvent(CUDAdrv.EVENT_DISABLE_TIMING)
 
     # Launch kernel
-    ctx = mkcontext(obj)
+    ctx = mkcontext(obj, ndrange)
     args = (ctx, obj.f, args...)
     GC.@preserve args begin
-        kernel_args = map(cudaconvert, args)
+        kernel_args = map(CUDAnative.cudaconvert, args)
         kernel_tt = Tuple{map(Core.Typeof, kernel_args)...}
 
         # If the kernel is statically sized we can tell the compiler about that
@@ -71,7 +73,7 @@ function (obj::Kernel{CUDA})(args...; ndrange=nothing, dependencies=nothing, wor
             static_workgroupsize = nothing
         end
 
-        kernel = cufunction(Cassette.overdub, kernel_tt; name=String(nameof(obj.f)), maxthreads=static_workgroupsize)
+        kernel = CUDAnative.cufunction(Cassette.overdub, kernel_tt; name=String(nameof(obj.f)), maxthreads=static_workgroupsize)
 
         # Dynamically sized and size not prescribed, use autotuning
         if KernelAbstractions.workgroupsize(obj) <: DynamicSize && workgroupsize === nothing
@@ -94,9 +96,18 @@ end
 
 Cassette.@context CUDACtx
 
-function mkcontext(kernel::Kernel{CUDA})
-    metadata = CompilerMetadata{workgroupsize(kernel)}(nothing)
+function mkcontext(kernel::Kernel{CUDA}, _ndrange)
+    metadata = CompilerMetadata{workgroupsize(kernel), ndrange(kernel), true}(_ndrange)
     Cassette.disablehooks(CUDACtx(pass = CompilerPass, metadata=metadata))
+end
+
+
+@inline function __gpu_groupsize(::CompilerMetadata{WorkgroupSize}) where {WorkgroupSize<:DynamicSize}
+    CUDAnative.blockDim().x
+end
+
+@inline function __gpu_groupsize(cm::CompilerMetadata{WorkgroupSize}) where {WorkgroupSize<:StaticSize}
+    __groupsize(cm)
 end
 
 @inline function Cassette.overdub(ctx::CUDACtx, ::typeof(__index_Local_Linear))
@@ -107,9 +118,9 @@ end
 @inline function Cassette.overdub(ctx::CUDACtx, ::typeof(__index_Global_Linear))
     idx = CUDAnative.threadIdx().x
     workgroup = CUDAnative.blockIdx().x
-    # XXX: have a verify mode where we check that our static dimesions are right
+    # XXX: have a verify mode where we check that our static dimensions are right
     #      e.g. that blockDim().x === __groupsize(ctx.metadata)
-    return (workgroup - 1) * __groupsize(ctx.metadata) + idx
+    return (workgroup - 1) * __gpu_groupsize(ctx.metadata) + idx
 end
 
 @inline function Cassette.overdub(ctx::CUDACtx, ::typeof(__index_Local_Cartesian))
@@ -119,7 +130,7 @@ end
 @inline function Cassette.overdub(ctx::CUDACtx, ::typeof(__index_Global_Cartesian))
     idx = CUDAnative.threadIdx().x
     workgroup = CUDAnative.blockIdx().x
-    lI = (workgroup - 1) * __groupsize(ctx.metadata) + idx
+    lI = (workgroup - 1) * __gpu_groupsize(ctx.metadata) + idx
 
     indices = __ndrange(ctx.metadata) 
     return @inbounds indices[lI]
@@ -129,9 +140,9 @@ end
     if __dynamic_checkbounds(ctx.metadata)
         idx = CUDAnative.threadIdx().x
         workgroup = CUDAnative.blockIdx().x
-        lI = (workgroup - 1) * __groupsize(ctx.metadata) + id
+        lI = (workgroup - 1) * __gpu_groupsize(ctx.metadata) + idx
         maxidx = prod(size(__ndrange(ctx.metadata)))
-        return idx <= maxidx
+        return lI <= maxidx
     else
         return true
     end
@@ -177,7 +188,7 @@ end
 end
 
 ###
-# CPU implementation of scratch memory
+# GPU implementation of scratch memory
 # - private memory for each workitem
 ###
 
