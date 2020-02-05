@@ -1,40 +1,70 @@
-# KernelAbstractions.jl
+# KernelAbstractions
 
-```@contents
+`KernelAbstractions.jl` is a package that allows you to write GPU-like kernels that
+target different execution backends. It is intended to be a minimal, and performant
+library that explores ways to best write heterogenous code.
+
+!!! note
+    While `KernelAbstraction.jl` is focused on performance portatbility, it is GPU-biased
+    and therefore the kernel language has several constructs that are necessary for good
+    performance on the GPU, but may hurt performance on the CPU.
+
+## Quickstart
+
+### Writing your first kernel
+
+Kernel functions have to be marked with the [`@kernel`](@ref). Inside the `@kernel` macro
+you can use the [kernel language](@ref api_kernel_language). As an example the `mul2` kernel
+below will multiply each element of the array `A` by `2`. It uses the [`@index`](@ref) macro
+to obtain the global linear index of the current workitem.
+
+```julia
+@kernel function mul2(A)
+  I = @index(Global)
+  A[I] = 2 * A[I]
+end
 ```
 
-## Kernel functions 
+### Launching your first kernel
 
-```@docs
-@kernel
+You can construct a kernel for a specific backend by calling the kernel function
+with the first argument being the device kind, the second argument being the size
+of the workgroup and the third argument being a static `ndrange`. The second and
+third argument are optional. After instantiating the kernel you can launch it by
+calling the kernel object with the right arguments and some keyword arguments that
+configure the specific launch. The example below creates a kernel with a static
+workgroup size of `16` and a dynamic `ndrange`. Since the `ndrange` is dynamic it
+has to be provided for the launch as a keyword argument.
+
+```julia
+A = ones(1024, 1024)
+kernel = mul2(CPU(), 16)
+event = kernel(A, ndrange=size(A))
+wait(event)
+all(A .== 2.0)
 ```
 
-### Marking input arguments as constant
-
-```@docs
-@Const
-```
+!!! danger
+    All kernel launches are asynchronous, each kernel produces an event token that
+    has to be waited upon, before reading or writing memory that was passed as an
+    argument to the kernel. See [dependencies](@ref dependencies) for a full
+    explanation.
 
 ## Important difference to Julia
 
-- Functions inside kernels are forcefully inlined, except when marked with `@noinline`
-- Floating-point multiplication, addition, subtraction are marked contractable
+1. Functions inside kernels are forcefully inlined, except when marked with `@noinline`.
+2. Floating-point multiplication, addition, subtraction are marked contractable.
 
-## Examples
-### Memory copy
+## Important differences to CUDAnative
 
-The first example simple copies memory from `A` to `B`
-
-
-````@eval
-using Markdown
-Markdown.parse("""
-```julia
-$(read("../../examples/memcopy.jl", String))
-```
-""")
-````
+1. The kernels are automatically bounds-checked against either the dynamic or statically
+   provided `ndrange`.
+2. Functions like `Base.sin` are mapped to `CUDAnative.sin`.
 
 ## How to debug kernels
 
+*TODO*
+
 ## How to profile kernels
+
+*TODO*

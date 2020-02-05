@@ -7,43 +7,20 @@ using Test
     @inbounds A[I] = B[I]
 end
 
+function mycopy!(A::Array, B::Array)
+    @assert size(A) == size(B)
+    kernel = copy_kernel!(CPU(), 8)
+    kernel(A, B, ndrange=length(A))
+end
+
+function mycopy_static!(A::Array, B::Array)
+    @assert size(A) == size(B)
+    kernel = copy_kernel!(CPU(), 32, size(A)) # if size(A) varies this will cause recompilation
+    kernel(A, B, ndrange=size(A))
+end
+
 A = zeros(128, 128)
 B = ones(128, 128)
-
-function mycopy!(A::Array, B::Array)
-    @assert size(A) == size(B)
-    kernel = copy_kernel!(ScalarCPU(), 32)
-    kernel(A, B, ndrange=length(A))
-end
-
-function mycopy_static!(A::Array, B::Array)
-    @assert size(A) == size(B)
-    kernel = copy_kernel!(ScalarCPU(), 32, size(A)) # if size(A) varies this will cause recompilation
-    kernel(A, B, ndrange=size(A))
-end
-
-event = mycopy!(A, B)
-wait(event)
-@test A == B
-
-A = zeros(128, 128)
-event = mycopy_static!(A, B)
-wait(event)
-@test A == B
-
-function mycopy!(A::Array, B::Array)
-    @assert size(A) == size(B)
-    kernel = copy_kernel!(ThreadedCPU(), 8)
-    kernel(A, B, ndrange=length(A))
-end
-
-function mycopy_static!(A::Array, B::Array)
-    @assert size(A) == size(B)
-    kernel = copy_kernel!(ThreadedCPU(), 32, size(A)) # if size(A) varies this will cause recompilation
-    kernel(A, B, ndrange=size(A))
-end
-
-A = zeros(128, 128)
 event = mycopy!(A, B)
 wait(event)
 @test A == B

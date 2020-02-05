@@ -127,8 +127,7 @@ function indextest(backend, ArrayT)
 end
 
 @testset "indextest" begin
-    indextest(ScalarCPU(), Array)
-    indextest(ThreadedCPU(), Array)
+    indextest(CPU(), Array)
     if has_cuda_gpu()
         indextest(CUDA(), CuArray)
     end

@@ -1,15 +1,20 @@
-# Kernel language operations
+# Writing kernels 
 
-These kernel language constructs are intendend to be used as part
+These kernel language constructs are intended to be used as part
 of [`@kernel`](@ref) functions and not outside that context.
 
-```@docs
-@shmem
-@scratchpad
-@index
-@synchronize
-```
+## Constant arguments
 
-## Memory kinds
-### Shared memory:
-### Scratch memory
+[`@Const`](@ref)
+
+## Indexing
+
+There are several [`@index`](@ref) variants.
+
+## Local memory, variable lifetime and private memory
+
+[`@localmem`](@ref), [`@synchronize`](@ref), [`@private`](@ref)
+
+# Launching kernels
+
+## [Kernel dependencies](@id dependencies)

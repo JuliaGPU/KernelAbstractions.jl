@@ -103,7 +103,7 @@ function split(stmts)
                 if callee === Symbol("@index")
                     push!(indicies, stmt)
                     continue
-                elseif callee === Symbol("@shmem") || callee === Symbol("@scratchpad")
+                elseif callee === Symbol("@localmem") || callee === Symbol("@private")
                     push!(allocations, stmt)
                     continue
                 end
