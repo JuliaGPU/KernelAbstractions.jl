@@ -17,3 +17,20 @@ test:nightly:
     - nvidia
   image: nvidia/cuda:latest
   allow_failure: true
+
+documentation:
+  extends:
+    - .julia:1.3
+    - .documentation
+  tags:
+    - nvidia
+
+pages:
+  stage: deploy
+  script:
+    - mv docs/build public
+  artifacts:
+    paths:
+    - public
+  only:
+    - master
