@@ -2,7 +2,7 @@ module KernelAbstractions
 
 export @kernel
 export @shmem, @scratchpad, @synchronize, @index
-export Device, GPU, CPU, CUDA, ScalarCPU, ThreadedCPU
+export Device, GPU, CPU, CUDA 
 
 using StaticArrays
 using Cassette
@@ -85,11 +85,8 @@ function __index_Global_Cartesian end
 
 abstract type Device end
 abstract type GPU <: Device end
-abstract type CPU <: Device end
 
-struct ScalarCPU   <: CPU end
-struct ThreadedCPU <: CPU end
-
+struct CPU <: Device end
 struct CUDA <: GPU end
 # struct AMD <: GPU end
 # struct Intel <: GPU end

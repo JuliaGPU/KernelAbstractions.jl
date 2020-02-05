@@ -6,7 +6,7 @@ function wait(ev::CPUEvent)
     wait(ev.task)
 end
 
-function (obj::Kernel{ThreadedCPU})(args...; ndrange=nothing, workgroupsize=nothing, dependencies=nothing)
+function (obj::Kernel{CPU})(args...; ndrange=nothing, workgroupsize=nothing, dependencies=nothing)
     if ndrange isa Int
         ndrange = (ndrange,)
     end
@@ -24,7 +24,7 @@ function (obj::Kernel{ThreadedCPU})(args...; ndrange=nothing, workgroupsize=noth
     if KernelAbstractions.workgroupsize(obj) <: StaticSize
         workgroupsize = nothing
     end
-    t = @async begin
+    t = Threads.@spawn begin
         if dependencies !== nothing
             Base.sync_end(map(e->e.task, dependencies))
         end
@@ -49,53 +49,14 @@ function (obj::Kernel{ThreadedCPU})(args...; ndrange=nothing, workgroupsize=noth
     return CPUEvent(t)
 end
 
-function (obj::Kernel{ScalarCPU})(args...; ndrange=nothing, workgroupsize=nothing, dependencies=nothing)
-    if ndrange isa Int
-        ndrange = (ndrange,)
-    end
-    if dependencies isa Event
-        dependencies = (dependencies,)
-    end 
-    if KernelAbstractions.workgroupsize(obj) <: DynamicSize && workgroupsize === nothing
-        workgroupsize = 1024 # Vectorization, 4x unrolling, minimal grain size
-    end
-    nblocks, dynamic = partition(obj, ndrange, workgroupsize)
-    # partition checked that the dynamic and static sizes agree 
-    if KernelAbstractions.ndrange(obj) <: StaticSize
-        ndrange = nothing
-    end
-    if KernelAbstractions.workgroupsize(obj) <: StaticSize
-        workgroupsize = nothing
-    end
-    t = @async begin
-        if dependencies !== nothing
-            Base.sync_end(map(e->e.task, dependencies))
-        end
-        for I in 1:(nblocks-1)
-            ctx = mkcontext(obj, I, ndrange, workgroupsize)
-            Cassette.overdub(ctx, obj.f, args...)
-        end
-
-        if dynamic
-            # TODO: Inferencebarrier
-            ctx = mkcontextdynamic(obj, nblocks, ndrange, workgroupsize)
-            Cassette.overdub(ctx, obj.f, args...)
-        else 
-            ctx = mkcontext(obj, nblocks, ndrange, workgroupsize)
-            Cassette.overdub(ctx, obj.f, args...)
-        end
-    end
-    return CPUEvent(t)
-end
-
 Cassette.@context CPUCtx
 
-function mkcontext(kernel::Kernel{<:CPU}, I, _ndrange, _workgroupsize)
+function mkcontext(kernel::Kernel{CPU}, I, _ndrange, _workgroupsize)
     metadata = CompilerMetadata{workgroupsize(kernel), ndrange(kernel), false}(I, _ndrange, workgroupsize)
     Cassette.disablehooks(CPUCtx(pass = CompilerPass, metadata=metadata))
 end
 
-function mkcontextdynamic(kernel::Kernel{<:CPU}, I, _ndrange, _workgroupsize)
+function mkcontextdynamic(kernel::Kernel{CPU}, I, _ndrange, _workgroupsize)
     metadata = CompilerMetadata{workgroupsize(kernel), ndrange(kernel), true}(I, _ndrange, workgroupsize)
     Cassette.disablehooks(CPUCtx(pass = CompilerPass, metadata=metadata))
 end
