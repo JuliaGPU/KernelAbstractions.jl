@@ -159,9 +159,9 @@ function transform_cpu(stmts, args)
     loops = split(stmts)
     body  = generate_cpu_code(loops) 
 
-    push!(new_stmts, Expr(:aliasscope))
+    # push!(new_stmts, Expr(:aliasscope))
     push!(new_stmts, body)
-    push!(new_stmts, Expr(:popaliasscope))
+    # push!(new_stmts, Expr(:popaliasscope))
     push!(new_stmts, :(return nothing))
     return Expr(:block, new_stmts...)
 end
