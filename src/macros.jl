@@ -34,16 +34,18 @@ function __kernel(expr)
     # create two functions
     # 1. GPU function
     # 2. CPU function with work-group loops inserted
-    gpu_name = gensym(Symbol(:gpu_, name))
-    cpu_name = gensym(Symbol(:cpu_, name))
+    gpu_name = esc(gensym(Symbol(:gpu_, name)))
+    cpu_name = esc(gensym(Symbol(:cpu_, name)))
+    name = esc(name)
 
     gpu_decl = Expr(:call, gpu_name, arglist...)
     cpu_decl = Expr(:call, cpu_name, arglist...)
 
-    gpu_body = transform_gpu(body, args)
+    # Without the deepcopy we might accidentially modify expr shared between CPU and GPU
+    gpu_body = transform_gpu(deepcopy(body), args)
     gpu_function = Expr(:function, gpu_decl, gpu_body)
 
-    cpu_body = transform_cpu(body, args)
+    cpu_body = transform_cpu(deepcopy(body), args)
     cpu_function = Expr(:function, cpu_decl, cpu_body)
 
     # create constructor functions
@@ -59,8 +61,7 @@ function __kernel(expr)
         end
     end
 
-    # XXX: What needs esc
-    return esc(Expr(:toplevel, cpu_function, gpu_function, constructors))
+    return Expr(:toplevel, cpu_function, gpu_function, constructors)
 end
 
 # Transform function for GPU execution
