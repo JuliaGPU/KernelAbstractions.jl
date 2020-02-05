@@ -10,11 +10,48 @@ using Requires
 
 """
    @kernel function f(args) end
+
+Takes a function definition and generates a Kernel constructor from it.
+The enclosed function is allowed to contain kernel language constructs.
+In order to call it the kernel has first to be specialized on the backend
+and then invoked on the arguments.
+
+# Kernel language
+
+- [`@Const`](@ref)
+- [`@index`](@ref)
+- [`@localmem`](@ref)
+- [`@private`](@ref)
+- [`@synchronize`](@ref)
+
+# Example:
+
+@kernel function vecadd(A, @Const(B))
+    I = @index(Global)
+    @inbounds A[I] += B[I]
+end
+
+A = ones(1024)
+B = rand(1024)
+event = vecadd(CPU(), 64)(A, B, ndrange=size(A))
+wait(event)
 """
-macro kernel end
+macro kernel(expr)
+    __kernel(expr)
+end
 
 """
    @Const(A)
+
+`@Const` is an argument annotiation that asserts that the memory reference
+by `A` is both not written to as part of the kernel and that it does not alias
+any other memory in the kernel.
+
+!!! danger
+    Violating those constraints will lead to arbitrary behaviour.
+
+as an example given a kernel signature `kernel(A, @Const(B))`, you are not
+allowed to call the kernel with `kernel(A, A)` or `kernel(A, view(A, :))`.
 """
 macro Const end
 

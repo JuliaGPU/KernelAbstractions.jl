@@ -1,9 +1,5 @@
 import Base.Meta: isexpr
 
-macro kernel(expr)
-    __kernel(expr)
-end 
-
 # XXX: Proper errors
 function __kernel(expr)
     @assert isexpr(expr, :function)
