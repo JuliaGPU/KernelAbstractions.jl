@@ -2,6 +2,7 @@ using KernelAbstractions
 using CUDAapi
 if has_cuda_gpu()
     using CuArrays
+    CuArrays.allowscalar(false)
 end
 
 import KernelAbstractions: StaticSize, DynamicSize
@@ -17,7 +18,7 @@ import KernelAbstractions: StaticSize, DynamicSize
     end
 
     # gpu static
-    let cm = KernelAbstractions.CompilerMetadata{StaticSize{(64,)}, StaticSize{(128,)}, false}(nothing, nothing)
+    let cm = KernelAbstractions.CompilerMetadata{StaticSize{(64,)}, StaticSize{(128,)}, false}(nothing)
         @test KernelAbstractions.__ndrange(cm) isa CartesianIndices
         @test KernelAbstractions.__ndrange(cm) == CartesianIndices((128,))
         @test KernelAbstractions.__groupsize(cm) == 64
@@ -35,7 +36,7 @@ import KernelAbstractions: StaticSize, DynamicSize
     end
 
     # gpu dynamic ndrange
-    let cm = KernelAbstractions.CompilerMetadata{StaticSize{(64,)}, DynamicSize, false}((128,), nothing)
+    let cm = KernelAbstractions.CompilerMetadata{StaticSize{(64,)}, DynamicSize, false}((128,))
         @test KernelAbstractions.__ndrange(cm) isa CartesianIndices
         @test KernelAbstractions.__ndrange(cm) == CartesianIndices((128,))
         @test KernelAbstractions.__groupsize(cm) == 64
@@ -91,7 +92,7 @@ end
 function indextest(backend, ArrayT)
     A = ArrayT{Int}(undef, 16, 16)
     wait(index_linear_global(backend, 8)(A, ndrange=length(A)))
-    @test A == LinearIndices(A)
+    @test all(A .== LinearIndices(A))
 
     A = ArrayT{Int}(undef, 8)
     wait(index_linear_local(backend, 8)(A, ndrange=length(A)))
@@ -118,7 +119,7 @@ function indextest(backend, ArrayT)
     # Non-multiplies of the workgroupsize
     A = ArrayT{Int}(undef, 7, 7)
     wait(index_linear_global(backend, 8)(A, ndrange=length(A)))
-    @test A == LinearIndices(A)
+    @test all(A .== LinearIndices(A))
 
     A = ArrayT{Int}(undef, 5)
     wait(index_linear_local(backend, 8)(A, ndrange=length(A)))

@@ -68,13 +68,13 @@ if has_cuda_gpu()
     end
 
     A = CuArray{Float32}(undef, 1024)
-    B = CuArrays.cuones(Float32, 1024)
-    event = mycopy!(data)
+    B = CuArrays.ones(Float32, 1024)
+    event = mycopy!(A, B)
     wait(event)
     @test A == B
 
     A = CuArray{Float32}(undef, 1024)
-    event = mycopy_static!(data)
+    event = mycopy_static!(A, B)
     wait(event)
     @test A == B
 end
