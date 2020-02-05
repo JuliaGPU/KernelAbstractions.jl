@@ -1,14 +1,16 @@
 module KernelAbstractions
 
 export @kernel
-export @shmem, @scratchpad, @synchronize, @index
+export @Const, @local, @private, @synchronize, @index
 export Device, GPU, CPU, CUDA 
 
 using StaticArrays
 using Cassette
 using Requires
 
-###
+"""
+   @kernel function f(args) end
+"""
 macro kernel end
 
 abstract type Event end
@@ -21,14 +23,18 @@ function async_copy! end
 
 ###
 # Kernel language
-# - @shmem
-# - @scratchpad
+# - @localmem
+# - @private
 # - @synchronize
 # - @index
 ###
 
 const shmem_id = Ref(0)
-macro shmem(T, dims)
+
+"""
+   @localmem T dims
+"""
+macro localmem(T, dims)
     id = (shmem_id[]+= 1)
 
     quote
@@ -36,16 +42,27 @@ macro shmem(T, dims)
     end
 end
 
-macro scratchpad(T, dims)
+"""
+   @private T dims
+"""
+macro private(T, dims)
     quote
         $Scratchpad($(esc(T)), Val($(esc(dims))))
     end
 end
 
+"""
+   @synchronize()
+"""
 macro synchronize()
     @error "@synchronize not captured or used outside @kernel"
 end
 
+"""
+   @index(Global)
+   @index(Local)
+   @index(Global, Cartesian)
+"""
 macro index(locale, args...)
     if !(locale === :Global || locale === :Local)
         error("@index requires as first argument either :Global or :Local")

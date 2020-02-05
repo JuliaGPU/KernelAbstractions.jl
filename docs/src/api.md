@@ -6,8 +6,8 @@
 @kernel
 @Const
 @index
-@shmem
-@scratchpad
+@localmem
+@private
 @synchronize
 ```
 
