@@ -6,7 +6,7 @@ makedocs(
     sitename = "KernelAbstractions.jl",
     pages = [
         "Home"    => "index.md",
-        "Kernel Language" => "kernels.md"
+        "Kernel Language" => "kernels.md",
         "Design" => "design.md"
     ],
     doctest = true
