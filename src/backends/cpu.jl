@@ -2,8 +2,15 @@ struct CPUEvent <: Event
     task::Core.Task
 end
 
-function wait(ev::CPUEvent)
-    wait(ev.task)
+function wait(ev::CPUEvent, progress=nothing)
+    if progress === nothing
+        wait(ev.task)
+    else
+        while !Base.istaskdone(ev.task)
+            progress()
+            yield() # yield to the scheduler
+        end
+    end
 end
 
 function (obj::Kernel{CPU})(args...; ndrange=nothing, workgroupsize=nothing, dependencies=nothing)

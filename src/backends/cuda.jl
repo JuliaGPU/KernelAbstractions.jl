@@ -19,9 +19,15 @@ end
 struct CudaEvent <: Event
     event::CuEvent
 end
-function wait(ev::CudaEvent)
-    # TODO: MPI/libuv progress
-    CUDAdrv.wait(ev.event)
+function wait(ev::CudaEvent, progress=nothing)
+    if progress === nothing
+        CUDAdrv.wait(ev.event)
+    else
+        while !CUDAdrv.query(ev.event)
+            progress()
+            # do we need to `yield` here?
+        end
+    end
 end
 
 @init begin
