@@ -2,18 +2,48 @@ import CUDAnative, CUDAdrv
 import CUDAnative: cufunction
 import CUDAdrv: CuEvent, CuStream, CuDefaultStream
 
-STREAMS = CuStream[]
-let id = 1
-    global next_stream
-    function next_stream()
-        global id
-        stream = STREAMS[id]
-        if id < length(STREAMS)
-            id += 1
-        else
-            id = 1
+const FREE_STREAMS = CuStream[]
+const STREAMS = CuStream[]
+const STREAM_GC_THRESHOLD = Ref{Int}(16)
+
+@init begin
+    if haskey(ENV, "KERNELABSTRACTIONS_STREAMS_GC_THRESHOLD")
+        global STREAM_GC_THRESHOLD[] = parse(Int, ENV["KERNELABSTRACTIONS_STREAMS_GC_THRESHOLD"])
+    end
+
+end
+
+## Stream GC
+# Simplistic stream gc design in which when we have a total number
+# of streams bigger than a threshold, we start scanning the streams
+# and add them back to the freelist if all work on them has completed.
+# Alternative designs:
+# - Enqueue a host function on the stream that adds the stream back to the freelist
+# - Attach a finalizer to events that adds the stream back to the freelist
+# Possible improvements
+# - Add a background task that occasionally scans all streams
+# - Add a hysterisis by checking a "since last scanned" timestamp
+# - Add locking
+function next_stream()
+    if !isempty(FREE_STREAMS)
+        return pop!(FREE_STREAMS)
+    end
+
+    if length(STREAMS) > STREAM_GC_THRESHOLD[]
+        for stream in STREAMS
+            if CUDAdrv.query(stream)
+                push!(FREE_STREAMS, stream)
+            end
         end
     end
+
+    if !isempty(FREE_STREAMS)
+        return pop!(FREE_STREAMS)
+    end
+
+    stream = CUDAdrv.CuStream(CUDAdrv.STREAM_NON_BLOCKING)
+    push!(STREAMS, stream)
+    return stream
 end
 
 struct CudaEvent <: Event
@@ -30,17 +60,6 @@ function wait(ev::CudaEvent, progress=nothing)
     end
 end
 
-@init begin
-    if haskey(ENV, "KERNELABSTRACTIONS_STREAMS")
-        nstreams = parse(Int, ENV["KERNELABSTRACTIONS_STREAMS"])
-    else
-        nstreams = 4
-    end
-    for i in 1:nstreams
-        push!(STREAMS, CuStream(CUDAdrv.STREAM_NON_BLOCKING))
-    end
-end
-
 function (obj::Kernel{CUDA})(args...; ndrange=nothing, dependencies=nothing, workgroupsize=nothing)
     if ndrange isa Int
         ndrange = (ndrange,)
@@ -49,13 +68,7 @@ function (obj::Kernel{CUDA})(args...; ndrange=nothing, dependencies=nothing, wor
         dependencies = (dependencies,)
     end
 
-    # Be conservative and launch on CuDefaultStream
-    if dependencies === nothing
-        stream = CuDefaultStream()
-    else
-        stream = next_stream()
-    end
-
+    stream = next_stream()
     if dependencies !== nothing
         for event in dependencies
             @assert event isa CudaEvent
