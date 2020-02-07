@@ -1,7 +1,7 @@
 module KernelAbstractions
 
 export @kernel
-export @Const, @localmem, @private, @synchronize, @index
+export @Const, @localmem, @private, @synchronize, @index, groupsize
 export Device, GPU, CPU, CUDA 
 
 using StaticArrays
@@ -69,7 +69,15 @@ function async_copy! end
 # - @private
 # - @synchronize
 # - @index
+# - groupsize
 ###
+
+"""
+    groupsize()
+
+Query the workgroupsize on the device.
+"""
+function groupsize end
 
 const shmem_id = Ref(0)
 
@@ -255,8 +263,6 @@ include("compiler.jl")
 ###
 # Compiler/Frontend
 ###
-
-function groupsize end
 
 @inline function __workitems_iterspace()
     return 1:groupsize()

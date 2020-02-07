@@ -9,6 +9,7 @@
 @localmem
 @private
 @synchronize
+groupsize
 ```
 
 ## Host interface
