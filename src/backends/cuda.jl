@@ -214,3 +214,7 @@ end
 @inline function Cassette.overdub(ctx::CUDACtx, ::typeof(Scratchpad), ::Type{T}, ::Val{Dims}) where {T, Dims}
     MArray{__size(Dims), T}(undef)
 end
+
+@inline function Cassette.overdub(ctx::CUDACtx, ::typeof(__synchronize))
+    CUDAnative.sync_threads()
+end
