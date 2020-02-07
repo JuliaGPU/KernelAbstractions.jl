@@ -108,6 +108,16 @@ generate_overdubs(CPUCtx)
     MArray{__size(Dims), T}(undef)
 end
 
+@inline function Cassette.overdub(ctx::CPUCtx, ::typeof(DynamicSharedMemory), ::Type{T}, alloc, ::Val, previous...) where T 
+    if alloc isa Function
+        N = alloc(__groupsize(ctx.metadata))
+    else
+        N = alloc
+    end
+    @assert N isa Int
+    Vector{T}(undef, N)
+end
+
 ###
 # CPU implementation of scratch memory
 # - private memory for each workitem

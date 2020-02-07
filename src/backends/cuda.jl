@@ -203,7 +203,31 @@ end
 ###
 @inline function Cassette.overdub(ctx::CUDACtx, ::typeof(SharedMemory), ::Type{T}, ::Val{Dims}, ::Val{Id}) where {T, Dims, Id}
     ptr = CUDAnative._shmem(Val(Id), T, Val(prod(Dims)))
-    CUDAnative.CuDeviceArray(Dims, CUDAnative.DevicePtr{T, CUDAnative.AS.Shared}(ptr))
+    CUDAnative.CuDeviceArray(Dims, ptr)
+end
+
+@inline function Cassette.overdub(ctx::CUDACtx, ::typeof(DynamicSharedMemory), ::Type{T}, alloc, ::Val{Id}, previous::Vararg{Any, N}) where {T, Id, N} 
+    ptr = CUDAnative._shmem(Val(Id), T, Val(0))
+    nthreads = __gpu_groupsize(ctx.metadata)
+    offset = 0
+    # ah yes this is indeed a mapreduce
+    ntuple(Val(N)) do I
+        Base.@_inline_meta
+        Tvar, _alloc  = @inbounds previous[I]
+        if _alloc isa Function
+            _size = _alloc(nthreads)::Int
+        else
+            _size = _alloc::Int
+        end
+        offset += sizeof(Tvar) * _size
+    end
+    if alloc isa Function
+        size = alloc(nthreads)::Int
+    else
+        size = alloc::Int
+    end
+    offset = offset::Int
+    CUDAnative.CuDeviceArray((size,), ptr + offset)
 end
 
 ###
