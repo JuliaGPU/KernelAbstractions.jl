@@ -88,7 +88,7 @@ function split(stmts)
 
     for stmt in stmts.args
         if isexpr(stmt, :macrocall) && stmt.args[1] === Symbol("@synchronize")
-            push!(loops, (current, copy(indicies), allocations))
+            push!(loops, (current, deepcopy(indicies), allocations))
             allocations = Any[]
             current     = Any[]
             continue

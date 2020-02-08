@@ -105,7 +105,9 @@ end
    @synchronize()
 """
 macro synchronize()
-    @error "@synchronize not captured or used outside @kernel"
+    quote
+        $__synchronize()
+    end
 end
 
 """
@@ -284,6 +286,10 @@ end
 
 function SharedMemory(::Type{T}, ::Val{Dims}, ::Val{Id}) where {T, Dims, Id}
     throw(MethodError(ScratchArray, (T, Val(Dims), Val(Id))))
+end
+
+function __synchronize()
+    error("@synchronize used outside kernel or not captured")
 end
 
 ###
