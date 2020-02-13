@@ -1,4 +1,8 @@
-using KernelAbstractions, CuArrays, Test, CUDAapi
+using KernelAbstractions, Test, CUDAapi
+if CUDAapi.has_cuda_gpu()
+    using CuArrays
+    CuArrays.allowscalar(false)
+end
 
 # Simple kernel for matrix multiplication
 @kernel function matmul!(a, b, c)
@@ -19,18 +23,30 @@ using KernelAbstractions, CuArrays, Test, CUDAapi
     c[cI] = tmp_sum
 end
 
+# Creating a wrapper kernel for launching with error checks
+function launch_matmul!(a, b, c)
+    if size(a)[2] != size(b)[1]
+        println("Matrix size mismatch!")
+        return nothing
+    end
+    if isa(a, CuArray)
+        kernel! = matmul!(CUDA(),256)
+    else
+        kernel! = matmul!(CPU(),4)
+    end
+    kernel!(a, b, c, ndrange=size(c)) 
+end
+
 function check()
     a = rand(256,123)
     b = rand(123, 45)
     c = zeros(256, 45)
 
     # beginning CPU tests, returns event
-    ev = matmul!(CPU(),4)(a, b, c, ndrange=size(c))
-
+    ev = launch_matmul!(a,b,c)
     wait(ev)
 
     println("Testing CPU matrix multiplication...")
-    println(c)
     @test isapprox(a*b, c)
 
     # beginning GPU tests
@@ -39,7 +55,7 @@ function check()
         d_b = CuArray(b)
         d_c = CuArray(c)
 
-        matmul!(CUDA(),256)(d_a, d_b, d_c, ndrange=size(c))
+        launch_matmul!(d_a, d_b, d_c)
         c = a*b
 
         println("Testing GPU matrix multiplication...")

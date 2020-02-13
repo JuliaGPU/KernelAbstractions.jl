@@ -1,4 +1,8 @@
-using KernelAbstractions, CuArrays, Test, CUDAapi
+using KernelAbstractions, Test, CUDAapi
+if CUDAapi.has_cuda_gpu()
+    using CuArrays
+    CuArrays.allowscalar(false)
+end
 
 @kernel function copy!(a,b)
     I = @index(Global)
@@ -11,6 +15,34 @@ end
   @inbounds b[i, j] = a[j, i]
 end
 
+# creating wrapper functions
+function launch_copy!(a, b)
+    if size(a) != size(b)
+        println("Matrix size mismatch!")
+        return nothing
+    end
+    if isa(a, CuArray)
+        kernel! = copy!(CUDA(),1024)
+    else
+        kernel! = copy!(CPU(),4)
+    end
+    kernel!(a, b, ndrange=size(a))
+end
+
+# creating wrapper functions
+function launch_naive_transpose!(a, b)
+    if size(a)[1] != size(b)[2] || size(a)[2] != size(b)[1]
+        println("Matrix size mismatch!")
+        return nothing
+    end
+    if isa(a, CuArray)
+        kernel! = naive_transpose!(CUDA(),256)
+    else
+        kernel! = naive_transpose!(CPU(),4)
+    end
+    kernel!(a, b, ndrange=size(a))
+end
+
 function main()
 
     # resolution of grid will be res*res
@@ -21,12 +53,13 @@ function main()
     b = zeros(Float32, res, res)
 
     # beginning CPU tests
-    println("CPU copy time is:")
-    @time copy!(CPU(),4)(a, b, ndrange=size(a))
+    ev = launch_copy!(a, b)
+    wait(ev)
+
+    ev = launch_naive_transpose!(a,b)
+    wait(ev)
 
     println("CPU transpose time is:")
-    @time naive_transpose!(CPU(),4)(a, b, ndrange=size(a))
-
     println("Testing CPU transpose...")
     @test a == transpose(b)
 
@@ -35,11 +68,9 @@ function main()
         d_a = CuArray(a)
         d_b = CuArray(zeros(Float32, res, res))
 
-        println("GPU copy time is:")
-        CuArrays.@time copy!(CUDA(),1024)(d_a, d_b, ndrange=size(a))
+        launch_copy!(d_a, d_b)
 
-        println("GPU transpose time is:")
-        CuArrays.@time naive_transpose!(CUDA(),256)(d_a, d_b, ndrange=size(a))
+        launch_naive_transpose!(d_a, d_b)
 
         a = Array(d_a)
         b = Array(d_b)
