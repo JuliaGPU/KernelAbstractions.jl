@@ -7,6 +7,7 @@ export Device, GPU, CPU, CUDA
 using StaticArrays
 using Cassette
 using Requires
+using Adapt
 
 """
    @kernel function f(args) end
@@ -147,6 +148,13 @@ function __index_Global_Linear end
 
 function __index_Local_Cartesian end
 function __index_Global_Cartesian end
+
+struct ConstAdaptor end
+
+Adapt.adapt_storage(to::ConstAdaptor, a::Array) = Base.Experimental.Const(a)
+
+constify(arg) = adapt(ConstAdaptor(), arg)
+
 ###
 # Backend hierarchy
 ###
@@ -271,8 +279,6 @@ end
 
 function __validindex end
 
-# TODO: GPU ConstWrapper that forwards loads to `ldg` and forbids stores
-ConstWrapper(A) = A
 include("macros.jl")
 
 ###

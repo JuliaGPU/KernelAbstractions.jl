@@ -1,5 +1,5 @@
 import CUDAnative, CUDAdrv
-import CUDAnative: cufunction
+import CUDAnative: cufunction, DevicePtr
 import CUDAdrv: CuEvent, CuStream, CuDefaultStream
 
 const FREE_STREAMS = CuStream[]
@@ -217,4 +217,33 @@ end
 
 @inline function Cassette.overdub(ctx::CUDACtx, ::typeof(__synchronize))
     CUDAnative.sync_threads()
+end
+
+###
+# GPU implementation of `@Const`
+###
+struct ConstCuDeviceArray{T,N,A} <: AbstractArray{T,N}
+    shape::Dims{N}
+    ptr::DevicePtr{T,A}
+
+    # inner constructors, fully parameterized, exact types (ie. Int not <:Integer)
+    ConstCuDeviceArray{T,N,A}(shape::Dims{N}, ptr::DevicePtr{T,A}) where {T,A,N} = new(shape,ptr)
+end
+
+Adapt.adapt_storage(to::ConstAdaptor, a::CUDAnative.CuDeviceArray{T,N,A}) where {T,N,A} = ConstCuDeviceArray{T, N, A}(a.shape, a.ptr)
+
+Base.pointer(a::ConstCuDeviceArray) = a.ptr
+Base.pointer(a::ConstCuDeviceArray, i::Integer) =
+    pointer(a) + (i - 1) * Base.elsize(a)
+
+Base.elsize(::Type{<:ConstCuDeviceArray{T}}) where {T} = sizeof(T)
+Base.size(g::ConstCuDeviceArray) = g.shape
+Base.length(g::ConstCuDeviceArray) = prod(g.shape)
+
+Base.unsafe_convert(::Type{DevicePtr{T,A}}, a::ConstCuDeviceArray{T,N,A}) where {T,A,N} = pointer(a)
+
+@inline function Base.getindex(A::ConstCuDeviceArray{T}, index::Integer) where {T}
+    @boundscheck checkbounds(A, index)
+    align = Base.datatype_alignment(T)
+    CUDAnative.unsafe_cached_load(pointer(A), index, Val(align))::T
 end

@@ -66,7 +66,7 @@ function transform_gpu(expr, args)
     new_stmts = Expr[]
     for (arg, isconst) in args
         if isconst
-            push!(new_stmts, :($arg = $ConstWrapper($arg)))
+            push!(new_stmts, :($arg = $constify($arg)))
         end
     end
     return quote
@@ -148,16 +148,15 @@ function transform_cpu(stmts, args)
     new_stmts = Expr[]
     for (arg, isconst) in args
         if isconst
-            # XXX: Deal with OffsetArrays
-            push!(new_stmts, :($arg = $Base.Experimental.Const($arg)))
+            push!(new_stmts, :($arg = $constify($arg)))
         end
     end
     loops = split(stmts)
     body  = generate_cpu_code(loops) 
 
-    # push!(new_stmts, Expr(:aliasscope))
+    push!(new_stmts, Expr(:aliasscope))
     push!(new_stmts, body)
-    # push!(new_stmts, Expr(:popaliasscope))
+    push!(new_stmts, Expr(:popaliasscope))
     push!(new_stmts, :(return nothing))
     return Expr(:block, new_stmts...)
 end

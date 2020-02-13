@@ -1,7 +1,9 @@
 using KernelAbstractions
 using CUDAapi
+using InteractiveUtils
 if has_cuda_gpu()
     using CuArrays
+    using CUDAnative
     CuArrays.allowscalar(false)
 end
 
@@ -130,5 +132,39 @@ end
     indextest(CPU(), Array)
     if has_cuda_gpu()
         indextest(CUDA(), CuArray)
+    end
+end
+
+@kernel function constarg(A, @Const(B))
+    I = @index(Global)
+    @inbounds A[I] = B[I]
+end
+
+@testset "Const" begin
+    let kernel = constarg(CPU(), 8, (1024,))
+        # this is poking at internals
+        ctx = KernelAbstractions.mkcontext(kernel, 1, nothing, nothing)
+        AT = Array{Float32, 2}
+        IR = sprint() do io
+            code_llvm(io, KernelAbstractions.Cassette.overdub, 
+                     (typeof(ctx), typeof(kernel.f), AT, AT),
+                     optimize=false, raw=true)
+        end
+        @test occursin("!alias.scope", IR)
+        @test occursin("!noalias", IR)
+    end
+
+    if has_cuda_gpu()
+        let kernel = constarg(CUDA(), 8, (1024,))
+            # this is poking at internals
+            ctx = KernelAbstractions.mkcontext(kernel, nothing)
+            AT = CUDAnative.CuDeviceArray{Float32, 2, CUDAnative.AS.Global}
+            IR = sprint() do io
+                CUDAnative.code_llvm(io, KernelAbstractions.Cassette.overdub, 
+                        (typeof(ctx), typeof(kernel.f), AT, AT),
+                        kernel=true, optimize=false)
+            end
+            @test occursin("@llvm.nvvm.ldg", IR)
+        end
     end
 end
