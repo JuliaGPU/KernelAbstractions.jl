@@ -203,7 +203,7 @@ end
 ###
 @inline function Cassette.overdub(ctx::CUDACtx, ::typeof(SharedMemory), ::Type{T}, ::Val{Dims}, ::Val{Id}) where {T, Dims, Id}
     ptr = CUDAnative._shmem(Val(Id), T, Val(prod(Dims)))
-    CUDAnative.CuDeviceArray(Dims, CUDAnative.DevicePtr{T, CUDAnative.AS.Shared}(ptr))
+    CUDAnative.CuDeviceArray(Dims, ptr)
 end
 
 ###

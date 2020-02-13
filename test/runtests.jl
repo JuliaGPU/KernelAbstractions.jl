@@ -5,4 +5,8 @@ using Test
     include("test.jl")
 end
 
+@testset "Localmem" begin
+    include("localmem.jl")
+end
+
 include("examples.jl")

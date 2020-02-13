@@ -79,16 +79,15 @@ Query the workgroupsize on the device.
 """
 function groupsize end
 
-const shmem_id = Ref(0)
-
 """
    @localmem T dims
 """
 macro localmem(T, dims)
-    id = (shmem_id[]+= 1)
+    # Stay in sync with CUDAnative
+    id = gensym("static_shmem")
 
     quote
-        $SharedMemory($(esc(T)), Val($(esc(dims))), Val($id))
+        $SharedMemory($(esc(T)), Val($(esc(dims))), Val($(QuoteNode(id))))
     end
 end
 
@@ -281,11 +280,11 @@ include("macros.jl")
 ###
 
 function Scratchpad(::Type{T}, ::Val{Dims}) where {T, Dims}
-    throw(MethodError(ScratchArray, (T, Val(Dims))))
+    throw(MethodError(Scratchpad, (T, Val(Dims))))
 end
 
 function SharedMemory(::Type{T}, ::Val{Dims}, ::Val{Id}) where {T, Dims, Id}
-    throw(MethodError(ScratchArray, (T, Val(Dims), Val(Id))))
+    throw(MethodError(SharedMemory, (T, Val(Dims), Val(Id))))
 end
 
 function __synchronize()
