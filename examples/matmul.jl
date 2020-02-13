@@ -29,10 +29,10 @@ function launch_matmul!(a, b, c)
         println("Matrix size mismatch!")
         return nothing
     end
-    if isa(a, CuArray)
-        kernel! = matmul!(CUDA(),256)
-    else
+    if isa(a, Array)
         kernel! = matmul!(CPU(),4)
+    else
+        kernel! = matmul!(CUDA(),256)
     end
     kernel!(a, b, c, ndrange=size(c)) 
 end

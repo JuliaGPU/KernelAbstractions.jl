@@ -21,10 +21,10 @@ function launch_copy!(a, b)
         println("Matrix size mismatch!")
         return nothing
     end
-    if isa(a, CuArray)
-        kernel! = copy!(CUDA(),1024)
-    else
+    if isa(a, Array)
         kernel! = copy!(CPU(),4)
+    else
+        kernel! = copy!(CUDA(),1024)
     end
     kernel!(a, b, ndrange=size(a))
 end
@@ -35,10 +35,10 @@ function launch_naive_transpose!(a, b)
         println("Matrix size mismatch!")
         return nothing
     end
-    if isa(a, CuArray)
-        kernel! = naive_transpose!(CUDA(),256)
-    else
+    if isa(a, Array)
         kernel! = naive_transpose!(CPU(),4)
+    else
+        kernel! = naive_transpose!(CUDA(),256)
     end
     kernel!(a, b, ndrange=size(a))
 end
