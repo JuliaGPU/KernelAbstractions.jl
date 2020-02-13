@@ -7,7 +7,7 @@ using KernelAbstractions, CuArrays, Test, CUDAapi
         # CUDAnative.@cuprintf("Matrix size mismatch!")
         return nothing
     end
-    cI = CartesianIndices(c)[@index(Global)]
+    cI = @index(Global, Cartesian)
 
     # creating a temporary sum variable for matrix multiplication
     tmp_sum = 0
@@ -24,8 +24,10 @@ function check()
     b = rand(123, 45)
     c = zeros(256, 45)
 
-    # beginning CPU tests
-    matmul!(CPU(),4)(a, b, c, ndrange=size(c))
+    # beginning CPU tests, returns event
+    ev = matmul!(CPU(),4)(a, b, c, ndrange=size(c))
+
+    wait(ev)
 
     println("Testing CPU matrix multiplication...")
     println(c)
