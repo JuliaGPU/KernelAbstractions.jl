@@ -25,7 +25,7 @@ function main()
     @time copy!(CPU(),4)(a, b, ndrange=size(a))
 
     println("CPU transpose time is:")
-    @time naive_transpose!(ThreadedCPU(),4)(a, b, ndrange=size(a))
+    @time naive_transpose!(CPU(),4)(a, b, ndrange=size(a))
 
     println("Testing CPU transpose...")
     @test a == transpose(b)
