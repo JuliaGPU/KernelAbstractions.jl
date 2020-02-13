@@ -9,13 +9,14 @@ using KernelAbstractions, CuArrays, Test, CUDAapi
     end
     cI = CartesianIndices(c)[@index(Global)]
 
-    tmp = 0
+    # creating a temporary sum variable for matrix multiplication
+    tmp_sum = 0
 
     for i = 1:size(a)[2]
-        tmp += a[cI[1],i] * b[i,cI[2]]
+        tmp_sum += a[cI[1],i] * b[i,cI[2]]
     end
 
-    c[cI] = tmp
+    c[cI] = tmp_sum
 end
 
 function check()
@@ -24,7 +25,7 @@ function check()
     c = zeros(256, 45)
 
     # beginning CPU tests
-    matmul!(ThreadedCPU(),4)(a, b, c, ndrange=size(c))
+    matmul!(CPU(),4)(a, b, c, ndrange=size(c))
 
     println("Testing CPU matrix multiplication...")
     println(c)
