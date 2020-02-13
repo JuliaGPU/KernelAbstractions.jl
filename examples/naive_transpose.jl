@@ -68,9 +68,11 @@ function main()
         d_a = CuArray(a)
         d_b = CuArray(zeros(Float32, res, res))
 
-        launch_copy!(d_a, d_b)
+        ev = launch_copy!(d_a, d_b)
+        wait(ev)
 
-        launch_naive_transpose!(d_a, d_b)
+        ev = launch_naive_transpose!(d_a, d_b)
+        wait(ev)
 
         a = Array(d_a)
         b = Array(d_b)

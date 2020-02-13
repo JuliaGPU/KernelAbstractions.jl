@@ -55,7 +55,8 @@ function check()
         d_b = CuArray(b)
         d_c = CuArray(c)
 
-        launch_matmul!(d_a, d_b, d_c)
+        ev = launch_matmul!(d_a, d_b, d_c)
+        wait(ev)
         c = a*b
 
         println("Testing GPU matrix multiplication...")
