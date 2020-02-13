@@ -7,7 +7,7 @@ using KernelAbstractions, CuArrays, Test, CUDAapi
         # CUDAnative.@cuprintf("Matrix size mismatch!")
         return nothing
     end
-    cI = CartesianIndices(c)[@index(Global)]
+    cI = @index(Global, Cartesian)
 
     tmp = 0
 
