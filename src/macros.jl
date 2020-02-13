@@ -32,10 +32,12 @@ function __kernel(expr)
     # 2. CPU function with work-group loops inserted
     gpu_name = esc(gensym(Symbol(:gpu_, name)))
     cpu_name = esc(gensym(Symbol(:cpu_, name)))
+    alloc_name = esc(gensym(Symbol(:alloc_, name)))
     name = esc(name)
 
     gpu_decl = Expr(:call, gpu_name, arglist...)
     cpu_decl = Expr(:call, cpu_name, arglist...)
+    alloc_decl = Expr(:call, alloc_name, arglist...)
 
     # Without the deepcopy we might accidentially modify expr shared between CPU and GPU
     gpu_body = transform_gpu(deepcopy(body), args)
@@ -43,6 +45,9 @@ function __kernel(expr)
 
     cpu_body = transform_cpu(deepcopy(body), args)
     cpu_function = Expr(:function, cpu_decl, cpu_body)
+
+    dynamic_allocator_body = transform_dynamic(body, args)
+    dynamic_allocator_function = Expr(:function, alloc_decl, dynamic_allocator_body)
 
     # create constructor functions
     constructors = quote
@@ -55,9 +60,11 @@ function __kernel(expr)
         function $name(::Device, ::S, ::NDRange) where {Device<:$GPU, S<:$_Size, NDRange<:$_Size}
             return $Kernel{Device, S, NDRange, typeof($gpu_name)}($gpu_name)
         end
+        KernelAbstractions.allocator(::typeof($gpu_name)) = $alloc_name
+        KernelAbstractions.allocator(::typeof($cpu_name)) = $alloc_name
     end
 
-    return Expr(:toplevel, cpu_function, gpu_function, constructors)
+    return Expr(:toplevel, cpu_function, gpu_function, dynamic_allocator_function, constructors)
 end
 
 # Transform function for GPU execution
@@ -83,6 +90,7 @@ function split(stmts)
     # 2. Aggregate the index and allocation expressions seen at the sync points
     indicies    = Any[]
     allocations = Any[]
+    dynamic_allocs = Any[]
     loops       = Any[]
     current     = Any[]
 
@@ -101,6 +109,15 @@ function split(stmts)
                     continue
                 elseif callee === Symbol("@localmem") || callee === Symbol("@private")
                     push!(allocations, stmt)
+                    continue
+                elseif callee === Symbol("@dynamic_localmem")
+                    # args[2] LineNumberNode
+                    Tvar = rhs.args[3]
+                    size = rhs.args[4]
+                    # add all previous dynamic allocations
+                    append!(rhs.args, dynamic_allocs)
+                    push!(allocations, stmt)
+                    push!(dynamic_allocs, Expr(:tuple, Tvar, size))
                     continue
                 end
             end
@@ -161,3 +178,26 @@ function transform_cpu(stmts, args)
     push!(new_stmts, :(return nothing))
     return Expr(:block, new_stmts...)
 end
+
+function transform_dynamic(stmts, args)
+    # 1. Find dynamic allocations
+    allocators = Expr[]
+    for stmt in stmts.args
+        if isexpr(stmt, :(=))
+            rhs = stmt.args[2]
+            if isexpr(rhs, :macrocall)
+                callee = rhs.args[1]
+                if callee === Symbol("@dynamic_localmem")
+                    # args[2] LineNumberNode
+                    Tvar = rhs.args[3]
+                    size = rhs.args[4]
+                    push!(allocators, Expr(:tuple, Expr(:call, :sizeof, Tvar), size))
+                    continue
+                end
+            end
+        end
+    end
+    return Expr(:block, Expr(:tuple, allocators...))
+end
+
+

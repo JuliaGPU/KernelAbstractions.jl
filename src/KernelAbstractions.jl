@@ -79,16 +79,26 @@ Query the workgroupsize on the device.
 """
 function groupsize end
 
-const shmem_id = Ref(0)
-
 """
    @localmem T dims
 """
 macro localmem(T, dims)
-    id = (shmem_id[]+= 1)
-
+    # Stay in sync with CUDAnative
+    id = gensym("static_shmem")
     quote
-        $SharedMemory($(esc(T)), Val($(esc(dims))), Val($id))
+        $SharedMemory($(esc(T)), Val($(esc(dims))), Val($(QuoteNode(id))))
+    end
+end
+
+"""
+    @dynamic_localmem T N
+    @dynamic_localmem T (workgroupsize)->N
+"""
+macro dynamic_localmem(T, N, previous...)
+    # Stay in sync with CUDAnative
+    id = gensym("dynamic_shmem")
+    quote
+        $DynamicSharedMemory($(esc(T)), $(esc(N)), Val($(QuoteNode(id))), $(map(esc, previous))...)
     end
 end
 
@@ -196,6 +206,8 @@ struct Kernel{Device, WorkgroupSize<:_Size, NDRange<:_Size, Fun}
     f::Fun
 end
 
+function allocator end
+
 workgroupsize(::Kernel{D, WorkgroupSize}) where {D, WorkgroupSize} = WorkgroupSize
 ndrange(::Kernel{D, WorkgroupSize, NDRange}) where {D, WorkgroupSize,NDRange} = NDRange
 
@@ -281,11 +293,15 @@ include("macros.jl")
 ###
 
 function Scratchpad(::Type{T}, ::Val{Dims}) where {T, Dims}
-    throw(MethodError(ScratchArray, (T, Val(Dims))))
+    throw(MethodError(Scratchpad, (T, Val(Dims))))
 end
 
 function SharedMemory(::Type{T}, ::Val{Dims}, ::Val{Id}) where {T, Dims, Id}
-    throw(MethodError(ScratchArray, (T, Val(Dims), Val(Id))))
+    throw(MethodError(SharedMemory, (T, Val(Dims), Val(Id))))
+end
+
+function DynamicSharedMemory(::Type{T}, N, ::Val{Id}, previous...) where {T, Id}
+    throw(MethodError(DynamicSharedMemory, (T, N, Val(id), previous)))
 end
 
 function __synchronize()

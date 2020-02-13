@@ -5,4 +5,12 @@ using Test
     include("test.jl")
 end
 
+@testset "Macro" begin
+    include("macros.jl")
+end
+
+@testset "Localmem" begin
+    include("localmem.jl")
+end
+
 include("examples.jl")

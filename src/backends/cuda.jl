@@ -203,7 +203,24 @@ end
 ###
 @inline function Cassette.overdub(ctx::CUDACtx, ::typeof(SharedMemory), ::Type{T}, ::Val{Dims}, ::Val{Id}) where {T, Dims, Id}
     ptr = CUDAnative._shmem(Val(Id), T, Val(prod(Dims)))
-    CUDAnative.CuDeviceArray(Dims, CUDAnative.DevicePtr{T, CUDAnative.AS.Shared}(ptr))
+    CUDAnative.CuDeviceArray(Dims, ptr)
+end
+
+@inline get_offset(threads) = 0
+@inline get_offset(threads, elem::Tuple{Int, Int}) = elem[1] * elem[2] 
+@inline get_offset(threads, elem::Tuple{Int, <:Function}) = elem[1] * elem[2](threads) 
+@inline get_offset(threads, elem, args...) = get_offset(threads, elem) + get_offset(threads, args...)
+
+@inline function Cassette.overdub(ctx::CUDACtx, ::typeof(DynamicSharedMemory), ::Type{T}, alloc, ::Val{Id}, previous::Vararg{Any, N}) where {T, Id, N} 
+    ptr = CUDAnative._shmem(Val(Id), T, Val(0))
+    nthreads = __gpu_groupsize(ctx.metadata)
+    offset = get_offset(nthreads, previous...)
+    if alloc isa Function
+        size = alloc(nthreads)
+    else
+        size = alloc
+    end
+    CUDAnative.CuDeviceArray{T}((size,), ptr + offset)
 end
 
 ###
