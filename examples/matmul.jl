@@ -1,14 +1,10 @@
-using KernelAbstractions
-using CUDAapi
-using CUDAnative
-
-using Test
-using CuArrays
+using KernelAbstractions, CuArrays, Test, CUDAapi
 
 # Simple kernel for matrix multiplication
 @kernel function matmul!(a, b, c)
     if size(a)[2] != size(b)[1]
-        CUDAnative.@cuprintf("Matrix size mismatch!")
+        # here, we need a CPU / GPU generic print statement, like...
+        # CUDAnative.@cuprintf("Matrix size mismatch!")
         return nothing
     end
     cI = CartesianIndices(c)[@index(Global)]
@@ -27,17 +23,24 @@ function check()
     b = rand(123, 45)
     c = zeros(256, 45)
 
-    d_a = CuArray(a)
-    d_b = CuArray(b)
-    d_c = CuArray(c)
+    # beginning CPU tests
+    matmul!(ThreadedCPU(),4)(a, b, c, ndrange=size(c))
 
-    matmul!(CUDA(),256)(d_a, d_b, d_c, ndrange=size(c))
-    c = a*b
+    println("Testing CPU matrix multiplication...")
+    println(c)
+    @test isapprox(a*b, c)
 
-    if isapprox(Array(d_c), c)
-        println("nice job, man.")
-    else
-        println("What a loser!")
+    # beginning GPU tests
+    if has_cuda_gpu()
+        d_a = CuArray(a)
+        d_b = CuArray(b)
+        d_c = CuArray(c)
+
+        matmul!(CUDA(),256)(d_a, d_b, d_c, ndrange=size(c))
+        c = a*b
+
+        println("Testing GPU matrix multiplication...")
+        @test isapprox(Array(d_c), c)
     end
 end
 
