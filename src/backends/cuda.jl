@@ -206,28 +206,21 @@ end
     CUDAnative.CuDeviceArray(Dims, ptr)
 end
 
+@inline get_offset(threads) = 0
+@inline get_offset(threads, elem::Tuple{Int, Int}) = elem[1] * elem[2] 
+@inline get_offset(threads, elem::Tuple{Int, <:Function}) = elem[1] * elem[2](threads) 
+@inline get_offset(threads, elem, args...) = get_offset(threads, elem) + get_offset(threads, args...)
+
 @inline function Cassette.overdub(ctx::CUDACtx, ::typeof(DynamicSharedMemory), ::Type{T}, alloc, ::Val{Id}, previous::Vararg{Any, N}) where {T, Id, N} 
     ptr = CUDAnative._shmem(Val(Id), T, Val(0))
     nthreads = __gpu_groupsize(ctx.metadata)
-    offset = 0
-    # ah yes this is indeed a mapreduce
-    ntuple(Val(N)) do I
-        Base.@_inline_meta
-        Tvar, _alloc  = @inbounds previous[I]
-        if _alloc isa Function
-            _size = _alloc(nthreads)::Int
-        else
-            _size = _alloc::Int
-        end
-        offset += sizeof(Tvar) * _size
-    end
+    offset = get_offset(nthreads, previous...)
     if alloc isa Function
-        size = alloc(nthreads)::Int
+        size = alloc(nthreads)
     else
-        size = alloc::Int
+        size = alloc
     end
-    offset = offset::Int
-    CUDAnative.CuDeviceArray((size,), ptr + offset)
+    CUDAnative.CuDeviceArray{T}((size,), ptr + offset)
 end
 
 ###
