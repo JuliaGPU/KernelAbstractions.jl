@@ -38,9 +38,8 @@ function __kernel(expr)
     # create two functions
     # 1. GPU function
     # 2. CPU function with work-group loops inserted
-    gpu_name = esc(gensym(Symbol(:gpu_, name)))
-    cpu_name = esc(gensym(Symbol(:cpu_, name)))
-    name = esc(name)
+    gpu_name = gensym(Symbol(:gpu_, name))
+    cpu_name = gensym(Symbol(:cpu_, name))
 
     gpu_decl = Expr(:call, gpu_name, arglist...)
     cpu_decl = Expr(:call, cpu_name, arglist...)
@@ -70,7 +69,7 @@ function __kernel(expr)
         end
     end
 
-    return Expr(:toplevel, cpu_function, gpu_function, constructors)
+    return Expr(:block, esc(cpu_function), esc(gpu_function), esc(constructors))
 end
 
 # Transform function for GPU execution
