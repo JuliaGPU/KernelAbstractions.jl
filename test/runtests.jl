@@ -9,4 +9,8 @@ end
     include("localmem.jl")
 end
 
+@testset "Unroll" begin
+    include("unroll.jl")
+end
+
 include("examples.jl")
