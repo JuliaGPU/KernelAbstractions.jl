@@ -7,7 +7,15 @@ function __kernel(expr)
     body = expr.args[2]
 
     # parse decl
-    @assert isexpr(decl, :call)
+    # `@kernel fname(::T) where {T}`
+    if isexpr(decl, :where) 
+        iswhere = true
+        whereargs = decl.args[2:end]
+        decl = decl.args[1]
+    else
+        iswhere = false
+    end
+    @assert isexpr(decl, :call) 
     name = decl.args[1]
 
     # List of tuple (Symbol, Bool) where the bool
@@ -36,6 +44,11 @@ function __kernel(expr)
 
     gpu_decl = Expr(:call, gpu_name, arglist...)
     cpu_decl = Expr(:call, cpu_name, arglist...)
+
+    if iswhere
+        gpu_decl = Expr(:where, gpu_decl, whereargs...)
+        cpu_decl = Expr(:where, cpu_decl, whereargs...)
+    end
 
     # Without the deepcopy we might accidentially modify expr shared between CPU and GPU
     gpu_body = transform_gpu(deepcopy(body), args)

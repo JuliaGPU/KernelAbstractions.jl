@@ -168,3 +168,17 @@ end
         end
     end
 end
+
+@kernel function kernel_val!(a, ::Val{m}) where {m}
+    I = @index(Global)
+    @inbounds a[I] = m
+end
+
+A = zeros(Int64, 1024)
+wait(kernel_val!(CPU())(A,Val(3), ndrange=size(A)))
+@test all((a)->a==3, A)
+if has_cuda_gpu()
+    A = CuArrays.zeros(Int64, 1024)
+    wait(kernel_val!(CUDA())(A,Val(3), ndrange=size(A)))
+    @test all((a)->a==3, A)
+end
