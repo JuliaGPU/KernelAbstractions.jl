@@ -59,12 +59,12 @@ end
 Cassette.@context CPUCtx
 
 function mkcontext(kernel::Kernel{CPU}, I, _ndrange, _workgroupsize)
-    metadata = CompilerMetadata{workgroupsize(kernel), ndrange(kernel), false}(I, _ndrange, workgroupsize)
+    metadata = CompilerMetadata{workgroupsize(kernel), ndrange(kernel), false}(I, _ndrange, _workgroupsize)
     Cassette.disablehooks(CPUCtx(pass = CompilerPass, metadata=metadata))
 end
 
 function mkcontextdynamic(kernel::Kernel{CPU}, I, _ndrange, _workgroupsize)
-    metadata = CompilerMetadata{workgroupsize(kernel), ndrange(kernel), true}(I, _ndrange, workgroupsize)
+    metadata = CompilerMetadata{workgroupsize(kernel), ndrange(kernel), true}(I, _ndrange, _workgroupsize)
     Cassette.disablehooks(CPUCtx(pass = CompilerPass, metadata=metadata))
 end
 
