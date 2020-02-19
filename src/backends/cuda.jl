@@ -6,11 +6,9 @@ const FREE_STREAMS = CuStream[]
 const STREAMS = CuStream[]
 const STREAM_GC_THRESHOLD = Ref{Int}(16)
 
-@init begin
-    if haskey(ENV, "KERNELABSTRACTIONS_STREAMS_GC_THRESHOLD")
-        global STREAM_GC_THRESHOLD[] = parse(Int, ENV["KERNELABSTRACTIONS_STREAMS_GC_THRESHOLD"])
-    end
-
+# This code is loaded after an `@init` step
+if haskey(ENV, "KERNELABSTRACTIONS_STREAMS_GC_THRESHOLD")
+    global STREAM_GC_THRESHOLD[] = parse(Int, ENV["KERNELABSTRACTIONS_STREAMS_GC_THRESHOLD"])
 end
 
 ## Stream GC
