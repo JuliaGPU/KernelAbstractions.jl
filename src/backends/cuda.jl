@@ -59,8 +59,11 @@ function wait(ev::CudaEvent, progress=nothing)
 end
 
 function (obj::Kernel{CUDA})(args...; ndrange=nothing, dependencies=nothing, workgroupsize=nothing)
-    if ndrange isa Int
+    if ndrange isa Integer
         ndrange = (ndrange,)
+    end
+    if workgroupsize isa Integer
+        workgroupsize = (workgroupsize, )
     end
     if dependencies isa Event
         dependencies = (dependencies,)
@@ -74,92 +77,63 @@ function (obj::Kernel{CUDA})(args...; ndrange=nothing, dependencies=nothing, wor
         end
     end
 
-    event = CuEvent(CUDAdrv.EVENT_DISABLE_TIMING)
-
-    # Launch kernel
-    ctx = mkcontext(obj, ndrange)
-    args = (ctx, obj.f, args...)
-    GC.@preserve args begin
-        kernel_args = map(CUDAnative.cudaconvert, args)
-        kernel_tt = Tuple{map(Core.Typeof, kernel_args)...}
-
-        # If the kernel is statically sized we can tell the compiler about that
-        if KernelAbstractions.workgroupsize(obj) <: StaticSize 
-            static_workgroupsize = get(KernelAbstractions.workgroupsize(obj))[1]
-        else
-            static_workgroupsize = nothing
-        end
-
-        kernel = CUDAnative.cufunction(Cassette.overdub, kernel_tt; name=String(nameof(obj.f)), maxthreads=static_workgroupsize)
-
-        # Dynamically sized and size not prescribed, use autotuning
-        if KernelAbstractions.workgroupsize(obj) <: DynamicSize && workgroupsize === nothing
-            workgroupsize = CUDAnative.maxthreads(kernel)
-        end
-
-        if workgroupsize === nothing
-            threads = static_workgroupsize
-        else
-            threads = workgroupsize
-        end
-        @assert threads !== nothing
-
-        blocks, _ = partition(obj, ndrange, threads)
-        kernel(kernel_args..., threads=threads, blocks=blocks, stream=stream)
+    if KernelAbstractions.workgroupsize(obj) <: DynamicSize && workgroupsize === nothing
+        # TODO: allow for NDRange{1, DynamicSize, DynamicSize}(nothing, nothing)
+        #       and actually use CUDAnative autotuning
+        workgroupsize = (256,)
     end
+    # If the kernel is statically sized we can tell the compiler about that
+    if KernelAbstractions.workgroupsize(obj) <: StaticSize 
+        maxthreads = prod(get(KernelAbstractions.workgroupsize(obj)))
+    else
+        maxthreads = nothing
+    end
+
+    iterspace, dynamic = partition(obj, ndrange, workgroupsize)
+
+    nblocks = length(blocks(iterspace))
+    threads = length(workitems(iterspace))
+
+    ctx = mkcontext(obj, ndrange, iterspace)
+    # Launch kernel
+    event = CuEvent(CUDAdrv.EVENT_DISABLE_TIMING)
+    CUDAnative.@cuda(threads=threads, blocks=nblocks, stream=stream,
+                     name=String(nameof(obj.f)), maxthreads=maxthreads,
+                     Cassette.overdub(ctx, obj.f, args...))
+
     CUDAdrv.record(event, stream)
     return CudaEvent(event)
 end
 
 Cassette.@context CUDACtx
 
-function mkcontext(kernel::Kernel{CUDA}, _ndrange)
-    metadata = CompilerMetadata{workgroupsize(kernel), ndrange(kernel), true}(_ndrange)
+function mkcontext(kernel::Kernel{CUDA}, _ndrange, iterspace)
+    metadata = CompilerMetadata{ndrange(kernel), true}(_ndrange, iterspace)
     Cassette.disablehooks(CUDACtx(pass = CompilerPass, metadata=metadata))
 end
 
-
-@inline function __gpu_groupsize(::CompilerMetadata{WorkgroupSize}) where {WorkgroupSize<:DynamicSize}
-    CUDAnative.blockDim().x
-end
-
-@inline function __gpu_groupsize(cm::CompilerMetadata{WorkgroupSize}) where {WorkgroupSize<:StaticSize}
-    __groupsize(cm)
-end
-
 @inline function Cassette.overdub(ctx::CUDACtx, ::typeof(__index_Local_Linear))
-    idx = CUDAnative.threadIdx().x
-    return idx
+    return CUDAnative.threadIdx().x
 end
 
 @inline function Cassette.overdub(ctx::CUDACtx, ::typeof(__index_Global_Linear))
-    idx = CUDAnative.threadIdx().x
-    workgroup = CUDAnative.blockIdx().x
-    # XXX: have a verify mode where we check that our static dimensions are right
-    #      e.g. that blockDim().x === __groupsize(ctx.metadata)
-    return (workgroup - 1) * __gpu_groupsize(ctx.metadata) + idx
+    I =  @inbounds expand(__iterspace(ctx.metadata), CUDAnative.blockIdx().x, CUDAnative.threadIdx().x)
+    # TODO: This is unfortunate, can we get the linear index cheaper
+    @inbounds LinearIndices(__ndrange(ctx.metadata))[I]
 end
 
 @inline function Cassette.overdub(ctx::CUDACtx, ::typeof(__index_Local_Cartesian))
-    error("@index(Local, Cartesian) is not yet defined")
+    @inbounds workitems(__iterspace(ctx.metadata))[CUDAnative.threadIdx().x]
 end
 
 @inline function Cassette.overdub(ctx::CUDACtx, ::typeof(__index_Global_Cartesian))
-    idx = CUDAnative.threadIdx().x
-    workgroup = CUDAnative.blockIdx().x
-    lI = (workgroup - 1) * __gpu_groupsize(ctx.metadata) + idx
-
-    indices = __ndrange(ctx.metadata) 
-    return @inbounds indices[lI]
+    return @inbounds expand(__iterspace(ctx.metadata), CUDAnative.blockIdx().x, CUDAnative.threadIdx().x)
 end
 
 @inline function Cassette.overdub(ctx::CUDACtx, ::typeof(__validindex))
     if __dynamic_checkbounds(ctx.metadata)
-        idx = CUDAnative.threadIdx().x
-        workgroup = CUDAnative.blockIdx().x
-        lI = (workgroup - 1) * __gpu_groupsize(ctx.metadata) + idx
-        maxidx = prod(size(__ndrange(ctx.metadata)))
-        return lI <= maxidx
+        I = @inbounds expand(__iterspace(ctx.metadata), CUDAnative.blockIdx().x, CUDAnative.threadIdx().x)
+        return I in __ndrange(ctx.metadata)
     else
         return true
     end

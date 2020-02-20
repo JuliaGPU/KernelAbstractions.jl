@@ -1,38 +1,38 @@
-struct CompilerMetadata{StaticWorkgroupSize, StaticNDRange, CheckBounds, I, NDRange, WorkgroupSize}
+struct CompilerMetadata{StaticNDRange, CheckBounds, I, NDRange, Iterspace}
     groupindex::I
     ndrange::NDRange
-    workgroupsize::WorkgroupSize
+    iterspace::Iterspace
 
     # CPU variant
-    function CompilerMetadata{WorkgroupSize, NDRange, CB}(idx, ndrange, workgroupsize) where {WorkgroupSize, NDRange, CB}
+    function CompilerMetadata{NDRange, CB}(idx, ndrange, iterspace) where {NDRange, CB}
         if ndrange !== nothing
             ndrange = CartesianIndices(ndrange)
         end
-        return new{WorkgroupSize, NDRange, CB, typeof(idx), typeof(ndrange), typeof(workgroupsize)}(idx, ndrange, workgroupsize)
+        return new{NDRange, CB, typeof(idx), typeof(ndrange), typeof(iterspace)}(idx, ndrange, iterspace)
     end
 
-    # GPU variante: index and dynamic blocksize is given implicit
-    function CompilerMetadata{WorkgroupSize, NDRange, CB}(ndrange) where {WorkgroupSize, NDRange, CB}
+    # GPU variante: index is given implicit
+    function CompilerMetadata{NDRange, CB}(ndrange, iterspace) where {NDRange, CB}
         if ndrange !== nothing
             ndrange = CartesianIndices(ndrange)
         end
-        return new{WorkgroupSize, NDRange, CB, Nothing, typeof(ndrange), Nothing}(nothing, ndrange, nothing)
+        return new{NDRange, CB, Nothing, typeof(ndrange), typeof(iterspace)}(nothing, ndrange, iterspace)
     end
 end
 
-@inline __groupsize(::CompilerMetadata{WorkgroupSize}) where {WorkgroupSize<:StaticSize} = get(WorkgroupSize)[1]
-@inline __groupsize(cm::CompilerMetadata{WorkgroupSize}) where {WorkgroupSize<:DynamicSize} = cm.workgroupsize
+@inline __iterspace(cm::CompilerMetadata)  = cm.iterspace
 @inline __groupindex(cm::CompilerMetadata) = cm.groupindex
-@inline __dynamic_checkbounds(::CompilerMetadata{WorkgroupSize, NDRange, CB}) where {WorkgroupSize, NDRange, CB} = CB
-@inline __ndrange(cm::CompilerMetadata{WorkgroupSize, NDRange}) where {WorkgroupSize, NDRange<:StaticSize}  = CartesianIndices(get(NDRange))
-@inline __ndrange(cm::CompilerMetadata{WorkgroupSize, NDRange}) where {WorkgroupSize, NDRange<:DynamicSize} = cm.ndrange
+@inline __dynamic_checkbounds(::CompilerMetadata{NDRange, CB}) where {NDRange, CB} = CB
+@inline __ndrange(cm::CompilerMetadata{NDRange}) where {NDRange<:StaticSize}  = CartesianIndices(get(NDRange))
+@inline __ndrange(cm::CompilerMetadata{NDRange}) where {NDRange<:DynamicSize} = cm.ndrange
 
 include("compiler/contract.jl")
 include("compiler/pass.jl")
 
 function generate_overdubs(Ctx)
    @eval begin
-        @inline Cassette.overdub(ctx::$Ctx, ::typeof(groupsize)) = __groupsize(ctx.metadata)
+        @inline Cassette.overdub(ctx::$Ctx, ::typeof(groupsize)) = size(workitems(__iterspace(ctx.metadata)))
+        @inline Cassette.overdub(ctx::$Ctx, ::typeof(__workitems_iterspace)) = workitems(__iterspace(ctx.metadata))
 
         ###
         # Cassette fixes

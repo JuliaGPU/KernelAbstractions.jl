@@ -14,86 +14,90 @@ function wait(ev::CPUEvent, progress=nothing)
 end
 
 function (obj::Kernel{CPU})(args...; ndrange=nothing, workgroupsize=nothing, dependencies=nothing)
-    if ndrange isa Int
+    if ndrange isa Integer
         ndrange = (ndrange,)
+    end
+    if workgroupsize isa Integer
+        workgroupsize = (workgroupsize, )
     end
     if dependencies isa Event
         dependencies = (dependencies,)
     end
+
     if KernelAbstractions.workgroupsize(obj) <: DynamicSize && workgroupsize === nothing
-        workgroupsize = 1024 # Vectorization, 4x unrolling, minimal grain size
+        workgroupsize = (1024,) # Vectorization, 4x unrolling, minimal grain size
     end
-    nblocks, dynamic = partition(obj, ndrange, workgroupsize)
+    iterspace, dynamic = partition(obj, ndrange, workgroupsize)
     # partition checked that the ndrange's agreed
     if KernelAbstractions.ndrange(obj) <: StaticSize
         ndrange = nothing
     end
-    if KernelAbstractions.workgroupsize(obj) <: StaticSize
-        workgroupsize = nothing
-    end
-    t = Threads.@spawn begin
+
+    t = __run(obj, ndrange, iterspace, args, dependencies)
+    return CPUEvent(t)
+end
+
+# Inference barrier
+function __run(obj, ndrange, iterspace, args, dependencies)
+    return Threads.@spawn begin
         if dependencies !== nothing
             Base.sync_end(map(e->e.task, dependencies))
         end
         @sync begin
-            for I in 1:(nblocks-1)
-                let ctx = mkcontext(obj, I, ndrange, workgroupsize)
-                    Threads.@spawn Cassette.overdub(ctx, obj.f, args...)
+            # TODO: how do we use the information that the iteration space maps perfectly to
+            #       the ndrange without incurring a 2x compilation overhead
+            # if dynamic
+                for block in iterspace
+                    let ctx = mkcontextdynamic(obj, block, ndrange, iterspace)
+                        Threads.@spawn Cassette.overdub(ctx, obj.f, args...)
+                    end
                 end
-            end
-
-            if dynamic
-                let ctx = mkcontextdynamic(obj, nblocks, ndrange, workgroupsize)
-                    Threads.@spawn Cassette.overdub(ctx, obj.f, args...)
-                end
-            else 
-                let ctx = mkcontext(obj, nblocks, ndrange, workgroupsize)
-                    Threads.@spawn Cassette.overdub(ctx, obj.f, args...)
-                end
-            end
+            # else
+            #     for block in iterspace
+            #         let ctx = mkcontext(obj, blocks, ndrange, iterspace)
+            #             Threads.@spawn Cassette.overdub(ctx, obj.f, args...)
+            #         end
+            #     end
+            # end
         end
     end
-    return CPUEvent(t)
 end
 
 Cassette.@context CPUCtx
 
-function mkcontext(kernel::Kernel{CPU}, I, _ndrange, _workgroupsize)
-    metadata = CompilerMetadata{workgroupsize(kernel), ndrange(kernel), false}(I, _ndrange, _workgroupsize)
+function mkcontext(kernel::Kernel{CPU}, I, _ndrange, iterspace)
+    metadata = CompilerMetadata{ndrange(kernel), false}(I, _ndrange, iterspace)
     Cassette.disablehooks(CPUCtx(pass = CompilerPass, metadata=metadata))
 end
 
-function mkcontextdynamic(kernel::Kernel{CPU}, I, _ndrange, _workgroupsize)
-    metadata = CompilerMetadata{workgroupsize(kernel), ndrange(kernel), true}(I, _ndrange, _workgroupsize)
+function mkcontextdynamic(kernel::Kernel{CPU}, I, _ndrange, iterspace)
+    metadata = CompilerMetadata{ndrange(kernel), true}(I, _ndrange, iterspace)
     Cassette.disablehooks(CPUCtx(pass = CompilerPass, metadata=metadata))
 end
 
-@inline function Cassette.overdub(ctx::CPUCtx, ::typeof(__index_Local_Linear), idx)
+@inline function Cassette.overdub(ctx::CPUCtx, ::typeof(__index_Local_Linear), idx::CartesianIndex)
+    indices = workitems(__iterspace(ctx.metadata))
+    return @inbounds LinearIndices(indices)[idx]
+end
+
+@inline function Cassette.overdub(ctx::CPUCtx, ::typeof(__index_Global_Linear), idx::CartesianIndex)
+    I = @inbounds expand(__iterspace(ctx.metadata), __groupindex(ctx.metadata), idx)
+    @inbounds LinearIndices(__ndrange(ctx.metadata))[I]
+end
+
+@inline function Cassette.overdub(ctx::CPUCtx, ::typeof(__index_Local_Cartesian), idx::CartesianIndex)
     return idx
 end
 
-@inline function Cassette.overdub(ctx::CPUCtx, ::typeof(__index_Global_Linear), idx)
-    workgroup = __groupindex(ctx.metadata)
-    (workgroup - 1) * __groupsize(ctx.metadata) + idx
+@inline function Cassette.overdub(ctx::CPUCtx, ::typeof(__index_Global_Cartesian), idx::CartesianIndex)
+    return @inbounds expand(__iterspace(ctx.metadata), __groupindex(ctx.metadata), idx)
 end
 
-@inline function Cassette.overdub(ctx::CPUCtx, ::typeof(__index_Local_Cartesian), idx)
-    error("@index(Local, Cartesian) is not yet defined")
-end
-
-@inline function Cassette.overdub(ctx::CPUCtx, ::typeof(__index_Global_Cartesian), idx)
-    workgroup = __groupindex(ctx.metadata)
-    indices = __ndrange(ctx.metadata)
-    lI = (workgroup - 1) * __groupsize(ctx.metadata) + idx
-    return @inbounds indices[lI]
-end
-
-@inline function Cassette.overdub(ctx::CPUCtx, ::typeof(__validindex), idx)
+@inline function Cassette.overdub(ctx::CPUCtx, ::typeof(__validindex), idx::CartesianIndex)
     # Turns this into a noop for code where we can turn of checkbounds of
     if __dynamic_checkbounds(ctx.metadata)
-        maxidx = prod(size(__ndrange(ctx.metadata)))
-        valid  = idx <= mod1(maxidx, __groupsize(ctx.metadata)) 
-        return valid
+        I = @inbounds expand(__iterspace(ctx.metadata), __groupindex(ctx.metadata), idx)
+        return I in __ndrange(ctx.metadata)
     else
         return true
     end
