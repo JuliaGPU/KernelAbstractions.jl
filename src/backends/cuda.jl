@@ -211,6 +211,7 @@ Base.pointer(a::ConstCuDeviceArray, i::Integer) =
 Base.elsize(::Type{<:ConstCuDeviceArray{T}}) where {T} = sizeof(T)
 Base.size(g::ConstCuDeviceArray) = g.shape
 Base.length(g::ConstCuDeviceArray) = prod(g.shape)
+Base.IndexStyle(::Type{<:ConstCuDeviceArray}) = Base.IndexLinear()
 
 Base.unsafe_convert(::Type{DevicePtr{T,A}}, a::ConstCuDeviceArray{T,N,A}) where {T,A,N} = pointer(a)
 
@@ -218,4 +219,10 @@ Base.unsafe_convert(::Type{DevicePtr{T,A}}, a::ConstCuDeviceArray{T,N,A}) where 
     @boundscheck checkbounds(A, index)
     align = Base.datatype_alignment(T)
     CUDAnative.unsafe_cached_load(pointer(A), index, Val(align))::T
+end
+
+@inline function Base.unsafe_view(arr::ConstCuDeviceArray{T, 1, A}, I::Vararg{Base.ViewIndex,1}) where {T, A}
+    ptr = pointer(arr) + (I[1].start-1)*sizeof(T)
+    len = I[1].stop - I[1].start + 1
+    return ConstCuDeviceArray{T,1,A}(len, ptr)
 end
