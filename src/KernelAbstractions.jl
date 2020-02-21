@@ -76,7 +76,9 @@ function async_copy! end
 """
     groupsize()
 
-Query the workgroupsize on the device.
+Query the workgroupsize on the device. This function returns
+a tuple corresponding to kernel configuration. In order to get
+the total size you can use `prod(groupsize())`.
 """
 function groupsize end
 
@@ -131,10 +133,6 @@ macro index(locale, args...)
         indexkind = :Linear
     end
 
-    if indexkind === :Cartesian && locale === :Local
-        error("@index(Local, Cartesian) is not implemented yet") 
-    end
-    
     index_function = Symbol(:__index_, locale, :_, indexkind)
     Expr(:call, GlobalRef(KernelAbstractions, index_function), map(esc, args)...)
 end
@@ -167,30 +165,13 @@ struct CUDA <: GPU end
 # struct AMD <: GPU end
 # struct Intel <: GPU end
 
+include("nditeration.jl")
+using .NDIteration
+import .NDIteration: get
+
 ###
 # Kernel closure struct
 ###
-
-import Base.@pure
-
-abstract type _Size end
-struct DynamicSize <: _Size end
-struct StaticSize{S} <: _Size
-    function StaticSize{S}() where S
-        new{S::Tuple{Vararg{Int}}}()
-    end
-end
-
-@pure StaticSize(s::Tuple{Vararg{Int}}) = StaticSize{s}() 
-@pure StaticSize(s::Int...) = StaticSize{s}() 
-@pure StaticSize(s::Type{<:Tuple}) = StaticSize{tuple(s.parameters...)}()
-
-# Some @pure convenience functions for `StaticSize`
-@pure get(::Type{StaticSize{S}}) where {S} = S
-@pure get(::StaticSize{S}) where {S} = S
-@pure Base.getindex(::StaticSize{S}, i::Int) where {S} = i <= length(S) ? S[i] : 1
-@pure Base.ndims(::StaticSize{S}) where {S} = length(S)
-@pure Base.length(::StaticSize{S}) where {S} = prod(S)
 
 """
     Kernel{Device, WorkgroupSize, NDRange, Func}
@@ -206,14 +187,7 @@ end
 workgroupsize(::Kernel{D, WorkgroupSize}) where {D, WorkgroupSize} = WorkgroupSize
 ndrange(::Kernel{D, WorkgroupSize, NDRange}) where {D, WorkgroupSize,NDRange} = NDRange
 
-"""
-    partition(kernel, ndrange)
-
-Splits the maximum size of the iteration space by the workgroupsize.
-Returns the number of workgroups necessary and whether the last workgroup
-needs to perform dynamic bounds-checking.
-"""
-@inline function partition(kernel::Kernel, ndrange, workgroupsize)
+function partition(kernel, ndrange, workgroupsize)
     static_ndrange = KernelAbstractions.ndrange(kernel)
     static_workgroupsize = KernelAbstractions.workgroupsize(kernel)
 
@@ -225,42 +199,49 @@ needs to perform dynamic bounds-checking.
             You created a dynamically sized kernel, but forgot to provide runtime
             parameters for the kernel. Either provide them statically if known
             or dynamically.
-            NDRange(Static):  $(typeof(static_ndrange))
+            NDRange(Static):  $(static_ndrange)
             NDRange(Dynamic): $(ndrange)
-            Workgroupsize(Static):  $(typeof(static_workgroupsize))
+            Workgroupsize(Static):  $(static_workgroupsize)
             Workgroupsize(Dynamic): $(workgroupsize)
         """
         error(errmsg)
     end
 
-    if ndrange !== nothing && static_ndrange <: StaticSize
-        if prod(ndrange) != prod(get(static_ndrange))
-            error("Static NDRange and launch NDRange differ")
+    if static_ndrange <: StaticSize
+        if ndrange !== nothing && ndrange != get(static_ndrange)
+            error("Static NDRange ($static_ndrange) and launch NDRange ($ndrange) differ")
         end
+        ndrange = get(static_ndrange)
     end
 
     if static_workgroupsize <: StaticSize
-        @assert length(get(static_workgroupsize)) === 1
-        static_workgroupsize = get(static_workgroupsize)[1]
-        if workgroupsize !== nothing && workgroupsize != static_workgroupsize
-            error("Static WorkgroupSize and launch WorkgroupSize differ")
+        if workgroupsize !== nothing && workgroupsize != get(static_workgroupsize)
+            error("Static WorkgroupSize ($static_workgroupsize) and launch WorkgroupSize $(workgroupsize) differ")
         end
-        workgroupsize = static_workgroupsize
+        workgroupsize = get(static_workgroupsize)
     end
+
     @assert workgroupsize !== nothing
+    @assert ndrange !== nothing
+    blocks, workgroupsize, dynamic = NDIteration.partition(ndrange, workgroupsize)
 
     if static_ndrange <: StaticSize
-        maxsize = prod(get(static_ndrange))
-    else
-        maxsize = prod(ndrange)
+        static_blocks = StaticSize{blocks}
+        blocks = nothing
+    else 
+        static_blocks = DynamicSize
+        blocks = CartesianIndices(blocks)
     end
 
-    nworkgroups = fld1(maxsize, workgroupsize)
-    dynamic     = mod(maxsize, workgroupsize) != 0
+    if static_workgroupsize <: StaticSize
+        static_workgroupsize = StaticSize{workgroupsize} # we might have padded workgroupsize
+        workgroupsize = nothing
+    else
+        workgroupsize = CartesianIndices(workgroupsize)
+    end
 
-    dynamic || @assert(nworkgroups * workgroupsize == maxsize)
-
-    return nworkgroups, dynamic 
+    iterspace = NDRange{length(ndrange), static_blocks, static_workgroupsize}(blocks, workgroupsize)
+    return iterspace, dynamic
 end
 
 ###
@@ -273,10 +254,7 @@ include("compiler.jl")
 # Compiler/Frontend
 ###
 
-@inline function __workitems_iterspace()
-    return 1:groupsize()
-end
-
+function __workitems_iterspace end
 function __validindex end
 
 include("macros.jl")

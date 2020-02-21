@@ -1,4 +1,5 @@
 using KernelAbstractions
+using KernelAbstractions.NDIteration
 using CUDAapi
 using InteractiveUtils
 if has_cuda_gpu()
@@ -7,73 +8,33 @@ if has_cuda_gpu()
     CuArrays.allowscalar(false)
 end
 
-import KernelAbstractions: StaticSize, DynamicSize
-
-@testset "CompilerMetadata constructors" begin
-    # cpu static
-    let cm =  KernelAbstractions.CompilerMetadata{StaticSize{(64,)}, StaticSize{(128,)}, false}(1, nothing, nothing)
-        @test KernelAbstractions.__ndrange(cm) isa CartesianIndices
-        @test KernelAbstractions.__ndrange(cm) == CartesianIndices((128,))
-        @test KernelAbstractions.__groupsize(cm) == 64
-        @test KernelAbstractions.__groupindex(cm) == 1
-        @test KernelAbstractions.__dynamic_checkbounds(cm) == false
-    end
-
-    # gpu static
-    let cm = KernelAbstractions.CompilerMetadata{StaticSize{(64,)}, StaticSize{(128,)}, false}(nothing)
-        @test KernelAbstractions.__ndrange(cm) isa CartesianIndices
-        @test KernelAbstractions.__ndrange(cm) == CartesianIndices((128,))
-        @test KernelAbstractions.__groupsize(cm) == 64
-        @test KernelAbstractions.__groupindex(cm) === nothing
-        @test KernelAbstractions.__dynamic_checkbounds(cm) == false
-    end
-
-    # cpu dynamic ndrange
-    let cm = KernelAbstractions.CompilerMetadata{StaticSize{(64,)}, DynamicSize, false}(1, (128,), nothing)
-        @test KernelAbstractions.__ndrange(cm) isa CartesianIndices
-        @test KernelAbstractions.__ndrange(cm) == CartesianIndices((128,))
-        @test KernelAbstractions.__groupsize(cm) == 64
-        @test KernelAbstractions.__groupindex(cm) === 1
-        @test KernelAbstractions.__dynamic_checkbounds(cm) == false
-    end
-
-    # gpu dynamic ndrange
-    let cm = KernelAbstractions.CompilerMetadata{StaticSize{(64,)}, DynamicSize, false}((128,))
-        @test KernelAbstractions.__ndrange(cm) isa CartesianIndices
-        @test KernelAbstractions.__ndrange(cm) == CartesianIndices((128,))
-        @test KernelAbstractions.__groupsize(cm) == 64
-        @test KernelAbstractions.__groupindex(cm) === nothing
-        @test KernelAbstractions.__dynamic_checkbounds(cm) == false
-    end
-end
-
 identity(x)=x
 @testset "partition" begin
     let kernel = KernelAbstractions.Kernel{CPU, StaticSize{(64,)}, DynamicSize, typeof(identity)}(identity)
-        nworkgroups, dynamic = KernelAbstractions.partition(kernel, 128, nothing)
-        @test nworkgroups == 2
+        iterspace, dynamic = KernelAbstractions.partition(kernel, (128,), nothing)
+        @test length(blocks(iterspace)) == 2
         @test !dynamic
 
-        nworkgroups, dynamic = KernelAbstractions.partition(kernel, 129, nothing)
-        @test nworkgroups == 3
+        iterspace, dynamic = KernelAbstractions.partition(kernel, (129,), nothing)
+        @test length(blocks(iterspace)) == 3
         @test dynamic
 
-        nworkgroups, dynamic = KernelAbstractions.partition(kernel, 129, 64)
-        @test nworkgroups == 3
+        iterspace, dynamic = KernelAbstractions.partition(kernel, (129,), (64,))
+        @test length(blocks(iterspace)) == 3
         @test dynamic
 
-        @test_throws ErrorException KernelAbstractions.partition(kernel,129, 65)
+        @test_throws ErrorException KernelAbstractions.partition(kernel, (129,), (65,))
     end
     let kernel = KernelAbstractions.Kernel{CPU, StaticSize{(64,)}, StaticSize{(128,)}, typeof(identity)}(identity)
-        nworkgroups, dynamic = KernelAbstractions.partition(kernel, 128, nothing)
-        @test nworkgroups == 2
+        iterspace, dynamic = KernelAbstractions.partition(kernel, (128,), nothing)
+        @test length(blocks(iterspace)) == 2
         @test !dynamic
 
-        nworkgroups, dynamic = KernelAbstractions.partition(kernel, nothing, nothing)
-        @test nworkgroups == 2
+        iterspace, dynamic = KernelAbstractions.partition(kernel, nothing, nothing)
+        @test length(blocks(iterspace)) == 2
         @test !dynamic
 
-        @test_throws ErrorException KernelAbstractions.partition(kernel, 129, nothing)
+        @test_throws ErrorException KernelAbstractions.partition(kernel, (129,), nothing)
     end
 end
 
@@ -143,7 +104,8 @@ end
 @testset "Const" begin
     let kernel = constarg(CPU(), 8, (1024,))
         # this is poking at internals
-        ctx = KernelAbstractions.mkcontext(kernel, 1, nothing, nothing)
+        iterspace = NDRange{1, StaticSize{(128,)}, StaticSize{(8,)}}();
+        ctx = KernelAbstractions.mkcontext(kernel, 1, nothing, iterspace)
         AT = Array{Float32, 2}
         IR = sprint() do io
             code_llvm(io, KernelAbstractions.Cassette.overdub, 
@@ -157,7 +119,8 @@ end
     if has_cuda_gpu()
         let kernel = constarg(CUDA(), 8, (1024,))
             # this is poking at internals
-            ctx = KernelAbstractions.mkcontext(kernel, nothing)
+            iterspace = NDRange{1, StaticSize{(128,)}, StaticSize{(8,)}}();
+            ctx = KernelAbstractions.mkcontext(kernel, nothing, iterspace)
             AT = CUDAnative.CuDeviceArray{Float32, 2, CUDAnative.AS.Global}
             IR = sprint() do io
                 CUDAnative.code_llvm(io, KernelAbstractions.Cassette.overdub, 

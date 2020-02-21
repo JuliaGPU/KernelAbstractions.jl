@@ -13,4 +13,8 @@ end
     include("unroll.jl")
 end
 
+@testset "NDIteration" begin
+    include("nditeration.jl")
+end
+
 include("examples.jl")

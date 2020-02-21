@@ -9,10 +9,10 @@ end
 @kernel function localmem(A)
     I = @index(Global, Linear)
     i = @index(Local, Linear)
-    lmem = @localmem Int (groupsize(),) # Ok iff groupsize is static 
+    lmem = @localmem Int groupsize() # Ok iff groupsize is static 
     lmem[i] = i
     @synchronize
-    A[I] = lmem[groupsize() - i + 1]
+    A[I] = lmem[prod(groupsize()) - i + 1]
 end
 
 function harness(backend, ArrayT)
