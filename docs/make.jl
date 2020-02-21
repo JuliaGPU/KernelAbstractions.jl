@@ -11,6 +11,10 @@ makedocs(
         "Writing kernels" => "kernels.md",
         "Examples" => [
             "examples/memcopy.md"
+            "examples/memcopy_static.md"
+            "examples/naive_transpose.md"
+            "examples/performance.md"
+            "examples/matmul.md"
         ],
         "API"          => "api.md",
         "Extras" => [
