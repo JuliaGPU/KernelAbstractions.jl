@@ -4,85 +4,49 @@ if CUDAapi.has_cuda_gpu()
     CuArrays.allowscalar(false)
 end
 
-@kernel function copy!(a,b)
-    I = @index(Global)
-    @inbounds b[I] = a[I]
-end
-
-@kernel function naive_transpose!(a, b)
+@kernel function naive_transpose_kernel!(a, b)
   I = @index(Global, Cartesian)
   i, j = Tuple(I)
   @inbounds b[i, j] = a[j, i]
 end
 
-# creating wrapper functions
-function launch_copy!(a, b)
-    if size(a) != size(b)
-        println("Matrix size mismatch!")
-        return nothing
-    end
-    if isa(a, Array)
-        kernel! = copy!(CPU(),4)
-    else
-        kernel! = copy!(CUDA(),1024)
-    end
-    kernel!(a, b, ndrange=size(a))
-end
-
-# creating wrapper functions
-function launch_naive_transpose!(a, b)
+# create wrapper function to check inputs
+# and select which backend to launch on.
+function naive_transpose!(a, b)
     if size(a)[1] != size(b)[2] || size(a)[2] != size(b)[1]
         println("Matrix size mismatch!")
         return nothing
     end
     if isa(a, Array)
-        kernel! = naive_transpose!(CPU(),4)
+        kernel! = naive_transpose_kernel!(CPU(),4)
     else
-        kernel! = naive_transpose!(CUDA(),256)
+        kernel! = naive_transpose_kernel!(CUDA(),256)
     end
     kernel!(a, b, ndrange=size(a))
 end
 
-function main()
 
-    # resolution of grid will be res*res
-    res = 1024
+# resolution of grid will be res*res
+res = 1024
 
-    # creating initial arrays on CPU and GPU
-    a = round.(rand(Float32, (res, res))*100)
-    b = zeros(Float32, res, res)
+# creating initial arrays
+a = round.(rand(Float32, (res, res))*100)
+b = zeros(Float32, res, res)
 
-    # beginning CPU tests
-    ev = launch_copy!(a, b)
+event = naive_transpose!(a,b)
+wait(event)
+@test a == transpose(b)
+
+# beginning GPU tests
+if has_cuda_gpu()
+    d_a = CuArray(a)
+    d_b = CuArrays.zeros(Float32, res, res)
+
+    ev = naive_transpose!(d_a, d_b)
     wait(ev)
 
-    ev = launch_naive_transpose!(a,b)
-    wait(ev)
+    a = Array(d_a)
+    b = Array(d_b)
 
-    println("CPU transpose time is:")
-    println("Testing CPU transpose...")
     @test a == transpose(b)
-
-    # beginning GPU tests
-    if has_cuda_gpu()
-        d_a = CuArray(a)
-        d_b = CuArray(zeros(Float32, res, res))
-
-        ev = launch_copy!(d_a, d_b)
-        wait(ev)
-
-        ev = launch_naive_transpose!(d_a, d_b)
-        wait(ev)
-
-        a = Array(d_a)
-        b = Array(d_b)
-
-        println("Testing GPU transpose...")
-        @test a == transpose(b)
-    end
-
-    return nothing
 end
-
-main()
-
