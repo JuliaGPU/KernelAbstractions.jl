@@ -209,14 +209,14 @@ function partition(kernel, ndrange, workgroupsize)
 
     if static_ndrange <: StaticSize
         if ndrange !== nothing && ndrange != get(static_ndrange)
-            error("Static NDRange and launch NDRange differ")
+            error("Static NDRange ($static_ndrange) and launch NDRange ($ndrange) differ")
         end
         ndrange = get(static_ndrange)
     end
 
     if static_workgroupsize <: StaticSize
         if workgroupsize !== nothing && workgroupsize != get(static_workgroupsize)
-            error("Static WorkgroupSize and launch WorkgroupSize differ")
+            error("Static WorkgroupSize ($static_workgroupsize) and launch WorkgroupSize $(workgroupsize) differ")
         end
         workgroupsize = get(static_workgroupsize)
     end
