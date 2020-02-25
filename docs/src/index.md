@@ -50,7 +50,7 @@ all(A .== 2.0)
     argument to the kernel. See [dependencies](@ref dependencies) for a full
     explanation.
 
-## Important difference to Julia
+## Important differences to Julia
 
 1. Functions inside kernels are forcefully inlined, except when marked with `@noinline`.
 2. Floating-point multiplication, addition, subtraction are marked contractable.
@@ -60,6 +60,13 @@ all(A .== 2.0)
 1. The kernels are automatically bounds-checked against either the dynamic or statically
    provided `ndrange`.
 2. Functions like `Base.sin` are mapped to `CUDAnative.sin`.
+
+## Important differences to GPUifyLoops
+
+1. `@scratch` has been renamed to `@private`, and the semantics have changed. Instead
+   of denoting how many dimensions are implicit on the GPU, you only ever provide the
+   explicit number of dimensions that you require. The implicit CPU dimensions are
+   appended.
 
 ## How to debug kernels
 
