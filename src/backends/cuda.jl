@@ -116,6 +116,10 @@ end
     return CUDAnative.threadIdx().x
 end
 
+@inline function Cassette.overdub(ctx::CUDACtx, ::typeof(__index_Group_Linear))
+    return CUDAnative.blockIdx().x
+end
+
 @inline function Cassette.overdub(ctx::CUDACtx, ::typeof(__index_Global_Linear))
     I =  @inbounds expand(__iterspace(ctx.metadata), CUDAnative.blockIdx().x, CUDAnative.threadIdx().x)
     # TODO: This is unfortunate, can we get the linear index cheaper
@@ -124,6 +128,10 @@ end
 
 @inline function Cassette.overdub(ctx::CUDACtx, ::typeof(__index_Local_Cartesian))
     @inbounds workitems(__iterspace(ctx.metadata))[CUDAnative.threadIdx().x]
+end
+
+@inline function Cassette.overdub(ctx::CUDACtx, ::typeof(__index_Group_Cartesian))
+    @inbounds blocks(__iterspace(ctx.metadata))[CUDAnative.blockIdx().x]
 end
 
 @inline function Cassette.overdub(ctx::CUDACtx, ::typeof(__index_Global_Cartesian))

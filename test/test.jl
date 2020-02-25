@@ -44,15 +44,31 @@ end
 end
 @kernel function index_linear_local(A)
        I  = @index(Global, Linear)
-       li = @index(Local, Linear)
-       A[I] = li
+       i = @index(Local, Linear)
+       A[I] = i
+end
+@kernel function index_linear_group(A)
+       I  = @index(Global, Linear)
+       i = @index(Group, Linear)
+       A[I] = i
 end
 @kernel function index_cartesian_global(A)
        I = @index(Global, Cartesian)
        A[I] = I
 end
+@kernel function index_cartesian_local(A)
+       I = @index(Global, Cartesian)
+       i = @index(Local, Cartesian)
+       A[I] = i
+end
+@kernel function index_cartesian_group(A)
+       I = @index(Global, Cartesian)
+       i = @index(Group, Cartesian)
+       A[I] = i
+end
 
 function indextest(backend, ArrayT)
+    # TODO: add test for _group and _local_cartesian
     A = ArrayT{Int}(undef, 16, 16)
     wait(index_linear_global(backend, 8)(A, ndrange=length(A)))
     @test all(A .== LinearIndices(A))

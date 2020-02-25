@@ -80,6 +80,11 @@ end
     return @inbounds LinearIndices(indices)[idx]
 end
 
+@inline function Cassette.overdub(ctx::CPUCtx, ::typeof(__index_Group_Linear), idx::CartesianIndex)
+    indices = blocks(__iterspace(ctx.metadata))
+    return @inbounds LinearIndices(indices)[__groupindex(ctx.metadata)]
+end
+
 @inline function Cassette.overdub(ctx::CPUCtx, ::typeof(__index_Global_Linear), idx::CartesianIndex)
     I = @inbounds expand(__iterspace(ctx.metadata), __groupindex(ctx.metadata), idx)
     @inbounds LinearIndices(__ndrange(ctx.metadata))[I]
@@ -87,6 +92,10 @@ end
 
 @inline function Cassette.overdub(ctx::CPUCtx, ::typeof(__index_Local_Cartesian), idx::CartesianIndex)
     return idx
+end
+
+@inline function Cassette.overdub(ctx::CPUCtx, ::typeof(__index_Group_Cartesian), idx::CartesianIndex)
+    __groupindex(ctx.metadata)
 end
 
 @inline function Cassette.overdub(ctx::CPUCtx, ::typeof(__index_Global_Cartesian), idx::CartesianIndex)
