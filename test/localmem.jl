@@ -7,12 +7,13 @@ if has_cuda_gpu()
 end
 
 @kernel function localmem(A)
+    N = @uniform prod(groupsize())
     I = @index(Global, Linear)
     i = @index(Local, Linear)
-    lmem = @localmem Int groupsize() # Ok iff groupsize is static 
+    lmem = @localmem Int (N,) # Ok iff groupsize is static 
     lmem[i] = i
     @synchronize
-    A[I] = lmem[prod(groupsize()) - i + 1]
+    A[I] = lmem[N - i + 1]
 end
 
 function harness(backend, ArrayT)

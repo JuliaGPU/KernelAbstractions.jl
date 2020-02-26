@@ -1,106 +1,127 @@
-import Base.Meta: isexpr
+import MacroTools: splitdef, combinedef, isexpr
 
 # XXX: Proper errors
 function __kernel(expr)
-    @assert isexpr(expr, :function)
-    decl = expr.args[1]
-    body = expr.args[2]
+    def = splitdef(expr)
+    name = def[:name]
+    args = def[:args]
 
-    # parse decl
-    # `@kernel fname(::T) where {T}`
-    if isexpr(decl, :where) 
-        iswhere = true
-        whereargs = decl.args[2:end]
-        decl = decl.args[1]
-    else
-        iswhere = false
-    end
-    @assert isexpr(decl, :call) 
-    name = decl.args[1]
-
-    # List of tuple (Symbol, Bool) where the bool
-    # marks if the arg is const
-    args = Any[]
-    for i in 2:length(decl.args)
-        arg = decl.args[i]
+    constargs = Array{Bool}(undef, length(args))
+    for (i, arg) in enumerate(args)
         if isexpr(arg, :macrocall)
             if arg.args[1] === Symbol("@Const")
-                # args[2] is a LineInfo node
-                push!(args, (arg.args[3], true))
+                # arg.args[2] is a LineInfo node
+                args[i] = arg.args[3] # strip @Const
+                constargs[i] = true
                 continue
             end
         end
-        push!(args, (arg, false))
+        constargs[i] = false
     end
-
-    arglist = map(a->a[1], args)
 
     # create two functions
     # 1. GPU function
     # 2. CPU function with work-group loops inserted
-    gpu_name = Symbol(:gpu_, name)
-    cpu_name = Symbol(:cpu_, name)
-
-    gpu_decl = Expr(:call, gpu_name, arglist...)
-    cpu_decl = Expr(:call, cpu_name, arglist...)
-
-    if iswhere
-        gpu_decl = Expr(:where, gpu_decl, whereargs...)
-        cpu_decl = Expr(:where, cpu_decl, whereargs...)
-    end
-
+    #
     # Without the deepcopy we might accidentially modify expr shared between CPU and GPU
-    gpu_body = transform_gpu(deepcopy(body), args)
-    gpu_function = Expr(:function, gpu_decl, gpu_body)
+    def_cpu = deepcopy(def)
+    def_gpu = deepcopy(def)
 
-    cpu_body = transform_cpu(deepcopy(body), args)
-    cpu_function = Expr(:function, cpu_decl, cpu_body)
+    def_cpu[:name] = cpu_name = Symbol(:cpu_, name)
+    def_gpu[:name] = gpu_name = Symbol(:gpu_, name)
+
+    transform_cpu!(def_cpu, constargs)
+    transform_gpu!(def_gpu, constargs)
+
+    cpu_function = combinedef(def_cpu)
+    gpu_function = combinedef(def_gpu)
 
     # create constructor functions
     constructors = quote
-        $name(dev::$Device) = $name(dev, $DynamicSize(), $DynamicSize())
-        $name(dev::$Device, size) = $name(dev, $StaticSize(size), $DynamicSize())
-        $name(dev::$Device, size, range) = $name(dev, $StaticSize(size), $StaticSize(range))
-        function $name(::Device, ::S, ::NDRange) where {Device<:$CPU, S<:$_Size, NDRange<:$_Size}
-            return $Kernel{Device, S, NDRange, typeof($cpu_name)}($cpu_name)
-        end
-        function $name(::Device, ::S, ::NDRange) where {Device<:$GPU, S<:$_Size, NDRange<:$_Size}
-            return $Kernel{Device, S, NDRange, typeof($gpu_name)}($gpu_name)
+        if !@isdefined($name)
+            $name(dev::$Device) = $name(dev, $DynamicSize(), $DynamicSize())
+            $name(dev::$Device, size) = $name(dev, $StaticSize(size), $DynamicSize())
+            $name(dev::$Device, size, range) = $name(dev, $StaticSize(size), $StaticSize(range))
+            function $name(::Device, ::S, ::NDRange) where {Device<:$CPU, S<:$_Size, NDRange<:$_Size}
+                return $Kernel{Device, S, NDRange, typeof($cpu_name)}($cpu_name)
+            end
+            function $name(::Device, ::S, ::NDRange) where {Device<:$GPU, S<:$_Size, NDRange<:$_Size}
+                return $Kernel{Device, S, NDRange, typeof($gpu_name)}($gpu_name)
+            end
         end
     end
 
     return Expr(:block, esc(cpu_function), esc(gpu_function), esc(constructors))
 end
 
-# Transform function for GPU execution
-# This involves marking constant arguments
-function transform_gpu(expr, args)
+# The easy case, transform the function for GPU execution
+# - mark constant arguments by applying `constify`.
+function transform_gpu!(def, constargs)
     new_stmts = Expr[]
-    for (arg, isconst) in args
-        if isconst
+    for (i, arg) in enumerate(def[:args])
+        if constargs[i]
             push!(new_stmts, :($arg = $constify($arg)))
         end
     end
-    return quote
+
+    def[:body] = quote
         if $__validindex()
             $(new_stmts...)
-            $expr
+            $(def[:body])
         end
         return nothing
     end
 end
 
+# The hard case, transform the function for CPU execution
+# - mark constant arguments by applying `constify`.
+# - insert aliasscope markers
+# - insert implied loop bodys
+#   - handle indicies
+#   - hoist workgroup definitions
+#   - hoist uniform variables
+function transform_cpu!(def, constargs)
+    new_stmts = Expr[]
+    for (i, arg) in enumerate(def[:args])
+        if constargs[i]
+            push!(new_stmts, :($arg = $constify($arg)))
+        end
+    end
+
+    body = MacroTools.flatten(def[:body])
+    loops = split(body)
+
+    push!(new_stmts, Expr(:aliasscope))
+    for loop in loops
+        push!(new_stmts, emit(loop))
+    end
+    push!(new_stmts, Expr(:popaliasscope))
+    push!(new_stmts, :(return nothing))
+    def[:body] = Expr(:block, new_stmts...)
+end
+
+struct WorkgroupLoop
+    indicies :: Vector{Any}
+    stmts :: Vector{Any}
+    allocations :: Vector{Any}
+end
+
+
 function split(stmts)
     # 1. Split the code into blocks separated by `@synchronize`
-    # 2. Aggregate the index and allocation expressions seen at the sync points
+    # 2. Aggregate `@index` expressions
+    # 3. Hoist allocations
+    # 4. Hoist uniforms
+
+    current     = Any[]
     indicies    = Any[]
     allocations = Any[]
-    loops       = Any[]
-    current     = Any[]
 
+    loops = WorkgroupLoop[]
     for stmt in stmts.args
         if isexpr(stmt, :macrocall) && stmt.args[1] === Symbol("@synchronize")
-            push!(loops, (current, deepcopy(indicies), allocations))
+            loop = WorkgroupLoop(deepcopy(indicies), current, allocations)
+            push!(loops, loop)
             allocations = Any[]
             current     = Any[]
             continue
@@ -111,64 +132,39 @@ function split(stmts)
                 if callee === Symbol("@index")
                     push!(indicies, stmt)
                     continue
-                elseif callee === Symbol("@localmem") || callee === Symbol("@private")
+                elseif callee === Symbol("@localmem") ||
+                       callee === Symbol("@private")  ||
+                       callee === Symbol("@uniform")
                     push!(allocations, stmt)
                     continue
                 end
             end
         end
 
-        if isexpr(stmt, :block)
-            # XXX: What about loops, let, ...
-            @warn "Encountered a block at the top-level unclear semantics"
-        end
         push!(current, stmt)
     end
 
     # everything since the last `@synchronize`
     if !isempty(current)
-        push!(loops, (current, copy(indicies), allocations))
+        push!(loops, WorkgroupLoop(deepcopy(indicies), current, allocations))
     end
     return loops
 end
 
-function generate_cpu_code(loops)
-    # Create loops
-    new_stmts = Any[]
-    for (body, indexes, allocations) in loops
-        idx = gensym(:I)
+function emit(loop)
+    idx = gensym(:I)
+    for stmt in loop.indicies
         # splice index into the i = @index(Cartesian, $idx)
-        for stmt in indexes
-            @assert stmt.head === :(=)
-            rhs = stmt.args[2]
-            push!(rhs.args, idx)
-        end
-        loop = quote
-            $(allocations...)
-            for $idx in $__workitems_iterspace()
-                $__validindex($idx) || continue
-                $(indexes...)
-                $(body...)
-            end
-        end
-        push!(new_stmts, loop)
+        @assert stmt.head === :(=)
+        rhs = stmt.args[2]
+        push!(rhs.args, idx)
     end
-    return Expr(:block, new_stmts...)
-end
-
-function transform_cpu(stmts, args)
-    new_stmts = Expr[]
-    for (arg, isconst) in args
-        if isconst
-            push!(new_stmts, :($arg = $constify($arg)))
+    quote
+        $(loop.allocations...)
+        for $idx in $__workitems_iterspace()
+            $__validindex($idx) || continue
+            $(loop.indicies...)
+            $(loop.stmts...)
         end
     end
-    loops = split(stmts)
-    body  = generate_cpu_code(loops) 
-
-    push!(new_stmts, Expr(:aliasscope))
-    push!(new_stmts, body)
-    push!(new_stmts, Expr(:popaliasscope))
-    push!(new_stmts, :(return nothing))
-    return Expr(:block, new_stmts...)
 end
