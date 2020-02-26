@@ -38,14 +38,16 @@ function __kernel(expr)
 
     # create constructor functions
     constructors = quote
-        $name(dev::$Device) = $name(dev, $DynamicSize(), $DynamicSize())
-        $name(dev::$Device, size) = $name(dev, $StaticSize(size), $DynamicSize())
-        $name(dev::$Device, size, range) = $name(dev, $StaticSize(size), $StaticSize(range))
-        function $name(::Device, ::S, ::NDRange) where {Device<:$CPU, S<:$_Size, NDRange<:$_Size}
-            return $Kernel{Device, S, NDRange, typeof($cpu_name)}($cpu_name)
-        end
-        function $name(::Device, ::S, ::NDRange) where {Device<:$GPU, S<:$_Size, NDRange<:$_Size}
-            return $Kernel{Device, S, NDRange, typeof($gpu_name)}($gpu_name)
+        if !@isdefined($name)
+            $name(dev::$Device) = $name(dev, $DynamicSize(), $DynamicSize())
+            $name(dev::$Device, size) = $name(dev, $StaticSize(size), $DynamicSize())
+            $name(dev::$Device, size, range) = $name(dev, $StaticSize(size), $StaticSize(range))
+            function $name(::Device, ::S, ::NDRange) where {Device<:$CPU, S<:$_Size, NDRange<:$_Size}
+                return $Kernel{Device, S, NDRange, typeof($cpu_name)}($cpu_name)
+            end
+            function $name(::Device, ::S, ::NDRange) where {Device<:$GPU, S<:$_Size, NDRange<:$_Size}
+                return $Kernel{Device, S, NDRange, typeof($gpu_name)}($gpu_name)
+            end
         end
     end
 
