@@ -38,8 +38,8 @@ function __kernel(expr)
     # create two functions
     # 1. GPU function
     # 2. CPU function with work-group loops inserted
-    gpu_name = gensym(Symbol(:gpu_, name))
-    cpu_name = gensym(Symbol(:cpu_, name))
+    gpu_name = Symbol(:gpu_, name)
+    cpu_name = Symbol(:cpu_, name)
 
     gpu_decl = Expr(:call, gpu_name, arglist...)
     cpu_decl = Expr(:call, cpu_name, arglist...)
