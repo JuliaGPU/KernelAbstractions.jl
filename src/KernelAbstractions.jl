@@ -4,6 +4,7 @@ export @kernel
 export @Const, @localmem, @private, @synchronize, @index, groupsize
 export Device, GPU, CPU, CUDA 
 
+using MacroTools
 using StaticArrays
 using Cassette
 using Requires
