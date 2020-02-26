@@ -119,12 +119,16 @@ function split(stmts)
 
     loops = WorkgroupLoop[]
     for stmt in stmts.args
-        if isexpr(stmt, :macrocall) && stmt.args[1] === Symbol("@synchronize")
-            loop = WorkgroupLoop(deepcopy(indicies), current, allocations)
-            push!(loops, loop)
-            allocations = Any[]
-            current     = Any[]
-            continue
+        if isexpr(stmt, :macrocall)
+            if stmt.args[1] === Symbol("@synchronize")
+                loop = WorkgroupLoop(deepcopy(indicies), current, allocations)
+                push!(loops, loop)
+                allocations = Any[]
+                current     = Any[]
+                continue
+            elseif stmt.args[1] === Symbol("@uniform")
+                push!(allocations, stmt)
+            end
         elseif isexpr(stmt, :(=))
             rhs = stmt.args[2]
             if isexpr(rhs, :macrocall)
