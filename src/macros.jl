@@ -131,7 +131,8 @@ function split(stmts)
                     push!(indicies, stmt)
                     continue
                 elseif callee === Symbol("@localmem") ||
-                       callee === Symbol("@private")
+                       callee === Symbol("@private")  ||
+                       callee === Symbol("@uniform")
                     push!(allocations, stmt)
                     continue
                 end

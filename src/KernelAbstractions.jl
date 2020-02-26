@@ -1,7 +1,7 @@
 module KernelAbstractions
 
 export @kernel
-export @Const, @localmem, @private, @synchronize, @index, groupsize
+export @Const, @localmem, @private, @uniform, @synchronize, @index, groupsize
 export Device, GPU, CPU, CUDA 
 
 using MacroTools
@@ -24,6 +24,7 @@ and then invoked on the arguments.
 - [`@index`](@ref)
 - [`@localmem`](@ref)
 - [`@private`](@ref)
+- [`@uniform`](@ref)
 - [`@synchronize`](@ref)
 
 # Example:
@@ -69,6 +70,7 @@ function async_copy! end
 # Kernel language
 # - @localmem
 # - @private
+# - @uniform
 # - @synchronize
 # - @index
 # - groupsize
@@ -84,7 +86,7 @@ the total size you can use `prod(groupsize())`.
 function groupsize end
 
 """
-   @localmem T dims
+    @localmem T dims
 """
 macro localmem(T, dims)
     # Stay in sync with CUDAnative
@@ -96,12 +98,19 @@ macro localmem(T, dims)
 end
 
 """
-   @private T dims
+    @private T dims
 """
 macro private(T, dims)
     quote
         $Scratchpad($(esc(T)), Val($(esc(dims))))
     end
+end
+
+"""
+    @uniform value
+"""
+macro uniform(value)
+    esc(value)
 end
 
 """
