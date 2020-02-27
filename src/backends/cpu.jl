@@ -132,28 +132,13 @@ struct ScratchArray{N, D}
 end
 
 @inline function Cassette.overdub(ctx::CPUCtx, ::typeof(Scratchpad), ::Type{T}, ::Val{Dims}) where {T, Dims}
-    return ScratchArray{length(Dims)}(MArray{__size((Dims..., __groupsize(ctx.metadata))), T}(undef))
+    return ScratchArray{length(Dims)}(MArray{__size((Dims..., __groupsize(ctx.metadata)...)), T}(undef))
 end
 
-Base.@propagate_inbounds function Cassette.overdub(ctx::CPUCtx, ::typeof(Base.getindex), A::ScratchArray{N}, I...) where N
-    nI = ntuple(Val(N+1)) do i
-        if i == N+1
-            __groupindex(ctx.metadata)
-        else
-            I[i]
-        end
-    end
-
-    return A.data[nI...]
+Base.@propagate_inbounds function Base.getindex(A::ScratchArray, I...)
+    return A.data[I...]
 end
 
-Base.@propagate_inbounds function Cassette.overdub(ctx::CPUCtx, ::typeof(Base.setindex!), A::ScratchArray{N}, val, I...) where N
-    nI = ntuple(Val(N+1)) do i
-        if i == N+1
-            __groupindex(ctx.metadata)
-        else
-            I[i]
-        end
-    end
-    A.data[nI...] = val
+Base.@propagate_inbounds function Base.setindex!(A::ScratchArray, val, I...)
+    A.data[I...] = val
 end
