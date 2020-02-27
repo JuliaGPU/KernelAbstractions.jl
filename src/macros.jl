@@ -1,4 +1,4 @@
-import MacroTools: splitdef, combinedef, isexpr
+import MacroTools: splitdef, combinedef, isexpr, postwalk
 
 # XXX: Proper errors
 function __kernel(expr)
@@ -104,6 +104,7 @@ struct WorkgroupLoop
     indicies :: Vector{Any}
     stmts :: Vector{Any}
     allocations :: Vector{Any}
+    private :: Vector{Any}
 end
 
 
@@ -116,12 +117,13 @@ function split(stmts)
     current     = Any[]
     indicies    = Any[]
     allocations = Any[]
+    private     = Any[]
 
     loops = WorkgroupLoop[]
     for stmt in stmts.args
         if isexpr(stmt, :macrocall)
             if stmt.args[1] === Symbol("@synchronize")
-                loop = WorkgroupLoop(deepcopy(indicies), current, allocations)
+                loop = WorkgroupLoop(deepcopy(indicies), current, allocations, deepcopy(private))
                 push!(loops, loop)
                 allocations = Any[]
                 current     = Any[]
@@ -137,9 +139,12 @@ function split(stmts)
                     push!(indicies, stmt)
                     continue
                 elseif callee === Symbol("@localmem") ||
-                       callee === Symbol("@private")  ||
                        callee === Symbol("@uniform")
                     push!(allocations, stmt)
+                    continue
+                elseif callee === Symbol("@private")
+                    push!(allocations, stmt)
+                    push!(private, stmt.args[1])
                     continue
                 end
             end
@@ -150,7 +155,7 @@ function split(stmts)
 
     # everything since the last `@synchronize`
     if !isempty(current)
-        push!(loops, WorkgroupLoop(deepcopy(indicies), current, allocations))
+        push!(loops, WorkgroupLoop(deepcopy(indicies), current, allocations, deepcopy(private)))
     end
     return loops
 end
@@ -163,12 +168,21 @@ function emit(loop)
         rhs = stmt.args[2]
         push!(rhs.args, idx)
     end
+    body = Expr(:block, loop.stmts...)
+    body = postwalk(body) do expr
+        if @capture(expr, A_[i__])
+            if A in loop.private
+                return :($A[$(i...), $(idx).I...])
+            end
+        end
+        return expr
+    end
     quote
         $(loop.allocations...)
         for $idx in $__workitems_iterspace()
             $__validindex($idx) || continue
             $(loop.indicies...)
-            $(loop.stmts...)
+            $(body)
         end
     end
 end

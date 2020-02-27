@@ -22,6 +22,7 @@ end
 
 @inline __iterspace(cm::CompilerMetadata)  = cm.iterspace
 @inline __groupindex(cm::CompilerMetadata) = cm.groupindex
+@inline __groupsize(cm::CompilerMetadata) = size(workitems(__iterspace(cm)))
 @inline __dynamic_checkbounds(::CompilerMetadata{NDRange, CB}) where {NDRange, CB} = CB
 @inline __ndrange(cm::CompilerMetadata{NDRange}) where {NDRange<:StaticSize}  = CartesianIndices(get(NDRange))
 @inline __ndrange(cm::CompilerMetadata{NDRange}) where {NDRange<:DynamicSize} = cm.ndrange
@@ -31,7 +32,7 @@ include("compiler/pass.jl")
 
 function generate_overdubs(Ctx)
    @eval begin
-        @inline Cassette.overdub(ctx::$Ctx, ::typeof(groupsize)) = size(workitems(__iterspace(ctx.metadata)))
+        @inline Cassette.overdub(ctx::$Ctx, ::typeof(groupsize)) = __groupsize(ctx.metadata)
         @inline Cassette.overdub(ctx::$Ctx, ::typeof(__workitems_iterspace)) = workitems(__iterspace(ctx.metadata))
 
         ###
