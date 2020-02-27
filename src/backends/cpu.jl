@@ -135,10 +135,10 @@ end
     return ScratchArray{length(Dims)}(MArray{__size((Dims..., __groupsize(ctx.metadata)...)), T}(undef))
 end
 
-Base.@propagate_inbounds function Cassette.overdub(ctx::CPUCtx, ::typeof(Base.getindex), A::ScratchArray, I...)
+Base.@propagate_inbounds function Base.getindex(A::ScratchArray, I...)
     return A.data[I...]
 end
 
-Base.@propagate_inbounds function Cassette.overdub(ctx::CPUCtx, ::typeof(Base.setindex!), A::ScratchArray, val, I...)
+Base.@propagate_inbounds function Base.setindex!(A::ScratchArray, val, I...)
     A.data[I...] = val
 end
