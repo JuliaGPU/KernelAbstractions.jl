@@ -138,7 +138,8 @@ A cartesian index is a general N-dimensional index that is derived from the iter
 # Index kind
 
   - `Linear`: Produces an `Int64` that can be used to linearly index into memory.
-  - `Global`: Produces a `CartesianIndex{N}` that can be used to index into memory.
+  - `Cartesian`: Produces a `CartesianIndex{N}` that can be used to index into memory.
+  - `NTuple`: Produces a `NTuple{N}` that can be used to index into memory.
 
 If the index kind is not provided it defaults to `Linear`, this is suspect to change.
 
@@ -149,6 +150,7 @@ If the index kind is not provided it defaults to `Linear`, this is suspect to ch
 @index(Global, Cartesian)
 @index(Local, Cartesian)
 @index(Group, Linear)
+@index(Local, NTuple)
 @index(Global)
 ```
 """
@@ -158,7 +160,10 @@ macro index(locale, args...)
     end
 
     if length(args) >= 1
-        if args[1] === :Cartesian || args[1] === :Linear
+
+        if args[1] === :Cartesian ||
+           args[1] === :Linear ||
+           args[1] === :NTuple
             indexkind = args[1]
             args = args[2:end]
         else
@@ -183,6 +188,10 @@ function __index_Global_Linear end
 function __index_Local_Cartesian end
 function __index_Group_Cartesian end
 function __index_Global_Cartesian end
+
+__index_Local_NTuple(I...) = Tuple(__index_Local_Cartesian(I...))
+__index_Group_NTuple(I...) = Tuple(__index_Group_Cartesian(I...))
+__index_Global_NTuple(I...) = Tuple(__index_Global_Cartesian(I...))
 
 struct ConstAdaptor end
 

@@ -9,8 +9,7 @@ using CUDAnative
 using CUDAnative.NVTX
 
 @kernel function transpose_kernel_naive!(b, a)
-    I = @index(Global, Cartesian)
-    i, j = I.I 
+    i, j = @index(Global, NTuple)
     @inbounds b[i, j] = a[j, i]
 end
 

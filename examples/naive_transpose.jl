@@ -5,8 +5,7 @@ if CUDAapi.has_cuda_gpu()
 end
 
 @kernel function naive_transpose_kernel!(a, b)
-  I = @index(Global, Cartesian)
-  i, j = Tuple(I)
+  i, j = @index(Global, NTuple)
   @inbounds b[i, j] = a[j, i]
 end
 
