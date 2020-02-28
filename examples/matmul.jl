@@ -6,15 +6,15 @@ end
 
 # Simple kernel for matrix multiplication
 @kernel function matmul_kernel!(a, b, c)
-    cI = @index(Global, Cartesian)
+    i, j = @index(Global, NTuple)
 
     # creating a temporary sum variable for matrix multiplication
     tmp_sum = zero(eltype(c))
-    for i = 1:size(a)[2]
-        tmp_sum += a[cI[1],i] * b[i,cI[2]]
+    for k = 1:size(a)[2]
+        tmp_sum += a[i,k] * b[k, j]
     end
 
-    c[cI] = tmp_sum
+    c[i,j] = tmp_sum
 end
 
 # Creating a wrapper kernel for launching with error checks
