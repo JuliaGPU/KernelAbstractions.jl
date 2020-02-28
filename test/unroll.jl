@@ -9,13 +9,16 @@ using StaticArrays
 end
 
 @kernel function kernel_unroll!(a, ::Val{N}) where N
-  @unroll for i in 1:N
-    @inbounds a[i] = i
+  let M = N+5
+    @unroll for i in 6:M
+      @inbounds a[i-5] = i
+    end
+    @synchronize
   end
 end
 
 # Check that nested `@unroll` doesn't throw a syntax error
-@kernel function kernel_unroll!(a, ::Val{N}) where N
+@kernel function kernel_unroll2!(A)
   @uniform begin
     a = MVector{3, Float64}(1, 2, 3)
     b = MVector{3, Float64}(3, 2, 1)
@@ -28,16 +31,16 @@ end
         c[1, j] = m * a[1] * b[j]
       end
     end
-    a[I] = c[1, 1]
-    m % 2 == 0 && @synchronize
+    A[I] = c[1, 1]
+    @synchronize(m % 2 == 0)
   end
 end
 
 let
   a = zeros(5)
   kernel! = kernel_unroll!(CPU(), 1, 1)
-  event = kernel!(a)
-  wait(event)
-  event = kernel!(a, Val(5))
-  wait(event)
+  wait(kernel!(a))
+  wait(kernel!(a, Val(5)))
+  kernel2! = kernel_unroll2!(CPU(), 1, 1)
+  wait(kernel2!(a))
 end

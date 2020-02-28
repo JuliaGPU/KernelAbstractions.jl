@@ -115,10 +115,31 @@ end
 
 """
    @synchronize()
+
+After a `@synchronize` statement all read and writes to global and local memory
+from each thread in the workgroup are visible in from all other threads in the
+workgroup.
 """
 macro synchronize()
     quote
         $__synchronize()
+    end
+end
+
+"""
+   @synchronize(cond)
+
+After a `@synchronize` statement all read and writes to global and local memory
+from each thread in the workgroup are visible in from all other threads in the
+workgroup. `cond` is not allowed to have any visible sideffects.
+
+# Platform differences
+  - `GPU`: This synchronization will only occur if the `cond` evaluates.
+  - `CPU`: This synchronization will always occur.
+"""
+macro synchronize(cond)
+    quote
+        $(esc(cond)) && $__synchronize()
     end
 end
 
