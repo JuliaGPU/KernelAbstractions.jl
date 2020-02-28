@@ -89,12 +89,8 @@ function transform_cpu!(def, constargs)
     end
 
     body = MacroTools.flatten(def[:body])
-    loops = split(body)
-
     push!(new_stmts, Expr(:aliasscope))
-    for loop in loops
-        push!(new_stmts, emit(loop))
-    end
+    append!(new_stmts, split(body.args))
     push!(new_stmts, Expr(:popaliasscope))
     push!(new_stmts, :(return nothing))
     def[:body] = Expr(:block, new_stmts...)
@@ -107,46 +103,68 @@ struct WorkgroupLoop
     private :: Vector{Any}
 end
 
+is_sync(expr) = @capture(expr, @synchronize)
+function find_sync(stmt)
+    result = false
+    postwalk(stmt) do expr
+        result |= is_sync(expr) 
+        expr
+    end
+    result
+end
 
-function split(stmts)
+# TODO proper handling of LineInfo
+function split(stmts, 
+               indicies = Any[], private=Any[])
     # 1. Split the code into blocks separated by `@synchronize`
     # 2. Aggregate `@index` expressions
     # 3. Hoist allocations
     # 4. Hoist uniforms
 
     current     = Any[]
-    indicies    = Any[]
     allocations = Any[]
-    private     = Any[]
+    new_stmts   = Any[]
+    for stmt in stmts
+        has_sync = find_sync(stmt)
+        if has_sync
+            loop = WorkgroupLoop(deepcopy(indicies), current, allocations, deepcopy(private))
+            push!(new_stmts, emit(loop))
+            allocations = Any[]
+            current     = Any[]
+            @capture(stmt, @synchronize) && continue
 
-    loops = WorkgroupLoop[]
-    for stmt in stmts.args
-        if isexpr(stmt, :macrocall)
-            if stmt.args[1] === Symbol("@synchronize")
-                loop = WorkgroupLoop(deepcopy(indicies), current, allocations, deepcopy(private))
-                push!(loops, loop)
-                allocations = Any[]
-                current     = Any[]
-                continue
-            elseif stmt.args[1] === Symbol("@uniform")
-                push!(allocations, stmt)
-            end
-        elseif isexpr(stmt, :(=))
-            rhs = stmt.args[2]
-            if isexpr(rhs, :macrocall)
-                callee = rhs.args[1]
-                if callee === Symbol("@index")
-                    push!(indicies, stmt)
-                    continue
-                elseif callee === Symbol("@localmem") ||
-                       callee === Symbol("@uniform")
-                    push!(allocations, stmt)
-                    continue
-                elseif callee === Symbol("@private")
-                    push!(allocations, stmt)
-                    push!(private, stmt.args[1])
-                    continue
+            # Recurse into scope constructs
+            # TODO: This currently implements hard scoping
+            #       probably need to implemet soft scoping
+            #       by not deepcopying the environment.
+            recurse(x) = x
+            function recurse(expr::Expr)
+                expr = unblock(expr)
+                if any(is_sync, expr.args)
+                    new_args = unblock(split(expr.args, deepcopy(indicies), deepcopy(private)))
+                    return Expr(expr.head, new_args...)
+                else 
+                    return Expr(expr.head, map(recurse, expr.args)...)
                 end
+            end
+            push!(new_stmts, recurse(stmt))
+            continue
+        end
+
+        if @capture(stmt, @uniform x_)
+            push!(allocations, stmt)
+            continue
+        elseif @capture(stmt, lhs_ = rhs_)
+            if @capture(rhs, @index(args__))
+                push!(indicies, stmt)
+                continue
+            elseif @capture(rhs, @localmem(args__) | @uniform(args__) )
+                push!(allocations, stmt)
+                continue
+            elseif @capture(rhs, @private(args__))
+                push!(allocations, stmt)
+                push!(private, lhs)
+                continue
             end
         end
 
@@ -155,9 +173,10 @@ function split(stmts)
 
     # everything since the last `@synchronize`
     if !isempty(current)
-        push!(loops, WorkgroupLoop(deepcopy(indicies), current, allocations, deepcopy(private)))
+        loop = WorkgroupLoop(deepcopy(indicies), current, allocations, deepcopy(private))
+        push!(new_stmts, emit(loop))
     end
-    return loops
+    return new_stmts
 end
 
 function emit(loop)
@@ -168,21 +187,28 @@ function emit(loop)
         rhs = stmt.args[2]
         push!(rhs.args, idx)
     end
-    body = Expr(:block, loop.stmts...)
-    body = postwalk(body) do expr
-        if @capture(expr, A_[i__])
-            if A in loop.private
-                return :($A[$(i...), $(idx).I...])
+    stmts = Any[]
+    append!(stmts, loop.allocations)
+    # don't emit empty loops
+    if !(isempty(loop.stmts) || all(s->s isa LineNumberNode, loop.stmts))
+        body = Expr(:block, loop.stmts...)
+        body = postwalk(body) do expr
+            if @capture(expr, A_[i__])
+                if A in loop.private
+                    return :($A[$(i...), $(idx).I...])
+                end
+            end
+            return expr
+        end
+        loopexpr = quote
+            for $idx in $__workitems_iterspace()
+                $__validindex($idx) || continue
+                $(loop.indicies...)
+                $(unblock(body))
             end
         end
-        return expr
+        push!(stmts, loopexpr)
     end
-    quote
-        $(loop.allocations...)
-        for $idx in $__workitems_iterspace()
-            $__validindex($idx) || continue
-            $(loop.indicies...)
-            $(body)
-        end
-    end
+
+    return unblock(Expr(:block, stmts...))
 end

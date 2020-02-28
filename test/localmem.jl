@@ -14,9 +14,11 @@ end
     I = @index(Global, Linear)
     i = @index(Local, Linear)
     lmem = @localmem Int (N,) # Ok iff groupsize is static 
-    lmem[i] = i
-    @synchronize
-    A[I] = lmem[N2 - i + 1]
+    @inbounds begin
+        lmem[i] = i
+        @synchronize
+        A[I] = lmem[N2 - i + 1]
+    end
 end
 
 function harness(backend, ArrayT)
