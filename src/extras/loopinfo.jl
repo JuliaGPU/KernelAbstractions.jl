@@ -1,6 +1,6 @@
 module LoopInfo
 
-const HAS_LOOPINFO_EXPR = VERSION >= v"1.2.0-DEV.462"
+using MacroTools
 export @unroll
 
 ##
@@ -20,13 +20,16 @@ module MD
 end
 
 function loopinfo(expr, nodes...)
-    if expr.head != :for
+    if @capture(expr, for i_ in iter_ body__ end)
+        return quote
+            for $i in $iter
+                $(body...)
+                $(Expr(:loopinfo, nodes...))
+            end
+        end
+    else
         error("Syntax error: loopinfo needs a for loop")
     end
-    if HAS_LOOPINFO_EXPR
-        push!(expr.args[2].args, Expr(:loopinfo, nodes...))
-    end
-    return expr
 end
 
 """
@@ -48,6 +51,7 @@ if it is safe to do so.
 """
 macro unroll(N, expr)
     if !(N isa Integer)
+        @debug "@unroll macro inputs" N expr
         error("Syntax error: `@unroll N expr` needs a constant integer N")
     end
     expr = loopinfo(expr, MD.unroll_count(N))
