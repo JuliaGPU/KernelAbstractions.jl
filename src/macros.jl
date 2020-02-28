@@ -103,7 +103,13 @@ struct WorkgroupLoop
     private :: Vector{Any}
 end
 
-is_sync(expr) = @capture(expr, @synchronize)
+is_sync(expr) = @capture(expr, @synchronize() | @synchronize(a_))
+
+function is_scope_construct(expr::Expr)
+    expr.head === :block # ||
+    # expr.head === :let
+end
+
 function find_sync(stmt)
     result = false
     postwalk(stmt) do expr
@@ -131,7 +137,7 @@ function split(stmts,
             push!(new_stmts, emit(loop))
             allocations = Any[]
             current     = Any[]
-            @capture(stmt, @synchronize) && continue
+            is_sync(stmt) && continue
 
             # Recurse into scope constructs
             # TODO: This currently implements hard scoping
@@ -140,7 +146,7 @@ function split(stmts,
             recurse(x) = x
             function recurse(expr::Expr)
                 expr = unblock(expr)
-                if any(is_sync, expr.args)
+                if is_scope_construct(expr) && any(is_sync, expr.args)
                     new_args = unblock(split(expr.args, deepcopy(indicies), deepcopy(private)))
                     return Expr(expr.head, new_args...)
                 else 
