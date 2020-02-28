@@ -20,16 +20,18 @@ end
 
 # This is horrible don't write code like this
 @kernel function forloop(A, ::Val{N}) where N
-    i = @index(Global, Linear)
+    I = @index(Global, Linear)
+    i = @index(Local, Linear)
     priv = @private Int (N,)
     for j in 1:N
-        priv[j] = A[i, j]
+        priv[j] = A[I, j]
     end
-    A[i, 1] = 0
+    A[I, 1] = 0
     @synchronize
     for j in 1:N
-       A[j, 1] += priv[j]
-       @synchronize
+        k = mod1(j + i - 1, N)
+        A[k, 1] += priv[j]
+        @synchronize
     end
 end
 
@@ -44,11 +46,7 @@ function harness(backend, ArrayT)
     A = ArrayT{Int}(undef, 64, 64)
     A .= 1
     wait(forloop(backend)(A, Val(size(A, 2)), ndrange=size(A,1), workgroupsize=size(A,1)))
-    if ArrayT <: Array
-        @test all(A[:, 1] .== 64)
-    else
-        @test_broken all(A[:, 1] .== 64)
-    end
+    @test all(A[:, 1] .== 64)
     @test all(A[:, 2:end] .== 1)
 end
 
