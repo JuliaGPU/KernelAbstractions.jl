@@ -72,8 +72,14 @@ function (obj::Kernel{CUDA})(args...; ndrange=nothing, dependencies=nothing, wor
     stream = next_stream()
     if dependencies !== nothing
         for event in dependencies
-            @assert event isa CudaEvent
-            CUDAdrv.wait(event.event, stream)
+            if event isa CudaEvent
+                CUDAdrv.wait(event.event, stream)
+            end
+        end
+        for event in dependencies
+            if !(event isa CudaEvent)
+                wait(event, ()->yield())
+            end
         end
     end
 

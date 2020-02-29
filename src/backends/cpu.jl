@@ -41,7 +41,18 @@ end
 function __run(obj, ndrange, iterspace, args, dependencies)
     return Threads.@spawn begin
         if dependencies !== nothing
-            Base.sync_end(map(e->e.task, dependencies))
+            cpu_tasks = Core.Task[]
+            for event in dependencies
+                if event isa CPUEvent
+                    push!(cpu_tasks, event.task)
+                end
+            end
+            !isempty(cpu_tasks) && Base.sync_end(cpu_tasks)
+            for event in dependencies
+                if !(event isa CPUEvent)
+                    wait(event, ()->yield())
+                end
+            end
         end
         @sync begin
             # TODO: how do we use the information that the iteration space maps perfectly to

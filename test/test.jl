@@ -161,3 +161,26 @@ if has_cuda_gpu()
     wait(kernel_val!(CUDA())(A,Val(3), ndrange=size(A)))
     @test all((a)->a==3, A)
 end
+
+@kernel function kernel_empty()
+    return
+end
+if has_cuda_gpu()
+    @testset "CPU--CUDA dependencies" begin
+        event1 = kernel_empty(CPU(), 1)(ndrange=1)
+        event2 = kernel_empty(CUDA(), 1)(ndrange=1)
+        event3 = kernel_empty(CPU(), 1)(ndrange=1)
+        event4 = kernel_empty(CUDA(), 1)(ndrange=1)
+        event5 = kernel_empty(CUDA(), 1)(ndrange=1, dependencies=(event1, event2, event3, event4))
+        wait(event5)
+        @test event5 isa KernelAbstractions.Event
+
+        event1 = kernel_empty(CPU(), 1)(ndrange=1)
+        event2 = kernel_empty(CUDA(), 1)(ndrange=1)
+        event3 = kernel_empty(CPU(), 1)(ndrange=1)
+        event4 = kernel_empty(CUDA(), 1)(ndrange=1)
+        event5 = kernel_empty(CPU(), 1)(ndrange=1, dependencies=(event1, event2, event3, event4))
+        wait(event5)
+        @test event5 isa KernelAbstractions.Event
+    end
+end
