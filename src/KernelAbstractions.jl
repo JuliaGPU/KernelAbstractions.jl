@@ -181,7 +181,6 @@ macro index(locale, args...)
     end
 
     if length(args) >= 1
-
         if args[1] === :Cartesian ||
            args[1] === :Linear ||
            args[1] === :NTuple

@@ -3,6 +3,8 @@ language: julia
 branches:
   only:
   - master
+  - staging
+  - trying
 os:
   - linux
   - osx
@@ -15,3 +17,7 @@ notifications:
   email: false
 git:
   depth: 99999999
+jobs:
+  allow_failures:
+    - julia: 1.4
+    - julia: nightly
