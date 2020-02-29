@@ -3,6 +3,8 @@ language: julia
 branches:
   only:
   - master
+  - staging
+  - trying
 os:
   - linux
   - osx
