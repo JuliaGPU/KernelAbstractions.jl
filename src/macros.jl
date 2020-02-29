@@ -160,7 +160,7 @@ function split(stmts,
         if @capture(stmt, @uniform x_)
             push!(allocations, stmt)
             continue
-        elseif @capture(stmt, lhs_ = rhs_)
+        elseif @capture(stmt, lhs_ = rhs_ | (vs__, lhs_ = rhs_))
             if @capture(rhs, @index(args__))
                 push!(indicies, stmt)
                 continue
