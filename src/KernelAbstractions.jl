@@ -28,6 +28,7 @@ and then invoked on the arguments.
 - [`@private`](@ref)
 - [`@uniform`](@ref)
 - [`@synchronize`](@ref)
+- [`@print`](@ref)
 
 # Example:
 
@@ -343,6 +344,10 @@ end
 
 function __synchronize()
     error("@synchronize used outside kernel or not captured")
+end
+
+function __print()
+    error("@print used outside of kernel or not captured")
 end
 
 ###
