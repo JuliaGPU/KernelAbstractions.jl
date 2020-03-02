@@ -62,9 +62,37 @@ abstract type Event end
 import Base.wait
 
 # TODO
-function async_copy! end
 # function register end
 # function unregister end
+
+# Functions for async_copy
+function pin!(a)
+  ad = Mem.register(Mem.Host, pointer(a), sizeof(a))
+  finalizer(_ -> Mem.unregister(ad), a)
+end
+
+function recordevent(stream)
+  event = CuEvent(CUDAdrv.EVENT_DISABLE_TIMING)
+  CUDAdrv.record(event, stream)
+  return CudaEvent(event)
+end
+
+function async_copy!(destptr, srcptr, N::Integer; stream=CuDefaultStream(),
+                     dependencies=nothing)
+  if dependencies isa Event
+    dependencies = (dependencies,)
+  end
+  if dependencies !== nothing
+    for event in dependencies
+      @assert event isa CudaEvent
+      CUDAdrv.wait(event.event, stream)
+    end
+  end
+
+  unsafe_copyto!(destptr, srcptr, N, async=true, stream=stream)
+
+  return recordevent(stream)
+end
 
 ###
 # Kernel language
