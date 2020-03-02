@@ -3,6 +3,8 @@ module KernelAbstractions
 export @kernel
 export @Const, @localmem, @private, @uniform, @synchronize, @index, groupsize
 export Device, GPU, CPU, CUDA, Event
+export async_copy!
+
 
 using MacroTools
 using StaticArrays
@@ -61,10 +63,12 @@ macro Const end
 abstract type Event end
 import Base.wait
 
-# TODO
+"""
+    async_copy!(::Device, dest::AbstractArray, src::AbstractArray; dependencies = nothing)
+
+Perform an asynchronous copy on the device. Returns an event that can be waited upon.
+"""
 function async_copy! end
-# function register end
-# function unregister end
 
 ###
 # Kernel language
