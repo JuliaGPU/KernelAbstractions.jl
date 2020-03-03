@@ -49,7 +49,7 @@ struct CudaEvent <: Event
 end
 function wait(ev::CudaEvent, progress=nothing)
     if progress === nothing
-        CUDAdrv.wait(ev.event)
+        CUDAdrv.synchronize(ev.event)
     else
         while !CUDAdrv.query(ev.event)
             progress()
