@@ -64,9 +64,10 @@ function main()
     sreq = MPI.Isend(b, dst_rank, 222, comm)
 
     stats = MPI.Waitall!([sreq, rreq])
-    copyevent = async_copyto!(pointer(d), pointer(c), M, stream=copystream)
-    copyevent = async_copyto!(pointer(C), pointer(d), M, stream=copystream, dependencies=copyevent)
+    copyevent = async_copy!(pointer(d), pointer(c), M, stream=copystream)
+    copyevent = async_copy!(pointer(C), pointer(d), M, stream=copystream, dependencies=copyevent)
     compevent = kernel!(CUDA(), 256)(C, A, B, ndrange=length(C), dependencies=copyevent)
   end
 end
+
 main()

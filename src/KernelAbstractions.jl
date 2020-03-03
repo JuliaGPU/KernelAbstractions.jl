@@ -9,6 +9,7 @@ using StaticArrays
 using Cassette
 using Requires
 using Adapt
+using CUDAdrv
 
 """
    @kernel function f(args) end
