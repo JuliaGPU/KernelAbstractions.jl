@@ -11,6 +11,9 @@ using Requires
 using Adapt
 using CUDAdrv
 using CUDAapi
+if has_cuda_gpu()
+    using CuArrays
+end
 
 """
    @kernel function f(args) end
@@ -86,22 +89,22 @@ end
 if has_cuda_gpu()
     function async_copy!(A::CuArray, B::CuArray; stream=CuDefaultStream(),
                         dependencies=nothing)
-        async_copy!(pointer(A), pointer(B), length(A), stream, dependencies)
+        async_copy_ptr!(pointer(A), pointer(B), length(A), stream, dependencies)
     end
 
-    function async_copy!(A::CuArray, B::CuArray); stream=CuDefaultStream(),
-                        dependencies=nothing
-        async_copy!(pointer(A), pointer(B), length(A), stream, dependencies)
+    function async_copy!(A::Array, B::CuArray; stream=CuDefaultStream(),
+                        dependencies=nothing)
+        async_copy_ptr!(pointer(A), pointer(B), length(A), stream, dependencies)
     end
 
-    function async_copy!(A::CuArray, B::Array); stream=CuDefaultStream(),
-                        dependencies=nothing
-        async_copy!(pointer(A), pointer(B), length(A), stream, dependencies)
+    function async_copy!(A::CuArray, B::Array; stream=CuDefaultStream(),
+                        dependencies=nothing)
+        async_copy_ptr!(pointer(A), pointer(B), length(A), stream, dependencies)
     end
 
-    function async_copy!(destptr, srcptr, N::Integer;
-                         stream=CuDefaultStream(),
-                         dependencies=nothing) where T
+    function async_copy_ptr!(destptr, srcptr, N::Integer;
+                             stream=CuDefaultStream(),
+                             dependencies=nothing) where T
         if dependencies isa Event
             dependencies = (dependencies,)
         end
