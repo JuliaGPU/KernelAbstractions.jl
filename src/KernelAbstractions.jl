@@ -81,7 +81,7 @@ end
 function async_copy!(destptr::Ptr{T}, srcptr::Ptr{T}, N::Integer) where T
   unsafe_copyto!(destptr, srcptr, N)
 end
-function async_copy!(destptr::CuPtr{T}, srcptr::CuPtr{T}, N::Integer; stream=0,
+function async_copy!(destptr::CuPtr{T}, srcptr::CuPtr{T}, N::Integer; stream=CuDefaultStream(),
                      dependencies=nothing) where T
   if dependencies isa Event
     dependencies = (dependencies,)

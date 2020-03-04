@@ -1,6 +1,6 @@
 using KernelAbstractions, Test, CUDAapi
 if has_cuda_gpu()
-    using CuArrays
+    using CuArrays, CUDAdrv
     CuArrays.allowscalar(false)
 end
 
