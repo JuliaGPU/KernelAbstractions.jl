@@ -78,8 +78,11 @@ function recordevent(stream)
   return CudaEvent(event)
 end
 
-function async_copy!(destptr, srcptr, N::Integer; stream=CuDefaultStream(),
-                     dependencies=nothing)
+function async_copy!(destptr::Ptr{T}, srcptr::Ptr{T}, N::Integer) where T
+  unsafe_copyto!(destptr, srcptr, N)
+end
+function async_copy!(destptr::CuPtr{T}, srcptr::CuPtr{T}, N::Integer; stream=0,
+                     dependencies=nothing) where T
   if dependencies isa Event
     dependencies = (dependencies,)
   end

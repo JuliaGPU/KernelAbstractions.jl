@@ -29,6 +29,24 @@ function GPU_copy_test(M)
     @test isapprox(a, Array(B))
 end
 
+function CPU_copy_test(M)
+    A = Array(rand(Float64, M))
+    B = Array(rand(Float64, M))
+
+    a = Array{Float64}(undef, M)
+
+    len = length(A)
+
+    copyevent = async_copy!(pointer(a), pointer(B), M)
+    copyevent = async_copy!(pointer(A), pointer(a), M)
+
+    @test isapprox(a, Array(A))
+    @test isapprox(a, Array(B))
+end
+
 M = 1024
 
-GPU_copy_test(M)
+if has_cuda_gpu()
+    GPU_copy_test(M)
+end
+CPU_copy_test(M)
