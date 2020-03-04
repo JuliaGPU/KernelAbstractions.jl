@@ -47,7 +47,16 @@ end
 struct CudaEvent <: Event
     event::CuEvent
 end
-function wait(ev::CudaEvent, progress=nothing)
+
+function Event(::CUDA)
+    stream = CUDAdrv.CuDefaultStream()
+    event = CuEvent(CUDAdrv.EVENT_DISABLE_TIMING)
+    CUDAdrv.record(event, stream)
+    CudaEvent(event)
+end
+
+wait(ev::CudaEvent, progress=nothing) = wait(CPU(), ev, progress)
+function wait(::CPU, ev::CudaEvent, progress=nothing)
     if progress === nothing
         CUDAdrv.synchronize(ev.event)
     else
@@ -56,6 +65,19 @@ function wait(ev::CudaEvent, progress=nothing)
             # do we need to `yield` here?
         end
     end
+end
+
+# Use this to synchronize between computation using the CuDefaultStream
+wait(::CUDA, ev::CudaEvent, progress=nothing) = __enqueue_wait(ev, CUDAdrv.CuDefaultStream())
+
+# There is no efficient wait for CPU->GPU synchronization, so instead we
+# do a CPU wait, and therefore block anyone from submitting more work.
+# We maybe could do a spinning wait on the GPU and atomic flag to signal from the CPU,
+# but which stream would we target?
+wait(::CUDA, ev::CPUEvent,  progress=nothing) = wait(CPU(), ev, progress)
+
+function __enqueue_wait(ev::CudaEvent, stream::CuStream)
+    CUDAdrv.wait(ev.event, stream)
 end
 
 function (obj::Kernel{CUDA})(args...; ndrange=nothing, dependencies=nothing, workgroupsize=nothing)
@@ -73,12 +95,12 @@ function (obj::Kernel{CUDA})(args...; ndrange=nothing, dependencies=nothing, wor
     if dependencies !== nothing
         for event in dependencies
             if event isa CudaEvent
-                CUDAdrv.wait(event.event, stream)
+                __enqueue_wait(event, stream)
             end
         end
         for event in dependencies
             if !(event isa CudaEvent)
-                wait(event, ()->yield())
+                wait(CUDA(), event, ()->yield())
             end
         end
     end

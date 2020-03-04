@@ -2,7 +2,7 @@ module KernelAbstractions
 
 export @kernel
 export @Const, @localmem, @private, @uniform, @synchronize, @index, groupsize
-export Device, GPU, CPU, CUDA 
+export Device, GPU, CPU, CUDA, Event
 
 using MacroTools
 using StaticArrays
