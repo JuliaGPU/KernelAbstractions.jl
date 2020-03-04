@@ -20,10 +20,8 @@ function GPU_copy_test(M)
 
     wait(copyevent)
 
-    copyevent = async_copy!(pointer(a), pointer(B), M,
-                            stream=copystream)
-    copyevent = async_copy!(pointer(A), pointer(a), M,
-                            stream=copystream, dependencies=copyevent)
+    copyevent = async_copy!(a, B, stream=copystream)
+    copyevent = async_copy!(A, a, stream=copystream, dependencies=copyevent)
 
     @test isapprox(a, Array(A))
     @test isapprox(a, Array(B))
@@ -35,13 +33,11 @@ function CPU_copy_test(M)
 
     a = Array{Float64}(undef, M)
 
-    len = length(A)
+    copyevent = async_copy!(a, B)
+    copyevent = async_copy!(A, a)
 
-    copyevent = async_copy!(pointer(a), pointer(B), M)
-    copyevent = async_copy!(pointer(A), pointer(a), M)
-
-    @test isapprox(a, Array(A))
-    @test isapprox(a, Array(B))
+    @test isapprox(a, A)
+    @test isapprox(a, B)
 end
 
 M = 1024

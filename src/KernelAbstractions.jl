@@ -10,6 +10,7 @@ using Cassette
 using Requires
 using Adapt
 using CUDAdrv
+using CUDAapi
 
 """
    @kernel function f(args) end
@@ -78,24 +79,43 @@ function recordevent(stream)
   return CudaEvent(event)
 end
 
-function async_copy!(destptr::Ptr{T}, srcptr::Ptr{T}, N::Integer) where T
-  unsafe_copyto!(destptr, srcptr, N)
+function async_copy!(A,B)
+    unsafe_copyto!(pointer(A), pointer(B), length(A))
 end
-function async_copy!(destptr::CuPtr{T}, srcptr::CuPtr{T}, N::Integer; stream=CuDefaultStream(),
-                     dependencies=nothing) where T
-  if dependencies isa Event
-    dependencies = (dependencies,)
-  end
-  if dependencies !== nothing
-    for event in dependencies
-      @assert event isa CudaEvent
-      CUDAdrv.wait(event.event, stream)
+
+if has_cuda_gpu()
+    function async_copy!(A::CuArray, B::CuArray; stream=CuDefaultStream(),
+                        dependencies=nothing)
+        async_copy!(pointer(A), pointer(B), length(A), stream, dependencies)
     end
-  end
 
-  unsafe_copyto!(destptr, srcptr, N, async=true, stream=stream)
+    function async_copy!(A::CuArray, B::CuArray); stream=CuDefaultStream(),
+                        dependencies=nothing
+        async_copy!(pointer(A), pointer(B), length(A), stream, dependencies)
+    end
 
-  return recordevent(stream)
+    function async_copy!(A::CuArray, B::Array); stream=CuDefaultStream(),
+                        dependencies=nothing
+        async_copy!(pointer(A), pointer(B), length(A), stream, dependencies)
+    end
+
+    function async_copy!(destptr, srcptr, N::Integer;
+                         stream=CuDefaultStream(),
+                         dependencies=nothing) where T
+        if dependencies isa Event
+            dependencies = (dependencies,)
+        end
+        if dependencies !== nothing
+            for event in dependencies
+                @assert event isa CudaEvent
+                CUDAdrv.wait(event.event, stream)
+            end
+        end
+
+        unsafe_copyto!(destptr, srcptr, N, async=true, stream=stream)
+
+        return recordevent(stream)
+    end
 end
 
 ###
