@@ -1,8 +1,15 @@
 struct CPUEvent <: Event
-    task::Core.Task
+    task::Union{Nothing, Core.Task}
 end
 
-function wait(ev::CPUEvent, progress=nothing)
+function Event(::CPU)
+    return CPUEvent(nothing)
+end
+
+wait(ev::CPUEvent, progress=nothing) = wait(CPU(), ev, progress)
+function wait(::CPU, ev::CPUEvent, progress=nothing)
+    ev.task === nothing && return
+    
     if progress === nothing
         wait(ev.task)
     else
@@ -50,7 +57,7 @@ function __run(obj, ndrange, iterspace, args, dependencies)
             !isempty(cpu_tasks) && Base.sync_end(cpu_tasks)
             for event in dependencies
                 if !(event isa CPUEvent)
-                    wait(event, ()->yield())
+                    wait(CPU(), event, ()->yield())
                 end
             end
         end
