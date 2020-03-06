@@ -47,37 +47,15 @@ end
 struct CudaEvent <: Event
     event::CuEvent
 end
-
-function Event(::CUDA)
-    stream = CUDAdrv.CuDefaultStream()
-    event = CuEvent(CUDAdrv.EVENT_DISABLE_TIMING)
-    CUDAdrv.record(event, stream)
-    CudaEvent(event)
-end
-
-wait(ev::CudaEvent, progress=nothing) = wait(CPU(), ev, progress)
-function wait(::CPU, ev::CudaEvent, progress=nothing)
+function wait(ev::CudaEvent, progress=nothing)
     if progress === nothing
-        CUDAdrv.synchronize(ev.event)
+        CUDAdrv.wait(ev.event)
     else
         while !CUDAdrv.query(ev.event)
             progress()
             # do we need to `yield` here?
         end
     end
-end
-
-# Use this to synchronize between computation using the CuDefaultStream
-wait(::CUDA, ev::CudaEvent, progress=nothing) = __enqueue_wait(ev, CUDAdrv.CuDefaultStream())
-
-# There is no efficient wait for CPU->GPU synchronization, so instead we
-# do a CPU wait, and therefore block anyone from submitting more work.
-# We maybe could do a spinning wait on the GPU and atomic flag to signal from the CPU,
-# but which stream would we target?
-wait(::CUDA, ev::CPUEvent,  progress=nothing) = wait(CPU(), ev, progress)
-
-function __enqueue_wait(ev::CudaEvent, stream::CuStream)
-    CUDAdrv.wait(ev.event, stream)
 end
 
 function (obj::Kernel{CUDA})(args...; ndrange=nothing, dependencies=nothing, workgroupsize=nothing)
@@ -95,12 +73,12 @@ function (obj::Kernel{CUDA})(args...; ndrange=nothing, dependencies=nothing, wor
     if dependencies !== nothing
         for event in dependencies
             if event isa CudaEvent
-                __enqueue_wait(event, stream)
+                CUDAdrv.wait(event.event, stream)
             end
         end
         for event in dependencies
             if !(event isa CudaEvent)
-                wait(CUDA(), event, ()->yield())
+                wait(event, ()->yield())
             end
         end
     end
@@ -261,4 +239,48 @@ end
     ptr = pointer(arr) + (I[1].start-1)*sizeof(T)
     len = I[1].stop - I[1].start + 1
     return ConstCuDeviceArray{T,1,A}(len, ptr)
+end
+
+# Functions for async_copy
+function pin!(::CUDA, a)
+  ad = Mem.register(Mem.Host, pointer(a), sizeof(a))
+  finalizer(_ -> Mem.unregister(ad), a)
+end
+
+function recordevent(stream)
+  event = CuEvent(CUDAdrv.EVENT_DISABLE_TIMING)
+  CUDAdrv.record(event, stream)
+  return CudaEvent(event)
+end
+
+function async_copy!(::CUDA, A::CuArray, B::CuArray; stream=CuDefaultStream(),
+                    dependencies=nothing)
+    async_copy_ptr!(pointer(A), pointer(B), length(A), stream, dependencies)
+end
+
+function async_copy!(A::CUDA, ::Array, B::CuArray; stream=CuDefaultStream(),
+                    dependencies=nothing)
+    async_copy_ptr!(pointer(A), pointer(B), length(A), stream, dependencies)
+end
+
+function async_copy!(A::CUDA, ::CuArray, B::Array; stream=CuDefaultStream(),
+                    dependencies=nothing)
+    async_copy_ptr!(pointer(A), pointer(B), length(A), stream, dependencies)
+end
+function async_copy_ptr!(destptr, srcptr, N::Integer;
+                         stream=CuDefaultStream(),
+                         dependencies=nothing) where T
+    if dependencies isa Event
+        dependencies = (dependencies,)
+    end
+    if dependencies !== nothing
+        for event in dependencies
+            @assert event isa CudaEvent
+            CUDAdrv.wait(event.event, stream)
+        end
+    end
+
+    unsafe_copyto!(destptr, srcptr, N, async=true, stream=stream)
+
+    return recordevent(stream)
 end

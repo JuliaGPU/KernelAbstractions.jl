@@ -3,17 +3,13 @@ module KernelAbstractions
 export @kernel
 export @Const, @localmem, @private, @uniform, @synchronize, @index, groupsize
 export Device, GPU, CPU, CUDA, Event
+export async_copy!
 
 using MacroTools
 using StaticArrays
 using Cassette
 using Requires
 using Adapt
-using CUDAdrv
-using CUDAapi
-if has_cuda_gpu()
-    using CuArrays
-end
 
 """
    @kernel function f(args) end
@@ -70,55 +66,8 @@ import Base.wait
 # function register end
 # function unregister end
 
-# Functions for async_copy
-function pin!(a)
-  ad = Mem.register(Mem.Host, pointer(a), sizeof(a))
-  finalizer(_ -> Mem.unregister(ad), a)
-end
-
-function recordevent(stream)
-  event = CuEvent(CUDAdrv.EVENT_DISABLE_TIMING)
-  CUDAdrv.record(event, stream)
-  return CudaEvent(event)
-end
-
-function async_copy!(A,B)
-    unsafe_copyto!(pointer(A), pointer(B), length(A))
-end
-
-if has_cuda_gpu()
-    function async_copy!(A::CuArray, B::CuArray; stream=CuDefaultStream(),
-                        dependencies=nothing)
-        async_copy_ptr!(pointer(A), pointer(B), length(A), stream, dependencies)
-    end
-
-    function async_copy!(A::Array, B::CuArray; stream=CuDefaultStream(),
-                        dependencies=nothing)
-        async_copy_ptr!(pointer(A), pointer(B), length(A), stream, dependencies)
-    end
-
-    function async_copy!(A::CuArray, B::Array; stream=CuDefaultStream(),
-                        dependencies=nothing)
-        async_copy_ptr!(pointer(A), pointer(B), length(A), stream, dependencies)
-    end
-
-    function async_copy_ptr!(destptr, srcptr, N::Integer;
-                             stream=CuDefaultStream(),
-                             dependencies=nothing) where T
-        if dependencies isa Event
-            dependencies = (dependencies,)
-        end
-        if dependencies !== nothing
-            for event in dependencies
-                @assert event isa CudaEvent
-                CUDAdrv.wait(event.event, stream)
-            end
-        end
-
-        unsafe_copyto!(destptr, srcptr, N, async=true, stream=stream)
-
-        return recordevent(stream)
-    end
+function async_copy!(::CPU, A, B, dependencies=nothing)
+    copyto!(pointer(A), pointer(B), length(A))
 end
 
 ###
