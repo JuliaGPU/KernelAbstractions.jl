@@ -16,12 +16,16 @@ function GPU_copy_test(M)
 
     copystream = CuStream(CUDAdrv.STREAM_NON_BLOCKING)
     copyevent = recordevent(copystream)
-    copyevent = async_copy!(pointer(A), pointer(B), M, stream=copystream)
+    copyevent = async_copy!(CUDA(), pointer(A), pointer(B),
+                            M, stream=copystream)
 
     wait(copyevent)
 
-    copyevent = async_copy!(a, B, stream=copystream)
-    copyevent = async_copy!(A, a, stream=copystream, dependencies=copyevent)
+    copyevent = async_copy!(CUDA(), a, B, stream=copystream)
+    wait(copyevent)
+    copyevent = async_copy!(CUDA(), A, a, stream=copystream,
+                            dependencies=copyevent)
+    wait(copyevent)
 
     @test isapprox(a, Array(A))
     @test isapprox(a, Array(B))
@@ -33,8 +37,10 @@ function CPU_copy_test(M)
 
     a = Array{Float64}(undef, M)
 
-    copyevent = async_copy!(a, B)
-    copyevent = async_copy!(A, a)
+    copyevent = async_copy!(CPU(), a, B)
+    wait(copyevent)
+    copyevent = async_copy!(CPU(), A, a)
+    wait(copyevent)
 
     @test isapprox(a, A)
     @test isapprox(a, B)

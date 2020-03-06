@@ -253,19 +253,19 @@ function recordevent(stream)
   return CudaEvent(event)
 end
 
-function async_copy!(::CUDA, A::CuArray, B::CuArray; stream=CuDefaultStream(),
-                    dependencies=nothing)
-    async_copy_ptr!(pointer(A), pointer(B), length(A), stream, dependencies)
+function async_copy!(::CUDA, A::CuArray, B::CuArray; dependencies=nothing)
+    async_copy_ptr!(pointer(A), pointer(B), length(A),
+                    stream=next_stream(), dependencies=dependencies)
 end
 
-function async_copy!(A::CUDA, ::Array, B::CuArray; stream=CuDefaultStream(),
-                    dependencies=nothing)
-    async_copy_ptr!(pointer(A), pointer(B), length(A), stream, dependencies)
+function async_copy!(A::CUDA, ::Array, B::CuArray; dependencies=nothing)
+    async_copy_ptr!(pointer(A), pointer(B), length(A),
+                    stream=next_stream(), dependencies=dependencies)
 end
 
-function async_copy!(A::CUDA, ::CuArray, B::Array; stream=CuDefaultStream(),
-                    dependencies=nothing)
-    async_copy_ptr!(pointer(A), pointer(B), length(A), stream, dependencies)
+function async_copy!(A::CUDA, ::CuArray, B::Array; dependencies=nothing)
+    async_copy_ptr!(pointer(A), pointer(B), length(A),
+                    stream=next_stream(), dependencies=dependencies)
 end
 function async_copy_ptr!(destptr, srcptr, N::Integer;
                          stream=CuDefaultStream(),

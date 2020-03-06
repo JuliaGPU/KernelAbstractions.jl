@@ -66,10 +66,6 @@ import Base.wait
 # function register end
 # function unregister end
 
-function async_copy!(::CPU, A, B, dependencies=nothing)
-    copyto!(pointer(A), pointer(B), length(A))
-end
-
 ###
 # Kernel language
 # - @localmem

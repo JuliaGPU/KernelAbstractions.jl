@@ -20,6 +20,11 @@ function wait(::CPU, ev::CPUEvent, progress=nothing)
     end
 end
 
+function async_copy!(::CPU, A, B, dependencies=nothing)
+    copyto!(A, B)
+    return CPUEvent(nothing)
+end
+
 function (obj::Kernel{CPU})(args...; ndrange=nothing, workgroupsize=nothing, dependencies=nothing)
     if ndrange isa Integer
         ndrange = (ndrange,)
