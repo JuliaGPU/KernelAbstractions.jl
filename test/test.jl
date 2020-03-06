@@ -196,3 +196,9 @@ end
     wait(env)
     @test x == [4,4,4]
 end
+
+@testset "CPU dependencies" begin
+    event = Event(CPU())
+    event = kernel_empty(CPU(), 1)(ndrange=1, dependencies=(event))
+    wait(event)
+end
