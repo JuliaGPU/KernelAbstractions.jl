@@ -184,3 +184,9 @@ if has_cuda_gpu()
         @test event5 isa KernelAbstractions.Event
     end
 end
+
+@testset "CPU dependencies" begin
+    event = Event(CPU())
+    event = kernel_empty(CPU(), 1)(ndrange=1, dependencies=(event))
+    wait(event)
+end
