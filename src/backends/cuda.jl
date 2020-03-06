@@ -1,6 +1,9 @@
 import CUDAnative, CUDAdrv
 import CUDAnative: cufunction, DevicePtr
-import CUDAdrv: CuEvent, CuStream, CuDefaultStream
+import CUDAdrv: CuEvent, CuStream, CuDefaultStream, Mem
+
+# I cannot figure out how to add CuArrays here
+#import CuArrays: CuArray
 
 const FREE_STREAMS = CuStream[]
 const STREAMS = CuStream[]

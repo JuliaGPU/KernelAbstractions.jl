@@ -5,6 +5,8 @@ export @Const, @localmem, @private, @uniform, @synchronize, @index, groupsize
 export Device, GPU, CPU, CUDA, Event
 export async_copy!
 
+export pin!, recordevent
+
 using MacroTools
 using StaticArrays
 using Cassette

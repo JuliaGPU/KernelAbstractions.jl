@@ -20,6 +20,9 @@ function wait(::CPU, ev::CPUEvent, progress=nothing)
     end
 end
 
+function pin!(::CPU, a)
+end
+
 function async_copy!(::CPU, A, B, dependencies=nothing)
     copyto!(A, B)
     return CPUEvent(nothing)
