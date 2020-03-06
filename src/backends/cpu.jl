@@ -50,7 +50,7 @@ function __run(obj, ndrange, iterspace, args, dependencies)
         if dependencies !== nothing
             cpu_tasks = Core.Task[]
             for event in dependencies
-                if event isa CPUEvent
+                if event isa CPUEvent && event.task isa Core.Task
                     push!(cpu_tasks, event.task)
                 end
             end
