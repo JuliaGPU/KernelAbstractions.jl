@@ -15,9 +15,28 @@ function wait(::CPU, ev::CPUEvent, progress=nothing)
     else
         while !Base.istaskdone(ev.task)
             progress()
-            yield() # yield to the scheduler
         end
     end
+end
+function __waitall(::CPU, dependencies, progress)
+    if dependencies isa Event
+        dependencies = (dependencies,)
+    end
+    if dependencies !== nothing
+        dependencies = collect(dependencies)
+        cpudeps   = filter(d->d isa CPUEvent && d.task !== nothing, dependencies)
+        otherdeps = filter(d->!(d isa CPUEvent), dependencies)
+        Base.sync_end(map(e->e.task, cpudeps))
+        for event in otherdeps
+            wait(CPU(), event, progress)
+        end
+    end
+end
+
+function async_copy!(::CPU, A, B; dependencies=nothing)
+    __waitall(CPU(), dependencies, yield)
+    copyto!(A, B)
+    return CPUEvent(nothing)
 end
 
 function (obj::Kernel{CPU})(args...; ndrange=nothing, workgroupsize=nothing, dependencies=nothing)
@@ -47,20 +66,7 @@ end
 # Inference barrier
 function __run(obj, ndrange, iterspace, args, dependencies)
     return Threads.@spawn begin
-        if dependencies !== nothing
-            cpu_tasks = Core.Task[]
-            for event in dependencies
-                if event isa CPUEvent && event.task isa Core.Task
-                    push!(cpu_tasks, event.task)
-                end
-            end
-            !isempty(cpu_tasks) && Base.sync_end(cpu_tasks)
-            for event in dependencies
-                if !(event isa CPUEvent)
-                    wait(CPU(), event, ()->yield())
-                end
-            end
-        end
+        __waitall(CPU(), dependencies, yield)
         @sync begin
             # TODO: how do we use the information that the iteration space maps perfectly to
             #       the ndrange without incurring a 2x compilation overhead
