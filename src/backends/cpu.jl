@@ -59,12 +59,12 @@ function (obj::Kernel{CPU})(args...; ndrange=nothing, workgroupsize=nothing, dep
         ndrange = nothing
     end
 
-    t = Threads.@spawn __run(obj, ndrange, iterspace, args, dependencies)
+    t = Threads.@spawn __run(obj, ndrange, iterspace, args, dependencies, Val(dynamic))
     return CPUEvent(t)
 end
 
 # Inference barriers
-function __run(obj, ndrange, iterspace, args, dependencies)
+function __run(obj, ndrange, iterspace, args, dependencies, ::Val{dynamic}) where dynamic
     __waitall(CPU(), dependencies, yield)
     N = length(iterspace)
     Nthreads = Threads.nthreads()
@@ -79,16 +79,16 @@ function __run(obj, ndrange, iterspace, args, dependencies)
         len, rem = 1, 0
     end
     if Nthreads == 1
-        __thread_run(1, len, rem, obj, ndrange, iterspace, args)
+        __thread_run(1, len, rem, obj, ndrange, iterspace, args, Val(dynamic))
     else
         @sync for tid in 1:Nthreads
-            Threads.@spawn __thread_run(tid, len, rem, obj, ndrange, iterspace, args)
+            Threads.@spawn __thread_run(tid, len, rem, obj, ndrange, iterspace, args, Val(dynamic))
         end
     end
     return nothing
 end
 
-function __thread_run(tid, len, rem, obj, ndrange, iterspace, args)
+function __thread_run(tid, len, rem, obj, ndrange, iterspace, args, ::Val{dynamic}) where dynamic
     # compute this thread's iterations
     f = 1 + ((tid-1) * len)
     l = f + len - 1
@@ -105,27 +105,16 @@ function __thread_run(tid, len, rem, obj, ndrange, iterspace, args)
     # run this thread's iterations
     for i = f:l
         block = @inbounds blocks(iterspace)[i]
-        # TODO: how do we use the information that the iteration space maps perfectly to
-        #       the ndrange without incurring a 2x compilation overhead
-        # if dynamic
-        ctx = mkcontextdynamic(obj, block, ndrange, iterspace)
+        ctx = mkcontext(obj, block, ndrange, iterspace, Val(dynamic))
         Cassette.overdub(ctx, obj.f, args...)
-        # else
-        #     ctx = mkcontext(obj, blocks, ndrange, iterspace)
-        #     Threads.@spawn Cassette.overdub(ctx, obj.f, args...)
     end
     return nothing
 end
 
 Cassette.@context CPUCtx
 
-function mkcontext(kernel::Kernel{CPU}, I, _ndrange, iterspace)
-    metadata = CompilerMetadata{ndrange(kernel), false}(I, _ndrange, iterspace)
-    Cassette.disablehooks(CPUCtx(pass = CompilerPass, metadata=metadata))
-end
-
-function mkcontextdynamic(kernel::Kernel{CPU}, I, _ndrange, iterspace)
-    metadata = CompilerMetadata{ndrange(kernel), true}(I, _ndrange, iterspace)
+function mkcontext(kernel::Kernel{CPU}, I, _ndrange, iterspace, ::Val{dynamic}) where dynamic
+    metadata = CompilerMetadata{ndrange(kernel), dynamic}(I, _ndrange, iterspace)
     Cassette.disablehooks(CPUCtx(pass = CompilerPass, metadata=metadata))
 end
 
