@@ -59,32 +59,62 @@ function (obj::Kernel{CPU})(args...; ndrange=nothing, workgroupsize=nothing, dep
         ndrange = nothing
     end
 
-    t = __run(obj, ndrange, iterspace, args, dependencies)
+    t = Threads.@spawn __run(obj, ndrange, iterspace, args, dependencies)
     return CPUEvent(t)
 end
 
-# Inference barrier
+# Inference barriers
 function __run(obj, ndrange, iterspace, args, dependencies)
-    return Threads.@spawn begin
-        __waitall(CPU(), dependencies, yield)
-        @sync begin
-            # TODO: how do we use the information that the iteration space maps perfectly to
-            #       the ndrange without incurring a 2x compilation overhead
-            # if dynamic
-                for block in iterspace
-                    let ctx = mkcontextdynamic(obj, block, ndrange, iterspace)
-                        Threads.@spawn Cassette.overdub(ctx, obj.f, args...)
-                    end
-                end
-            # else
-            #     for block in iterspace
-            #         let ctx = mkcontext(obj, blocks, ndrange, iterspace)
-            #             Threads.@spawn Cassette.overdub(ctx, obj.f, args...)
-            #         end
-            #     end
-            # end
+    __waitall(CPU(), dependencies, yield)
+    N = length(iterspace)
+    Nthreads = Threads.nthreads()
+    if Nthreads == 1
+        len, rem = N, 0
+    else
+        len, rem = divrem(N, Nthreads)
+    end
+    # not enough iterations for all the threads?
+    if len == 0
+        Nthreads = N
+        len, rem = 1, 0
+    end
+    if Nthreads == 1
+        __thread_run(1, len, rem, obj, ndrange, iterspace, args)
+    else
+        @sync for tid in 1:Nthreads
+            Threads.@spawn __thread_run(tid, len, rem, obj, ndrange, iterspace, args)
         end
     end
+    return nothing
+end
+
+function __thread_run(tid, len, rem, obj, ndrange, iterspace, args)
+    # compute this thread's iterations
+    f = 1 + ((tid-1) * len)
+    l = f + len - 1
+    # distribute remaining iterations evenly
+    if rem > 0
+        if tid <= rem
+            f = f + (tid-1)
+            l = l + tid
+        else
+            f = f + rem
+            l = l + rem
+        end
+    end
+    # run this thread's iterations
+    for i = f:l
+        block = @inbounds blocks(iterspace)[i]
+        # TODO: how do we use the information that the iteration space maps perfectly to
+        #       the ndrange without incurring a 2x compilation overhead
+        # if dynamic
+        ctx = mkcontextdynamic(obj, block, ndrange, iterspace)
+        Cassette.overdub(ctx, obj.f, args...)
+        # else
+        #     ctx = mkcontext(obj, blocks, ndrange, iterspace)
+        #     Threads.@spawn Cassette.overdub(ctx, obj.f, args...)
+    end
+    return nothing
 end
 
 Cassette.@context CPUCtx
