@@ -57,20 +57,23 @@ end
 # The easy case, transform the function for GPU execution
 # - mark constant arguments by applying `constify`.
 function transform_gpu!(def, constargs)
-    new_stmts = Expr[]
+    let_constargs = Expr[]
     for (i, arg) in enumerate(def[:args])
         if constargs[i]
-            push!(new_stmts, :($arg = $constify($arg)))
+            push!(let_constargs, :($arg = $constify($arg)))
         end
     end
 
-    def[:body] = quote
+    body = quote
         if $__validindex()
-            $(new_stmts...)
             $(def[:body])
         end
         return nothing
     end
+    def[:body] = Expr(:let,
+        Expr(:block, let_constargs...),
+        body,
+    )
 end
 
 # The hard case, transform the function for CPU execution
@@ -81,19 +84,22 @@ end
 #   - hoist workgroup definitions
 #   - hoist uniform variables
 function transform_cpu!(def, constargs)
-    new_stmts = Expr[]
+    let_constargs = Expr[]
     for (i, arg) in enumerate(def[:args])
         if constargs[i]
-            push!(new_stmts, :($arg = $constify($arg)))
+            push!(let_constargs, :($arg = $constify($arg)))
         end
     end
-
+    new_stmts = Expr[]
     body = MacroTools.flatten(def[:body])
     push!(new_stmts, Expr(:aliasscope))
     append!(new_stmts, split(body.args))
     push!(new_stmts, Expr(:popaliasscope))
     push!(new_stmts, :(return nothing))
-    def[:body] = Expr(:block, new_stmts...)
+    def[:body] = Expr(:let,
+        Expr(:block, let_constargs...),
+        Expr(:block, new_stmts...)
+    )
 end
 
 struct WorkgroupLoop
