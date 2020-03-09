@@ -121,7 +121,7 @@ end
     let kernel = constarg(CPU(), 8, (1024,))
         # this is poking at internals
         iterspace = NDRange{1, StaticSize{(128,)}, StaticSize{(8,)}}();
-        ctx = KernelAbstractions.mkcontext(kernel, 1, nothing, iterspace)
+        ctx = KernelAbstractions.mkcontext(kernel, 1, nothing, iterspace, Val(false))
         AT = Array{Float32, 2}
         IR = sprint() do io
             code_llvm(io, KernelAbstractions.Cassette.overdub, 
