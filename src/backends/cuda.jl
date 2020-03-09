@@ -68,7 +68,9 @@ function wait(::CPU, ev::CudaEvent, progress=nothing)
 end
 
 # Use this to synchronize between computation using the CuDefaultStream
-wait(::CUDA, ev::CudaEvent, progress=nothing) = __enqueue_wait(ev, CUDAdrv.CuDefaultStream())
+function wait(::CUDA, ev::CudaEvent, progress=nothing)
+    CUDAdrv.wait(ev.event, CUDAdrv.CuDefaultStream())
+end
 
 # There is no efficient wait for CPU->GPU synchronization, so instead we
 # do a CPU wait, and therefore block anyone from submitting more work.
