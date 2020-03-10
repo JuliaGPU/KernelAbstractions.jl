@@ -389,7 +389,7 @@ function __synchronize()
 end
 
 function __print(items...)
-    error("@print used outside of kernel or not captured")
+    error("@print used outside of kernel")
 end
 
 ###
