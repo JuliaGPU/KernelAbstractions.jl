@@ -10,11 +10,11 @@ end
   @print("Hello from thread ", I, "!\n")
 end
 
-function test_print(gpu_avail)
-  if gpu_avail
-    kernel = kernel_print(CUDA(), 4)
-  else
+function test_print(backend)
+  if backend == CPU()
     kernel = kernel_print(CPU(), 4)
+  else
+    kernel = kernel_print(CUDA(), 4)
   end
   kernel(ndrange=(4,)) 
 end
@@ -22,10 +22,10 @@ end
 
 @testset "print test" begin
     if CUDAapi.has_cuda_gpu()
-        wait(test_print(true))
+        wait(test_print(CUDA()))
         @test true
     end
 
-    wait(test_print(false))
+    wait(test_print(CPU()))
     @test true
 end
