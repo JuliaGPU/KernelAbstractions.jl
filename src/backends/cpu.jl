@@ -155,6 +155,10 @@ end
     end
 end
 
+@inline function Cassette.overdub(ctx::CPUCtx, ::typeof(__print), items...)
+    println(items...)
+end
+
 generate_overdubs(CPUCtx)
 
 ###

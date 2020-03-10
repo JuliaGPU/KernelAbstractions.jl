@@ -1,4 +1,4 @@
-macro print(parts...)
+@generated function cuda_print(items...)
     args = Union{Val,Expr,Symbol}[]
 
     parts = [parts...]
@@ -26,12 +26,6 @@ macro print(parts...)
     end
 
     quote
-        __print($(parts...))
+        CUDAnative._cuprint($(map(esc, args)...))
     end
-end
-
-macro println(parts...)
-    esc(quote
-        $@print($(parts...), "\n")
-    end)
 end

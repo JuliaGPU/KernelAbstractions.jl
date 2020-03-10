@@ -149,6 +149,21 @@ macro synchronize(cond)
 end
 
 """
+   @print(items...)
+
+This is a unified print statement.
+
+# Platform differences
+  - `GPU`: This will reorganize the items to print via @cuprintf
+  - `CPU`: This will call `print(items...)`
+"""
+macro print(items...)
+    quote
+        $__print($(map(esc,items)...))
+    end
+end
+
+"""
    @index
 
 The `@index` macro can be used to give you the index of a workitem within a kernel
@@ -346,7 +361,7 @@ function __synchronize()
     error("@synchronize used outside kernel or not captured")
 end
 
-function __print()
+function __print(items...)
     error("@print used outside of kernel or not captured")
 end
 
