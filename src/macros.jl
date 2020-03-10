@@ -94,7 +94,7 @@ function transform_cpu!(def, constargs)
     body = MacroTools.flatten(def[:body])
     push!(new_stmts, Expr(:aliasscope))
     append!(new_stmts, split(body.args))
-    #push!(new_stmts, Expr(:popaliasscope))
+    push!(new_stmts, Expr(:popaliasscope))
     push!(new_stmts, :(return nothing))
     def[:body] = Expr(:let,
         Expr(:block, let_constargs...),
