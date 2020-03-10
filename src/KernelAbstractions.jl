@@ -1,7 +1,7 @@
 module KernelAbstractions
 
 export @kernel
-export @Const, @localmem, @private, @uniform, @synchronize, @index, groupsize
+export @Const, @localmem, @private, @uniform, @synchronize, @index, groupsize, @print
 export Device, GPU, CPU, CUDA, Event
 export async_copy!
 
@@ -158,8 +158,35 @@ This is a unified print statement.
   - `CPU`: This will call `print(items...)`
 """
 macro print(items...)
+
+    args = Union{Val,Expr,Symbol}[]
+
+    items = [items...]
+    while true
+        isempty(items) && break
+
+        item = popfirst!(items)
+
+        # handle string interpolation
+        if isa(item, Expr) && item.head == :string
+            items = vcat(item.args, items)
+            continue
+        end
+
+        # expose literals to the generator by using Val types
+        if isbits(item) # literal numbers, etc
+            push!(args, Val(item))
+        elseif isa(item, QuoteNode) # literal symbols
+            push!(args, Val(item.value))
+        elseif isa(item, String) # literal strings need to be interned
+            push!(args, Val(Symbol(item)))
+        else # actual values that will be passed to printf
+            push!(args, item)
+        end
+    end
+
     quote
-        $__print($(map(esc,items)...))
+        $__print($(map(esc,args)...))
     end
 end
 
