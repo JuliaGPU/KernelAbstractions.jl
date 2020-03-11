@@ -1,7 +1,7 @@
 module KernelAbstractions
 
 export @kernel
-export @Const, @localmem, @private, @uniform, @synchronize, @index, groupsize
+export @Const, @localmem, @private, @uniform, @synchronize, @index, groupsize, @print
 export Device, GPU, CPU, CUDA, Event
 export async_copy!
 
@@ -28,6 +28,7 @@ and then invoked on the arguments.
 - [`@private`](@ref)
 - [`@uniform`](@ref)
 - [`@synchronize`](@ref)
+- [`@print`](@ref)
 
 # Example:
 
@@ -144,6 +145,48 @@ workgroup. `cond` is not allowed to have any visible sideffects.
 macro synchronize(cond)
     quote
         $(esc(cond)) && $__synchronize()
+    end
+end
+
+"""
+   @print(items...)
+
+This is a unified print statement.
+
+# Platform differences
+  - `GPU`: This will reorganize the items to print via @cuprintf
+  - `CPU`: This will call `print(items...)`
+"""
+macro print(items...)
+
+    args = Union{Val,Expr,Symbol}[]
+
+    items = [items...]
+    while true
+        isempty(items) && break
+
+        item = popfirst!(items)
+
+        # handle string interpolation
+        if isa(item, Expr) && item.head == :string
+            items = vcat(item.args, items)
+            continue
+        end
+
+        # expose literals to the generator by using Val types
+        if isbits(item) # literal numbers, etc
+            push!(args, Val(item))
+        elseif isa(item, QuoteNode) # literal symbols
+            push!(args, Val(item.value))
+        elseif isa(item, String) # literal strings need to be interned
+            push!(args, Val(Symbol(item)))
+        else # actual values that will be passed to printf
+            push!(args, item)
+        end
+    end
+
+    quote
+        $__print($(map(esc,args)...))
     end
 end
 
@@ -343,6 +386,10 @@ end
 
 function __synchronize()
     error("@synchronize used outside kernel or not captured")
+end
+
+function __print(items...)
+    error("@print used outside of kernel")
 end
 
 ###

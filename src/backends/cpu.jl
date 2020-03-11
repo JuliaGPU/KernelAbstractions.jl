@@ -155,6 +155,30 @@ end
     end
 end
 
+@generated function _print(items...)
+    str = ""
+    args = []
+
+    for i in 1:length(items)
+        item = :(items[$i])
+        T = items[i]
+        if T <: Val
+            item = QuoteNode(T.parameters[1])
+        end
+        push!(args, item)
+    end
+
+    quote
+        print($(args...))
+    end
+
+end
+
+
+@inline function Cassette.overdub(ctx::CPUCtx, ::typeof(__print), items...)
+    _print(items...)
+end
+
 generate_overdubs(CPUCtx)
 
 ###

@@ -274,6 +274,10 @@ end
     CUDAnative.sync_threads()
 end
 
+@inline function Cassette.overdub(ctx::CUDACtx, ::typeof(__print), args...)
+    CUDAnative._cuprint(args...)
+end
+
 ###
 # GPU implementation of `@Const`
 ###

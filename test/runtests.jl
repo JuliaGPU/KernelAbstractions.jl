@@ -21,4 +21,6 @@ end
     include("nditeration.jl")
 end
 
+include("print_test.jl")
+
 include("examples.jl")
