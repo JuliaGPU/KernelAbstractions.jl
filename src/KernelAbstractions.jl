@@ -2,7 +2,7 @@ module KernelAbstractions
 
 export @kernel
 export @Const, @localmem, @private, @uniform, @synchronize, @index, groupsize, @print
-export Device, GPU, CPU, CUDA, Event, MultiEvent
+export Device, GPU, CPU, CUDA, Event, MultiEvent, NoneEvent
 export async_copy!
 
 
@@ -72,6 +72,9 @@ struct MultiEvent{T} <: Event
     function MultiEvent(events::Tuple{Vararg{<:Event}})
         evs = tuplejoin(map(flatten, events)...)
         new{typeof(evs)}(evs)
+    end
+    function MultiEvent(event::E) where {E<:Event}
+        new{Tuple{E}}((event,))
     end
 end
 MultiEvent(::Nothing) = MultiEvent()

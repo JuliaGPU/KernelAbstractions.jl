@@ -195,3 +195,24 @@ end
     event = kernel_empty(CPU(), 1)(ndrange=1, dependencies=(event))
     wait(event)
 end
+
+@testset "MultiEvent" begin
+  event1 = kernel_empty(CPU(), 1)(ndrange=1)
+  event2 = kernel_empty(CPU(), 1)(ndrange=1)
+  event3 = kernel_empty(CPU(), 1)(ndrange=1)
+
+  @test MultiEvent(nothing) isa Event
+  @test MultiEvent(event1) isa Event
+  @test MultiEvent((event1, event2, event3)) isa Event
+end
+
+if has_cuda_gpu()
+  @testset "MultiEvent CUDA" begin
+    event1 = kernel_empty(CUDA(), 1)(ndrange=1)
+    event2 = kernel_empty(CPU(), 1)(ndrange=1)
+    event3 = kernel_empty(CUDA(), 1)(ndrange=1)
+
+    @test MultiEvent(event1) isa Event
+    @test MultiEvent((event1, event2, event3)) isa Event
+  end
+end
