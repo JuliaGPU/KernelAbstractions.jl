@@ -179,6 +179,25 @@ end
 
 generate_overdubs(CPUCtx)
 
+# Don't recurse into these functions
+const cpufuns = (:cos, :cospi, :sin, :sinpi, :tan,
+          :acos, :asin, :atan,
+          :cosh, :sinh, :tanh,
+          :acosh, :asinh, :atanh,
+          :log, :log10, :log1p, :log2,
+          :exp, :exp2, :exp10, :expm1, :ldexp,
+          :isfinite, :isinf, :isnan, :signbit,
+          :abs,
+          :sqrt, :cbrt,
+          :ceil, :floor,)
+for f in cpufuns
+    @eval function Cassette.overdub(ctx::CPUCtx, ::typeof(Base.$f), x::Union{Float32, Float64})
+        @Base._inline_meta
+        return Base.$f(x)
+    end
+end
+
+
 ###
 # CPU implementation of shared memory
 ###
