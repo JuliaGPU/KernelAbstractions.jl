@@ -409,8 +409,22 @@ function __synchronize()
     error("@synchronize used outside kernel or not captured")
 end
 
-function __print(items...)
-    error("@print used outside of kernel")
+@generated function __print(items...)
+    str = ""
+    args = []
+
+    for i in 1:length(items)
+        item = :(items[$i])
+        T = items[i]
+        if T <: Val
+            item = QuoteNode(T.parameters[1])
+        end
+        push!(args, item)
+    end
+
+    quote
+        print($(args...))
+    end
 end
 
 ###
