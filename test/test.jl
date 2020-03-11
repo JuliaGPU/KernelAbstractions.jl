@@ -197,13 +197,13 @@ end
 end
 
 @testset "fallback test: callable types" begin
-    struct A end
-    @kernel function (a::A)(x, ::Val{m}) where m
+    function f end
+    @kernel function (a::typeof(f))(x, ::Val{m}) where m
         I = @index(Global)
         @inbounds x[I] = m
     end
     x = [1,2,3]
-    env = A()(CPU())(x, Val(4); ndrange=length(x))
+    env = f(CPU())(x, Val(4); ndrange=length(x))
     wait(env)
     @test x == [4,4,4]
 end
