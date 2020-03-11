@@ -1,6 +1,6 @@
 import CUDAnative, CUDAdrv
 import CUDAnative: cufunction, DevicePtr
-import CUDAdrv: CuEvent, CuStream, CuDefaultStream
+import CUDAdrv: CuEvent, CuStream, CuDefaultStream, Mem
 
 const FREE_STREAMS = CuStream[]
 const STREAMS = CuStream[]
@@ -68,7 +68,9 @@ function wait(::CPU, ev::CudaEvent, progress=nothing)
 end
 
 # Use this to synchronize between computation using the CuDefaultStream
-wait(::CUDA, ev::CudaEvent, progress=nothing) = __enqueue_wait(ev, CUDAdrv.CuDefaultStream())
+function wait(::CUDA, ev::CudaEvent, progress=nothing)
+    CUDAdrv.wait(ev.event, CUDAdrv.CuDefaultStream())
+end
 
 # There is no efficient wait for CPU->GPU synchronization, so instead we
 # do a CPU wait, and therefore block anyone from submitting more work.
@@ -76,10 +78,66 @@ wait(::CUDA, ev::CudaEvent, progress=nothing) = __enqueue_wait(ev, CUDAdrv.CuDef
 # but which stream would we target?
 wait(::CUDA, ev::CPUEvent,  progress=nothing) = wait(CPU(), ev, progress)
 
-function __enqueue_wait(ev::CudaEvent, stream::CuStream)
-    CUDAdrv.wait(ev.event, stream)
+function __waitall(::CUDA, dependencies, progress, stream)
+    if dependencies isa Event
+        dependencies = (dependencies,)
+    end
+    if dependencies !== nothing
+        dependencies = collect(dependencies)
+        cudadeps  = filter(d->d isa CudaEvent,    dependencies)
+        otherdeps = filter(d->!(d isa CudaEvent), dependencies)
+        for event in cudadeps
+            CUDAdrv.wait(event.event, stream)
+        end
+        for event in otherdeps
+            wait(CUDA(), event, progress)
+        end
+    end
 end
 
+###
+# async_copy
+###
+# - IdDict does not free the memory
+# - WeakRef dict does not unique the key by objectid
+const __pinned_memory = Dict{UInt64, WeakRef}()
+
+function __pin!(a)
+    # use pointer instead of objectid?
+    oid = objectid(a)
+    if haskey(__pinned_memory, oid) && __pinned_memory[oid].value !== nothing
+        return nothing
+    end
+    ad = Mem.register(Mem.Host, pointer(a), sizeof(a))
+    finalizer(_ -> Mem.unregister(ad), a)
+    __pinned_memory[oid] = WeakRef(a)
+    return nothing
+end
+
+function async_copy!(::CUDA, A, B; dependencies=nothing)
+    A isa Array && __pin!(A)
+    B isa Array && __pin!(B)
+
+    stream = next_stream()
+    __waitall(CUDA(), dependencies, yield, stream)
+    event = CuEvent(CUDAdrv.EVENT_DISABLE_TIMING)
+    GC.@preserve A B begin
+        destptr = pointer(A)
+        srcptr  = pointer(B)
+        N       = length(A)
+        unsafe_copyto!(destptr, srcptr, N, async=true, stream=stream)
+    end
+
+    CUDAdrv.record(event, stream)
+
+    return CudaEvent(event)
+end
+
+
+
+###
+# Kernel launch
+###
 function (obj::Kernel{CUDA})(args...; ndrange=nothing, dependencies=nothing, workgroupsize=nothing)
     if ndrange isa Integer
         ndrange = (ndrange,)
@@ -92,18 +150,7 @@ function (obj::Kernel{CUDA})(args...; ndrange=nothing, dependencies=nothing, wor
     end
 
     stream = next_stream()
-    if dependencies !== nothing
-        for event in dependencies
-            if event isa CudaEvent
-                __enqueue_wait(event, stream)
-            end
-        end
-        for event in dependencies
-            if !(event isa CudaEvent)
-                wait(CUDA(), event, ()->yield())
-            end
-        end
-    end
+    __waitall(CUDA(), dependencies, yield, stream)
 
     if KernelAbstractions.workgroupsize(obj) <: DynamicSize && workgroupsize === nothing
         # TODO: allow for NDRange{1, DynamicSize, DynamicSize}(nothing, nothing)

@@ -121,7 +121,7 @@ end
     let kernel = constarg(CPU(), 8, (1024,))
         # this is poking at internals
         iterspace = NDRange{1, StaticSize{(128,)}, StaticSize{(8,)}}();
-        ctx = KernelAbstractions.mkcontext(kernel, 1, nothing, iterspace)
+        ctx = KernelAbstractions.mkcontext(kernel, 1, nothing, iterspace, Val(false))
         AT = Array{Float32, 2}
         IR = sprint() do io
             code_llvm(io, KernelAbstractions.Cassette.overdub, 
@@ -183,6 +183,17 @@ if has_cuda_gpu()
         wait(event5)
         @test event5 isa KernelAbstractions.Event
     end
+    @testset "CUDA wait" begin
+        event = kernel_empty(CUDA(), 1)(ndrange=1)
+        wait(CUDA(), event)
+        @test event isa KernelAbstractions.Event
+    end
+end
+
+@testset "CPU dependencies" begin
+    event = Event(CPU())
+    event = kernel_empty(CPU(), 1)(ndrange=1, dependencies=(event))
+    wait(event)
 end
 
 @testset "fallback test: callable types" begin

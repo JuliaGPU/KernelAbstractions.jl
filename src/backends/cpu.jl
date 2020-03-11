@@ -15,9 +15,28 @@ function wait(::CPU, ev::CPUEvent, progress=nothing)
     else
         while !Base.istaskdone(ev.task)
             progress()
-            yield() # yield to the scheduler
         end
     end
+end
+function __waitall(::CPU, dependencies, progress)
+    if dependencies isa Event
+        dependencies = (dependencies,)
+    end
+    if dependencies !== nothing
+        dependencies = collect(dependencies)
+        cpudeps   = filter(d->d isa CPUEvent && d.task !== nothing, dependencies)
+        otherdeps = filter(d->!(d isa CPUEvent), dependencies)
+        Base.sync_end(map(e->e.task, cpudeps))
+        for event in otherdeps
+            wait(CPU(), event, progress)
+        end
+    end
+end
+
+function async_copy!(::CPU, A, B; dependencies=nothing)
+    __waitall(CPU(), dependencies, yield)
+    copyto!(A, B)
+    return CPUEvent(nothing)
 end
 
 function (obj::Kernel{CPU})(args...; ndrange=nothing, workgroupsize=nothing, dependencies=nothing)
@@ -40,56 +59,62 @@ function (obj::Kernel{CPU})(args...; ndrange=nothing, workgroupsize=nothing, dep
         ndrange = nothing
     end
 
-    t = __run(obj, ndrange, iterspace, args, dependencies)
+    t = Threads.@spawn __run(obj, ndrange, iterspace, args, dependencies, Val(dynamic))
     return CPUEvent(t)
 end
 
-# Inference barrier
-function __run(obj, ndrange, iterspace, args, dependencies)
-    return Threads.@spawn begin
-        if dependencies !== nothing
-            cpu_tasks = Core.Task[]
-            for event in dependencies
-                if event isa CPUEvent
-                    push!(cpu_tasks, event.task)
-                end
-            end
-            !isempty(cpu_tasks) && Base.sync_end(cpu_tasks)
-            for event in dependencies
-                if !(event isa CPUEvent)
-                    wait(CPU(), event, ()->yield())
-                end
-            end
-        end
-        @sync begin
-            # TODO: how do we use the information that the iteration space maps perfectly to
-            #       the ndrange without incurring a 2x compilation overhead
-            # if dynamic
-                for block in iterspace
-                    let ctx = mkcontextdynamic(obj, block, ndrange, iterspace)
-                        Threads.@spawn Cassette.overdub(ctx, obj.f, args...)
-                    end
-                end
-            # else
-            #     for block in iterspace
-            #         let ctx = mkcontext(obj, blocks, ndrange, iterspace)
-            #             Threads.@spawn Cassette.overdub(ctx, obj.f, args...)
-            #         end
-            #     end
-            # end
+# Inference barriers
+function __run(obj, ndrange, iterspace, args, dependencies, ::Val{dynamic}) where dynamic
+    __waitall(CPU(), dependencies, yield)
+    N = length(iterspace)
+    Nthreads = Threads.nthreads()
+    if Nthreads == 1
+        len, rem = N, 0
+    else
+        len, rem = divrem(N, Nthreads)
+    end
+    # not enough iterations for all the threads?
+    if len == 0
+        Nthreads = N
+        len, rem = 1, 0
+    end
+    if Nthreads == 1
+        __thread_run(1, len, rem, obj, ndrange, iterspace, args, Val(dynamic))
+    else
+        @sync for tid in 1:Nthreads
+            Threads.@spawn __thread_run(tid, len, rem, obj, ndrange, iterspace, args, Val(dynamic))
         end
     end
+    return nothing
+end
+
+function __thread_run(tid, len, rem, obj, ndrange, iterspace, args, ::Val{dynamic}) where dynamic
+    # compute this thread's iterations
+    f = 1 + ((tid-1) * len)
+    l = f + len - 1
+    # distribute remaining iterations evenly
+    if rem > 0
+        if tid <= rem
+            f = f + (tid-1)
+            l = l + tid
+        else
+            f = f + rem
+            l = l + rem
+        end
+    end
+    # run this thread's iterations
+    for i = f:l
+        block = @inbounds blocks(iterspace)[i]
+        ctx = mkcontext(obj, block, ndrange, iterspace, Val(dynamic))
+        Cassette.overdub(ctx, obj.f, args...)
+    end
+    return nothing
 end
 
 Cassette.@context CPUCtx
 
-function mkcontext(kernel::Kernel{CPU}, I, _ndrange, iterspace)
-    metadata = CompilerMetadata{ndrange(kernel), false}(I, _ndrange, iterspace)
-    Cassette.disablehooks(CPUCtx(pass = CompilerPass, metadata=metadata))
-end
-
-function mkcontextdynamic(kernel::Kernel{CPU}, I, _ndrange, iterspace)
-    metadata = CompilerMetadata{ndrange(kernel), true}(I, _ndrange, iterspace)
+function mkcontext(kernel::Kernel{CPU}, I, _ndrange, iterspace, ::Val{dynamic}) where dynamic
+    metadata = CompilerMetadata{ndrange(kernel), dynamic}(I, _ndrange, iterspace)
     Cassette.disablehooks(CPUCtx(pass = CompilerPass, metadata=metadata))
 end
 
