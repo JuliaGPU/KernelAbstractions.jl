@@ -11,14 +11,9 @@ end
 end
 
 function test_print(backend)
-  if backend == CPU()
-    kernel = kernel_print(CPU(), 4)
-  else
-    kernel = kernel_print(CUDA(), 4)
-  end
+  kernel = kernel_print(backend, 4)
   kernel(ndrange=(4,)) 
 end
-
 
 @testset "print test" begin
     if CUDAapi.has_cuda_gpu()
@@ -27,5 +22,8 @@ end
     end
 
     wait(test_print(CPU()))
+    @test true
+
+    @print("Why this should work")
     @test true
 end
