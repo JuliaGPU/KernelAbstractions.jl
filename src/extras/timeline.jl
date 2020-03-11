@@ -29,20 +29,20 @@ module NVTXT
         ProcessId = $pid
         CategoryId = 1
         Color = Blue
-        TimeBase = ClockMonotonicRaw
+        TimeBase = Manual
         @RangePush, Time, ThreadId, Message
         ProcessId = $pid
         CategoryId = 1
         Color = Blue
-        TimeBase = ClockMonotonicRaw
+        TimeBase = Manual
         @RangePop, Time, ThreadId
         ProcessId = $pid
-        TimeBase = ClockMonotonicRaw
+        TimeBase = Manual
         @Marker, Time, ThreadId, Message
         ProcessId = $pid
         CategoryId = 1
         Color = Blue
-        TimeBase = ClockMonotonicRaw
+        TimeBase = Manual
         """)
     end
 
