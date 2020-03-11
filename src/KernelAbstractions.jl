@@ -2,7 +2,7 @@ module KernelAbstractions
 
 export @kernel
 export @Const, @localmem, @private, @uniform, @synchronize, @index, groupsize, @print
-export Device, GPU, CPU, CUDA, Event
+export Device, GPU, CPU, CUDA, Event, MultiEvent
 export async_copy!
 
 
@@ -63,6 +63,27 @@ macro Const end
 
 abstract type Event end
 import Base.wait
+
+struct NoneEvent <: Event end
+
+struct MultiEvent{T} <: Event
+    events::T
+    MultiEvent() = new{Tuple{}}(())
+    function MultiEvent(events::Tuple{Vararg{<:Event}})
+        evs = tuplejoin(map(flatten, events)...)
+        new{typeof(evs)}(evs)
+    end
+end
+MultiEvent(::Nothing) = MultiEvent()
+MultiEvent(ev::MultiEvent) = ev
+
+@inline tuplejoin(x) = x
+@inline tuplejoin(x, y) = (x..., y...)
+@inline tuplejoin(x, y, z...) = (x..., tuplejoin(y, z...)...)
+
+flatten(ev::MultiEvent) = tuplejoin(map(flatten, ev.events)...)
+flatten(ev::NoneEvent) = ()
+flatten(ev::Event) = (ev,)
 
 """
     async_copy!(::Device, dest::AbstractArray, src::AbstractArray; dependencies = nothing)

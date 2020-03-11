@@ -56,6 +56,7 @@ function Event(::CUDA)
 end
 
 wait(ev::CudaEvent, progress=nothing) = wait(CPU(), ev, progress)
+
 function wait(::CPU, ev::CudaEvent, progress=nothing)
     if progress === nothing
         CUDAdrv.synchronize(ev.event)
@@ -68,30 +69,24 @@ function wait(::CPU, ev::CudaEvent, progress=nothing)
 end
 
 # Use this to synchronize between computation using the CuDefaultStream
-function wait(::CUDA, ev::CudaEvent, progress=nothing)
-    CUDAdrv.wait(ev.event, CUDAdrv.CuDefaultStream())
-end
+wait(::CUDA, ev::CudaEvent, progress=nothing, stream=CUDAdrv.CuDefaultStream()) = CUDAdrv.wait(ev.event, stream)
+wait(::CUDA, ev::NoneEvent, progress=nothing, stream=nothing) = nothing
 
 # There is no efficient wait for CPU->GPU synchronization, so instead we
 # do a CPU wait, and therefore block anyone from submitting more work.
 # We maybe could do a spinning wait on the GPU and atomic flag to signal from the CPU,
 # but which stream would we target?
-wait(::CUDA, ev::CPUEvent,  progress=nothing) = wait(CPU(), ev, progress)
+wait(::CUDA, ev::CPUEvent, progress=nothing, stream=nothing) = wait(CPU(), ev, progress)
 
-function __waitall(::CUDA, dependencies, progress, stream)
-    if dependencies isa Event
-        dependencies = (dependencies,)
+function wait(::CUDA, ev::MultiEvent, progress=nothing, stream=CUDAdrv.CuDefaultStream())
+    dependencies = collect(ev.events)
+    cudadeps  = filter(d->d isa CudaEvent,    dependencies)
+    otherdeps = filter(d->!(d isa CudaEvent), dependencies)
+    for event in cudadeps
+        CUDAdrv.wait(event.event, stream)
     end
-    if dependencies !== nothing
-        dependencies = collect(dependencies)
-        cudadeps  = filter(d->d isa CudaEvent,    dependencies)
-        otherdeps = filter(d->!(d isa CudaEvent), dependencies)
-        for event in cudadeps
-            CUDAdrv.wait(event.event, stream)
-        end
-        for event in otherdeps
-            wait(CUDA(), event, progress)
-        end
+    for event in otherdeps
+        wait(CUDA(), event, progress)
     end
 end
 
@@ -119,7 +114,7 @@ function async_copy!(::CUDA, A, B; dependencies=nothing)
     B isa Array && __pin!(B)
 
     stream = next_stream()
-    __waitall(CUDA(), dependencies, yield, stream)
+    wait(CUDA(), MultiEvent(dependencies), yield, stream)
     event = CuEvent(CUDAdrv.EVENT_DISABLE_TIMING)
     GC.@preserve A B begin
         destptr = pointer(A)
@@ -145,12 +140,9 @@ function (obj::Kernel{CUDA})(args...; ndrange=nothing, dependencies=nothing, wor
     if workgroupsize isa Integer
         workgroupsize = (workgroupsize, )
     end
-    if dependencies isa Event
-        dependencies = (dependencies,)
-    end
 
     stream = next_stream()
-    __waitall(CUDA(), dependencies, yield, stream)
+    wait(CUDA(), MultiEvent(dependencies), yield, stream)
 
     if KernelAbstractions.workgroupsize(obj) <: DynamicSize && workgroupsize === nothing
         # TODO: allow for NDRange{1, DynamicSize, DynamicSize}(nothing, nothing)

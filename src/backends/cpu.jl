@@ -1,12 +1,24 @@
 struct CPUEvent <: Event
-    task::Union{Nothing, Core.Task}
+    task::Core.Task
 end
 
 function Event(::CPU)
-    return CPUEvent(nothing)
+    return NoneEvent()
 end
 
-wait(ev::CPUEvent, progress=nothing) = wait(CPU(), ev, progress)
+wait(ev::Union{CPUEvent, NoneEvent, MultiEvent}, progress=nothing) = wait(CPU(), ev, progress)
+wait(::CPU, ev::NoneEvent, progress=nothing) = nothing
+
+function wait(cpu::CPU, ev::MultiEvent, progress=nothing)
+    dependencies = collect(ev.events)
+    cpudeps   = filter(d->d isa CPUEvent && d.task !== nothing, dependencies)
+    otherdeps = filter(d->!(d isa CPUEvent), dependencies)
+    Base.sync_end(map(e->e.task, cpudeps))
+    for event in otherdeps
+        wait(CPU(), event, progress)
+    end
+end
+
 function wait(::CPU, ev::CPUEvent, progress=nothing)
     ev.task === nothing && return
     
@@ -18,23 +30,9 @@ function wait(::CPU, ev::CPUEvent, progress=nothing)
         end
     end
 end
-function __waitall(::CPU, dependencies, progress)
-    if dependencies isa Event
-        dependencies = (dependencies,)
-    end
-    if dependencies !== nothing
-        dependencies = collect(dependencies)
-        cpudeps   = filter(d->d isa CPUEvent && d.task !== nothing, dependencies)
-        otherdeps = filter(d->!(d isa CPUEvent), dependencies)
-        Base.sync_end(map(e->e.task, cpudeps))
-        for event in otherdeps
-            wait(CPU(), event, progress)
-        end
-    end
-end
 
 function async_copy!(::CPU, A, B; dependencies=nothing)
-    __waitall(CPU(), dependencies, yield)
+    wait(CPU(), MultiEvent(dependencies), yield)
     copyto!(A, B)
     return CPUEvent(nothing)
 end
@@ -65,7 +63,7 @@ end
 
 # Inference barriers
 function __run(obj, ndrange, iterspace, args, dependencies, ::Val{dynamic}) where dynamic
-    __waitall(CPU(), dependencies, yield)
+    wait(CPU(), MultiEvent(dependencies), yield)
     N = length(iterspace)
     Nthreads = Threads.nthreads()
     if Nthreads == 1
