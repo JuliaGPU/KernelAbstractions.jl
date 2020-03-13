@@ -150,7 +150,7 @@ function (obj::Kernel{CUDA})(args...; ndrange=nothing, dependencies=nothing, wor
         workgroupsize = (256,)
     end
     # If the kernel is statically sized we can tell the compiler about that
-    if KernelAbstractions.workgroupsize(obj) <: StaticSize 
+    if KernelAbstractions.workgroupsize(obj) <: StaticSize
         maxthreads = prod(get(KernelAbstractions.workgroupsize(obj)))
     else
         maxthreads = nothing
@@ -243,6 +243,9 @@ for f in cudafuns
         return CUDAnative.$f(x)
     end
 end
+
+@inline Cassette.overdub(::CUDACtx, ::typeof(sincos), x::Union{Float32, Float64}) = (CUDAnative.sin(x), CUDAnative.cos(x))
+@inline Cassette.overdub(::CUDACtx, ::typeof(exp), x::Union{ComplexF32, ComplexF64}) = CUDAnative.exp(x)
 
 
 ###
