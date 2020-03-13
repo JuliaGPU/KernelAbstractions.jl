@@ -22,4 +22,4 @@ M = 1024
 if has_cuda_gpu()
     copy_test(CUDA(), CuArray, M)
 end
-copy_test(CPU(), CuArray, M)
+copy_test(CPU(), Array, M)
