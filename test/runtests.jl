@@ -21,6 +21,10 @@ end
     include("nditeration.jl")
 end
 
+@testset "Events" begin
+    include("events.jl")
+end
+
 include("print_test.jl")
 
 include("examples.jl")

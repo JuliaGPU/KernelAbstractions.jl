@@ -6,6 +6,14 @@ function Event(::CPU)
     return NoneEvent()
 end
 
+function Event(f, args...; dependencies=nothing, progress=nothing)
+    T = Threads.@spawn begin
+        wait(MultiEvent(dependencies), progress)
+        f(args...)
+    end
+    return CPUEvent(T)
+end
+
 wait(ev::Union{CPUEvent, NoneEvent, MultiEvent}, progress=nothing) = wait(CPU(), ev, progress)
 wait(::CPU, ev::NoneEvent, progress=nothing) = nothing
 
