@@ -21,6 +21,10 @@ end
     include("nditeration.jl")
 end
 
+@testset "async_copy!" begin
+    include("async_copy.jl")
+end
+
 include("print_test.jl")
 
 include("examples.jl")
