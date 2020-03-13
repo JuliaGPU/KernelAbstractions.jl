@@ -109,12 +109,12 @@ function __pin!(a)
     return nothing
 end
 
-function async_copy!(::CUDA, A, B; dependencies=nothing)
+function async_copy!(::CUDA, A, B; dependencies=nothing, progress=yield)
     A isa Array && __pin!(A)
     B isa Array && __pin!(B)
 
     stream = next_stream()
-    wait(CUDA(), MultiEvent(dependencies), yield, stream)
+    wait(CUDA(), MultiEvent(dependencies), progress, stream)
     event = CuEvent(CUDAdrv.EVENT_DISABLE_TIMING)
     GC.@preserve A B begin
         destptr = pointer(A)
@@ -133,7 +133,7 @@ end
 ###
 # Kernel launch
 ###
-function (obj::Kernel{CUDA})(args...; ndrange=nothing, dependencies=nothing, workgroupsize=nothing)
+function (obj::Kernel{CUDA})(args...; ndrange=nothing, dependencies=nothing, workgroupsize=nothing, progress=yield)
     if ndrange isa Integer
         ndrange = (ndrange,)
     end
@@ -142,7 +142,7 @@ function (obj::Kernel{CUDA})(args...; ndrange=nothing, dependencies=nothing, wor
     end
 
     stream = next_stream()
-    wait(CUDA(), MultiEvent(dependencies), yield, stream)
+    wait(CUDA(), MultiEvent(dependencies), progress, stream)
 
     if KernelAbstractions.workgroupsize(obj) <: DynamicSize && workgroupsize === nothing
         # TODO: allow for NDRange{1, DynamicSize, DynamicSize}(nothing, nothing)

@@ -39,13 +39,11 @@ function wait(::CPU, ev::CPUEvent, progress=nothing)
     end
 end
 
-function async_copy!(::CPU, A, B; dependencies=nothing)
-    wait(CPU(), MultiEvent(dependencies), yield)
-    copyto!(A, B)
-    return CPUEvent(nothing)
+function async_copy!(::CPU, A, B; dependencies=nothing, progress=yield)
+    Event(copyto!, A, B, dependencies=dependencies, progress=progress)
 end
 
-function (obj::Kernel{CPU})(args...; ndrange=nothing, workgroupsize=nothing, dependencies=nothing)
+function (obj::Kernel{CPU})(args...; ndrange=nothing, workgroupsize=nothing, dependencies=nothing, progress=yield)
     if ndrange isa Integer
         ndrange = (ndrange,)
     end
@@ -65,13 +63,12 @@ function (obj::Kernel{CPU})(args...; ndrange=nothing, workgroupsize=nothing, dep
         ndrange = nothing
     end
 
-    t = Threads.@spawn __run(obj, ndrange, iterspace, args, dependencies, Val(dynamic))
-    return CPUEvent(t)
+    Event(__run, obj, ndrange, iterspace, args, Val(dynamic),
+          dependencies=dependencies, progress=progress)
 end
 
 # Inference barriers
-function __run(obj, ndrange, iterspace, args, dependencies, ::Val{dynamic}) where dynamic
-    wait(CPU(), MultiEvent(dependencies), yield)
+function __run(obj, ndrange, iterspace, args, ::Val{dynamic}) where dynamic
     N = length(iterspace)
     Nthreads = Threads.nthreads()
     if Nthreads == 1
