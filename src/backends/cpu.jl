@@ -32,7 +32,7 @@ end
 function async_copy!(::CPU, A, B; dependencies=nothing)
     wait(CPU(), MultiEvent(dependencies), yield)
     copyto!(A, B)
-    return CPUEvent(nothing)
+    return NoneEvent()
 end
 
 function (obj::Kernel{CPU})(args...; ndrange=nothing, workgroupsize=nothing, dependencies=nothing)
