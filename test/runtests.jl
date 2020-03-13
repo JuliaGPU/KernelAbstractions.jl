@@ -25,6 +25,10 @@ end
     include("async_copy.jl")
 end
 
+@testset "Events" begin
+    include("events.jl")
+end
+
 include("print_test.jl")
 
 include("examples.jl")
