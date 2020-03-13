@@ -20,8 +20,6 @@ function wait(cpu::CPU, ev::MultiEvent, progress=nothing)
 end
 
 function wait(::CPU, ev::CPUEvent, progress=nothing)
-    ev.task === nothing && return
-    
     if progress === nothing
         wait(ev.task)
     else
