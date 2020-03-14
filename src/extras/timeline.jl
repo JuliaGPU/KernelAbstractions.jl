@@ -1,5 +1,8 @@
 module Timeline
 
+using Requires
+export @range, mark
+
 module NVTXT
     const LOG_FILE=Ref{IOStream}()
     const SHOULD_LOG=Ref{Bool}(false)
@@ -91,7 +94,42 @@ module NVTXT
     end
 end # NVTXT
 
-function range_push end
-function mark end
+_mark(msg) = NVTXT.mark(msg)
+_push_range(msg) = NVTXT.push_range(msg)
+_pop_range() = NVTXT.pop_range()
+_start_range(msg) = NVTXT.start_range(msg)
+_end_range(r) = NVTXT.end_range(r)
+
+@init @require CUDAnative="be33ccc6-a3ff-5ff2-a52e-74243cff1e17" begin
+    # replace implementations
+    import CUDAnative.NVTX
+
+    _mark(msg) = NVTX.mark(msg)
+    _push_range(msg) = NVTX.push_range(msg)
+    _pop_range() = NVTX.pop_range()
+    _start_range(msg) = NVTX.start_range(msg)
+    _end_range(r) = NVTX.end_range(r)
+end
+
+import Base: invokelatest
+mark(msg) = invokelatest(_mark, msg)
+push_range(msg) = invokelatest(_push_range, msg)
+pop_range() = invokelatest(_pop_range)
+start_range(msg) = invokelatest(_start_range, msg)
+end_range(r) = invokelatest(_end_range, r)
+
+"""
+    @range "msg" ex
+Create a new range and execute `ex`. The range is popped automatically afterwards.
+See also: [`range`](@ref)
+"""
+macro range(msg, ex)
+    quote
+        local range = $start_range($(esc(msg)))
+        local ret = $(esc(ex))
+        $end_range(range)
+        ret
+    end
+end
 
 end

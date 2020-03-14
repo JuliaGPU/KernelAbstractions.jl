@@ -6,5 +6,6 @@ export @unroll
 
 include("timeline.jl")
 using .Timeline
+export Timeline
 
 end # module
