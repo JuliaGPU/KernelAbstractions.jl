@@ -431,6 +431,15 @@ end
 end
 
 ###
+# Extras
+# - LoopInfo
+# - Timeline
+###
+
+include("extras/extras.jl")
+import .Extras.Timeline
+
+###
 # Backends/Implementation
 ###
 
@@ -442,11 +451,4 @@ include("backends/cpu.jl")
 @init @require CUDAnative="be33ccc6-a3ff-5ff2-a52e-74243cff1e17" begin
     include("backends/cuda.jl")
 end
-
-###
-# Extras
-# - LoopInfo
-###
-
-include("extras/extras.jl")
 end #module

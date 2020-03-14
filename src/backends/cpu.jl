@@ -8,8 +8,11 @@ end
 
 function Event(f, args...; dependencies=nothing, progress=nothing)
     T = Threads.@spawn begin
-        wait(MultiEvent(dependencies), progress)
-        f(args...)
+        Timeline.range "Event($(nameof(f))" begin
+            wait(MultiEvent(dependencies), progress)
+            Timeline.mark("Event($(nameof(f))) waiting done")
+            f(args...)
+        end
     end
     return CPUEvent(T)
 end
@@ -79,6 +82,7 @@ function __run(obj, ndrange, iterspace, args, ::Val{dynamic}) where dynamic
         Nthreads = N
         len, rem = 1, 0
     end
+    Timeline.@range string(nameof(obj.f)) begin
     if Nthreads == 1
         __thread_run(1, len, rem, obj, ndrange, iterspace, args, Val(dynamic))
     else
@@ -86,6 +90,7 @@ function __run(obj, ndrange, iterspace, args, ::Val{dynamic}) where dynamic
             Threads.@spawn __thread_run(tid, len, rem, obj, ndrange, iterspace, args, Val(dynamic))
         end
     end
+    end # Timeline
     return nothing
 end
 
