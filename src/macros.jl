@@ -152,7 +152,7 @@ function split(stmts,
             recurse(x) = x
             function recurse(expr::Expr)
                 expr = unblock(expr)
-                if is_scope_construct(expr) && any(is_sync, expr.args)
+                if is_scope_construct(expr) && any(find_sync, expr.args)
                     new_args = unblock(split(expr.args, deepcopy(indicies), deepcopy(private)))
                     return Expr(expr.head, new_args...)
                 else 
