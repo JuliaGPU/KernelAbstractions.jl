@@ -6,11 +6,19 @@ function Event(::CPU)
     return NoneEvent()
 end
 
-function Event(f, args...; dependencies=nothing, progress=nothing)
-    T = Threads.@spawn begin
+"""
+    Event(f, args...; dependencies, progress, sticky=true)
+
+Run function `f` with `args` in a Julia task. If `sticky` is `true` the task
+is run on the thread that launched it.
+"""
+function Event(f, args...; dependencies=nothing, progress=nothing, sticky=true)
+    T = Task() do
         wait(MultiEvent(dependencies), progress)
         f(args...)
     end
+    T.sticky = sticky
+    Base.schedule(T)
     return CPUEvent(T)
 end
 
