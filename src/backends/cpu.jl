@@ -1,5 +1,7 @@
 struct CPUEvent <: Event
     task::Core.Task
+    bt
+    CPUEvent(ev) = new(ev, Base.backtrace())
 end
 
 function Event(::CPU)
@@ -22,10 +24,12 @@ function Event(f, args...; dependencies=nothing, progress=nothing, sticky=true)
     return CPUEvent(T)
 end
 
-wait(ev::Union{CPUEvent, NoneEvent, MultiEvent}, progress=nothing) = wait(CPU(), ev, progress)
-wait(::CPU, ev::NoneEvent, progress=nothing) = nothing
+wait(ev::Union{CPUEvent, NoneEvent, MultiEvent}, progress=yield) = wait(CPU(), ev, progress)
+wait(::CPU, ev::NoneEvent, progress=yield) = (progress(); nothing)
 
-function wait(cpu::CPU, ev::MultiEvent, progress=nothing)
+function wait(cpu::CPU, ev::MultiEvent, progress=yield)
+    @info "Waiting on MultiEvent" origin=stacktrace(ev.bt) current=stacktrace()
+
     dependencies = collect(ev.events)
     cpudeps   = filter(d->d isa CPUEvent && d.task !== nothing, dependencies)
     otherdeps = filter(d->!(d isa CPUEvent), dependencies)

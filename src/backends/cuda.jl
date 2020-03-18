@@ -46,6 +46,8 @@ end
 
 struct CudaEvent <: Event
     event::CuEvent
+    bt
+    CudaEvent(ev) = new(ev, Base.backtrace())
 end
 
 function Event(::CUDA)
@@ -55,14 +57,24 @@ function Event(::CUDA)
     CudaEvent(event)
 end
 
-wait(ev::CudaEvent, progress=nothing) = wait(CPU(), ev, progress)
+wait(ev::CudaEvent, progress=yield) = wait(CPU(), ev, progress)
 
-function wait(::CPU, ev::CudaEvent, progress=nothing)
+function wait(::CPU, ev::CudaEvent, progress=yield)
+    token = gensym()
+    @info "Waiting on CUDAEvent" origin=stacktrace(ev.bt) current=stacktrace() token
+
+    # println(stdout, "Waiting on CudaEvent created at")
+    # Base.show_backtrace(stdout, ev.bt)
+    # println(stdout, "at locationt")
+    # Base.show_backtrace(stdout, Base.backtrace())
+    # println(stdout)
+
     if progress === nothing
         CUDAdrv.synchronize(ev.event)
     else
         while !CUDAdrv.query(ev.event)
             progress()
+            @info "Still waiting on CUDAEvent" token
             # do we need to `yield` here?
         end
     end

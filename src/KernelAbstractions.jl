@@ -64,17 +64,21 @@ macro Const end
 abstract type Event end
 import Base.wait
 
-struct NoneEvent <: Event end
+struct NoneEvent <: Event
+    bt
+    NoneEvent() = new(Base.backtrace())
+end
 
 struct MultiEvent{T} <: Event
     events::T
-    MultiEvent() = new{Tuple{}}(())
+    bt
+    MultiEvent() = new{Tuple{}}((), Base.backtrace())
     function MultiEvent(events::Tuple{Vararg{<:Event}})
         evs = tuplejoin(map(flatten, events)...)
-        new{typeof(evs)}(evs)
+        new{typeof(evs)}(evs, Base.backtrace())
     end
     function MultiEvent(event::E) where {E<:Event}
-        new{Tuple{E}}((event,))
+        new{Tuple{E}}((event,), Base.backtrace())
     end
 end
 MultiEvent(::Nothing) = MultiEvent()
