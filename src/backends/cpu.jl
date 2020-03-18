@@ -1,6 +1,8 @@
 struct CPUEvent <: Event
     task::Core.Task
 end
+isdone(ev::CPUEvent) = Base.istaskdone(ev.task)
+failed(ev::CPUEvent) = Base.istaskfailed(ev.task)
 
 function Event(::CPU)
     return NoneEvent()
@@ -12,7 +14,7 @@ end
 Run function `f` with `args` in a Julia task. If `sticky` is `true` the task
 is run on the thread that launched it.
 """
-function Event(f, args...; dependencies=nothing, progress=nothing, sticky=true)
+function Event(f, args...; dependencies=nothing, progress=yield, sticky=true)
     T = Task() do
         wait(MultiEvent(dependencies), progress)
         f(args...)
@@ -22,25 +24,49 @@ function Event(f, args...; dependencies=nothing, progress=nothing, sticky=true)
     return CPUEvent(T)
 end
 
-wait(ev::Union{CPUEvent, NoneEvent, MultiEvent}, progress=nothing) = wait(CPU(), ev, progress)
-wait(::CPU, ev::NoneEvent, progress=nothing) = nothing
+wait(ev::Union{CPUEvent, NoneEvent, MultiEvent}, progress=yield) = wait(CPU(), ev, progress)
+wait(::CPU, ev::NoneEvent, progress=yield) = (progress(); nothing)
 
-function wait(cpu::CPU, ev::MultiEvent, progress=nothing)
-    dependencies = collect(ev.events)
-    cpudeps   = filter(d->d isa CPUEvent && d.task !== nothing, dependencies)
-    otherdeps = filter(d->!(d isa CPUEvent), dependencies)
-    Base.sync_end(map(e->e.task, cpudeps))
-    for event in otherdeps
-        wait(CPU(), event, progress)
+function wait(cpu::CPU, ev::MultiEvent, progress=yield)
+    events = ev.events
+    N = length(events)
+    alldone = ntuple(i->false, N)
+
+    while !all(alldone)
+        alldone = ntuple(N) do i
+            if alldone[i]
+                true
+            else 
+                isdone(events[i])
+            end
+        end
+        if progress === nothing
+            yield()
+        else
+            progress()
+        end
+    end
+   
+    if any(failed, events)
+        ex = CompositeException()
+        for event in events
+            if failed(event) && event isa CPUEvent
+                push!(ex, Base.TaskFailedException(event.task))
+            end
+        end
+        throw(ex)
     end
 end
 
-function wait(::CPU, ev::CPUEvent, progress=nothing)
+function wait(::CPU, ev::CPUEvent, progress=yield)
     if progress === nothing
         wait(ev.task)
     else
         while !Base.istaskdone(ev.task)
             progress()
+        end
+        if Base.istaskfailed(ev.task)
+            throw(Base.TaskFailedException(ev.task))
         end
     end
 end

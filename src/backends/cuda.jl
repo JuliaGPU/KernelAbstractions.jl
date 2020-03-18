@@ -48,6 +48,9 @@ struct CudaEvent <: Event
     event::CuEvent
 end
 
+failed(::CudaEvent) = false
+isdone(ev::CudaEvent) = CUDAdrv.query(ev.event)
+
 function Event(::CUDA)
     stream = CUDAdrv.CuDefaultStream()
     event = CuEvent(CUDAdrv.EVENT_DISABLE_TIMING)
@@ -55,15 +58,14 @@ function Event(::CUDA)
     CudaEvent(event)
 end
 
-wait(ev::CudaEvent, progress=nothing) = wait(CPU(), ev, progress)
+wait(ev::CudaEvent, progress=yield) = wait(CPU(), ev, progress)
 
-function wait(::CPU, ev::CudaEvent, progress=nothing)
+function wait(::CPU, ev::CudaEvent, progress=yield)
     if progress === nothing
         CUDAdrv.synchronize(ev.event)
     else
-        while !CUDAdrv.query(ev.event)
+        while !isdone(ev)
             progress()
-            # do we need to `yield` here?
         end
     end
 end
