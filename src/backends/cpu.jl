@@ -39,12 +39,25 @@ function wait(cpu::CPU, ev::MultiEvent, progress=yield)
     end
 end
 
-function wait(::CPU, ev::CPUEvent, progress=nothing)
+function wait(::CPU, ev::CPUEvent, progress=yield)
+    token = gensym()
+    @info "Waiting on CPUEvent" origin=stacktrace(ev.bt) current=stacktrace() token
+
     if progress === nothing
         wait(ev.task)
     else
-        while !Base.istaskdone(ev.task)
-            progress()
+        t = ev.task
+        if !Base.istaskdone(t)
+            lock(t.donenotify)
+            try
+                while !Base.istaskdone(t)
+                    @info "Still waiting on CPUEvent" token
+                    progress()
+                    wait(t.donenotify)
+                end
+            finally
+                unlock(t.donenotify)
+            end
         end
     end
 end
