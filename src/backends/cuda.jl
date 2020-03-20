@@ -86,62 +86,42 @@ function wait(::CUDA, ev::MultiEvent, progress=nothing, stream=CUDAdrv.CuDefault
     end
 end
 
-# The most complicated of synchronizations:
-# We launch a host function on a stream, which will be run on a seperate thread
-# by the driver, on that thread we will notify a julia event, which is an level
-# triggered synchronization primitive and enter a LibUV barrier to halt progress
-# on the CUDA thread, therefore halting progress on the CUDA stream.
-# Prior to that we started a Julia task, which will wait on the event to be notified,
-# then wait on the CPUEvent we wanted to wait on and once that has completed hit the
-# barrier, allowing the stream to make progress
+include("cusynchronization.jl")
+import .CuSynchronization: unsafe_volatile_load, unsafe_volatile_store!
+import CUDAdrv: Mem
 
-struct Barrier
-    event::Base.Threads.Event # Level triggered
-    barr::Ptr{Cvoid}
-    function Barrier()
-        ptr = Libc.malloc(64) # one cacheline, really just a guess
-        ccall(:uv_barrier_init, Cint, (Ptr{Cvoid}, Cuint), ptr, 2)
-        new(Base.Threads.Event(), ptr)
-    end
-end
-
-function __callback_waiter(data::Ptr{Cvoid})
-    ptr = convert(Ptr{Barrier}, data)
-    barrier = unsafe_load(ptr)::Barrier
-    notify(barrier.event)
-    if ccall(:uv_barrier_wait, Cint, (Ptr{Cvoid},), barrier.barr) > 0
-        ccall(:uv_barrier_destroy, Cvoid, (Ptr{Cvoid},), barrier.barr)
-        Libc.free(barrier.barr)
-    end
-    return nothing
-end
-
+# This implements waiting for a CPUEvent on the GPU.
+# Most importantly this implementation needs to be asynchronous w.r.t to the host,
+# otherwise one could introduce deadlocks with outside event systems.
+# It uses a device visible host buffer to create a barrier/semaphore.
+# On a CPU task we wait for the `ev` to finish and then signal the GPU
+# by setting the flag 0->1, the CPU then in return needs to wait for the GPU
+# to set trhe flag 1->2 so that we can deallocate the memory.
+# TODO:
+# - In case of an error we should probably also kill the waiting GPU code.
 function wait(::CUDA, ev::CPUEvent, progress=nothing, stream=CuDefaultStream())
-    r_barrier = Ref(Barrier())
-
-    T = Threads.@spawn begin
-        GC.@preserve r_barrier begin
-            barrier = r_barrier[]
-            # wait for GPU to notify us. Otherwise we just waste resources here
-            wait(barrier.event)
-            # wait for the CPU task to finish
-            try
-                wait(ev.task)
-            catch err
-                bt = catch_backtrace()
-                @error "Error thrown during CUDA wait on CPUEvent" _ex=(err, bt)
-            finally
-                # enter barrier, allowing the GPU to continue
-                if ccall(:uv_barrier_wait, Cint, (Ptr{Cvoid},), barrier.b) > 0
-                    ccall(:uv_barrier_destroy, Cvoid, (Ptr{Cvoid},), barrier.b)
-                    Libc.free(barrier.b)
-                end
+    buf = Mem.alloc(Mem.HostBuffer, sizeof(UInt32), Mem.HOSTREGISTER_DEVICEMAP)
+    unsafe_store!(convert(Ptr{UInt32}, buf), UInt32(0))
+    # TODO: Switch to `@spawn` when CUDAnative.jl is thread-safe
+    @async begin
+        try
+            wait(ev.task)
+        catch err
+            bt = catch_backtrace()
+            @error "Error thrown during CUDA wait on CPUEvent" _ex=(err, bt)
+        finally
+            @debug "notifying GPU"
+            unsafe_volatile_store!(convert(Ptr{UInt32}, buf), UInt32(1))
+            while !(unsafe_volatile_load(convert(Ptr{UInt32}, buf)) == UInt32(2))
+                yield()
             end
+            @debug "GPU released"
+            Mem.free(buf)
         end
-        return nothing
     end
-    callback = @cfunction(__callback_waiter, Cvoid, (Ptr{Cvoid},))
-    CUDAdrv.cuLaunchHostFunc(stream, callback, r_barrier)
+    ptr = convert(CUDAnative.DevicePtr{UInt32}, convert(Mem.CuPtr{UInt32}, buf))
+    sem = CuSynchronization.Semaphore(ptr, UInt32(1))
+    CUDAnative.@cuda threads=1 stream=stream CuSynchronization.wait(sem)
 end
 
 ###

@@ -1,5 +1,8 @@
-using KernelAbstractions
-using Test
+using KernelAbstractions, Test, CUDAapi
+if has_cuda_gpu()
+    using CuArrays, CUDAdrv
+    CuArrays.allowscalar(false)
+end
 
 @testset "Error propagation" begin
     let event = Event(()->error(""))
@@ -19,4 +22,15 @@ using Test
         event = Event(()->nothing, dependencies=event)
         @test_throws TaskFailedException wait(event)
     end
+end
+
+if has_cuda_gpu()
+    barrier = Base.Threads.Event()
+    cpu_event = Event(wait, barrier)
+
+    wait(CUDA(), cpu_event) # Event edge on CuDefaultStream
+    gpu_event = Event(CUDA()) # Event on CuDefaultStream
+
+    notify(barrier)
+    wait(gpu_event)
 end
