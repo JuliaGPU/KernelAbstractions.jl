@@ -48,6 +48,9 @@ struct CudaEvent <: Event
     event::CuEvent
 end
 
+failed(::CudaEvent) = false
+isdone(ev::CudaEvent) = CUDAdrv.query(ev.event)
+
 function Event(::CUDA)
     stream = CUDAdrv.CuDefaultStream()
     event = CuEvent(CUDAdrv.EVENT_DISABLE_TIMING)
@@ -55,15 +58,14 @@ function Event(::CUDA)
     CudaEvent(event)
 end
 
-wait(ev::CudaEvent, progress=nothing) = wait(CPU(), ev, progress)
+wait(ev::CudaEvent, progress=yield) = wait(CPU(), ev, progress)
 
-function wait(::CPU, ev::CudaEvent, progress=nothing)
+function wait(::CPU, ev::CudaEvent, progress=yield)
     if progress === nothing
         CUDAdrv.synchronize(ev.event)
     else
-        while !CUDAdrv.query(ev.event)
+        while !isdone(ev)
             progress()
-            # do we need to `yield` here?
         end
     end
 end
@@ -71,12 +73,6 @@ end
 # Use this to synchronize between computation using the CuDefaultStream
 wait(::CUDA, ev::CudaEvent, progress=nothing, stream=CUDAdrv.CuDefaultStream()) = CUDAdrv.wait(ev.event, stream)
 wait(::CUDA, ev::NoneEvent, progress=nothing, stream=nothing) = nothing
-
-# There is no efficient wait for CPU->GPU synchronization, so instead we
-# do a CPU wait, and therefore block anyone from submitting more work.
-# We maybe could do a spinning wait on the GPU and atomic flag to signal from the CPU,
-# but which stream would we target?
-wait(::CUDA, ev::CPUEvent, progress=nothing, stream=nothing) = wait(CPU(), ev, progress)
 
 function wait(::CUDA, ev::MultiEvent, progress=nothing, stream=CUDAdrv.CuDefaultStream())
     dependencies = collect(ev.events)
@@ -86,8 +82,46 @@ function wait(::CUDA, ev::MultiEvent, progress=nothing, stream=CUDAdrv.CuDefault
         CUDAdrv.wait(event.event, stream)
     end
     for event in otherdeps
-        wait(CUDA(), event, progress)
+        wait(CUDA(), event, progress, stream)
     end
+end
+
+include("cusynchronization.jl")
+import .CuSynchronization: unsafe_volatile_load, unsafe_volatile_store!
+import CUDAdrv: Mem
+
+# This implements waiting for a CPUEvent on the GPU.
+# Most importantly this implementation needs to be asynchronous w.r.t to the host,
+# otherwise one could introduce deadlocks with outside event systems.
+# It uses a device visible host buffer to create a barrier/semaphore.
+# On a CPU task we wait for the `ev` to finish and then signal the GPU
+# by setting the flag 0->1, the CPU then in return needs to wait for the GPU
+# to set trhe flag 1->2 so that we can deallocate the memory.
+# TODO:
+# - In case of an error we should probably also kill the waiting GPU code.
+function wait(::CUDA, ev::CPUEvent, progress=nothing, stream=CuDefaultStream())
+    buf = Mem.alloc(Mem.HostBuffer, sizeof(UInt32), Mem.HOSTREGISTER_DEVICEMAP)
+    unsafe_store!(convert(Ptr{UInt32}, buf), UInt32(0))
+    # TODO: Switch to `@spawn` when CUDAnative.jl is thread-safe
+    @async begin
+        try
+            wait(ev.task)
+        catch err
+            bt = catch_backtrace()
+            @error "Error thrown during CUDA wait on CPUEvent" _ex=(err, bt)
+        finally
+            @debug "notifying GPU"
+            unsafe_volatile_store!(convert(Ptr{UInt32}, buf), UInt32(1))
+            while !(unsafe_volatile_load(convert(Ptr{UInt32}, buf)) == UInt32(2))
+                yield()
+            end
+            @debug "GPU released"
+            Mem.free(buf)
+        end
+    end
+    ptr = convert(CUDAnative.DevicePtr{UInt32}, convert(Mem.CuPtr{UInt32}, buf))
+    sem = CuSynchronization.Semaphore(ptr, UInt32(1))
+    CUDAnative.@cuda threads=1 stream=stream CuSynchronization.wait(sem)
 end
 
 ###

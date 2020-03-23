@@ -65,6 +65,8 @@ abstract type Event end
 import Base.wait
 
 struct NoneEvent <: Event end
+isdone(::NoneEvent) = true
+failed(::NoneEvent) = false
 
 struct MultiEvent{T} <: Event
     events::T
@@ -79,6 +81,9 @@ struct MultiEvent{T} <: Event
 end
 MultiEvent(::Nothing) = MultiEvent()
 MultiEvent(ev::MultiEvent) = ev
+
+isdone(ev::MultiEvent) = all(ev->isdone(ev), ev.events)
+failed(ev::MultiEvent) = all(ev->failed(ev), ev.events)
 
 @inline tuplejoin(x) = x
 @inline tuplejoin(x, y) = (x..., y...)
