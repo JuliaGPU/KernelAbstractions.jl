@@ -163,7 +163,7 @@ if has_cuda_gpu()
 end
 
 @kernel function kernel_empty()
-    return
+    nothing
 end
 if has_cuda_gpu()
     @testset "CPU--CUDA dependencies" begin
@@ -215,4 +215,15 @@ if has_cuda_gpu()
     @test MultiEvent(event1) isa Event
     @test MultiEvent((event1, event2, event3)) isa Event
   end
+end
+
+@testset "return statement" begin
+    try
+        @eval @kernel function kernel_return()
+            return
+        end
+    catch e
+        @test e.error ==
+            ErrorException("Return statement not permitted in a kernel function kernel_return")
+    end
 end

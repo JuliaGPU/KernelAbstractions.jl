@@ -1,10 +1,21 @@
 import MacroTools: splitdef, combinedef, isexpr, postwalk
 
+function find_return(stmt)
+    result = false
+    postwalk(stmt) do expr
+        result |= @capture(expr, return x_)
+        expr
+    end
+    result
+end
+
 # XXX: Proper errors
 function __kernel(expr)
     def = splitdef(expr)
     name = def[:name]
     args = def[:args]
+
+    find_return(expr) && error("Return statement not permitted in a kernel function $name")
 
     constargs = Array{Bool}(undef, length(args))
     for (i, arg) in enumerate(args)
