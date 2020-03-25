@@ -186,6 +186,36 @@ function (obj::Kernel{CUDA})(args...; ndrange=nothing, dependencies=nothing, wor
     return CudaEvent(event)
 end
 
+function precompile(obj::Kernel{CUDA}, @nospecialize(args...); ndrange= nothing, workgroupsize=nothing)
+    if ndrange isa Integer
+        ndrange = (ndrange,)
+    end
+    if workgroupsize isa Integer
+        workgroupsize = (workgroupsize, )
+    end
+    if KernelAbstractions.workgroupsize(obj) <: DynamicSize && workgroupsize === nothing
+        # TODO: allow for NDRange{1, DynamicSize, DynamicSize}(nothing, nothing)
+        #       and actually use CUDAnative autotuning
+        workgroupsize = (256,)
+    end
+    # If the kernel is statically sized we can tell the compiler about that
+    if KernelAbstractions.workgroupsize(obj) <: StaticSize
+        maxthreads = prod(get(KernelAbstractions.workgroupsize(obj)))
+    else
+        maxthreads = nothing
+    end
+
+    iterspace, dynamic = partition(obj, ndrange, workgroupsize)
+    ctx = mkcontext(obj, ndrange, iterspace)
+    args = (ctx, obj.f, args...)
+    GC.@preserve args begin
+        kernel_args = map(CUDAnative.cudaconvert, args)
+        kernel_tt = Tuple{map(Core.Typeof, kernel_args)...}
+        kernel = cufunction(Cassette.overdub, kernel_tt; name=String(nameof(obj.f)), maxthreads=maxthreads)
+    end
+    return nothing
+end
+
 Cassette.@context CUDACtx
 
 function mkcontext(kernel::Kernel{CUDA}, _ndrange, iterspace)

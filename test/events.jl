@@ -38,8 +38,7 @@ if has_cuda_gpu()
     end
     let kernel = happy(CUDA(), (1,))
         # precompile
-        gpu_event = kernel(;ndrange=(1,))
-        wait(gpu_event)
+        KernelAbstractions.precompile(kernel; ndrange=(1,))
 
         barrier = Base.Threads.Event()
         cpu_event = Event(wait, barrier)
@@ -53,9 +52,9 @@ if has_cuda_gpu()
         notify(barrier)
         wait(gpu_event)
     end
-    @kernel function happy()
-        @print("I am so happy")
-    end
+    # @kernel function happy()
+    #     @print("I am so happy")
+    # end
     # let kernel = happy(CUDA(), (1,))
     #     # do not precompile, this hangs since cuModuleLoadDataEx will block
     #     # if device is busy

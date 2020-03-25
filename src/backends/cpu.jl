@@ -75,6 +75,10 @@ function async_copy!(::CPU, A, B; dependencies=nothing, progress=yield)
     Event(copyto!, A, B, dependencies=dependencies, progress=progress)
 end
 
+function precompile(obj::Kernel{CPU}, @nospecialize(args...); ndrange=nothing, workgroupsize=nothing)
+    nothing
+end
+
 function (obj::Kernel{CPU})(args...; ndrange=nothing, workgroupsize=nothing, dependencies=nothing, progress=yield)
     if ndrange isa Integer
         ndrange = (ndrange,)
