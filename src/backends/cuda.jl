@@ -92,36 +92,16 @@ import CUDAdrv: Mem
 
 # This implements waiting for a CPUEvent on the GPU.
 # Most importantly this implementation needs to be asynchronous w.r.t to the host,
-# otherwise one could introduce deadlocks with outside event systems.
-# It uses a device visible host buffer to create a barrier/semaphore.
-# On a CPU task we wait for the `ev` to finish and then signal the GPU
-# by setting the flag 0->1, the CPU then in return needs to wait for the GPU
-# to set trhe flag 1->2 so that we can deallocate the memory.
+# otherwise one could introduce deadlocks with outside event systems. This uses
+# cuLaunchHostFunc to schedule a CPU-call that will block the stream from making progress
+# until the ev is finished. This is implemented using a C-Shim, that uses a libuv barrier
+# to perform the synchronization.
 # TODO:
 # - In case of an error we should probably also kill the waiting GPU code.
 function wait(::CUDA, ev::CPUEvent, progress=nothing, stream=CuDefaultStream())
-    buf = Mem.alloc(Mem.HostBuffer, sizeof(UInt32), Mem.HOSTREGISTER_DEVICEMAP)
-    unsafe_store!(convert(Ptr{UInt32}, buf), UInt32(0))
-    # TODO: Switch to `@spawn` when CUDAnative.jl is thread-safe
-    @async begin
-        try
-            wait(ev.task)
-        catch err
-            bt = catch_backtrace()
-            @error "Error thrown during CUDA wait on CPUEvent" _ex=(err, bt)
-        finally
-            @debug "notifying GPU"
-            unsafe_volatile_store!(convert(Ptr{UInt32}, buf), UInt32(1))
-            while !(unsafe_volatile_load(convert(Ptr{UInt32}, buf)) == UInt32(2))
-                yield()
-            end
-            @debug "GPU released"
-            Mem.free(buf)
-        end
-    end
-    ptr = convert(CUDAnative.DevicePtr{UInt32}, convert(Mem.CuPtr{UInt32}, buf))
-    sem = CuSynchronization.Semaphore(ptr, UInt32(1))
-    CUDAnative.@cuda threads=1 stream=stream CuSynchronization.wait(sem)
+    payload, _ = Extras.KAShim.waiter(ev.task)
+    callback = Extras.KAShim.callback_ptr()
+    CUDAdrv.cuLaunchHostFunc(stream, callback, payload)
 end
 
 ###
