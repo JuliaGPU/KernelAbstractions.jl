@@ -28,6 +28,7 @@ wait(ev::Union{CPUEvent, NoneEvent, MultiEvent}, progress=yield) = wait(CPU(), e
 wait(::CPU, ev::NoneEvent, progress=yield) = (progress(); nothing)
 
 function wait(cpu::CPU, ev::MultiEvent, progress=yield)
+    @timeit_debug to "wait(::CPU, ::MultiEvent)" begin
     events = ev.events
     N = length(events)
     alldone = ntuple(i->false, N)
@@ -56,9 +57,11 @@ function wait(cpu::CPU, ev::MultiEvent, progress=yield)
         end
         throw(ex)
     end
+    end
 end
 
 function wait(::CPU, ev::CPUEvent, progress=yield)
+    @timeit_debug to "wait(::CPU, ::CPUEvent)" begin
     if progress === nothing
         wait(ev.task)
     else
@@ -69,13 +72,14 @@ function wait(::CPU, ev::CPUEvent, progress=yield)
             throw(Base.TaskFailedException(ev.task))
         end
     end
+    end
 end
 
 function async_copy!(::CPU, A, B; dependencies=nothing, progress=yield)
     Event(copyto!, A, B, dependencies=dependencies, progress=progress)
 end
 
-function (obj::Kernel{CPU})(args...; ndrange=nothing, workgroupsize=nothing, dependencies=nothing, progress=yield)
+@timeit_debug to function (obj::Kernel{CPU})(args...; ndrange=nothing, workgroupsize=nothing, dependencies=nothing, progress=yield)
     if ndrange isa Integer
         ndrange = (ndrange,)
     end
@@ -100,7 +104,7 @@ function (obj::Kernel{CPU})(args...; ndrange=nothing, workgroupsize=nothing, dep
 end
 
 # Inference barriers
-function __run(obj, ndrange, iterspace, args, ::Val{dynamic}) where dynamic
+@timeit_debug to function __run(obj, ndrange, iterspace, args, ::Val{dynamic}) where dynamic
     N = length(iterspace)
     Nthreads = Threads.nthreads()
     if Nthreads == 1
@@ -123,7 +127,7 @@ function __run(obj, ndrange, iterspace, args, ::Val{dynamic}) where dynamic
     return nothing
 end
 
-function __thread_run(tid, len, rem, obj, ndrange, iterspace, args, ::Val{dynamic}) where dynamic
+@timeit_debug to function __thread_run(tid, len, rem, obj, ndrange, iterspace, args, ::Val{dynamic}) where dynamic
     # compute this thread's iterations
     f = 1 + ((tid-1) * len)
     l = f + len - 1
@@ -141,7 +145,7 @@ function __thread_run(tid, len, rem, obj, ndrange, iterspace, args, ::Val{dynami
     for i = f:l
         block = @inbounds blocks(iterspace)[i]
         ctx = mkcontext(obj, block, ndrange, iterspace, Val(dynamic))
-        Cassette.overdub(ctx, obj.f, args...)
+        @timeit_debug to "CPU work" Cassette.overdub(ctx, obj.f, args...)
     end
     return nothing
 end

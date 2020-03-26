@@ -11,6 +11,14 @@ using StaticArrays
 using Cassette
 using Requires
 using Adapt
+using TimerOutputs
+
+const to = TimerOutput()
+@init begin
+    TimerOutputs.reset_timer!(to)
+end
+timings() = (TimerOutputs.print_timer(to); println())
+enable_timings() = (TimerOutputs.enable_debug_timings(KernelAbstractions); return)
 
 """
    @kernel function f(args) end
@@ -329,7 +337,7 @@ end
 workgroupsize(::Kernel{D, WorkgroupSize}) where {D, WorkgroupSize} = WorkgroupSize
 ndrange(::Kernel{D, WorkgroupSize, NDRange}) where {D, WorkgroupSize,NDRange} = NDRange
 
-function partition(kernel, ndrange, workgroupsize)
+@timeit_debug function partition(kernel, ndrange, workgroupsize)
     static_ndrange = KernelAbstractions.ndrange(kernel)
     static_workgroupsize = KernelAbstractions.workgroupsize(kernel)
 

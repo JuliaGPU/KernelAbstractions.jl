@@ -61,12 +61,14 @@ end
 wait(ev::CudaEvent, progress=yield) = wait(CPU(), ev, progress)
 
 function wait(::CPU, ev::CudaEvent, progress=yield)
+    @timeit_debug to "wait(::CPU, ::CudaEvent)" begin 
     if progress === nothing
         CUDAdrv.synchronize(ev.event)
     else
         while !isdone(ev)
             progress()
         end
+    end
     end
 end
 
@@ -75,6 +77,7 @@ wait(::CUDA, ev::CudaEvent, progress=nothing, stream=CUDAdrv.CuDefaultStream()) 
 wait(::CUDA, ev::NoneEvent, progress=nothing, stream=nothing) = nothing
 
 function wait(::CUDA, ev::MultiEvent, progress=nothing, stream=CUDAdrv.CuDefaultStream())
+    @timeit_debug to "wait(::CUDA, ::MultiEvent)" begin 
     dependencies = collect(ev.events)
     cudadeps  = filter(d->d isa CudaEvent,    dependencies)
     otherdeps = filter(d->!(d isa CudaEvent), dependencies)
@@ -83,6 +86,7 @@ function wait(::CUDA, ev::MultiEvent, progress=nothing, stream=CUDAdrv.CuDefault
     end
     for event in otherdeps
         wait(CUDA(), event, progress, stream)
+    end
     end
 end
 
@@ -100,6 +104,7 @@ import CUDAdrv: Mem
 # TODO:
 # - In case of an error we should probably also kill the waiting GPU code.
 function wait(::CUDA, ev::CPUEvent, progress=nothing, stream=CuDefaultStream())
+    @timeit_debug to "wait(::CUDA, ::CPUEvent)" begin 
     buf = Mem.alloc(Mem.HostBuffer, sizeof(UInt32), Mem.HOSTREGISTER_DEVICEMAP)
     unsafe_store!(convert(Ptr{UInt32}, buf), UInt32(0))
     # TODO: Switch to `@spawn` when CUDAnative.jl is thread-safe
@@ -122,6 +127,7 @@ function wait(::CUDA, ev::CPUEvent, progress=nothing, stream=CuDefaultStream())
     ptr = convert(CUDAnative.DevicePtr{UInt32}, convert(Mem.CuPtr{UInt32}, buf))
     sem = CuSynchronization.Semaphore(ptr, UInt32(1))
     CUDAnative.@cuda threads=1 stream=stream CuSynchronization.wait(sem)
+    end
 end
 
 ###
@@ -148,7 +154,7 @@ function async_copy!(::CUDA, A, B; dependencies=nothing, progress=yield)
     B isa Array && __pin!(B)
 
     stream = next_stream()
-    wait(CUDA(), MultiEvent(dependencies), progress, stream)
+    @timeit_debug to "scheduling wait on CUDA" wait(CUDA(), MultiEvent(dependencies), progress, stream)
     event = CuEvent(CUDAdrv.EVENT_DISABLE_TIMING)
     GC.@preserve A B begin
         destptr = pointer(A)
@@ -167,7 +173,7 @@ end
 ###
 # Kernel launch
 ###
-function (obj::Kernel{CUDA})(args...; ndrange=nothing, dependencies=nothing, workgroupsize=nothing, progress=yield)
+@timeit_debug to function (obj::Kernel{CUDA})(args...; ndrange=nothing, dependencies=nothing, workgroupsize=nothing, progress=yield)
     if ndrange isa Integer
         ndrange = (ndrange,)
     end
@@ -176,7 +182,7 @@ function (obj::Kernel{CUDA})(args...; ndrange=nothing, dependencies=nothing, wor
     end
 
     stream = next_stream()
-    wait(CUDA(), MultiEvent(dependencies), progress, stream)
+    @timeit_debug to "scheduling wait on CUDA" wait(CUDA(), MultiEvent(dependencies), progress, stream)
 
     if KernelAbstractions.workgroupsize(obj) <: DynamicSize && workgroupsize === nothing
         # TODO: allow for NDRange{1, DynamicSize, DynamicSize}(nothing, nothing)
