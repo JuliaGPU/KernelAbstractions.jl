@@ -95,26 +95,31 @@ Splits the maximum size of the iteration space by the workgroupsize.
 Returns the number of workgroups necessary and whether the last workgroup
 needs to perform dynamic bounds-checking.
 """
-@inline function partition(ndrange, workgroupsize)
-    @assert length(workgroupsize) <= length(ndrange)
-    if length(workgroupsize) < length(ndrange)
+@inline function partition(ndrange, __workgroupsize)
+    @assert length(__workgroupsize) <= length(ndrange)
+    if length(__workgroupsize) < length(ndrange)
         # pad workgroupsize with ones
-        workgroupsize = ntuple(length(ndrange)) do I
-            if I > length(workgroupsize)
+        workgroupsize = ntuple(Val(length(ndrange))) do I
+            Base.@_inline_meta
+            if I > length(__workgroupsize)
                 return 1
             else
-                return workgroupsize[I]
+                return __workgroupsize[I]
             end
         end
+    else
+        workgroupsize = __workgroupsize
     end
+    let workgroupsize = workgroupsize
+        dynamic = Ref(false)
+        blocks = ntuple(Val(length(ndrange))) do I
+            Base.@_inline_meta
+            dynamic[] |= mod(ndrange[I], workgroupsize[I]) != 0
+            return fld1(ndrange[I], workgroupsize[I])
+        end
 
-    dynamic = false
-    blocks = ntuple(length(ndrange)) do I
-        dynamic |= mod(ndrange[I], workgroupsize[I]) != 0
-        return fld1(ndrange[I], workgroupsize[I])
+        return blocks, workgroupsize, dynamic[]
     end
-
-    return blocks, workgroupsize, dynamic 
 end
 
 end #module
