@@ -28,7 +28,7 @@ if has_cuda_gpu()
     barrier = Base.Threads.Event()
     cpu_event = Event(wait, barrier)
 
-    wait(CUDA(), cpu_event) # Event edge on CuDefaultStream
+    KernelAbstractions.unsafe_wait(CUDA(), cpu_event) # Event edge on CuDefaultStream
     gpu_event = Event(CUDA()) # Event on CuDefaultStream
 
     notify(barrier)
