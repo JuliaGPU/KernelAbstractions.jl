@@ -202,6 +202,7 @@ end
   event3 = kernel_empty(CPU(), 1)(ndrange=1)
 
   @test MultiEvent(nothing) isa Event
+  @test MultiEvent((MultiEvent(nothing),)) isa Event
   @test MultiEvent(event1) isa Event
   @test MultiEvent((event1, event2, event3)) isa Event
 end
