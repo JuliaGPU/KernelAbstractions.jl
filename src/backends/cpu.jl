@@ -14,7 +14,7 @@ end
 Run function `f` with `args` in a Julia task. If `sticky` is `true` the task
 is run on the thread that launched it.
 """
-function Event(f, args...; dependencies=nothing, progress=yield, sticky=true)
+function Event(f, args...; dependencies=nothing, progress=nothing, sticky=true)
     T = Task() do
         wait(MultiEvent(dependencies), progress)
         f(args...)
@@ -24,10 +24,10 @@ function Event(f, args...; dependencies=nothing, progress=yield, sticky=true)
     return CPUEvent(T)
 end
 
-wait(ev::Union{CPUEvent, NoneEvent, MultiEvent}, progress=yield) = wait(CPU(), ev, progress)
-wait(::CPU, ev::NoneEvent, progress=yield) = (progress(); nothing)
+wait(ev::Union{CPUEvent, NoneEvent, MultiEvent}, progress=nothing) = wait(CPU(), ev, progress)
+wait(::CPU, ev::NoneEvent, progress=nothing) = nothing
 
-function wait(cpu::CPU, ev::MultiEvent, progress=yield)
+function wait(cpu::CPU, ev::MultiEvent, progress=nothing)
     events = ev.events
     N = length(events)
     alldone = ntuple(i->false, N)
@@ -58,7 +58,7 @@ function wait(cpu::CPU, ev::MultiEvent, progress=yield)
     end
 end
 
-function wait(::CPU, ev::CPUEvent, progress=yield)
+function wait(::CPU, ev::CPUEvent, progress=nothing)
     if progress === nothing
         wait(ev.task)
     else
@@ -71,11 +71,11 @@ function wait(::CPU, ev::CPUEvent, progress=yield)
     end
 end
 
-function async_copy!(::CPU, A, B; dependencies=nothing, progress=yield)
+function async_copy!(::CPU, A, B; dependencies=nothing, progress=nothing)
     Event(copyto!, A, B, dependencies=dependencies, progress=progress)
 end
 
-function (obj::Kernel{CPU})(args...; ndrange=nothing, workgroupsize=nothing, dependencies=nothing, progress=yield)
+function (obj::Kernel{CPU})(args...; ndrange=nothing, workgroupsize=nothing, dependencies=nothing, progress=nothing)
     if ndrange isa Integer
         ndrange = (ndrange,)
     end
@@ -95,12 +95,12 @@ function (obj::Kernel{CPU})(args...; ndrange=nothing, workgroupsize=nothing, dep
         ndrange = nothing
     end
 
-    Event(__run, obj, ndrange, iterspace, args, Val(dynamic),
+    Event(__run, obj, ndrange, iterspace, args, dynamic,
           dependencies=dependencies, progress=progress)
 end
 
 # Inference barriers
-function __run(obj, ndrange, iterspace, args, ::Val{dynamic}) where dynamic
+function __run(obj, ndrange, iterspace, args, dynamic)
     N = length(iterspace)
     Nthreads = Threads.nthreads()
     if Nthreads == 1
@@ -114,16 +114,16 @@ function __run(obj, ndrange, iterspace, args, ::Val{dynamic}) where dynamic
         len, rem = 1, 0
     end
     if Nthreads == 1
-        __thread_run(1, len, rem, obj, ndrange, iterspace, args, Val(dynamic))
+        __thread_run(1, len, rem, obj, ndrange, iterspace, args, dynamic)
     else
         @sync for tid in 1:Nthreads
-            Threads.@spawn __thread_run(tid, len, rem, obj, ndrange, iterspace, args, Val(dynamic))
+            Threads.@spawn __thread_run(tid, len, rem, obj, ndrange, iterspace, args, dynamic)
         end
     end
     return nothing
 end
 
-function __thread_run(tid, len, rem, obj, ndrange, iterspace, args, ::Val{dynamic}) where dynamic
+function __thread_run(tid, len, rem, obj, ndrange, iterspace, args, dynamic)
     # compute this thread's iterations
     f = 1 + ((tid-1) * len)
     l = f + len - 1
@@ -140,7 +140,7 @@ function __thread_run(tid, len, rem, obj, ndrange, iterspace, args, ::Val{dynami
     # run this thread's iterations
     for i = f:l
         block = @inbounds blocks(iterspace)[i]
-        ctx = mkcontext(obj, block, ndrange, iterspace, Val(dynamic))
+        ctx = mkcontext(obj, block, ndrange, iterspace, dynamic)
         Cassette.overdub(ctx, obj.f, args...)
     end
     return nothing
@@ -148,8 +148,8 @@ end
 
 Cassette.@context CPUCtx
 
-function mkcontext(kernel::Kernel{CPU}, I, _ndrange, iterspace, ::Val{dynamic}) where dynamic
-    metadata = CompilerMetadata{ndrange(kernel), dynamic}(I, _ndrange, iterspace)
+function mkcontext(kernel::Kernel{CPU}, I, _ndrange, iterspace, ::Dynamic) where Dynamic
+    metadata = CompilerMetadata{ndrange(kernel), Dynamic}(I, _ndrange, iterspace)
     Cassette.disablehooks(CPUCtx(pass = CompilerPass, metadata=metadata))
 end
 
