@@ -171,9 +171,9 @@ if has_cuda_gpu()
         event2 = kernel_empty(CUDA(), 1)(ndrange=1)
         event3 = kernel_empty(CPU(), 1)(ndrange=1)
         event4 = kernel_empty(CUDA(), 1)(ndrange=1)
-        event5 = kernel_empty(CUDA(), 1)(ndrange=1, dependencies=(event1, event2, event3, event4))
-        wait(event5)
-        @test event5 isa KernelAbstractions.Event
+        @test_throws ErrorException event5 = kernel_empty(CUDA(), 1)(ndrange=1, dependencies=(event1, event2, event3, event4))
+        # wait(event5)
+        # @test event5 isa KernelAbstractions.Event
 
         event1 = kernel_empty(CPU(), 1)(ndrange=1)
         event2 = kernel_empty(CUDA(), 1)(ndrange=1)

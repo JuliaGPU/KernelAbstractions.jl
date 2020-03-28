@@ -90,6 +90,15 @@ include("cusynchronization.jl")
 import .CuSynchronization: unsafe_volatile_load, unsafe_volatile_store!
 import CUDAdrv: Mem
 
+function wait(::CUDA, ev::CPUEvent, progress=nothing, stream=nothing)
+    error("""
+    Waiting on the GPU for an CPU event to finish is currently not supported.
+    We have encountered deadlocks arising, due to interactions with the CUDA
+    driver. If you are certain that you are deadlock free, you can use `unsafe_wait`
+    instead.
+    """)
+end
+
 # This implements waiting for a CPUEvent on the GPU.
 # Most importantly this implementation needs to be asynchronous w.r.t to the host,
 # otherwise one could introduce deadlocks with outside event systems.
@@ -99,7 +108,8 @@ import CUDAdrv: Mem
 # to set trhe flag 1->2 so that we can deallocate the memory.
 # TODO:
 # - In case of an error we should probably also kill the waiting GPU code.
-function wait(::CUDA, ev::CPUEvent, progress=nothing, stream=CuDefaultStream())
+unsafe_wait(dev::Device, ev, progress=nothing) = wait(dev, ev, progress) 
+function unsafe_wait(::CUDA, ev::CPUEvent, progress=nothing, stream=CuDefaultStream())
     buf = Mem.alloc(Mem.HostBuffer, sizeof(UInt32), Mem.HOSTREGISTER_DEVICEMAP)
     unsafe_store!(convert(Ptr{UInt32}, buf), UInt32(0))
     # TODO: Switch to `@spawn` when CUDAnative.jl is thread-safe
