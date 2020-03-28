@@ -14,7 +14,7 @@ end
 Run function `f` with `args` in a Julia task. If `sticky` is `true` the task
 is run on the thread that launched it.
 """
-function Event(f, args...; dependencies=nothing, progress=yield, sticky=true)
+function Event(f, args...; dependencies=nothing, progress=nothing, sticky=true)
     T = Task() do
         wait(MultiEvent(dependencies), progress)
         f(args...)
@@ -24,10 +24,10 @@ function Event(f, args...; dependencies=nothing, progress=yield, sticky=true)
     return CPUEvent(T)
 end
 
-wait(ev::Union{CPUEvent, NoneEvent, MultiEvent}, progress=yield) = wait(CPU(), ev, progress)
-wait(::CPU, ev::NoneEvent, progress=yield) = (progress(); nothing)
+wait(ev::Union{CPUEvent, NoneEvent, MultiEvent}, progress=nothing) = wait(CPU(), ev, progress)
+wait(::CPU, ev::NoneEvent, progress=nothing) = nothing
 
-function wait(cpu::CPU, ev::MultiEvent, progress=yield)
+function wait(cpu::CPU, ev::MultiEvent, progress=nothing)
     events = ev.events
     N = length(events)
     alldone = ntuple(i->false, N)
@@ -58,7 +58,7 @@ function wait(cpu::CPU, ev::MultiEvent, progress=yield)
     end
 end
 
-function wait(::CPU, ev::CPUEvent, progress=yield)
+function wait(::CPU, ev::CPUEvent, progress=nothing)
     if progress === nothing
         wait(ev.task)
     else
@@ -71,11 +71,11 @@ function wait(::CPU, ev::CPUEvent, progress=yield)
     end
 end
 
-function async_copy!(::CPU, A, B; dependencies=nothing, progress=yield)
+function async_copy!(::CPU, A, B; dependencies=nothing, progress=nothing)
     Event(copyto!, A, B, dependencies=dependencies, progress=progress)
 end
 
-function (obj::Kernel{CPU})(args...; ndrange=nothing, workgroupsize=nothing, dependencies=nothing, progress=yield)
+function (obj::Kernel{CPU})(args...; ndrange=nothing, workgroupsize=nothing, dependencies=nothing, progress=nothing)
     if ndrange isa Integer
         ndrange = (ndrange,)
     end
