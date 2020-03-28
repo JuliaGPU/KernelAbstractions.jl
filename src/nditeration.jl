@@ -2,8 +2,12 @@ module NDIteration
 
 export _Size, StaticSize, DynamicSize, get
 export NDRange, blocks, workitems, expand
+export DynamicCheck, NoDynamicCheck
 
 import Base.@pure
+
+struct DynamicCheck end
+struct NoDynamicCheck end
 
 abstract type _Size end
 struct DynamicSize <: _Size end
@@ -118,7 +122,7 @@ needs to perform dynamic bounds-checking.
             return fld1(ndrange[I], workgroupsize[I])
         end
 
-        return blocks, workgroupsize, dynamic[]
+        return blocks, workgroupsize, dynamic[] ? DynamicCheck() : NoDynamicCheck()
     end
 end
 

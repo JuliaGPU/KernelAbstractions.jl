@@ -13,26 +13,26 @@ identity(x)=x
     let kernel = KernelAbstractions.Kernel{CPU, StaticSize{(64,)}, DynamicSize, typeof(identity)}(identity)
         iterspace, dynamic = KernelAbstractions.partition(kernel, (128,), nothing)
         @test length(blocks(iterspace)) == 2
-        @test !dynamic
+        @test dynamic isa NoDynamicCheck
 
         iterspace, dynamic = KernelAbstractions.partition(kernel, (129,), nothing)
         @test length(blocks(iterspace)) == 3
-        @test dynamic
+        @test dynamic isa DynamicCheck
 
         iterspace, dynamic = KernelAbstractions.partition(kernel, (129,), (64,))
         @test length(blocks(iterspace)) == 3
-        @test dynamic
+        @test dynamic isa DynamicCheck
 
         @test_throws ErrorException KernelAbstractions.partition(kernel, (129,), (65,))
     end
     let kernel = KernelAbstractions.Kernel{CPU, StaticSize{(64,)}, StaticSize{(128,)}, typeof(identity)}(identity)
         iterspace, dynamic = KernelAbstractions.partition(kernel, (128,), nothing)
         @test length(blocks(iterspace)) == 2
-        @test !dynamic
+        @test dynamic isa NoDynamicCheck
 
         iterspace, dynamic = KernelAbstractions.partition(kernel, nothing, nothing)
         @test length(blocks(iterspace)) == 2
-        @test !dynamic
+        @test dynamic isa NoDynamicCheck
 
         @test_throws ErrorException KernelAbstractions.partition(kernel, (129,), nothing)
     end
@@ -121,7 +121,7 @@ end
     let kernel = constarg(CPU(), 8, (1024,))
         # this is poking at internals
         iterspace = NDRange{1, StaticSize{(128,)}, StaticSize{(8,)}}();
-        ctx = KernelAbstractions.mkcontext(kernel, 1, nothing, iterspace, Val(false))
+        ctx = KernelAbstractions.mkcontext(kernel, 1, nothing, iterspace, Val(NoDynamicCheck()))
         AT = Array{Float32, 2}
         IR = sprint() do io
             code_llvm(io, KernelAbstractions.Cassette.overdub, 
