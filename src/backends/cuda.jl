@@ -209,7 +209,7 @@ end
 Cassette.@context CUDACtx
 
 function mkcontext(kernel::Kernel{CUDA}, _ndrange, iterspace)
-    metadata = CompilerMetadata{ndrange(kernel), true}(_ndrange, iterspace)
+    metadata = CompilerMetadata{ndrange(kernel), DynamicCheck()}(_ndrange, iterspace)
     Cassette.disablehooks(CUDACtx(pass = CompilerPass, metadata=metadata))
 end
 
