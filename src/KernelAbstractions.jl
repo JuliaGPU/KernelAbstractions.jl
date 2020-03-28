@@ -85,6 +85,7 @@ MultiEvent(ev::MultiEvent) = ev
 isdone(ev::MultiEvent) = all(ev->isdone(ev), ev.events)
 failed(ev::MultiEvent) = all(ev->failed(ev), ev.events)
 
+@inline tuplejoin() = ()
 @inline tuplejoin(x) = x
 @inline tuplejoin(x, y) = (x..., y...)
 @inline tuplejoin(x, y, z...) = (x..., tuplejoin(y, z...)...)
