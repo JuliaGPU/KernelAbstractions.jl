@@ -95,8 +95,16 @@ function (obj::Kernel{CPU})(args...; ndrange=nothing, workgroupsize=nothing, dep
         ndrange = nothing
     end
 
-    Event(__run, obj, ndrange, iterspace, args, Val(dynamic),
-          dependencies=dependencies, progress=progress)
+    if dependencies === nothing
+        # we can execute this kernel directly, removing the overhead of spawning a task
+        # if you need the the kernel to be executed asynchronously, pass a `NoneEvent` as
+        # a dependency.
+        __run(obj, ndrange, iterspace, args, Val(dynamic))
+        return NoneEvent()
+    else
+        return Event(__run, obj, ndrange, iterspace, args, Val(dynamic),
+              dependencies=dependencies, progress=progress)
+    end
 end
 
 # Inference barriers
