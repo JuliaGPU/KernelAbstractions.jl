@@ -95,6 +95,10 @@ function (obj::Kernel{CPU})(args...; ndrange=nothing, workgroupsize=nothing, dep
         ndrange = nothing
     end
 
+    if length(blocks(iterspace)) == 0
+        return MultiEvent(dependencies)
+    end
+
     Event(__run, obj, ndrange, iterspace, args, dynamic,
           dependencies=dependencies, progress=progress)
 end

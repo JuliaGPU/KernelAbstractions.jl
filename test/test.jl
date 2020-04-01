@@ -218,6 +218,25 @@ if has_cuda_gpu()
   end
 end
 
+@testset "Zero iteration space" begin
+    event1 = kernel_empty(CPU(), 1)(ndrange=1)
+    event2 = kernel_empty(CPU(), 1)(ndrange=0; dependencies=event1)
+    @test event2 == MultiEvent(event1)
+    event = kernel_empty(CPU(), 1)(ndrange=0)
+    @test event == MultiEvent(nothing)
+end
+
+
+if has_cuda_gpu()
+    @testset "Zero iteration space CUDA" begin
+        event1 = kernel_empty(CUDA(), 1)(ndrange=1)
+        event2 = kernel_empty(CUDA(), 1)(ndrange=0; dependencies=event1)
+        @test event2 == MultiEvent(event1)
+        event = kernel_empty(CUDA(), 1)(ndrange=0)
+        @test event == MultiEvent(nothing)
+    end
+end
+
 @testset "return statement" begin
     try
         @eval @kernel function kernel_return()
