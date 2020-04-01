@@ -185,9 +185,6 @@ function (obj::Kernel{CUDA})(args...; ndrange=nothing, dependencies=nothing, wor
         workgroupsize = (workgroupsize, )
     end
 
-    stream = next_stream()
-    wait(CUDA(), MultiEvent(dependencies), progress, stream)
-
     if KernelAbstractions.workgroupsize(obj) <: DynamicSize && workgroupsize === nothing
         # TODO: allow for NDRange{1, DynamicSize, DynamicSize}(nothing, nothing)
         #       and actually use CUDAnative autotuning
@@ -204,6 +201,13 @@ function (obj::Kernel{CUDA})(args...; ndrange=nothing, dependencies=nothing, wor
 
     nblocks = length(blocks(iterspace))
     threads = length(workitems(iterspace))
+
+    if nblocks == 0
+        return MultiEvent(dependencies)
+    end
+
+    stream = next_stream()
+    wait(CUDA(), MultiEvent(dependencies), progress, stream)
 
     ctx = mkcontext(obj, ndrange, iterspace)
     # Launch kernel
