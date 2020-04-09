@@ -50,7 +50,7 @@ function __kernel(expr)
     # create constructor functions
     constructors = quote
         if !@isdefined($name)
-            $name(dev::$Device) = $name(dev, $DynamicSize(), $DynamicSize())
+            Core.@__doc__ $name(dev::$Device) = $name(dev, $DynamicSize(), $DynamicSize())
             $name(dev::$Device, size) = $name(dev, $StaticSize(size), $DynamicSize())
             $name(dev::$Device, size, range) = $name(dev, $StaticSize(size), $StaticSize(range))
             function $name(::Device, ::S, ::NDRange) where {Device<:$CPU, S<:$_Size, NDRange<:$_Size}
