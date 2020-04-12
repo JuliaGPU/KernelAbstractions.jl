@@ -13,26 +13,26 @@ identity(x)=x
     let kernel = KernelAbstractions.Kernel{CPU, StaticSize{(64,)}, DynamicSize, typeof(identity)}(identity)
         iterspace, dynamic = KernelAbstractions.partition(kernel, (128,), nothing)
         @test length(blocks(iterspace)) == 2
-        @test !dynamic
+        @test dynamic isa NoDynamicCheck
 
         iterspace, dynamic = KernelAbstractions.partition(kernel, (129,), nothing)
         @test length(blocks(iterspace)) == 3
-        @test dynamic
+        @test dynamic isa DynamicCheck
 
         iterspace, dynamic = KernelAbstractions.partition(kernel, (129,), (64,))
         @test length(blocks(iterspace)) == 3
-        @test dynamic
+        @test dynamic isa DynamicCheck
 
         @test_throws ErrorException KernelAbstractions.partition(kernel, (129,), (65,))
     end
     let kernel = KernelAbstractions.Kernel{CPU, StaticSize{(64,)}, StaticSize{(128,)}, typeof(identity)}(identity)
         iterspace, dynamic = KernelAbstractions.partition(kernel, (128,), nothing)
         @test length(blocks(iterspace)) == 2
-        @test !dynamic
+        @test dynamic isa NoDynamicCheck
 
         iterspace, dynamic = KernelAbstractions.partition(kernel, nothing, nothing)
         @test length(blocks(iterspace)) == 2
-        @test !dynamic
+        @test dynamic isa NoDynamicCheck
 
         @test_throws ErrorException KernelAbstractions.partition(kernel, (129,), nothing)
     end
@@ -121,7 +121,7 @@ end
     let kernel = constarg(CPU(), 8, (1024,))
         # this is poking at internals
         iterspace = NDRange{1, StaticSize{(128,)}, StaticSize{(8,)}}();
-        ctx = KernelAbstractions.mkcontext(kernel, 1, nothing, iterspace, Val(false))
+        ctx = KernelAbstractions.mkcontext(kernel, 1, nothing, iterspace, Val(NoDynamicCheck()))
         AT = Array{Float32, 2}
         IR = sprint() do io
             code_llvm(io, KernelAbstractions.Cassette.overdub, 
@@ -163,7 +163,7 @@ if has_cuda_gpu()
 end
 
 @kernel function kernel_empty()
-    return
+    nothing
 end
 if has_cuda_gpu()
     @testset "CPU--CUDA dependencies" begin
@@ -171,9 +171,9 @@ if has_cuda_gpu()
         event2 = kernel_empty(CUDA(), 1)(ndrange=1)
         event3 = kernel_empty(CPU(), 1)(ndrange=1)
         event4 = kernel_empty(CUDA(), 1)(ndrange=1)
-        event5 = kernel_empty(CUDA(), 1)(ndrange=1, dependencies=(event1, event2, event3, event4))
-        wait(event5)
-        @test event5 isa KernelAbstractions.Event
+        @test_throws ErrorException event5 = kernel_empty(CUDA(), 1)(ndrange=1, dependencies=(event1, event2, event3, event4))
+        # wait(event5)
+        # @test event5 isa KernelAbstractions.Event
 
         event1 = kernel_empty(CPU(), 1)(ndrange=1)
         event2 = kernel_empty(CUDA(), 1)(ndrange=1)
@@ -202,8 +202,69 @@ end
         I = @index(Global)
         @inbounds x[I] = m
     end
+    @kernel function (a::typeof(f))(x, ::Val{1}) where m
+        I = @index(Global)
+        @inbounds x[I] = m
+    end
     x = [1,2,3]
     env = f(CPU())(x, Val(4); ndrange=length(x))
     wait(env)
     @test x == [4,4,4]
+
+    x = [1,2,3]
+    env = f(CPU())(x, Val(1); ndrange=length(x))
+    wait(env)
+    @test x == [1,1,1]
+end
+
+@testset "MultiEvent" begin
+  event1 = kernel_empty(CPU(), 1)(ndrange=1)
+  event2 = kernel_empty(CPU(), 1)(ndrange=1)
+  event3 = kernel_empty(CPU(), 1)(ndrange=1)
+
+  @test MultiEvent(nothing) isa Event
+  @test MultiEvent((MultiEvent(nothing),)) isa Event
+  @test MultiEvent(event1) isa Event
+  @test MultiEvent((event1, event2, event3)) isa Event
+end
+
+if has_cuda_gpu()
+  @testset "MultiEvent CUDA" begin
+    event1 = kernel_empty(CUDA(), 1)(ndrange=1)
+    event2 = kernel_empty(CPU(), 1)(ndrange=1)
+    event3 = kernel_empty(CUDA(), 1)(ndrange=1)
+
+    @test MultiEvent(event1) isa Event
+    @test MultiEvent((event1, event2, event3)) isa Event
+  end
+end
+
+@testset "Zero iteration space" begin
+    event1 = kernel_empty(CPU(), 1)(ndrange=1)
+    event2 = kernel_empty(CPU(), 1)(ndrange=0; dependencies=event1)
+    @test event2 == MultiEvent(event1)
+    event = kernel_empty(CPU(), 1)(ndrange=0)
+    @test event == MultiEvent(nothing)
+end
+
+
+if has_cuda_gpu()
+    @testset "Zero iteration space CUDA" begin
+        event1 = kernel_empty(CUDA(), 1)(ndrange=1)
+        event2 = kernel_empty(CUDA(), 1)(ndrange=0; dependencies=event1)
+        @test event2 == MultiEvent(event1)
+        event = kernel_empty(CUDA(), 1)(ndrange=0)
+        @test event == MultiEvent(nothing)
+    end
+end
+
+@testset "return statement" begin
+    try
+        @eval @kernel function kernel_return()
+            return
+        end
+    catch e
+        @test e.error ==
+            ErrorException("Return statement not permitted in a kernel function kernel_return")
+    end
 end

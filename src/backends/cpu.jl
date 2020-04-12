@@ -1,45 +1,81 @@
 struct CPUEvent <: Event
-    task::Union{Nothing, Core.Task}
+    task::Core.Task
 end
+isdone(ev::CPUEvent) = Base.istaskdone(ev.task)
+failed(ev::CPUEvent) = Base.istaskfailed(ev.task)
 
 function Event(::CPU)
-    return CPUEvent(nothing)
+    return NoneEvent()
 end
 
-wait(ev::CPUEvent, progress=nothing) = wait(CPU(), ev, progress)
+"""
+    Event(f, args...; dependencies, progress, sticky=true)
+
+Run function `f` with `args` in a Julia task. If `sticky` is `true` the task
+is run on the thread that launched it.
+"""
+function Event(f, args...; dependencies=nothing, progress=nothing, sticky=true)
+    T = Task() do
+        wait(MultiEvent(dependencies), progress)
+        f(args...)
+    end
+    T.sticky = sticky
+    Base.schedule(T)
+    return CPUEvent(T)
+end
+
+wait(ev::Union{CPUEvent, NoneEvent, MultiEvent}, progress=nothing) = wait(CPU(), ev, progress)
+wait(::CPU, ev::NoneEvent, progress=nothing) = nothing
+
+function wait(cpu::CPU, ev::MultiEvent, progress=nothing)
+    events = ev.events
+    N = length(events)
+    alldone = ntuple(i->false, N)
+
+    while !all(alldone)
+        alldone = ntuple(N) do i
+            if alldone[i]
+                true
+            else 
+                isdone(events[i])
+            end
+        end
+        if progress === nothing
+            yield()
+        else
+            progress()
+        end
+    end
+   
+    if any(failed, events)
+        ex = CompositeException()
+        for event in events
+            if failed(event) && event isa CPUEvent
+                push!(ex, Base.TaskFailedException(event.task))
+            end
+        end
+        throw(ex)
+    end
+end
+
 function wait(::CPU, ev::CPUEvent, progress=nothing)
-    ev.task === nothing && return
-    
     if progress === nothing
         wait(ev.task)
     else
         while !Base.istaskdone(ev.task)
             progress()
         end
-    end
-end
-function __waitall(::CPU, dependencies, progress)
-    if dependencies isa Event
-        dependencies = (dependencies,)
-    end
-    if dependencies !== nothing
-        dependencies = collect(dependencies)
-        cpudeps   = filter(d->d isa CPUEvent && d.task !== nothing, dependencies)
-        otherdeps = filter(d->!(d isa CPUEvent), dependencies)
-        Base.sync_end(map(e->e.task, cpudeps))
-        for event in otherdeps
-            wait(CPU(), event, progress)
+        if Base.istaskfailed(ev.task)
+            throw(Base.TaskFailedException(ev.task))
         end
     end
 end
 
-function async_copy!(::CPU, A, B; dependencies=nothing)
-    __waitall(CPU(), dependencies, yield)
-    copyto!(A, B)
-    return CPUEvent(nothing)
+function async_copy!(::CPU, A, B; dependencies=nothing, progress=nothing)
+    Event(copyto!, A, B, dependencies=dependencies, progress=progress)
 end
 
-function (obj::Kernel{CPU})(args...; ndrange=nothing, workgroupsize=nothing, dependencies=nothing)
+function (obj::Kernel{CPU})(args...; ndrange=nothing, workgroupsize=nothing, dependencies=nothing, progress=nothing)
     if ndrange isa Integer
         ndrange = (ndrange,)
     end
@@ -59,13 +95,16 @@ function (obj::Kernel{CPU})(args...; ndrange=nothing, workgroupsize=nothing, dep
         ndrange = nothing
     end
 
-    t = Threads.@spawn __run(obj, ndrange, iterspace, args, dependencies, Val(dynamic))
-    return CPUEvent(t)
+    if length(blocks(iterspace)) == 0
+        return MultiEvent(dependencies)
+    end
+
+    Event(__run, obj, ndrange, iterspace, args, dynamic,
+          dependencies=dependencies, progress=progress)
 end
 
 # Inference barriers
-function __run(obj, ndrange, iterspace, args, dependencies, ::Val{dynamic}) where dynamic
-    __waitall(CPU(), dependencies, yield)
+function __run(obj, ndrange, iterspace, args, dynamic)
     N = length(iterspace)
     Nthreads = Threads.nthreads()
     if Nthreads == 1
@@ -79,16 +118,16 @@ function __run(obj, ndrange, iterspace, args, dependencies, ::Val{dynamic}) wher
         len, rem = 1, 0
     end
     if Nthreads == 1
-        __thread_run(1, len, rem, obj, ndrange, iterspace, args, Val(dynamic))
+        __thread_run(1, len, rem, obj, ndrange, iterspace, args, dynamic)
     else
         @sync for tid in 1:Nthreads
-            Threads.@spawn __thread_run(tid, len, rem, obj, ndrange, iterspace, args, Val(dynamic))
+            Threads.@spawn __thread_run(tid, len, rem, obj, ndrange, iterspace, args, dynamic)
         end
     end
     return nothing
 end
 
-function __thread_run(tid, len, rem, obj, ndrange, iterspace, args, ::Val{dynamic}) where dynamic
+function __thread_run(tid, len, rem, obj, ndrange, iterspace, args, dynamic)
     # compute this thread's iterations
     f = 1 + ((tid-1) * len)
     l = f + len - 1
@@ -105,7 +144,7 @@ function __thread_run(tid, len, rem, obj, ndrange, iterspace, args, ::Val{dynami
     # run this thread's iterations
     for i = f:l
         block = @inbounds blocks(iterspace)[i]
-        ctx = mkcontext(obj, block, ndrange, iterspace, Val(dynamic))
+        ctx = mkcontext(obj, block, ndrange, iterspace, dynamic)
         Cassette.overdub(ctx, obj.f, args...)
     end
     return nothing
@@ -113,8 +152,8 @@ end
 
 Cassette.@context CPUCtx
 
-function mkcontext(kernel::Kernel{CPU}, I, _ndrange, iterspace, ::Val{dynamic}) where dynamic
-    metadata = CompilerMetadata{ndrange(kernel), dynamic}(I, _ndrange, iterspace)
+function mkcontext(kernel::Kernel{CPU}, I, _ndrange, iterspace, ::Dynamic) where Dynamic
+    metadata = CompilerMetadata{ndrange(kernel), Dynamic}(I, _ndrange, iterspace)
     Cassette.disablehooks(CPUCtx(pass = CompilerPass, metadata=metadata))
 end
 
@@ -155,7 +194,31 @@ end
     end
 end
 
+
+@inline function Cassette.overdub(ctx::CPUCtx, ::typeof(__print), items...)
+    __print(items...)
+end
+
 generate_overdubs(CPUCtx)
+
+# Don't recurse into these functions
+const cpufuns = (:cos, :cospi, :sin, :sinpi, :tan,
+          :acos, :asin, :atan,
+          :cosh, :sinh, :tanh,
+          :acosh, :asinh, :atanh,
+          :log, :log10, :log1p, :log2,
+          :exp, :exp2, :exp10, :expm1, :ldexp,
+          :isfinite, :isinf, :isnan, :signbit,
+          :abs,
+          :sqrt, :cbrt,
+          :ceil, :floor,)
+for f in cpufuns
+    @eval function Cassette.overdub(ctx::CPUCtx, ::typeof(Base.$f), x::Union{Float32, Float64})
+        @Base._inline_meta
+        return Base.$f(x)
+    end
+end
+
 
 ###
 # CPU implementation of shared memory

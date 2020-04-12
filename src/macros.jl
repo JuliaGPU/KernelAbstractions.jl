@@ -1,10 +1,21 @@
 import MacroTools: splitdef, combinedef, isexpr, postwalk
 
+function find_return(stmt)
+    result = false
+    postwalk(stmt) do expr
+        result |= @capture(expr, return x_)
+        expr
+    end
+    result
+end
+
 # XXX: Proper errors
 function __kernel(expr)
     def = splitdef(expr)
     name = def[:name]
     args = def[:args]
+
+    find_return(expr) && error("Return statement not permitted in a kernel function $name")
 
     constargs = Array{Bool}(undef, length(args))
     for (i, arg) in enumerate(args)
@@ -40,6 +51,7 @@ function __kernel(expr)
     constructors = quote
         if $(name isa Symbol ? :(!@isdefined($name)) : true)
             $name(dev::$Device) = $name(dev, $DynamicSize(), $DynamicSize())
+            Core.@__doc__ $name(dev::$Device) = $name(dev, $DynamicSize(), $DynamicSize())
             $name(dev::$Device, size) = $name(dev, $StaticSize(size), $DynamicSize())
             $name(dev::$Device, size, range) = $name(dev, $StaticSize(size), $StaticSize(range))
             function $name(::Device, ::S, ::NDRange) where {Device<:$CPU, S<:$_Size, NDRange<:$_Size}
@@ -152,7 +164,7 @@ function split(stmts,
             recurse(x) = x
             function recurse(expr::Expr)
                 expr = unblock(expr)
-                if is_scope_construct(expr) && any(is_sync, expr.args)
+                if is_scope_construct(expr) && any(find_sync, expr.args)
                     new_args = unblock(split(expr.args, deepcopy(indicies), deepcopy(private)))
                     return Expr(expr.head, new_args...)
                 else

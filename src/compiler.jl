@@ -23,7 +23,7 @@ end
 @inline __iterspace(cm::CompilerMetadata)  = cm.iterspace
 @inline __groupindex(cm::CompilerMetadata) = cm.groupindex
 @inline __groupsize(cm::CompilerMetadata) = size(workitems(__iterspace(cm)))
-@inline __dynamic_checkbounds(::CompilerMetadata{NDRange, CB}) where {NDRange, CB} = CB
+@inline __dynamic_checkbounds(::CompilerMetadata{NDRange, CB}) where {NDRange, CB} = CB <: DynamicCheck
 @inline __ndrange(cm::CompilerMetadata{NDRange}) where {NDRange<:StaticSize}  = CartesianIndices(get(NDRange))
 @inline __ndrange(cm::CompilerMetadata{NDRange}) where {NDRange<:DynamicSize} = cm.ndrange
 

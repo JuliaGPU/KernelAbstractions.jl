@@ -48,6 +48,9 @@ struct CudaEvent <: Event
     event::CuEvent
 end
 
+failed(::CudaEvent) = false
+isdone(ev::CudaEvent) = CUDAdrv.query(ev.event)
+
 function Event(::CUDA)
     stream = CUDAdrv.CuDefaultStream()
     event = CuEvent(CUDAdrv.EVENT_DISABLE_TIMING)
@@ -55,44 +58,80 @@ function Event(::CUDA)
     CudaEvent(event)
 end
 
-wait(ev::CudaEvent, progress=nothing) = wait(CPU(), ev, progress)
-function wait(::CPU, ev::CudaEvent, progress=nothing)
+wait(ev::CudaEvent, progress=yield) = wait(CPU(), ev, progress)
+
+function wait(::CPU, ev::CudaEvent, progress=yield)
     if progress === nothing
         CUDAdrv.synchronize(ev.event)
     else
-        while !CUDAdrv.query(ev.event)
+        while !isdone(ev)
             progress()
-            # do we need to `yield` here?
         end
     end
 end
 
 # Use this to synchronize between computation using the CuDefaultStream
-function wait(::CUDA, ev::CudaEvent, progress=nothing)
-    CUDAdrv.wait(ev.event, CUDAdrv.CuDefaultStream())
+wait(::CUDA, ev::CudaEvent, progress=nothing, stream=CUDAdrv.CuDefaultStream()) = CUDAdrv.wait(ev.event, stream)
+wait(::CUDA, ev::NoneEvent, progress=nothing, stream=nothing) = nothing
+
+function wait(::CUDA, ev::MultiEvent, progress=nothing, stream=CUDAdrv.CuDefaultStream())
+    dependencies = collect(ev.events)
+    cudadeps  = filter(d->d isa CudaEvent,    dependencies)
+    otherdeps = filter(d->!(d isa CudaEvent), dependencies)
+    for event in cudadeps
+        CUDAdrv.wait(event.event, stream)
+    end
+    for event in otherdeps
+        wait(CUDA(), event, progress, stream)
+    end
 end
 
-# There is no efficient wait for CPU->GPU synchronization, so instead we
-# do a CPU wait, and therefore block anyone from submitting more work.
-# We maybe could do a spinning wait on the GPU and atomic flag to signal from the CPU,
-# but which stream would we target?
-wait(::CUDA, ev::CPUEvent,  progress=nothing) = wait(CPU(), ev, progress)
+include("cusynchronization.jl")
+import .CuSynchronization: unsafe_volatile_load, unsafe_volatile_store!
+import CUDAdrv: Mem
 
-function __waitall(::CUDA, dependencies, progress, stream)
-    if dependencies isa Event
-        dependencies = (dependencies,)
-    end
-    if dependencies !== nothing
-        dependencies = collect(dependencies)
-        cudadeps  = filter(d->d isa CudaEvent,    dependencies)
-        otherdeps = filter(d->!(d isa CudaEvent), dependencies)
-        for event in cudadeps
-            CUDAdrv.wait(event.event, stream)
+function wait(::CUDA, ev::CPUEvent, progress=nothing, stream=nothing)
+    error("""
+    Waiting on the GPU for an CPU event to finish is currently not supported.
+    We have encountered deadlocks arising, due to interactions with the CUDA
+    driver. If you are certain that you are deadlock free, you can use `unsafe_wait`
+    instead.
+    """)
+end
+
+# This implements waiting for a CPUEvent on the GPU.
+# Most importantly this implementation needs to be asynchronous w.r.t to the host,
+# otherwise one could introduce deadlocks with outside event systems.
+# It uses a device visible host buffer to create a barrier/semaphore.
+# On a CPU task we wait for the `ev` to finish and then signal the GPU
+# by setting the flag 0->1, the CPU then in return needs to wait for the GPU
+# to set trhe flag 1->2 so that we can deallocate the memory.
+# TODO:
+# - In case of an error we should probably also kill the waiting GPU code.
+unsafe_wait(dev::Device, ev, progress=nothing) = wait(dev, ev, progress) 
+function unsafe_wait(::CUDA, ev::CPUEvent, progress=nothing, stream=CuDefaultStream())
+    buf = Mem.alloc(Mem.HostBuffer, sizeof(UInt32), Mem.HOSTREGISTER_DEVICEMAP)
+    unsafe_store!(convert(Ptr{UInt32}, buf), UInt32(0))
+    # TODO: Switch to `@spawn` when CUDAnative.jl is thread-safe
+    @async begin
+        try
+            wait(ev.task)
+        catch err
+            bt = catch_backtrace()
+            @error "Error thrown during CUDA wait on CPUEvent" _ex=(err, bt)
+        finally
+            @debug "notifying GPU"
+            unsafe_volatile_store!(convert(Ptr{UInt32}, buf), UInt32(1))
+            while !(unsafe_volatile_load(convert(Ptr{UInt32}, buf)) == UInt32(2))
+                yield()
+            end
+            @debug "GPU released"
+            Mem.free(buf)
         end
-        for event in otherdeps
-            wait(CUDA(), event, progress)
-        end
     end
+    ptr = convert(CUDAnative.DevicePtr{UInt32}, convert(Mem.CuPtr{UInt32}, buf))
+    sem = CuSynchronization.Semaphore(ptr, UInt32(1))
+    CUDAnative.@cuda threads=1 stream=stream CuSynchronization.wait(sem)
 end
 
 ###
@@ -114,12 +153,12 @@ function __pin!(a)
     return nothing
 end
 
-function async_copy!(::CUDA, A, B; dependencies=nothing)
+function async_copy!(::CUDA, A, B; dependencies=nothing, progress=yield)
     A isa Array && __pin!(A)
     B isa Array && __pin!(B)
 
     stream = next_stream()
-    __waitall(CUDA(), dependencies, yield, stream)
+    wait(CUDA(), MultiEvent(dependencies), progress, stream)
     event = CuEvent(CUDAdrv.EVENT_DISABLE_TIMING)
     GC.@preserve A B begin
         destptr = pointer(A)
@@ -138,19 +177,13 @@ end
 ###
 # Kernel launch
 ###
-function (obj::Kernel{CUDA})(args...; ndrange=nothing, dependencies=nothing, workgroupsize=nothing)
+function (obj::Kernel{CUDA})(args...; ndrange=nothing, dependencies=nothing, workgroupsize=nothing, progress=yield)
     if ndrange isa Integer
         ndrange = (ndrange,)
     end
     if workgroupsize isa Integer
         workgroupsize = (workgroupsize, )
     end
-    if dependencies isa Event
-        dependencies = (dependencies,)
-    end
-
-    stream = next_stream()
-    __waitall(CUDA(), dependencies, yield, stream)
 
     if KernelAbstractions.workgroupsize(obj) <: DynamicSize && workgroupsize === nothing
         # TODO: allow for NDRange{1, DynamicSize, DynamicSize}(nothing, nothing)
@@ -158,7 +191,7 @@ function (obj::Kernel{CUDA})(args...; ndrange=nothing, dependencies=nothing, wor
         workgroupsize = (256,)
     end
     # If the kernel is statically sized we can tell the compiler about that
-    if KernelAbstractions.workgroupsize(obj) <: StaticSize 
+    if KernelAbstractions.workgroupsize(obj) <: StaticSize
         maxthreads = prod(get(KernelAbstractions.workgroupsize(obj)))
     else
         maxthreads = nothing
@@ -168,6 +201,13 @@ function (obj::Kernel{CUDA})(args...; ndrange=nothing, dependencies=nothing, wor
 
     nblocks = length(blocks(iterspace))
     threads = length(workitems(iterspace))
+
+    if nblocks == 0
+        return MultiEvent(dependencies)
+    end
+
+    stream = next_stream()
+    wait(CUDA(), MultiEvent(dependencies), progress, stream)
 
     ctx = mkcontext(obj, ndrange, iterspace)
     # Launch kernel
@@ -183,7 +223,7 @@ end
 Cassette.@context CUDACtx
 
 function mkcontext(kernel::Kernel{CUDA}, _ndrange, iterspace)
-    metadata = CompilerMetadata{ndrange(kernel), true}(_ndrange, iterspace)
+    metadata = CompilerMetadata{ndrange(kernel), DynamicCheck}(_ndrange, iterspace)
     Cassette.disablehooks(CUDACtx(pass = CompilerPass, metadata=metadata))
 end
 
@@ -252,6 +292,9 @@ for f in cudafuns
     end
 end
 
+@inline Cassette.overdub(::CUDACtx, ::typeof(sincos), x::Union{Float32, Float64}) = (CUDAnative.sin(x), CUDAnative.cos(x))
+@inline Cassette.overdub(::CUDACtx, ::typeof(exp), x::Union{ComplexF32, ComplexF64}) = CUDAnative.exp(x)
+
 
 ###
 # GPU implementation of shared memory
@@ -272,6 +315,10 @@ end
 
 @inline function Cassette.overdub(ctx::CUDACtx, ::typeof(__synchronize))
     CUDAnative.sync_threads()
+end
+
+@inline function Cassette.overdub(ctx::CUDACtx, ::typeof(__print), args...)
+    CUDAnative._cuprint(args...)
 end
 
 ###
