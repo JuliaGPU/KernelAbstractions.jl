@@ -196,27 +196,6 @@ end
     wait(event)
 end
 
-@testset "fallback test: callable types" begin
-    function f end
-    @kernel function (a::typeof(f))(x, ::Val{m}) where m
-        I = @index(Global)
-        @inbounds x[I] = m
-    end
-    @kernel function (a::typeof(f))(x, ::Val{1})
-        I = @index(Global)
-        @inbounds x[I] = 1
-    end
-    x = [1,2,3]
-    env = f(CPU())(x, Val(4); ndrange=length(x))
-    wait(env)
-    @test x == [4,4,4]
-
-    x = [1,2,3]
-    env = f(CPU())(x, Val(1); ndrange=length(x))
-    wait(env)
-    @test x == [1,1,1]
-end
-
 @testset "MultiEvent" begin
   event1 = kernel_empty(CPU(), 1)(ndrange=1)
   event2 = kernel_empty(CPU(), 1)(ndrange=1)
@@ -268,3 +247,26 @@ end
             ErrorException("Return statement not permitted in a kernel function kernel_return")
     end
 end
+
+@testset "fallback test: callable types" begin
+    function f end
+    @kernel function (a::typeof(f))(x, ::Val{m}) where m
+        I = @index(Global)
+        @inbounds x[I] = m
+    end
+    @kernel function (a::typeof(f))(x, ::Val{1})
+        I = @index(Global)
+        @inbounds x[I] = 1
+    end
+    x = [1,2,3]
+    env = f(CPU())(x, Val(4); ndrange=length(x))
+    wait(env)
+    @test x == [4,4,4]
+
+    x = [1,2,3]
+    env = f(CPU())(x, Val(1); ndrange=length(x))
+    wait(env)
+    @test x == [1,1,1]
+end
+
+
