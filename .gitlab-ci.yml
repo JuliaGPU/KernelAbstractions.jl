@@ -1,6 +1,14 @@
 include:
   - 'https://raw.githubusercontent.com/JuliaGPU/gitlab-ci/master/templates/v6.yml'
 
+test:1.4:
+  extends:
+    - .julia:1.4
+    - .test
+  tags:
+    - nvidia
+  image: nvidia/cuda:latest
+
 test:1.3:
   extends:
     - .julia:1.3
