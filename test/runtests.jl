@@ -29,6 +29,12 @@ end
     include("events.jl")
 end
 
-include("print_test.jl")
+@testset "Printing" begin
+    include("print_test.jl")
+end
+
+@testset "Compiler" begin
+    include("compiler.jl")
+end
 
 include("examples.jl")

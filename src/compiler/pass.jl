@@ -45,12 +45,16 @@ function transform(ctx, ref)
         isassign = Base.Meta.isexpr(x, :(=))
         stmt = isassign ? x.args[2] : x
         if Base.Meta.isexpr(stmt, :call)
-            applycall = Cassette.is_ir_element(stmt.args[1], GlobalRef(Core, :_apply), CI.code)
+            applycall = Cassette.is_ir_element(stmt.args[1], GlobalRef(Core, :_apply), CI.code) 
+            applyitercall = Cassette.is_ir_element(stmt.args[1], GlobalRef(Core, :_apply_iterate), CI.code) 
             if applycall
-                f = stmt.args[2]
+                fidx = 2
+            elseif applyitercall
+                fidx = 3
             else
-                f = stmt.args[1]
+                fidx = 1
             end
+            f = stmt.args[fidx]
             f = ir_element(f, CI.code)
             if f isa GlobalRef
                 mod = f.mod
@@ -58,11 +62,7 @@ function transform(ctx, ref)
                 if Base.isbindingresolved(mod, name) && Base.isdefined(mod, name)
                     ff = getfield(f.mod, f.name)
                     if ff isa Core.IntrinsicFunction || ff isa Core.Builtin
-                        if applycall
-                            stmt.args[2] = Expr(:nooverdub, f)
-                        else
-                            stmt.args[1] = Expr(:nooverdub, f)
-                        end
+                        stmt.args[fidx] = Expr(:nooverdub, f)
                     end
                 end
             end
