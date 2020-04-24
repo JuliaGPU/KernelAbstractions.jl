@@ -124,7 +124,7 @@ end
         ctx = KernelAbstractions.mkcontext(kernel, 1, nothing, iterspace, Val(NoDynamicCheck()))
         AT = Array{Float32, 2}
         IR = sprint() do io
-            code_llvm(io, KernelAbstractions.Cassette.overdub, 
+            code_llvm(io, KernelAbstractions.Cassette.overdub,
                      (typeof(ctx), typeof(kernel.f), AT, AT),
                      optimize=false, raw=true)
         end
@@ -139,7 +139,7 @@ end
             ctx = KernelAbstractions.mkcontext(kernel, nothing, iterspace)
             AT = CUDAnative.CuDeviceArray{Float32, 2, CUDAnative.AS.Global}
             IR = sprint() do io
-                CUDAnative.code_llvm(io, KernelAbstractions.Cassette.overdub, 
+                CUDAnative.code_llvm(io, KernelAbstractions.Cassette.overdub,
                         (typeof(ctx), typeof(kernel.f), AT, AT),
                         kernel=true, optimize=false)
             end
@@ -247,3 +247,26 @@ end
             ErrorException("Return statement not permitted in a kernel function kernel_return")
     end
 end
+
+@testset "fallback test: callable types" begin
+    function f end
+    @kernel function (a::typeof(f))(x, ::Val{m}) where m
+        I = @index(Global)
+        @inbounds x[I] = m
+    end
+    @kernel function (a::typeof(f))(x, ::Val{1})
+        I = @index(Global)
+        @inbounds x[I] = 1
+    end
+    x = [1,2,3]
+    env = f(CPU())(x, Val(4); ndrange=length(x))
+    wait(env)
+    @test x == [4,4,4]
+
+    x = [1,2,3]
+    env = f(CPU())(x, Val(1); ndrange=length(x))
+    wait(env)
+    @test x == [1,1,1]
+end
+
+

@@ -49,7 +49,8 @@ function __kernel(expr)
 
     # create constructor functions
     constructors = quote
-        if !@isdefined($name)
+        if $(name isa Symbol ? :(!@isdefined($name)) : true)
+            $name(dev::$Device) = $name(dev, $DynamicSize(), $DynamicSize())
             Core.@__doc__ $name(dev::$Device) = $name(dev, $DynamicSize(), $DynamicSize())
             $name(dev::$Device, size) = $name(dev, $StaticSize(size), $DynamicSize())
             $name(dev::$Device, size, range) = $name(dev, $StaticSize(size), $StaticSize(range))
@@ -130,14 +131,14 @@ end
 function find_sync(stmt)
     result = false
     postwalk(stmt) do expr
-        result |= is_sync(expr) 
+        result |= is_sync(expr)
         expr
     end
     result
 end
 
 # TODO proper handling of LineInfo
-function split(stmts, 
+function split(stmts,
                indicies = Any[], private=Any[])
     # 1. Split the code into blocks separated by `@synchronize`
     # 2. Aggregate `@index` expressions
@@ -166,7 +167,7 @@ function split(stmts,
                 if is_scope_construct(expr) && any(find_sync, expr.args)
                     new_args = unblock(split(expr.args, deepcopy(indicies), deepcopy(private)))
                     return Expr(expr.head, new_args...)
-                else 
+                else
                     return Expr(expr.head, map(recurse, expr.args)...)
                 end
             end
