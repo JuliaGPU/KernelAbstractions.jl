@@ -455,4 +455,11 @@ end
 ###
 
 include("extras/extras.jl")
+
+##
+# Arrays
+# - AbstractKernelArray
+##
+include("arrays/arrays.jl")
+
 end #module
