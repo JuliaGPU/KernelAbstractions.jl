@@ -9,7 +9,6 @@ export async_copy!
 using MacroTools
 using StaticArrays
 using Cassette
-using Requires
 using Adapt
 
 """
@@ -445,9 +444,7 @@ __size(args::Tuple) = Tuple{args...}
 __size(i::Int) = Tuple{i}
 
 include("backends/cpu.jl")
-@init @require CUDAnative="be33ccc6-a3ff-5ff2-a52e-74243cff1e17" begin
-    include("backends/cuda.jl")
-end
+include("backends/cuda.jl")
 
 ###
 # Extras
