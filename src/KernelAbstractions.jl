@@ -324,6 +324,7 @@ in a workgroup.
 """
 struct Kernel{Device, WorkgroupSize<:_Size, NDRange<:_Size, Fun}
     f::Fun
+    regiontag::String
 end
 
 workgroupsize(::Kernel{D, WorkgroupSize}) where {D, WorkgroupSize} = WorkgroupSize

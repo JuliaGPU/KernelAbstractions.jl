@@ -117,6 +117,7 @@ function __run(obj, ndrange, iterspace, args, dynamic)
         Nthreads = N
         len, rem = 1, 0
     end
+    LIKWID.Marker.startregion(obj.regiontag)
     if Nthreads == 1
         __thread_run(1, len, rem, obj, ndrange, iterspace, args, dynamic)
     else
@@ -124,6 +125,7 @@ function __run(obj, ndrange, iterspace, args, dynamic)
             Threads.@spawn __thread_run(tid, len, rem, obj, ndrange, iterspace, args, dynamic)
         end
     end
+    LIKWID.Marker.stopregion(obj.regiontag)
     return nothing
 end
 

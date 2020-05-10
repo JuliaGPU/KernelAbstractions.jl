@@ -9,6 +9,12 @@ function find_return(stmt)
     result
 end
 
+const __uid__ = Ref(0)
+function __uid()
+    __uid[] += 1
+end
+
+
 # XXX: Proper errors
 function __kernel(expr)
     def = splitdef(expr)
@@ -54,10 +60,10 @@ function __kernel(expr)
             $name(dev::$Device, size) = $name(dev, $StaticSize(size), $DynamicSize())
             $name(dev::$Device, size, range) = $name(dev, $StaticSize(size), $StaticSize(range))
             function $name(::Device, ::S, ::NDRange) where {Device<:$CPU, S<:$_Size, NDRange<:$_Size}
-                return $Kernel{Device, S, NDRange, typeof($cpu_name)}($cpu_name)
+                return $Kernel{Device, S, NDRange, typeof($cpu_name)}($cpu_name, string($cpu_name, __uid()))
             end
             function $name(::Device, ::S, ::NDRange) where {Device<:$GPU, S<:$_Size, NDRange<:$_Size}
-                return $Kernel{Device, S, NDRange, typeof($gpu_name)}($gpu_name)
+                return $Kernel{Device, S, NDRange, typeof($gpu_name)}($gpu_name, string($gpu_name, __uid()))
             end
         end
     end
