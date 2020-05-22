@@ -6,6 +6,14 @@ if has_cuda_gpu()
     CuArrays.allowscalar(false)
 end
 
+@kernel function typetest(A, B)
+    priv = @private eltype(A) (1,)
+    I = @index(Global, Linear)
+    @inbounds begin
+      B[I] = eltype(priv) === eltype(A)
+    end
+end
+
 @kernel function private(A)
     @uniform N = prod(groupsize())
     I = @index(Global, Linear)
@@ -48,6 +56,10 @@ function harness(backend, ArrayT)
     wait(forloop(backend)(A, Val(size(A, 2)), ndrange=size(A,1), workgroupsize=size(A,1)))
     @test all(A[:, 1] .== 64)
     @test all(A[:, 2:end] .== 1)
+
+    B = ArrayT{Bool}(undef, size(A)...)
+    wait(typetest(backend, 16)(A, B, ndrange=size(A)))
+    @test all(B)
 end
 
 @testset "kernels" begin
