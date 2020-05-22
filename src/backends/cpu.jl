@@ -236,6 +236,7 @@ struct ScratchArray{N, D}
     data::D
     ScratchArray{N}(data::D) where {N, D} = new{N, D}(data)
 end
+Base.eltype(a::ScratchArray) = eltype(a.data)
 
 @inline function Cassette.overdub(ctx::CPUCtx, ::typeof(Scratchpad), ::Type{T}, ::Val{Dims}) where {T, Dims}
     return ScratchArray{length(Dims)}(MArray{__size((Dims..., __groupsize(ctx.metadata)...)), T}(undef))
