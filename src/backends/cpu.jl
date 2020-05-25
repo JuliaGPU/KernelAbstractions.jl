@@ -242,10 +242,6 @@ Base.eltype(a::ScratchArray) = eltype(a.data)
     return ScratchArray{length(Dims)}(MArray{__size((Dims..., __groupsize(ctx.metadata)...)), T}(undef))
 end
 
-Base.@propagate_inbounds function Base.getindex(A::ScratchArray, I...)
-    return A.data[I...]
-end
-
-Base.@propagate_inbounds function Base.setindex!(A::ScratchArray, val, I...)
-    A.data[I...] = val
+Base.@propagate_inbounds function Base.getindex(A::ScratchArray{N}, I...) where {N}
+    return view(A.data, ntuple(_ -> Colon(), Val(N))..., I...)
 end

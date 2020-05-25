@@ -43,6 +43,12 @@ end
     end
 end
 
+@kernel function lengthtest(A)
+    priv = @private eltype(A) (2, 3)
+    I = @index(Global, Linear)
+    @inbounds A[I] = length(priv)
+end
+
 function harness(backend, ArrayT)
     A = ArrayT{Int}(undef, 64)
     wait(private(backend, 16)(A, ndrange=size(A)))
@@ -60,6 +66,10 @@ function harness(backend, ArrayT)
     B = ArrayT{Bool}(undef, size(A)...)
     wait(typetest(backend, 16)(A, B, ndrange=size(A)))
     @test all(B)
+
+    A .= 0
+    wait(lengthtest(backend, 16)(A, ndrange=size(A)))
+    @test all(A .== 6)
 end
 
 @testset "kernels" begin

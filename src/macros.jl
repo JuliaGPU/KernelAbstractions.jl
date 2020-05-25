@@ -216,10 +216,8 @@ function emit(loop)
     if !(isempty(loop.stmts) || all(s->s isa LineNumberNode, loop.stmts))
         body = Expr(:block, loop.stmts...)
         body = postwalk(body) do expr
-            if @capture(expr, A_[i__])
-                if A in loop.private
-                    return :($A[$(i...), $(idx).I...])
-                end
+            if expr in loop.private
+                return :($expr[$(idx).I...])
             end
             return expr
         end
