@@ -26,6 +26,18 @@ end
     end
 end
 
+@kernel function scalarprivate(A)
+    @uniform N = prod(groupsize())
+    I = @index(Global, Linear)
+    i = @index(Local, Linear)
+    priv = @private Int
+    @inbounds begin
+        priv = N - i + 1
+        @synchronize
+        A[I] = priv
+    end
+end
+
 # This is horrible don't write code like this
 @kernel function forloop(A, ::Val{N}) where N
     I = @index(Global, Linear)
@@ -52,6 +64,12 @@ end
 function harness(backend, ArrayT)
     A = ArrayT{Int}(undef, 64)
     wait(private(backend, 16)(A, ndrange=size(A)))
+    @test all(A[1:16] .== 16:-1:1)
+    @test all(A[17:32] .== 16:-1:1)
+    @test all(A[33:48] .== 16:-1:1)
+    @test all(A[49:64] .== 16:-1:1)
+
+    wait(scalarprivate(backend, 16)(A, ndrange=size(A)))
     @test all(A[1:16] .== 16:-1:1)
     @test all(A[17:32] .== 16:-1:1)
     @test all(A[33:48] .== 16:-1:1)

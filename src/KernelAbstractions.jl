@@ -134,7 +134,7 @@ end
 """
     @private T dims
 """
-macro private(T, dims)
+macro private(T, dims = ())
     quote
         $Scratchpad($(esc(T)), Val($(esc(dims))))
     end

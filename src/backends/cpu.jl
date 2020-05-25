@@ -245,3 +245,9 @@ end
 Base.@propagate_inbounds function Base.getindex(A::ScratchArray{N}, I...) where {N}
     return view(A.data, ntuple(_ -> Colon(), Val(N))..., I...)
 end
+Base.@propagate_inbounds function Base.getindex(A::ScratchArray{0}, I...)
+    return A.data[I...]
+end
+Base.@propagate_inbounds function Base.setindex!(A::ScratchArray{0}, val, I...)
+    A.data[I...] = val
+end
