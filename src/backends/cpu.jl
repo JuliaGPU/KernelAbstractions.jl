@@ -1,3 +1,5 @@
+import SpecialFunctions
+
 struct CPUEvent <: Event
     task::Core.Task
 end
@@ -219,6 +221,7 @@ for f in cpufuns
     end
 end
 
+@inline Cassette.overdub(::CPUCtx, ::typeof(SpecialFunctions.gamma), x::Union{Float32, Float64}) = SpecialFunctions.gamma(x)
 
 ###
 # CPU implementation of shared memory

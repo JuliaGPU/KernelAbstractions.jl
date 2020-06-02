@@ -1,6 +1,7 @@
 import CUDAnative, CUDAdrv
 import CUDAnative: cufunction, DevicePtr
 import CUDAdrv: CuEvent, CuStream, CuDefaultStream, Mem
+import SpecialFunctions
 
 const FREE_STREAMS = CuStream[]
 const STREAMS = CuStream[]
@@ -295,6 +296,7 @@ end
 @inline Cassette.overdub(::CUDACtx, ::typeof(sincos), x::Union{Float32, Float64}) = (CUDAnative.sin(x), CUDAnative.cos(x))
 @inline Cassette.overdub(::CUDACtx, ::typeof(exp), x::Union{ComplexF32, ComplexF64}) = CUDAnative.exp(x)
 
+@inline Cassette.overdub(::CUDACtx, ::typeof(SpecialFunctions.gamma), x::Union{Float32, Float64}) = CUDAnative.tgamma(x)
 
 ###
 # GPU implementation of shared memory
