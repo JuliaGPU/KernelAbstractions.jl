@@ -269,4 +269,28 @@ end
     @test x == [1,1,1]
 end
 
+@testset "special functions: gamma" begin
+    import SpecialFunctions
 
+    @kernel function gamma_knl(A, @Const(B))
+        I = @index(Global)
+        @inbounds A[I] = SpecialFunctions.gamma(B[I])
+    end
+
+    x = [1.0,2.0,3.0,5.5]
+    y = similar(x)
+    event = gamma_knl(CPU())(y, x; ndrange=length(x))
+    wait(event)
+    @test y == SpecialFunctions.gamma.(x)
+
+    if has_cuda_gpu()
+        cx = CuArray(x)
+        cy = similar(cx)
+        event = gamma_knl(CUDA())(cy, cx; ndrange=length(x))
+        wait(event)
+
+        cy = Array(cy)
+        @test cy[1:3] == SpecialFunctions.gamma.(x[1:3])
+        @test cy[4] ≈ SpecialFunctions.gamma.(x[4])
+    end
+end
