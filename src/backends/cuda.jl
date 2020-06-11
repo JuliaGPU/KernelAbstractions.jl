@@ -40,7 +40,7 @@ function next_stream()
         return pop!(FREE_STREAMS)
     end
 
-    stream = CUDAdrv.CuStream(CUDAdrv.STREAM_NON_BLOCKING)
+    stream = CUDAdrv.CuStream(flags = CUDAdrv.STREAM_NON_BLOCKING)
     push!(STREAMS, stream)
     return stream
 end

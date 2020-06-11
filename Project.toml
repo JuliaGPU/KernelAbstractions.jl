@@ -1,7 +1,7 @@
 name = "KernelAbstractions"
 uuid = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
 authors = ["Valentin Churavy <v.churavy@gmail.com>"]
-version = "0.2.5"
+version = "0.2.6"
 
 [deps]
 Adapt = "79e6a3ab-5dfb-504d-930d-738a2a938a0e"
@@ -15,8 +15,8 @@ StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 
 [compat]
 Adapt = "0.4, 1.0"
-CUDAapi = "3.0, 3.1, 4.0"
-CUDAdrv = "6.1, 6.2"
+CUDAapi = "4.0"
+CUDAdrv = "6.3"
 CUDAnative = "3.0"
 Cassette = "0.3.2"
 MacroTools = "0.5"
