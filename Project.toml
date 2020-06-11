@@ -14,7 +14,7 @@ SpecialFunctions = "276daf66-3868-5448-9aa4-cd146d93841b"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 
 [compat]
-Adapt = "0.4, 1.0"
+Adapt = "0.4, 1.0, 2.0"
 CUDAapi = "3.0, 3.1, 4.0"
 CUDAdrv = "6.1, 6.2"
 CUDAnative = "3.0"
