@@ -1,8 +1,7 @@
 module CuSynchronization
 
-using CUDAnative.LLVM
-using CUDAnative.LLVM.Interop
-using CUDAnative
+using LLVM
+using LLVM.Interop
 
 @generated function unsafe_volatile_load(ptr::Ptr{T}) where T
     eltyp = convert(LLVMType, T)
@@ -50,7 +49,7 @@ end
 end
 
 
-import CUDAnative: DevicePtr
+import CUDA: DevicePtr, threadfence_block, threadfence_system
 
 struct Semaphore{T, AS}
     sem::DevicePtr{T, AS}
@@ -72,7 +71,7 @@ end
         if sem[] == sem.value
             break
         end
-        threadfence_block()
+	threadfence_block()
     end
     sem[] = 2 % T # finalize
     threadfence_system()
