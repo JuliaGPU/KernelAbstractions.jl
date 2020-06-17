@@ -55,13 +55,13 @@ all(A .== 2.0)
 1. Functions inside kernels are forcefully inlined, except when marked with `@noinline`.
 2. Floating-point multiplication, addition, subtraction are marked contractable.
 
-## Important differences to CUDA
+## Important differences to CUDA.jl
 
 1. The kernels are automatically bounds-checked against either the dynamic or statically
    provided `ndrange`.
 2. Functions like `Base.sin` are mapped to `CUDA.sin`.
 
-## Important differences to GPUifyLoops
+## Important differences to GPUifyLoops.jl
 
 1. `@scratch` has been renamed to `@private`, and the semantics have changed. Instead
    of denoting how many dimensions are implicit on the GPU, you only ever provide the

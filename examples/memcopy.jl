@@ -24,7 +24,7 @@ if has_cuda_gpu()
 
     function mycopy!(A::CuArray, B::CuArray)
         @assert size(A) == size(B)
-        copy_kernel!(CUDAGPU(), 256)(A, B, ndrange=length(A))
+        copy_kernel!(CUDADevice(), 256)(A, B, ndrange=length(A))
     end
 
     A = CuArray{Float32}(undef, 1024)

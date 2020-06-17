@@ -17,7 +17,7 @@ end
 
 @testset "print test" begin
     if has_cuda_gpu()
-        wait(test_print(CUDAGPU()))
+        wait(test_print(CUDADevice()))
         @test true
     end
 

@@ -19,7 +19,7 @@ function naive_transpose!(a, b)
     if isa(a, Array)
         kernel! = naive_transpose_kernel!(CPU(),4)
     else
-        kernel! = naive_transpose_kernel!(CUDAGPU(),256)
+        kernel! = naive_transpose_kernel!(CUDADevice(),256)
     end
     kernel!(a, b, ndrange=size(a))
 end

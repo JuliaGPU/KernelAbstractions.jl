@@ -26,7 +26,7 @@ function matmul!(a, b, c)
     if isa(a, Array)
         kernel! = matmul_kernel!(CPU(),4)
     else
-        kernel! = matmul_kernel!(CUDAGPU(),256)
+        kernel! = matmul_kernel!(CUDADevice(),256)
     end
     kernel!(a, b, c, ndrange=size(c)) 
 end

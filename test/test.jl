@@ -109,7 +109,7 @@ end
 @testset "indextest" begin
     indextest(CPU(), Array)
     if has_cuda_gpu()
-        indextest(CUDAGPU(), CuArray)
+        indextest(CUDADevice(), CuArray)
     end
 end
 
@@ -134,7 +134,7 @@ end
     end
 
     if has_cuda_gpu()
-        let kernel = constarg(CUDAGPU(), 8, (1024,))
+        let kernel = constarg(CUDADevice(), 8, (1024,))
             # this is poking at internals
             iterspace = NDRange{1, StaticSize{(128,)}, StaticSize{(8,)}}();
             ctx = KernelAbstractions.mkcontext(kernel, nothing, iterspace)
@@ -159,7 +159,7 @@ wait(kernel_val!(CPU())(A,Val(3), ndrange=size(A)))
 @test all((a)->a==3, A)
 if has_cuda_gpu()
     A = CUDA.zeros(Int64, 1024)
-    wait(kernel_val!(CUDAGPU())(A,Val(3), ndrange=size(A)))
+    wait(kernel_val!(CUDADevice())(A,Val(3), ndrange=size(A)))
     @test all((a)->a==3, A)
 end
 
@@ -169,24 +169,24 @@ end
 if has_cuda_gpu()
     @testset "CPU--CUDA dependencies" begin
         event1 = kernel_empty(CPU(), 1)(ndrange=1)
-        event2 = kernel_empty(CUDAGPU(), 1)(ndrange=1)
+        event2 = kernel_empty(CUDADevice(), 1)(ndrange=1)
         event3 = kernel_empty(CPU(), 1)(ndrange=1)
-        event4 = kernel_empty(CUDAGPU(), 1)(ndrange=1)
-        @test_throws ErrorException event5 = kernel_empty(CUDAGPU(), 1)(ndrange=1, dependencies=(event1, event2, event3, event4))
+        event4 = kernel_empty(CUDADevice(), 1)(ndrange=1)
+        @test_throws ErrorException event5 = kernel_empty(CUDADevice(), 1)(ndrange=1, dependencies=(event1, event2, event3, event4))
         # wait(event5)
         # @test event5 isa KernelAbstractions.Event
 
         event1 = kernel_empty(CPU(), 1)(ndrange=1)
-        event2 = kernel_empty(CUDAGPU(), 1)(ndrange=1)
+        event2 = kernel_empty(CUDADevice(), 1)(ndrange=1)
         event3 = kernel_empty(CPU(), 1)(ndrange=1)
-        event4 = kernel_empty(CUDAGPU(), 1)(ndrange=1)
+        event4 = kernel_empty(CUDADevice(), 1)(ndrange=1)
         event5 = kernel_empty(CPU(), 1)(ndrange=1, dependencies=(event1, event2, event3, event4))
         wait(event5)
         @test event5 isa KernelAbstractions.Event
     end
     @testset "CUDA wait" begin
-        event = kernel_empty(CUDAGPU(), 1)(ndrange=1)
-        wait(CUDAGPU(), event)
+        event = kernel_empty(CUDADevice(), 1)(ndrange=1)
+        wait(CUDADevice(), event)
         @test event isa KernelAbstractions.Event
     end
 end
@@ -210,9 +210,9 @@ end
 
 if has_cuda_gpu()
   @testset "MultiEvent CUDA" begin
-    event1 = kernel_empty(CUDAGPU(), 1)(ndrange=1)
+    event1 = kernel_empty(CUDADevice(), 1)(ndrange=1)
     event2 = kernel_empty(CPU(), 1)(ndrange=1)
-    event3 = kernel_empty(CUDAGPU(), 1)(ndrange=1)
+    event3 = kernel_empty(CUDADevice(), 1)(ndrange=1)
 
     @test MultiEvent(event1) isa Event
     @test MultiEvent((event1, event2, event3)) isa Event
@@ -230,10 +230,10 @@ end
 
 if has_cuda_gpu()
     @testset "Zero iteration space CUDA" begin
-        event1 = kernel_empty(CUDAGPU(), 1)(ndrange=1)
-        event2 = kernel_empty(CUDAGPU(), 1)(ndrange=0; dependencies=event1)
+        event1 = kernel_empty(CUDADevice(), 1)(ndrange=1)
+        event2 = kernel_empty(CUDADevice(), 1)(ndrange=0; dependencies=event1)
         @test event2 == MultiEvent(event1)
-        event = kernel_empty(CUDAGPU(), 1)(ndrange=0)
+        event = kernel_empty(CUDADevice(), 1)(ndrange=0)
         @test event == MultiEvent(nothing)
     end
 end
@@ -287,7 +287,7 @@ end
     if has_cuda_gpu()
         cx = CuArray(x)
         cy = similar(cx)
-        event = gamma_knl(CUDAGPU())(cy, cx; ndrange=length(x))
+        event = gamma_knl(CUDADevice())(cy, cx; ndrange=length(x))
         wait(event)
 
         cy = Array(cy)

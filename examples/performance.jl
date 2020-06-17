@@ -19,7 +19,7 @@ const nreps = 1
 NVTX.@range "Naive transpose ($block_dim, $block_dim)" let
     a = CuArray(rand(T, shape))
     b = similar(a, shape[2], shape[1])
-    kernel! = transpose_kernel_naive!(CUDAGPU(), (block_dim, block_dim), size(b))
+    kernel! = transpose_kernel_naive!(CUDADevice(), (block_dim, block_dim), size(b))
   
     event = kernel!(b, a)
     wait(event)
@@ -35,7 +35,7 @@ end
 NVTX.@range "Naive transpose ($(block_dim^2), 1)" let
     a = CuArray(rand(T, shape))
     b = similar(a, shape[2], shape[1])
-    kernel! = transpose_kernel_naive!(CUDAGPU(), (block_dim*block_dim, 1), size(b))
+    kernel! = transpose_kernel_naive!(CUDADevice(), (block_dim*block_dim, 1), size(b))
   
     event = kernel!(b, a)
     wait(event)
@@ -51,7 +51,7 @@ end
 NVTX.@range "Naive transpose (1, $(block_dim^2))" let
     a = CuArray(rand(T, shape))
     b = similar(a, shape[2], shape[1])
-    kernel! = transpose_kernel_naive!(CUDAGPU(), (1, block_dim*block_dim), size(b))
+    kernel! = transpose_kernel_naive!(CUDADevice(), (1, block_dim*block_dim), size(b))
   
     event = kernel!(b, a)
     wait(event)

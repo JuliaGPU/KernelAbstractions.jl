@@ -20,6 +20,6 @@ end
 M = 1024
 
 if has_cuda_gpu()
-    copy_test(CUDAGPU(), CuArray, M)
+    copy_test(CUDADevice(), CuArray, M)
 end
 copy_test(CPU(), Array, M)

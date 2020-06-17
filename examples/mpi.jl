@@ -10,7 +10,7 @@ end
 
 using MPI
 
-device(A) = typeof(A) <: Array ? CPU() : CUDAGPU()
+device(A) = typeof(A) <: Array ? CPU() : CUDADevice()
 
 function mpiyield()
     MPI.Iprobe(MPI.MPI_ANY_SOURCE, MPI.MPI_ANY_TAG, MPI.COMM_WORLD)

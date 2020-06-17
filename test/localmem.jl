@@ -53,6 +53,6 @@ end
 @testset "kernels" begin
     harness(CPU(), Array)
     if has_cuda_gpu()
-        harness(CUDAGPU(), CuArray)
+        harness(CUDADevice(), CuArray)
     end
 end

@@ -49,7 +49,7 @@ end
 failed(::CudaEvent) = false
 isdone(ev::CudaEvent) = CUDA.query(ev.event)
 
-function Event(::CUDAGPU)
+function Event(::CUDADevice)
     stream = CUDA.CuDefaultStream()
     event = CUDA.CuEvent(CUDA.EVENT_DISABLE_TIMING)
     CUDA.record(event, stream)
@@ -69,10 +69,10 @@ function wait(::CPU, ev::CudaEvent, progress=yield)
 end
 
 # Use this to synchronize between computation using the CuDefaultStream
-wait(::CUDAGPU, ev::CudaEvent, progress=nothing, stream=CUDA.CuDefaultStream()) = CUDA.wait(ev.event, stream)
-wait(::CUDAGPU, ev::NoneEvent, progress=nothing, stream=nothing) = nothing
+wait(::CUDADevice, ev::CudaEvent, progress=nothing, stream=CUDA.CuDefaultStream()) = CUDA.wait(ev.event, stream)
+wait(::CUDADevice, ev::NoneEvent, progress=nothing, stream=nothing) = nothing
 
-function wait(::CUDAGPU, ev::MultiEvent, progress=nothing, stream=CUDA.CuDefaultStream())
+function wait(::CUDADevice, ev::MultiEvent, progress=nothing, stream=CUDA.CuDefaultStream())
     dependencies = collect(ev.events)
     cudadeps  = filter(d->d isa CudaEvent,    dependencies)
     otherdeps = filter(d->!(d isa CudaEvent), dependencies)
@@ -80,14 +80,14 @@ function wait(::CUDAGPU, ev::MultiEvent, progress=nothing, stream=CUDA.CuDefault
         CUDA.wait(event.event, stream)
     end
     for event in otherdeps
-        wait(CUDAGPU(), event, progress, stream)
+        wait(CUDADevice(), event, progress, stream)
     end
 end
 
 include("cusynchronization.jl")
 import .CuSynchronization: unsafe_volatile_load, unsafe_volatile_store!
 
-function wait(::CUDAGPU, ev::CPUEvent, progress=nothing, stream=nothing)
+function wait(::CUDADevice, ev::CPUEvent, progress=nothing, stream=nothing)
     error("""
     Waiting on the GPU for an CPU event to finish is currently not supported.
     We have encountered deadlocks arising, due to interactions with the CUDA
@@ -106,7 +106,7 @@ end
 # TODO:
 # - In case of an error we should probably also kill the waiting GPU code.
 unsafe_wait(dev::Device, ev, progress=nothing) = wait(dev, ev, progress) 
-function unsafe_wait(::CUDAGPU, ev::CPUEvent, progress=nothing, stream=CUDA.CuDefaultStream())
+function unsafe_wait(::CUDADevice, ev::CPUEvent, progress=nothing, stream=CUDA.CuDefaultStream())
     buf = CUDA.Mem.alloc(CUDA.Mem.HostBuffer, sizeof(UInt32), CUDA.Mem.HOSTREGISTER_DEVICEMAP)
     unsafe_store!(convert(Ptr{UInt32}, buf), UInt32(0))
     # TODO: Switch to `@spawn` when CUDA.jl is thread-safe
@@ -150,12 +150,12 @@ function __pin!(a)
     return nothing
 end
 
-function async_copy!(::CUDAGPU, A, B; dependencies=nothing, progress=yield)
+function async_copy!(::CUDADevice, A, B; dependencies=nothing, progress=yield)
     A isa Array && __pin!(A)
     B isa Array && __pin!(B)
 
     stream = next_stream()
-    wait(CUDAGPU(), MultiEvent(dependencies), progress, stream)
+    wait(CUDADevice(), MultiEvent(dependencies), progress, stream)
     event = CUDA.CuEvent(CUDA.EVENT_DISABLE_TIMING)
     GC.@preserve A B begin
         destptr = pointer(A)
@@ -173,7 +173,7 @@ end
 ###
 # Kernel launch
 ###
-function (obj::Kernel{CUDAGPU})(args...; ndrange=nothing, dependencies=nothing, workgroupsize=nothing, progress=yield)
+function (obj::Kernel{CUDADevice})(args...; ndrange=nothing, dependencies=nothing, workgroupsize=nothing, progress=yield)
     if ndrange isa Integer
         ndrange = (ndrange,)
     end
@@ -203,7 +203,7 @@ function (obj::Kernel{CUDAGPU})(args...; ndrange=nothing, dependencies=nothing, 
     end
 
     stream = next_stream()
-    wait(CUDAGPU(), MultiEvent(dependencies), progress, stream)
+    wait(CUDADevice(), MultiEvent(dependencies), progress, stream)
 
     ctx = mkcontext(obj, ndrange, iterspace)
     # Launch kernel
@@ -218,7 +218,7 @@ end
 
 Cassette.@context CUDACtx
 
-function mkcontext(kernel::Kernel{CUDAGPU}, _ndrange, iterspace)
+function mkcontext(kernel::Kernel{CUDADevice}, _ndrange, iterspace)
     metadata = CompilerMetadata{ndrange(kernel), DynamicCheck}(_ndrange, iterspace)
     Cassette.disablehooks(CUDACtx(pass = CompilerPass, metadata=metadata))
 end
