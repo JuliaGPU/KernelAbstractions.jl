@@ -1,12 +1,7 @@
 using KernelAbstractions
-using CUDAapi
+using CUDA
 
-CUDAapi.has_cuda_gpu() || exit()
-
-using CuArrays
-using CUDAdrv
-using CUDAnative
-using CUDAnative.NVTX
+has_cuda_gpu() || exit()
 
 @kernel function transpose_kernel_naive!(b, a)
     i, j = @index(Global, NTuple)
@@ -24,12 +19,12 @@ const nreps = 1
 NVTX.@range "Naive transpose ($block_dim, $block_dim)" let
     a = CuArray(rand(T, shape))
     b = similar(a, shape[2], shape[1])
-    kernel! = transpose_kernel_naive!(CUDA(), (block_dim, block_dim), size(b))
+    kernel! = transpose_kernel_naive!(CUDAGPU(), (block_dim, block_dim), size(b))
   
     event = kernel!(b, a)
     wait(event)
     @assert Array(b) == Array(a)'
-    @CUDAdrv.profile begin
+    CUDA.@profile begin
         for rep in 1:nreps
           event = kernel!(b, a, dependencies=(event,))
         end
@@ -40,12 +35,12 @@ end
 NVTX.@range "Naive transpose ($(block_dim^2), 1)" let
     a = CuArray(rand(T, shape))
     b = similar(a, shape[2], shape[1])
-    kernel! = transpose_kernel_naive!(CUDA(), (block_dim*block_dim, 1), size(b))
+    kernel! = transpose_kernel_naive!(CUDAGPU(), (block_dim*block_dim, 1), size(b))
   
     event = kernel!(b, a)
     wait(event)
     @assert Array(b) == Array(a)'
-    @CUDAdrv.profile begin
+    CUDA.@profile begin
         for rep in 1:nreps
           event = kernel!(b, a, dependencies=(event,))
         end
@@ -56,12 +51,12 @@ end
 NVTX.@range "Naive transpose (1, $(block_dim^2))" let
     a = CuArray(rand(T, shape))
     b = similar(a, shape[2], shape[1])
-    kernel! = transpose_kernel_naive!(CUDA(), (1, block_dim*block_dim), size(b))
+    kernel! = transpose_kernel_naive!(CUDAGPU(), (1, block_dim*block_dim), size(b))
   
     event = kernel!(b, a)
     wait(event)
     @assert Array(b) == Array(a)'
-    @CUDAdrv.profile begin
+    CUDA.@profile begin
         for rep in 1:nreps
           event = kernel!(b, a, dependencies=(event,))
         end

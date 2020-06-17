@@ -55,11 +55,11 @@ all(A .== 2.0)
 1. Functions inside kernels are forcefully inlined, except when marked with `@noinline`.
 2. Floating-point multiplication, addition, subtraction are marked contractable.
 
-## Important differences to CUDAnative
+## Important differences to CUDA
 
 1. The kernels are automatically bounds-checked against either the dynamic or statically
    provided `ndrange`.
-2. Functions like `Base.sin` are mapped to `CUDAnative.sin`.
+2. Functions like `Base.sin` are mapped to `CUDA.sin`.
 
 ## Important differences to GPUifyLoops
 

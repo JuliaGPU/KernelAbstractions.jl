@@ -1,7 +1,7 @@
-using KernelAbstractions, Test, CUDAapi
-if CUDAapi.has_cuda_gpu()
-    using CuArrays
-    CuArrays.allowscalar(false)
+using KernelAbstractions, Test, CUDA
+
+if has_cuda_gpu()
+    CUDA.allowscalar(false)
 end
 
 # Simple kernel for matrix multiplication
@@ -26,7 +26,7 @@ function matmul!(a, b, c)
     if isa(a, Array)
         kernel! = matmul_kernel!(CPU(),4)
     else
-        kernel! = matmul_kernel!(CUDA(),256)
+        kernel! = matmul_kernel!(CUDAGPU(),256)
     end
     kernel!(a, b, c, ndrange=size(c)) 
 end

@@ -1,8 +1,8 @@
 using KernelAbstractions, Test
-using CUDAapi
-if CUDAapi.has_cuda_gpu()
-    using CuArrays
-    CuArrays.allowscalar(false)
+using CUDA
+
+if has_cuda_gpu()
+    CUDA.allowscalar(false)
 end
 
 @kernel function kernel_print()
@@ -16,8 +16,8 @@ function test_print(backend)
 end
 
 @testset "print test" begin
-    if CUDAapi.has_cuda_gpu()
-        wait(test_print(CUDA()))
+    if has_cuda_gpu()
+        wait(test_print(CUDAGPU()))
         @test true
     end
 

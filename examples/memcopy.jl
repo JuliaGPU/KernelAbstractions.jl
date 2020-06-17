@@ -1,5 +1,5 @@
 using KernelAbstractions
-using CUDAapi
+using CUDA
 using Test
 
 @kernel function copy_kernel!(A, @Const(B))
@@ -21,15 +21,14 @@ wait(event)
 
 
 if has_cuda_gpu()
-    using CuArrays
 
     function mycopy!(A::CuArray, B::CuArray)
         @assert size(A) == size(B)
-        copy_kernel!(CUDA(), 256)(A, B, ndrange=length(A))
+        copy_kernel!(CUDAGPU(), 256)(A, B, ndrange=length(A))
     end
 
     A = CuArray{Float32}(undef, 1024)
-    B = CuArrays.ones(Float32, 1024)
+    B = CUDA.ones(Float32, 1024)
     event = mycopy!(A, B)
     wait(event)
     @test A == B
