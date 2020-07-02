@@ -5,7 +5,6 @@ export @Const, @localmem, @private, @uniform, @synchronize, @index, groupsize, @
 export Device, GPU, CPU, CUDADevice, Event, MultiEvent, NoneEvent
 export async_copy!
 
-
 using MacroTools
 using StaticArrays
 using Cassette
@@ -303,7 +302,7 @@ abstract type Device end
 abstract type GPU <: Device end
 
 struct CPU <: Device end
-struct CUDADevice <: GPU end
+
 # struct AMD <: GPU end
 # struct Intel <: GPU end
 
@@ -435,6 +434,8 @@ end
     end
 end
 
+unsafe_wait(dev::Device, ev, progress=nothing) = wait(dev, ev, progress) 
+
 ###
 # Backends/Implementation
 ###
@@ -444,7 +445,6 @@ __size(args::Tuple) = Tuple{args...}
 __size(i::Int) = Tuple{i}
 
 include("backends/cpu.jl")
-include("backends/cuda.jl")
 
 ###
 # Extras

@@ -201,7 +201,7 @@ end
     __print(items...)
 end
 
-generate_overdubs(CPUCtx)
+generate_overdubs(@__MODULE__, CPUCtx)
 
 # Don't recurse into these functions
 const cpufuns = (:cos, :cospi, :sin, :sinpi, :tan,

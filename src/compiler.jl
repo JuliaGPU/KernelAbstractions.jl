@@ -30,21 +30,21 @@ end
 include("compiler/contract.jl")
 include("compiler/pass.jl")
 
-function generate_overdubs(Ctx)
-   @eval begin
-        @inline Cassette.overdub(ctx::$Ctx, ::typeof(groupsize)) = __groupsize(ctx.metadata)
-        @inline Cassette.overdub(ctx::$Ctx, ::typeof(__workitems_iterspace)) = workitems(__iterspace(ctx.metadata))
+function generate_overdubs(Module,Ctx)
+   @eval Module begin
+        @inline Cassette.overdub(ctx::$Ctx, ::typeof($groupsize)) = $__groupsize(ctx.metadata)
+        @inline Cassette.overdub(ctx::$Ctx, ::typeof($__workitems_iterspace)) = $workitems($__iterspace(ctx.metadata))
 
         ###
         # Cassette fixes
         ###
         @inline Cassette.overdub(::$Ctx, ::typeof(Core.kwfunc), f) = return Core.kwfunc(f)
         @inline Cassette.overdub(::$Ctx, ::typeof(Core.apply_type), args...) = return Core.apply_type(args...)
-        @inline Cassette.overdub(::$Ctx, ::typeof(StaticArrays.Size), x::Type{<:AbstractArray{<:Any, N}}) where {N} = return StaticArrays.Size(x)
+        @inline Cassette.overdub(::$Ctx, ::typeof($StaticArrays.Size), x::Type{<:AbstractArray{<:Any, N}}) where {N} = return $StaticArrays.Size(x)
 
-        @inline Cassette.overdub(::$Ctx, ::typeof(+), a::T, b::T) where T<:Union{Float32, Float64} = add_float_contract(a, b)
-        @inline Cassette.overdub(::$Ctx, ::typeof(-), a::T, b::T) where T<:Union{Float32, Float64} = sub_float_contract(a, b)
-        @inline Cassette.overdub(::$Ctx, ::typeof(*), a::T, b::T) where T<:Union{Float32, Float64} = mul_float_contract(a, b)
+        @inline Cassette.overdub(::$Ctx, ::typeof(+), a::T, b::T) where T<:Union{Float32, Float64} = $add_float_contract(a, b)
+        @inline Cassette.overdub(::$Ctx, ::typeof(-), a::T, b::T) where T<:Union{Float32, Float64} = $sub_float_contract(a, b)
+        @inline Cassette.overdub(::$Ctx, ::typeof(*), a::T, b::T) where T<:Union{Float32, Float64} = $mul_float_contract(a, b)
 
         function Cassette.overdub(::$Ctx, ::typeof(:), start::T, step::T, stop::T) where T<:Union{Float16,Float32,Float64}
             lf = (stop-start)/step
