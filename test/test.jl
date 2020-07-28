@@ -295,3 +295,55 @@ end
         @test cy[4] ≈ SpecialFunctions.gamma.(x[4])
     end
 end
+
+@testset "special functions: erf" begin
+    import SpecialFunctions
+
+    @kernel function erf_knl(A, @Const(B))
+        I = @index(Global)
+        @inbounds A[I] = SpecialFunctions.erf(B[I])
+    end
+
+    x = [-1.0,-0.5,0.0,1e-3,1.0,2.0,5.5]
+    y = similar(x)
+    event = erf_knl(CPU())(y, x; ndrange=length(x))
+    wait(event)
+    @test y == SpecialFunctions.erf.(x)
+
+    if has_cuda_gpu()
+        cx = CuArray(x)
+        cy = similar(cx)
+        event = erf_knl(CUDADevice())(cy, cx; ndrange=length(x))
+        wait(event)
+
+        cy = Array(cy)
+        @test cy[1:3] == SpecialFunctions.erf.(x[1:3])
+        @test cy[4] ≈ SpecialFunctions.erf.(x[4])
+    end
+end
+
+@testset "special functions: erfc" begin
+    import SpecialFunctions
+
+    @kernel function erfc_knl(A, @Const(B))
+        I = @index(Global)
+        @inbounds A[I] = SpecialFunctions.erfc(B[I])
+    end
+
+    x = [-1.0,-0.5,0.0,1e-3,1.0,2.0,5.5]
+    y = similar(x)
+    event = erfc_knl(CPU())(y, x; ndrange=length(x))
+    wait(event)
+    @test y == SpecialFunctions.erfc.(x)
+
+    if has_cuda_gpu()
+        cx = CuArray(x)
+        cy = similar(cx)
+        event = erfc_knl(CUDADevice())(cy, cx; ndrange=length(x))
+        wait(event)
+
+        cy = Array(cy)
+        @test cy[1:3] == SpecialFunctions.erfc.(x[1:3])
+        @test cy[4] ≈ SpecialFunctions.erfc.(x[4])
+    end
+end

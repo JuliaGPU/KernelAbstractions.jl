@@ -222,6 +222,8 @@ for f in cpufuns
 end
 
 @inline Cassette.overdub(::CPUCtx, ::typeof(SpecialFunctions.gamma), x::Union{Float32, Float64}) = SpecialFunctions.gamma(x)
+@inline Cassette.overdub(::CPUCtx, ::typeof(SpecialFunctions.erf), x::Union{Float32, Float64}) = SpecialFunctions.erf(x)
+@inline Cassette.overdub(::CPUCtx, ::typeof(SpecialFunctions.erfc), x::Union{Float32, Float64}) = SpecialFunctions.erfc(x)
 
 ###
 # CPU implementation of shared memory
