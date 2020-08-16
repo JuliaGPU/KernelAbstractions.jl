@@ -5,7 +5,7 @@ target different execution backends. It is intended to be a minimal, and perform
 library that explores ways to best write heterogenous code.
 
 !!! note
-    While `KernelAbstraction.jl` is focused on performance portatbility, it is GPU-biased
+    While `KernelAbstraction.jl` is focused on performance portability, it is GPU-biased
     and therefore the kernel language has several constructs that are necessary for good
     performance on the GPU, but may hurt performance on the CPU.
 
