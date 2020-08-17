@@ -2,7 +2,7 @@ module KernelAbstractions
 
 export @kernel
 export @Const, @localmem, @private, @uniform, @synchronize, @index, groupsize, @print
-export Device, GPU, CPU, CUDA, Event, MultiEvent, NoneEvent
+export Device, GPU, CPU, CUDADevice, Event, MultiEvent, NoneEvent
 export async_copy!
 
 
@@ -303,7 +303,7 @@ abstract type Device end
 abstract type GPU <: Device end
 
 struct CPU <: Device end
-struct CUDA <: GPU end
+struct CUDADevice <: GPU end
 # struct AMD <: GPU end
 # struct Intel <: GPU end
 

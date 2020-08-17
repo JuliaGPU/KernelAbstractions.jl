@@ -1,7 +1,7 @@
-using KernelAbstractions, Test, CUDAapi
-if CUDAapi.has_cuda_gpu()
-    using CuArrays
-    CuArrays.allowscalar(false)
+using KernelAbstractions, Test, CUDA
+
+if has_cuda_gpu()
+    CUDA.allowscalar(false)
 end
 
 @kernel function naive_transpose_kernel!(a, b)
@@ -19,7 +19,7 @@ function naive_transpose!(a, b)
     if isa(a, Array)
         kernel! = naive_transpose_kernel!(CPU(),4)
     else
-        kernel! = naive_transpose_kernel!(CUDA(),256)
+        kernel! = naive_transpose_kernel!(CUDADevice(),256)
     end
     kernel!(a, b, ndrange=size(a))
 end
@@ -39,7 +39,7 @@ wait(event)
 # beginning GPU tests
 if has_cuda_gpu()
     d_a = CuArray(a)
-    d_b = CuArrays.zeros(Float32, res, res)
+    d_b = CUDA.zeros(Float32, res, res)
 
     ev = naive_transpose!(d_a, d_b)
     wait(ev)

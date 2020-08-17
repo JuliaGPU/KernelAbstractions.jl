@@ -1,9 +1,9 @@
 using KernelAbstractions
 using Test
-using CUDAapi
+using CUDA
+
 if has_cuda_gpu()
-    using CuArrays
-    CuArrays.allowscalar(false)
+    CUDA.allowscalar(false)
 end
 
 @kernel function typetest(A, B)
@@ -65,6 +65,6 @@ end
 @testset "kernels" begin
     harness(CPU(), Array)
     if has_cuda_gpu()
-        harness(CUDA(), CuArray)
+        harness(CUDADevice(), CuArray)
     end
 end

@@ -1,10 +1,8 @@
-import CUDAnative, CUDAdrv
-import CUDAnative: cufunction, DevicePtr
-import CUDAdrv: CuEvent, CuStream, CuDefaultStream, Mem
+import CUDA
 import SpecialFunctions
 
-const FREE_STREAMS = CuStream[]
-const STREAMS = CuStream[]
+const FREE_STREAMS = CUDA.CuStream[]
+const STREAMS = CUDA.CuStream[]
 const STREAM_GC_THRESHOLD = Ref{Int}(16)
 
 # This code is loaded after an `@init` step
@@ -30,7 +28,7 @@ function next_stream()
 
     if length(STREAMS) > STREAM_GC_THRESHOLD[]
         for stream in STREAMS
-            if CUDAdrv.query(stream)
+            if CUDA.query(stream)
                 push!(FREE_STREAMS, stream)
             end
         end
@@ -39,23 +37,22 @@ function next_stream()
     if !isempty(FREE_STREAMS)
         return pop!(FREE_STREAMS)
     end
-
-    stream = CUDAdrv.CuStream(CUDAdrv.STREAM_NON_BLOCKING)
+    stream = CUDA.CuStream(flags = CUDA.STREAM_NON_BLOCKING)
     push!(STREAMS, stream)
     return stream
 end
 
 struct CudaEvent <: Event
-    event::CuEvent
+    event::CUDA.CuEvent
 end
 
 failed(::CudaEvent) = false
-isdone(ev::CudaEvent) = CUDAdrv.query(ev.event)
+isdone(ev::CudaEvent) = CUDA.query(ev.event)
 
-function Event(::CUDA)
-    stream = CUDAdrv.CuDefaultStream()
-    event = CuEvent(CUDAdrv.EVENT_DISABLE_TIMING)
-    CUDAdrv.record(event, stream)
+function Event(::CUDADevice)
+    stream = CUDA.CuDefaultStream()
+    event = CUDA.CuEvent(CUDA.EVENT_DISABLE_TIMING)
+    CUDA.record(event, stream)
     CudaEvent(event)
 end
 
@@ -63,7 +60,7 @@ wait(ev::CudaEvent, progress=yield) = wait(CPU(), ev, progress)
 
 function wait(::CPU, ev::CudaEvent, progress=yield)
     if progress === nothing
-        CUDAdrv.synchronize(ev.event)
+        CUDA.synchronize(ev.event)
     else
         while !isdone(ev)
             progress()
@@ -72,26 +69,25 @@ function wait(::CPU, ev::CudaEvent, progress=yield)
 end
 
 # Use this to synchronize between computation using the CuDefaultStream
-wait(::CUDA, ev::CudaEvent, progress=nothing, stream=CUDAdrv.CuDefaultStream()) = CUDAdrv.wait(ev.event, stream)
-wait(::CUDA, ev::NoneEvent, progress=nothing, stream=nothing) = nothing
+wait(::CUDADevice, ev::CudaEvent, progress=nothing, stream=CUDA.CuDefaultStream()) = CUDA.wait(ev.event, stream)
+wait(::CUDADevice, ev::NoneEvent, progress=nothing, stream=nothing) = nothing
 
-function wait(::CUDA, ev::MultiEvent, progress=nothing, stream=CUDAdrv.CuDefaultStream())
+function wait(::CUDADevice, ev::MultiEvent, progress=nothing, stream=CUDA.CuDefaultStream())
     dependencies = collect(ev.events)
     cudadeps  = filter(d->d isa CudaEvent,    dependencies)
     otherdeps = filter(d->!(d isa CudaEvent), dependencies)
     for event in cudadeps
-        CUDAdrv.wait(event.event, stream)
+        CUDA.wait(event.event, stream)
     end
     for event in otherdeps
-        wait(CUDA(), event, progress, stream)
+        wait(CUDADevice(), event, progress, stream)
     end
 end
 
 include("cusynchronization.jl")
 import .CuSynchronization: unsafe_volatile_load, unsafe_volatile_store!
-import CUDAdrv: Mem
 
-function wait(::CUDA, ev::CPUEvent, progress=nothing, stream=nothing)
+function wait(::CUDADevice, ev::CPUEvent, progress=nothing, stream=nothing)
     error("""
     Waiting on the GPU for an CPU event to finish is currently not supported.
     We have encountered deadlocks arising, due to interactions with the CUDA
@@ -110,10 +106,10 @@ end
 # TODO:
 # - In case of an error we should probably also kill the waiting GPU code.
 unsafe_wait(dev::Device, ev, progress=nothing) = wait(dev, ev, progress) 
-function unsafe_wait(::CUDA, ev::CPUEvent, progress=nothing, stream=CuDefaultStream())
-    buf = Mem.alloc(Mem.HostBuffer, sizeof(UInt32), Mem.HOSTREGISTER_DEVICEMAP)
+function unsafe_wait(::CUDADevice, ev::CPUEvent, progress=nothing, stream=CUDA.CuDefaultStream())
+    buf = CUDA.Mem.alloc(CUDA.Mem.HostBuffer, sizeof(UInt32), CUDA.Mem.HOSTREGISTER_DEVICEMAP)
     unsafe_store!(convert(Ptr{UInt32}, buf), UInt32(0))
-    # TODO: Switch to `@spawn` when CUDAnative.jl is thread-safe
+    # TODO: Switch to `@spawn` when CUDA.jl is thread-safe
     @async begin
         try
             wait(ev.task)
@@ -127,12 +123,12 @@ function unsafe_wait(::CUDA, ev::CPUEvent, progress=nothing, stream=CuDefaultStr
                 yield()
             end
             @debug "GPU released"
-            Mem.free(buf)
+            CUDA.Mem.free(buf)
         end
     end
-    ptr = convert(CUDAnative.DevicePtr{UInt32}, convert(Mem.CuPtr{UInt32}, buf))
+    ptr = convert(CUDA.DevicePtr{UInt32}, convert(CUDA.Mem.CuPtr{UInt32}, buf))
     sem = CuSynchronization.Semaphore(ptr, UInt32(1))
-    CUDAnative.@cuda threads=1 stream=stream CuSynchronization.wait(sem)
+    CUDA.@cuda threads=1 stream=stream CuSynchronization.wait(sem)
 end
 
 ###
@@ -148,19 +144,19 @@ function __pin!(a)
     if haskey(__pinned_memory, oid) && __pinned_memory[oid].value !== nothing
         return nothing
     end
-    ad = Mem.register(Mem.Host, pointer(a), sizeof(a))
-    finalizer(_ -> Mem.unregister(ad), a)
+    ad = CUDA.Mem.register(CUDA.Mem.Host, pointer(a), sizeof(a))
+    finalizer(_ -> CUDA.Mem.unregister(ad), a)
     __pinned_memory[oid] = WeakRef(a)
     return nothing
 end
 
-function async_copy!(::CUDA, A, B; dependencies=nothing, progress=yield)
+function async_copy!(::CUDADevice, A, B; dependencies=nothing, progress=yield)
     A isa Array && __pin!(A)
     B isa Array && __pin!(B)
 
     stream = next_stream()
-    wait(CUDA(), MultiEvent(dependencies), progress, stream)
-    event = CuEvent(CUDAdrv.EVENT_DISABLE_TIMING)
+    wait(CUDADevice(), MultiEvent(dependencies), progress, stream)
+    event = CUDA.CuEvent(CUDA.EVENT_DISABLE_TIMING)
     GC.@preserve A B begin
         destptr = pointer(A)
         srcptr  = pointer(B)
@@ -168,8 +164,7 @@ function async_copy!(::CUDA, A, B; dependencies=nothing, progress=yield)
         unsafe_copyto!(destptr, srcptr, N, async=true, stream=stream)
     end
 
-    CUDAdrv.record(event, stream)
-
+    CUDA.record(event, stream)
     return CudaEvent(event)
 end
 
@@ -178,7 +173,7 @@ end
 ###
 # Kernel launch
 ###
-function (obj::Kernel{CUDA})(args...; ndrange=nothing, dependencies=nothing, workgroupsize=nothing, progress=yield)
+function (obj::Kernel{CUDADevice})(args...; ndrange=nothing, dependencies=nothing, workgroupsize=nothing, progress=yield)
     if ndrange isa Integer
         ndrange = (ndrange,)
     end
@@ -188,7 +183,7 @@ function (obj::Kernel{CUDA})(args...; ndrange=nothing, dependencies=nothing, wor
 
     if KernelAbstractions.workgroupsize(obj) <: DynamicSize && workgroupsize === nothing
         # TODO: allow for NDRange{1, DynamicSize, DynamicSize}(nothing, nothing)
-        #       and actually use CUDAnative autotuning
+        #       and actually use CUDA autotuning
         workgroupsize = (256,)
     end
     # If the kernel is statically sized we can tell the compiler about that
@@ -208,55 +203,55 @@ function (obj::Kernel{CUDA})(args...; ndrange=nothing, dependencies=nothing, wor
     end
 
     stream = next_stream()
-    wait(CUDA(), MultiEvent(dependencies), progress, stream)
+    wait(CUDADevice(), MultiEvent(dependencies), progress, stream)
 
     ctx = mkcontext(obj, ndrange, iterspace)
     # Launch kernel
-    event = CuEvent(CUDAdrv.EVENT_DISABLE_TIMING)
-    CUDAnative.@cuda(threads=threads, blocks=nblocks, stream=stream,
-                     name=String(nameof(obj.f)), maxthreads=maxthreads,
-                     Cassette.overdub(ctx, obj.f, args...))
+    event = CUDA.CuEvent(CUDA.EVENT_DISABLE_TIMING)
+    CUDA.@cuda(threads=threads, blocks=nblocks, stream=stream,
+               name=String(nameof(obj.f)), maxthreads=maxthreads,
+               Cassette.overdub(ctx, obj.f, args...))
 
-    CUDAdrv.record(event, stream)
+    CUDA.record(event, stream)
     return CudaEvent(event)
 end
 
 Cassette.@context CUDACtx
 
-function mkcontext(kernel::Kernel{CUDA}, _ndrange, iterspace)
+function mkcontext(kernel::Kernel{CUDADevice}, _ndrange, iterspace)
     metadata = CompilerMetadata{ndrange(kernel), DynamicCheck}(_ndrange, iterspace)
     Cassette.disablehooks(CUDACtx(pass = CompilerPass, metadata=metadata))
 end
 
 @inline function Cassette.overdub(ctx::CUDACtx, ::typeof(__index_Local_Linear))
-    return CUDAnative.threadIdx().x
+    return CUDA.threadIdx().x
 end
 
 @inline function Cassette.overdub(ctx::CUDACtx, ::typeof(__index_Group_Linear))
-    return CUDAnative.blockIdx().x
+    return CUDA.blockIdx().x
 end
 
 @inline function Cassette.overdub(ctx::CUDACtx, ::typeof(__index_Global_Linear))
-    I =  @inbounds expand(__iterspace(ctx.metadata), CUDAnative.blockIdx().x, CUDAnative.threadIdx().x)
+    I =  @inbounds expand(__iterspace(ctx.metadata), CUDA.blockIdx().x, CUDA.threadIdx().x)
     # TODO: This is unfortunate, can we get the linear index cheaper
     @inbounds LinearIndices(__ndrange(ctx.metadata))[I]
 end
 
 @inline function Cassette.overdub(ctx::CUDACtx, ::typeof(__index_Local_Cartesian))
-    @inbounds workitems(__iterspace(ctx.metadata))[CUDAnative.threadIdx().x]
+    @inbounds workitems(__iterspace(ctx.metadata))[CUDA.threadIdx().x]
 end
 
 @inline function Cassette.overdub(ctx::CUDACtx, ::typeof(__index_Group_Cartesian))
-    @inbounds blocks(__iterspace(ctx.metadata))[CUDAnative.blockIdx().x]
+    @inbounds blocks(__iterspace(ctx.metadata))[CUDA.blockIdx().x]
 end
 
 @inline function Cassette.overdub(ctx::CUDACtx, ::typeof(__index_Global_Cartesian))
-    return @inbounds expand(__iterspace(ctx.metadata), CUDAnative.blockIdx().x, CUDAnative.threadIdx().x)
+    return @inbounds expand(__iterspace(ctx.metadata), CUDA.blockIdx().x, CUDA.threadIdx().x)
 end
 
 @inline function Cassette.overdub(ctx::CUDACtx, ::typeof(__validindex))
     if __dynamic_checkbounds(ctx.metadata)
-        I = @inbounds expand(__iterspace(ctx.metadata), CUDAnative.blockIdx().x, CUDAnative.threadIdx().x)
+        I = @inbounds expand(__iterspace(ctx.metadata), CUDA.blockIdx().x, CUDA.threadIdx().x)
         return I in __ndrange(ctx.metadata)
     else
         return true
@@ -269,11 +264,11 @@ generate_overdubs(CUDACtx)
 # CUDA specific method rewrites
 ###
 
-@inline Cassette.overdub(::CUDACtx, ::typeof(^), x::Float64, y::Float64) = CUDAnative.pow(x, y)
-@inline Cassette.overdub(::CUDACtx, ::typeof(^), x::Float32, y::Float32) = CUDAnative.pow(x, y)
-@inline Cassette.overdub(::CUDACtx, ::typeof(^), x::Float64, y::Int32)   = CUDAnative.pow(x, y)
-@inline Cassette.overdub(::CUDACtx, ::typeof(^), x::Float32, y::Int32)   = CUDAnative.pow(x, y)
-@inline Cassette.overdub(::CUDACtx, ::typeof(^), x::Union{Float32, Float64}, y::Int64) = CUDAnative.pow(x, y)
+@inline Cassette.overdub(::CUDACtx, ::typeof(^), x::Float64, y::Float64) = CUDA.pow(x, y)
+@inline Cassette.overdub(::CUDACtx, ::typeof(^), x::Float32, y::Float32) = CUDA.pow(x, y)
+@inline Cassette.overdub(::CUDACtx, ::typeof(^), x::Float64, y::Int32)   = CUDA.pow(x, y)
+@inline Cassette.overdub(::CUDACtx, ::typeof(^), x::Float32, y::Int32)   = CUDA.pow(x, y)
+@inline Cassette.overdub(::CUDACtx, ::typeof(^), x::Union{Float32, Float64}, y::Int64) = CUDA.pow(x, y)
 
 # libdevice.jl
 const cudafuns = (:cos, :cospi, :sin, :sinpi, :tan,
@@ -289,21 +284,21 @@ const cudafuns = (:cos, :cospi, :sin, :sinpi, :tan,
 for f in cudafuns
     @eval function Cassette.overdub(ctx::CUDACtx, ::typeof(Base.$f), x::Union{Float32, Float64})
         @Base._inline_meta
-        return CUDAnative.$f(x)
+        return CUDA.$f(x)
     end
 end
 
-@inline Cassette.overdub(::CUDACtx, ::typeof(sincos), x::Union{Float32, Float64}) = (CUDAnative.sin(x), CUDAnative.cos(x))
-@inline Cassette.overdub(::CUDACtx, ::typeof(exp), x::Union{ComplexF32, ComplexF64}) = CUDAnative.exp(x)
+@inline Cassette.overdub(::CUDACtx, ::typeof(sincos), x::Union{Float32, Float64}) = (CUDA.sin(x), CUDA.cos(x))
+@inline Cassette.overdub(::CUDACtx, ::typeof(exp), x::Union{ComplexF32, ComplexF64}) = CUDA.exp(x)
 
-@inline Cassette.overdub(::CUDACtx, ::typeof(SpecialFunctions.gamma), x::Union{Float32, Float64}) = CUDAnative.tgamma(x)
+@inline Cassette.overdub(::CUDACtx, ::typeof(SpecialFunctions.gamma), x::Union{Float32, Float64}) = CUDA.tgamma(x)
 
 ###
 # GPU implementation of shared memory
 ###
 @inline function Cassette.overdub(ctx::CUDACtx, ::typeof(SharedMemory), ::Type{T}, ::Val{Dims}, ::Val{Id}) where {T, Dims, Id}
-    ptr = CUDAnative._shmem(Val(Id), T, Val(prod(Dims)))
-    CUDAnative.CuDeviceArray(Dims, ptr)
+    ptr = CUDA._shmem(Val(Id), T, Val(prod(Dims)))
+    CUDA.CuDeviceArray(Dims, ptr)
 end
 
 ###
@@ -316,11 +311,11 @@ end
 end
 
 @inline function Cassette.overdub(ctx::CUDACtx, ::typeof(__synchronize))
-    CUDAnative.sync_threads()
+    CUDA.sync_threads()
 end
 
 @inline function Cassette.overdub(ctx::CUDACtx, ::typeof(__print), args...)
-    CUDAnative._cuprint(args...)
+    CUDA._cuprint(args...)
 end
 
 ###
@@ -328,13 +323,13 @@ end
 ###
 struct ConstCuDeviceArray{T,N,A} <: AbstractArray{T,N}
     shape::Dims{N}
-    ptr::DevicePtr{T,A}
+    ptr::CUDA.DevicePtr{T,A}
 
     # inner constructors, fully parameterized, exact types (ie. Int not <:Integer)
-    ConstCuDeviceArray{T,N,A}(shape::Dims{N}, ptr::DevicePtr{T,A}) where {T,A,N} = new(shape,ptr)
+    ConstCuDeviceArray{T,N,A}(shape::Dims{N}, ptr::CUDA.DevicePtr{T,A}) where {T,A,N} = new(shape,ptr)
 end
 
-Adapt.adapt_storage(to::ConstAdaptor, a::CUDAnative.CuDeviceArray{T,N,A}) where {T,N,A} = ConstCuDeviceArray{T, N, A}(a.shape, a.ptr)
+Adapt.adapt_storage(to::ConstAdaptor, a::CUDA.CuDeviceArray{T,N,A}) where {T,N,A} = ConstCuDeviceArray{T, N, A}(a.shape, a.ptr)
 
 Base.pointer(a::ConstCuDeviceArray) = a.ptr
 Base.pointer(a::ConstCuDeviceArray, i::Integer) =
@@ -345,12 +340,12 @@ Base.size(g::ConstCuDeviceArray) = g.shape
 Base.length(g::ConstCuDeviceArray) = prod(g.shape)
 Base.IndexStyle(::Type{<:ConstCuDeviceArray}) = Base.IndexLinear()
 
-Base.unsafe_convert(::Type{DevicePtr{T,A}}, a::ConstCuDeviceArray{T,N,A}) where {T,A,N} = pointer(a)
+Base.unsafe_convert(::Type{CUDA.DevicePtr{T,A}}, a::ConstCuDeviceArray{T,N,A}) where {T,A,N} = pointer(a)
 
 @inline function Base.getindex(A::ConstCuDeviceArray{T}, index::Integer) where {T}
     @boundscheck checkbounds(A, index)
     align = Base.datatype_alignment(T)
-    CUDAnative.unsafe_cached_load(pointer(A), index, Val(align))::T
+    CUDA.unsafe_cached_load(pointer(A), index, Val(align))::T
 end
 
 @inline function Base.unsafe_view(arr::ConstCuDeviceArray{T, 1, A}, I::Vararg{Base.ViewIndex,1}) where {T, A}

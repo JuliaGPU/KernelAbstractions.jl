@@ -1,15 +1,16 @@
 # EXCLUDE FROM TESTING
 using KernelAbstractions
-using  CUDAapi
-if CUDAapi.has_cuda_gpu()
-    using CuArrays
-    CuArrays.allowscalar(false)
+using  CUDA
+
+if has_cuda_gpu()
+    CUDA.allowscalar(false)
 else
     exit()
 end
+
 using MPI
 
-device(A) = typeof(A) <: Array ? CPU() : CUDA()
+device(A) = typeof(A) <: Array ? CPU() : CUDADevice()
 
 function mpiyield()
     MPI.Iprobe(MPI.MPI_ANY_SOURCE, MPI.MPI_ANY_TAG, MPI.COMM_WORLD)
@@ -62,7 +63,7 @@ function main()
     T = Int64
     M = 10
 
-    d_recv_buf = CuArrays.zeros(T, M)
+    d_recv_buf = CUDA.zeros(T, M)
     h_send_buf = zeros(T, M)
     h_recv_buf = zeros(T, M)
 

@@ -1,7 +1,7 @@
-using KernelAbstractions, Test, CUDAapi
+using KernelAbstractions, Test, CUDA
+
 if has_cuda_gpu()
-    using CuArrays, CUDAdrv
-    CuArrays.allowscalar(false)
+    CUDA.allowscalar(false)
 end
 
 function copy_test(backend, ArrayT, M)
@@ -20,6 +20,6 @@ end
 M = 1024
 
 if has_cuda_gpu()
-    copy_test(CUDA(), CuArray, M)
+    copy_test(CUDADevice(), CuArray, M)
 end
 copy_test(CPU(), Array, M)
