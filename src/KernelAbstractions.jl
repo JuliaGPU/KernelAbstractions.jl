@@ -121,6 +121,8 @@ function groupsize end
 
 """
     @localmem T dims
+
+Declare storage that is local to a workgroup.
 """
 macro localmem(T, dims)
     # Stay in sync with CUDAnative
@@ -133,6 +135,15 @@ end
 
 """
     @private T dims
+
+Declare storage that is local to each item in the workgroup. This can be safely used
+across [`@synchronize`](@ref) statements. On a CPU, this will allocate additional implicit
+dimensions to ensure correct localization.
+
+For storage that only persists between `@synchronize` statements, an `MArray` can be used
+instead.
+
+See also [`@uniform`](@ref).
 """
 macro private(T, dims)
     quote
@@ -141,14 +152,17 @@ macro private(T, dims)
 end
 
 """
-    @uniform value
+    @uniform expr
+
+`expr` is evaluated outside the workitem scope. This is useful for variable declarations
+that span workitems, or are reused across `@synchronize` statements.
 """
 macro uniform(value)
     esc(value)
 end
 
 """
-   @synchronize()
+    @synchronize()
 
 After a `@synchronize` statement all read and writes to global and local memory
 from each thread in the workgroup are visible in from all other threads in the
@@ -161,7 +175,7 @@ macro synchronize()
 end
 
 """
-   @synchronize(cond)
+    @synchronize(cond)
 
 After a `@synchronize` statement all read and writes to global and local memory
 from each thread in the workgroup are visible in from all other threads in the
@@ -178,7 +192,7 @@ macro synchronize(cond)
 end
 
 """
-   @print(items...)
+    @print(items...)
 
 This is a unified print statement.
 
@@ -220,7 +234,7 @@ macro print(items...)
 end
 
 """
-   @index
+    @index
 
 The `@index` macro can be used to give you the index of a workitem within a kernel
 function. It supports both the production of a linear index or a cartesian index.
