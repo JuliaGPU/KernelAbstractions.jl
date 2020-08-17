@@ -1,4 +1,5 @@
 using KernelAbstractions, CUDA, Test
+using KernelAbstractions.Extras: @unroll
 
 has_cuda_gpu() || exit()
 CUDA.allowscalar(false)
@@ -156,7 +157,7 @@ for (name, kernel) in (
                         ("transpose", lmem_transpose_kernel!(CUDADevice(), (TILE_DIM, TILE_DIM))),
                       )
     for bank in (true, false)
-        NVTX.@range "Localmem $name $(TILE_DIM, TILE_DIM) bank=$bank" let
+        NVTX.@range "Localmem $name ($TILE_DIM, $TILE_DIM) bank=$bank" let
             input = CUDA.rand(T, (N, N))
             output = similar(input)
 
@@ -178,7 +179,7 @@ for (name, kernel) in (
                         ("transpose", coalesced_transpose_kernel!(CUDADevice(), (TILE_DIM, BLOCK_ROWS))),
                       )
     for bank in (true, false)
-        NVTX.@range "Localmem + multiple elements $name $(TILE_DIM, BLOCK_ROWS) bank=$bank" let
+        NVTX.@range "Localmem + multiple elements $name ($TILE_DIM, $BLOCK_ROWS) bank=$bank" let
             input = CUDA.rand(T, (N, N))
             output = similar(input)
 
