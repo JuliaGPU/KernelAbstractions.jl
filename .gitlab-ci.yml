@@ -7,7 +7,6 @@ test:1.4:
     - .test
   tags:
     - nvidia
-  image: nvidia/cuda:latest
 
 test:1.3:
   extends:
@@ -15,7 +14,6 @@ test:1.3:
     - .test
   tags:
     - nvidia
-  image: nvidia/cuda:latest
 
 test:nightly:
   extends:
@@ -23,7 +21,6 @@ test:nightly:
     - .test
   tags:
     - nvidia
-  image: nvidia/cuda:latest
   allow_failure: true
 
 documentation:
