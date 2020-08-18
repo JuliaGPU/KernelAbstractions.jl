@@ -3,7 +3,7 @@
 Run under `nsight-cu`:
 
 ```sh
-nv-nsight-cu-cli --nvtx --profile-from-start=off --section=SpeedOfLight julia --project=examples examples/performance.jl
+nv-nsight-cu-cli --nvtx --profile-from-start=off --section=SpeedOfLight --section=julia --project=examples examples/performance.jl
 ```
 
 ## Results:
