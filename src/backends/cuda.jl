@@ -293,11 +293,18 @@ end
 
 @inline Cassette.overdub(::CUDACtx, ::typeof(SpecialFunctions.gamma), x::Union{Float32, Float64}) = CUDA.tgamma(x)
 
+@static if Base.isbindingresolved(CUDA, :emit_shmem) && Base.isdefined(CUDA, :emit_shmem)
+    const emit_shmem = CUDA.emit_shmem
+else
+    const emit_shmem = CUDA._shmem
+end
+
+ptr = CUDA._shmem(Val(Id), T, Val(prod(Dims)))
 ###
 # GPU implementation of shared memory
 ###
 @inline function Cassette.overdub(ctx::CUDACtx, ::typeof(SharedMemory), ::Type{T}, ::Val{Dims}, ::Val{Id}) where {T, Dims, Id}
-    ptr = CUDA._shmem(Val(Id), T, Val(prod(Dims)))
+    ptr = emit_shmem(Val(Id), T, Val(prod(Dims)))
     CUDA.CuDeviceArray(Dims, ptr)
 end
 
