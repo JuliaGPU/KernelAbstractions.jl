@@ -299,7 +299,6 @@ else
     const emit_shmem = CUDA._shmem
 end
 
-ptr = CUDA._shmem(Val(Id), T, Val(prod(Dims)))
 ###
 # GPU implementation of shared memory
 ###
