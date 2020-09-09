@@ -84,51 +84,12 @@ function wait(::CUDADevice, ev::MultiEvent, progress=nothing, stream=CUDA.CuDefa
     end
 end
 
-include("cusynchronization.jl")
-import .CuSynchronization: unsafe_volatile_load, unsafe_volatile_store!
-
 function wait(::CUDADevice, ev::CPUEvent, progress=nothing, stream=nothing)
     error("""
     Waiting on the GPU for an CPU event to finish is currently not supported.
     We have encountered deadlocks arising, due to interactions with the CUDA
-    driver. If you are certain that you are deadlock free, you can use `unsafe_wait`
-    instead.
+    driver.
     """)
-end
-
-# This implements waiting for a CPUEvent on the GPU.
-# Most importantly this implementation needs to be asynchronous w.r.t to the host,
-# otherwise one could introduce deadlocks with outside event systems.
-# It uses a device visible host buffer to create a barrier/semaphore.
-# On a CPU task we wait for the `ev` to finish and then signal the GPU
-# by setting the flag 0->1, the CPU then in return needs to wait for the GPU
-# to set trhe flag 1->2 so that we can deallocate the memory.
-# TODO:
-# - In case of an error we should probably also kill the waiting GPU code.
-unsafe_wait(dev::Device, ev, progress=nothing) = wait(dev, ev, progress) 
-function unsafe_wait(::CUDADevice, ev::CPUEvent, progress=nothing, stream=CUDA.CuDefaultStream())
-    buf = CUDA.Mem.alloc(CUDA.Mem.HostBuffer, sizeof(UInt32), CUDA.Mem.HOSTREGISTER_DEVICEMAP)
-    unsafe_store!(convert(Ptr{UInt32}, buf), UInt32(0))
-    # TODO: Switch to `@spawn` when CUDA.jl is thread-safe
-    @async begin
-        try
-            wait(ev.task)
-        catch err
-            bt = catch_backtrace()
-            @error "Error thrown during CUDA wait on CPUEvent" _ex=(err, bt)
-        finally
-            @debug "notifying GPU"
-            unsafe_volatile_store!(convert(Ptr{UInt32}, buf), UInt32(1))
-            while !(unsafe_volatile_load(convert(Ptr{UInt32}, buf)) == UInt32(2))
-                yield()
-            end
-            @debug "GPU released"
-            CUDA.Mem.free(buf)
-        end
-    end
-    ptr = convert(CUDA.DevicePtr{UInt32}, convert(CUDA.Mem.CuPtr{UInt32}, buf))
-    sem = CuSynchronization.Semaphore(ptr, UInt32(1))
-    CUDA.@cuda threads=1 stream=stream CuSynchronization.wait(sem)
 end
 
 ###
