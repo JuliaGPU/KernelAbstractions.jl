@@ -41,6 +41,7 @@ function transform(ctx, ref)
     end
 
     # overdubbing IntrinsicFunctions removes our ability to profile code
+    # Base.eltype is special because it is used for type inference
     newstmt = (x, i) -> begin
         isassign = Base.Meta.isexpr(x, :(=))
         stmt = isassign ? x.args[2] : x
@@ -61,7 +62,7 @@ function transform(ctx, ref)
                 name = f.name
                 if Base.isbindingresolved(mod, name) && Base.isdefined(mod, name)
                     ff = getfield(f.mod, f.name)
-                    if ff isa Core.IntrinsicFunction || ff isa Core.Builtin
+                    if ff isa Core.IntrinsicFunction || ff isa Core.Builtin || ff === Base.eltype
                         stmt.args[fidx] = Expr(:nooverdub, f)
                     end
                 end
