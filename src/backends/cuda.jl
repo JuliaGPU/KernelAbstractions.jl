@@ -139,7 +139,7 @@ function (obj::Kernel{CUDADevice})(args...; ndrange=nothing, dependencies=nothin
         ndrange = (ndrange,)
     end
     if workgroupsize isa Integer
-        workgroupsize = (workgroupsize, )
+        workgroupsize = (workgroupsize,)
     end
 
     if KernelAbstractions.workgroupsize(obj) <: DynamicSize && workgroupsize === nothing
@@ -255,6 +255,23 @@ end
 @inline Cassette.overdub(::CUDACtx, ::typeof(SpecialFunctions.gamma), x::Union{Float32, Float64}) = CUDA.tgamma(x)
 @inline Cassette.overdub(::CUDACtx, ::typeof(SpecialFunctions.erf), x::Union{Float32, Float64}) = CUDA.erf(x)
 @inline Cassette.overdub(::CUDACtx, ::typeof(SpecialFunctions.erfc), x::Union{Float32, Float64}) = CUDA.erfc(x)
+
+@inline function Cassette.overdub(::CUDACtx, ::typeof(exponent), x::Union{Float32, Float64})
+    T = typeof(x)
+    xs = reinterpret(Unsigned, x) & ~Base.sign_mask(T)
+    if xs >= Base.exponent_mask(T)
+        throw(DomainError(x, "Cannot be Nan of Inf."))
+    end
+    k = Int(xs >> Base.significand_bits(T))
+    if k == 0 # x is subnormal
+        if xs == 0
+            throw(DomainError(x, "Cannot be subnormal converted to 0."))
+	end
+        m = Base.leading_zeros(xs) - Base.exponent_bits(T)
+        k = 1 - m
+    end
+    return k - Base.exponent_bias(T)
+end
 
 @static if Base.isbindingresolved(CUDA, :emit_shmem) && Base.isdefined(CUDA, :emit_shmem)
     const emit_shmem = CUDA.emit_shmem
