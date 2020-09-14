@@ -38,7 +38,7 @@ function wait(cpu::CPU, ev::MultiEvent, progress=nothing)
         alldone = ntuple(N) do i
             if alldone[i]
                 true
-            else 
+            else
                 isdone(events[i])
             end
         end
@@ -48,7 +48,7 @@ function wait(cpu::CPU, ev::MultiEvent, progress=nothing)
             progress()
         end
     end
-   
+
     if any(failed, events)
         ex = CompositeException()
         for event in events
@@ -78,23 +78,10 @@ function async_copy!(::CPU, A, B; dependencies=nothing, progress=nothing)
 end
 
 function (obj::Kernel{CPU})(args...; ndrange=nothing, workgroupsize=nothing, dependencies=nothing, progress=nothing)
-    if ndrange isa Integer
-        ndrange = (ndrange,)
-    end
-    if workgroupsize isa Integer
-        workgroupsize = (workgroupsize, )
-    end
+    ndrange, workgroupsize, iterspace, dynamic = launch_config(obj, ndrange, workgroupsize)
+
     if dependencies isa Event
         dependencies = (dependencies,)
-    end
-
-    if KernelAbstractions.workgroupsize(obj) <: DynamicSize && workgroupsize === nothing
-        workgroupsize = (1024,) # Vectorization, 4x unrolling, minimal grain size
-    end
-    iterspace, dynamic = partition(obj, ndrange, workgroupsize)
-    # partition checked that the ndrange's agreed
-    if KernelAbstractions.ndrange(obj) <: StaticSize
-        ndrange = nothing
     end
 
     if length(blocks(iterspace)) == 0
@@ -103,6 +90,26 @@ function (obj::Kernel{CPU})(args...; ndrange=nothing, workgroupsize=nothing, dep
 
     Event(__run, obj, ndrange, iterspace, args, dynamic,
           dependencies=dependencies, progress=progress)
+end
+
+function launch_config(kernel::Kernel{CPU}, ndrange=nothing, workgroupsize=nothing)
+    if ndrange isa Integer
+        ndrange = (ndrange,)
+    end
+    if workgroupsize isa Integer
+        workgroupsize = (workgroupsize, )
+    end
+
+    if KernelAbstractions.workgroupsize(kernel) <: DynamicSize && workgroupsize === nothing
+        workgroupsize = (1024,) # Vectorization, 4x unrolling, minimal grain size
+    end
+    iterspace, dynamic = partition(kernel, ndrange, workgroupsize)
+    # partition checked that the ndrange's agreed
+    if KernelAbstractions.ndrange(kernel) <: StaticSize
+        ndrange = nothing
+    end
+
+    return ndrange, workgroupsize, iterspace, dynamic
 end
 
 # Inference barriers
