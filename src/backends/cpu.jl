@@ -92,7 +92,7 @@ function (obj::Kernel{CPU})(args...; ndrange=nothing, workgroupsize=nothing, dep
           dependencies=dependencies, progress=progress)
 end
 
-function launch_config(kernel::Kernel{CPU}, ndrange=nothing, workgroupsize=nothing)
+function launch_config(kernel::Kernel{CPU}, ndrange, workgroupsize)
     if ndrange isa Integer
         ndrange = (ndrange,)
     end
