@@ -146,6 +146,9 @@ instead.
 See also [`@uniform`](@ref).
 """
 macro private(T, dims)
+    if dims isa Integer
+        dims = (dims,)
+    end
     quote
         $Scratchpad($(esc(T)), Val($(esc(dims))))
     end
@@ -384,7 +387,7 @@ function partition(kernel, ndrange, workgroupsize)
     if static_ndrange <: StaticSize
         static_blocks = StaticSize{blocks}
         blocks = nothing
-    else 
+    else
         static_blocks = DynamicSize
         blocks = CartesianIndices(blocks)
     end
@@ -466,4 +469,6 @@ include("backends/cuda.jl")
 ###
 
 include("extras/extras.jl")
+
+include("reflection.jl")
 end #module
