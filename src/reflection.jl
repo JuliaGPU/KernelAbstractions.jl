@@ -4,10 +4,15 @@ export @ka_code_typed
 function ka_code_typed(kernel, argtypes; ndrange=nothing, workgroupsize=nothing, dependencies=nothing, kwargs...)
     # get the iterspace and dynamic of a kernel
     ndrange, workgroupsize, iterspace, dynamic = KernelAbstractions.launch_config(kernel, ndrange, workgroupsize)
-    # get the first block
-    block = @inbounds KernelAbstractions.blocks(iterspace)[1]
-    # get a context of the kernel based on the first block
-    ctx = KernelAbstractions.mkcontext(kernel, block, ndrange, iterspace, dynamic)
+
+    if isa(kernel, Kernel{CPU})
+        # get the first block
+        block = @inbounds KernelAbstractions.blocks(iterspace)[1]
+        # get a context of the kernel based on the first block
+        ctx = KernelAbstractions.mkcontext(kernel, block, ndrange, iterspace, dynamic)
+    else
+        ctx = KernelAbstractions.mkcontext(kernel, ndrange, iterspace)
+    end
     # reformat
     if argtypes isa Type
         argtypes = argtypes.parameters

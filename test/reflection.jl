@@ -1,4 +1,4 @@
-using KernelAbstractions, Test
+using KernelAbstractions, Test, CUDA
 
 @kernel function mul2(A)
     I = @index(Global)
@@ -11,6 +11,14 @@ function test_typed_kernel_dynamic()
     res = @ka_code_typed kernel(A, ndrange=size(A), workgroupsize=16)
     @test isa(res, Pair{Core.CodeInfo, DataType})
     @test isa(res[1].code, Array{Any,1})
+
+    if has_cuda_gpu()
+        A = CUDA.ones(1024, 1024)
+        kernel = mul2(CUDADevice())
+        res = @ka_code_typed kernel(A, ndrange=size(A), workgroupsize=(32, 32))
+        @test isa(res, Pair{Core.CodeInfo, DataType})
+        @test isa(res[1].code, Array{Any,1})
+    end
 end
 
 function test_typed_kernel_dynamic_no_info()
@@ -19,6 +27,14 @@ function test_typed_kernel_dynamic_no_info()
     res = @ka_code_typed kernel(A, ndrange=size(A))
     @test isa(res, Pair{Core.CodeInfo, DataType})
     @test isa(res[1].code, Array{Any,1})
+
+    if has_cuda_gpu()
+        A = CUDA.ones(1024, 1024)
+        kernel = mul2(CUDADevice())
+        res = @ka_code_typed kernel(A, ndrange=size(A))
+        @test isa(res, Pair{Core.CodeInfo, DataType})
+        @test isa(res[1].code, Array{Any,1})
+    end
 end
 
 function test_typed_kernel_static()
@@ -27,6 +43,14 @@ function test_typed_kernel_static()
     res = @ka_code_typed kernel(A, ndrange=size(A))
     @test isa(res, Pair{Core.CodeInfo, DataType})
     @test isa(res[1].code, Array{Any,1})
+
+    if has_cuda_gpu()
+        A = CUDA.ones(1024, 1024)
+        kernel = mul2(CUDADevice(), (32, 32))
+        res = @ka_code_typed kernel(A, ndrange=size(A))
+        @test isa(res, Pair{Core.CodeInfo, DataType})
+        @test isa(res[1].code, Array{Any,1})
+    end
 end
 
 function test_typed_kernel_no_optimize()
@@ -36,6 +60,15 @@ function test_typed_kernel_no_optimize()
     @test isa(res, Pair{Core.CodeInfo, DataType})
     res_opt = @ka_code_typed kernel(A, ndrange=size(A))
     @test size(res[1].code) < size(res_opt[1].code)
+
+    if has_cuda_gpu()
+        A = CUDA.ones(1024, 1024)
+        kernel = mul2(CUDADevice(), (32, 32))
+        res = @ka_code_typed optimize=false kernel(A, ndrange=size(A))
+        @test isa(res, Pair{Core.CodeInfo, DataType})
+        res_opt = @ka_code_typed kernel(A, ndrange=size(A))
+        @test size(res[1].code) < size(res_opt[1].code)
+    end
 end
 
 test_typed_kernel_dynamic()
