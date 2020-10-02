@@ -1,8 +1,13 @@
-using KernelAbstractions, Test
+using KernelAbstractions, Test, CUDA
 
 @kernel function mul2(A)
     I = @index(Global)
     A[I] = 2 * A[I]
+end
+
+@kernel function add3(A, B, C)
+    I = @index(Global)
+    A[I] = B[I] + C[I]
 end
 
 function test_typed_kernel_dynamic()
@@ -11,14 +16,34 @@ function test_typed_kernel_dynamic()
     res = @ka_code_typed kernel(A, ndrange=size(A), workgroupsize=16)
     @test isa(res, Pair{Core.CodeInfo, DataType})
     @test isa(res[1].code, Array{Any,1})
+
+    if has_cuda_gpu()
+        A = CUDA.ones(1024, 1024)
+        kernel = mul2(CUDADevice())
+        res = @ka_code_typed kernel(A, ndrange=size(A), workgroupsize=(32, 32))
+        @test isa(res, Pair{Core.CodeInfo, DataType})
+        @test isa(res[1].code, Array{Any,1})
+    end
 end
 
 function test_typed_kernel_dynamic_no_info()
     A = ones(1024, 1024)
-    kernel = mul2(CPU())
-    res = @ka_code_typed kernel(A, ndrange=size(A))
+    B = similar(A)
+    C = similar(A)
+    kernel = add3(CPU())
+    res = @ka_code_typed kernel(A, B, C, ndrange=size(A))
     @test isa(res, Pair{Core.CodeInfo, DataType})
     @test isa(res[1].code, Array{Any,1})
+
+    if has_cuda_gpu()
+        A = CUDA.ones(1024, 1024)
+        B = similar(A)
+        C = similar(A)
+        kernel = add3(CUDADevice())
+        res = @ka_code_typed kernel(A, B, C, ndrange=size(A))
+        @test isa(res, Pair{Core.CodeInfo, DataType})
+        @test isa(res[1].code, Array{Any,1})
+    end
 end
 
 function test_typed_kernel_static()
@@ -27,15 +52,36 @@ function test_typed_kernel_static()
     res = @ka_code_typed kernel(A, ndrange=size(A))
     @test isa(res, Pair{Core.CodeInfo, DataType})
     @test isa(res[1].code, Array{Any,1})
+
+    if has_cuda_gpu()
+        A = CUDA.ones(1024, 1024)
+        kernel = mul2(CUDADevice(), (32, 32))
+        res = @ka_code_typed kernel(A, ndrange=size(A))
+        @test isa(res, Pair{Core.CodeInfo, DataType})
+        @test isa(res[1].code, Array{Any,1})
+    end
 end
 
 function test_typed_kernel_no_optimize()
     A = ones(1024, 1024)
-    kernel = mul2(CPU(), 16)
+    B = similar(A)
+    C = similar(A)
+    kernel = add3(CPU(), 16)
     res = @ka_code_typed optimize=false kernel(A, ndrange=size(A))
-    @test isa(res, Pair{Core.CodeInfo, DataType})
+    @test isa(res, Pair{Core.CodeInfo,Core.TypeofBottom})
     res_opt = @ka_code_typed kernel(A, ndrange=size(A))
     @test size(res[1].code) < size(res_opt[1].code)
+
+    if has_cuda_gpu()
+        A = CUDA.ones(1024, 1024)
+        B = similar(A)
+        C = similar(A)
+        kernel = add3(CUDADevice(), (32, 32))
+        res = @ka_code_typed optimize=false kernel(A, ndrange=size(A))
+        @test isa(res, Pair{Core.CodeInfo,Core.TypeofBottom})
+        res_opt = @ka_code_typed kernel(A, ndrange=size(A))
+        @test size(res[1].code) < size(res_opt[1].code)
+    end
 end
 
 test_typed_kernel_dynamic()

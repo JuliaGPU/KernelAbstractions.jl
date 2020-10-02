@@ -134,27 +134,40 @@ end
 ###
 # Kernel launch
 ###
-function (obj::Kernel{CUDADevice})(args...; ndrange=nothing, dependencies=nothing, workgroupsize=nothing, progress=yield)
+function launch_config(kernel::Kernel{CUDADevice}, ndrange, workgroupsize)
     if ndrange isa Integer
         ndrange = (ndrange,)
     end
     if workgroupsize isa Integer
-        workgroupsize = (workgroupsize,)
+        workgroupsize = (workgroupsize, )
     end
 
-    if KernelAbstractions.workgroupsize(obj) <: DynamicSize && workgroupsize === nothing
+    if KernelAbstractions.workgroupsize(kernel) <: DynamicSize && workgroupsize === nothing
         # TODO: allow for NDRange{1, DynamicSize, DynamicSize}(nothing, nothing)
         #       and actually use CUDA autotuning
         workgroupsize = (256,)
     end
+
+    # partition checked that the ndrange's agreed
+    if KernelAbstractions.ndrange(kernel) <: StaticSize
+        ndrange = nothing
+    end
+
+    iterspace, dynamic = partition(kernel, ndrange, workgroupsize)
+
+    return ndrange, workgroupsize, iterspace, dynamic
+end
+
+function (obj::Kernel{CUDADevice})(args...; ndrange=nothing, dependencies=nothing, workgroupsize=nothing, progress=yield)
+
+    ndrange, workgroupsize, iterspace, dynamic = launch_config(obj, ndrange, workgroupsize)
+
     # If the kernel is statically sized we can tell the compiler about that
     if KernelAbstractions.workgroupsize(obj) <: StaticSize
         maxthreads = prod(get(KernelAbstractions.workgroupsize(obj)))
     else
         maxthreads = nothing
     end
-
-    iterspace, dynamic = partition(obj, ndrange, workgroupsize)
 
     nblocks = length(blocks(iterspace))
     threads = length(workitems(iterspace))
