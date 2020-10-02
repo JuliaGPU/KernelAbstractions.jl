@@ -24,12 +24,17 @@ end
 
 
 """
-Get the llvm code for a kernel
+Get the typed IR for a kernel
 
 # Examples
 ```
-@ka_code_typed kernel(args)
-@ka_code_typed optimize=false kernel(args)
+@ka_code_typed kernel(args. ndrange=...)
+@ka_code_typed kernel(args. ndrange=... workgroupsize=...)
+@ka_code_typed optimize=false kernel(args. ndrange=...)
+```
+If ndrange is statically defined, then you could call
+```
+@ka_code_typed kernel(args.)
 ```
 Works for CPU or CUDA kernels, with static or dynamic declarations
 """
@@ -72,7 +77,7 @@ macro ka_code_typed(ex0...)
         local $(esc(args)) = $(old_args)
         if isa($kern, Kernel{CUDADevice})
             # translate CuArray to CuDeviceArray
-            local $(esc(args)) = map(CUDA.cudaconvert, $(esc(args)))
+            $(esc(args)) = map(CUDA.cudaconvert, $(esc(args)))
         end
 
         local results = $thecall
