@@ -2,7 +2,10 @@ import InteractiveUtils
 export @ka_code_typed
 using CUDA
 
-function ka_code_typed(kernel, argtypes; ndrange=nothing, workgroupsize=nothing, dependencies=nothing, kwargs...)
+using UUIDs
+const Cthulhu = Base.PkgId(UUID("f68482b8-f384-11e8-15f7-abe071a5a75f"), "Cthulhu")
+
+function ka_code_typed(kernel, argtypes; ndrange=nothing, workgroupsize=nothing, dependencies=nothing, interactive=false, kwargs...)
     # get the iterspace and dynamic of a kernel
     ndrange, workgroupsize, iterspace, dynamic = KernelAbstractions.launch_config(kernel, ndrange, workgroupsize)
 
@@ -19,7 +22,15 @@ function ka_code_typed(kernel, argtypes; ndrange=nothing, workgroupsize=nothing,
         argtypes = argtypes.parameters
     end
     # use code_typed
-    return InteractiveUtils.code_typed(KernelAbstractions.Cassette.overdub, (typeof(ctx), typeof(kernel.f), argtypes...); kwargs...)
+    if interactive
+        # call Cthulhu without introducing a dependency on Cthulhu
+        mod = Base.get(Base.loaded_modules, Cthulhu, nothing)
+        mod===nothing && error("Interactive code reflection requires Cthulhu; please install and load this package first.")
+        descend_code_typed = getfield(mod, :descend_code_typed)
+        return descend_code_typed(KernelAbstractions.Cassette.overdub, (typeof(ctx), typeof(kernel.f), argtypes...); kwargs...)
+    else
+        return InteractiveUtils.code_typed(KernelAbstractions.Cassette.overdub, (typeof(ctx), typeof(kernel.f), argtypes...); kwargs...)
+    end
 end
 
 
@@ -31,6 +42,7 @@ Get the typed IR for a kernel
 @ka_code_typed kernel(args. ndrange=...)
 @ka_code_typed kernel(args. ndrange=... workgroupsize=...)
 @ka_code_typed optimize=false kernel(args. ndrange=...)
+@ka_code_typed interactive=true kernel(args. ndrange=...)
 ```
 If ndrange is statically defined, then you could call
 ```
