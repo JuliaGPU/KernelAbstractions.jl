@@ -10,6 +10,11 @@ end
     A[I] = B[I] + C[I]
 end
 
+@kernel function addi(A, C, i)
+    I = @index(Global)
+    A[I] = i + C[I]
+end
+
 function test_typed_kernel_dynamic()
     A = ones(1024, 1024)
     kernel = mul2(CPU())
@@ -84,7 +89,26 @@ function test_typed_kernel_no_optimize()
     end
 end
 
+function test_expr_kernel()
+    A = ones(1024, 1024)
+    C = similar(A)
+    kernel = addi(CPU())
+    res = @ka_code_typed kernel(A, C, 1+2, ndrange=size(A))
+    @test isa(res, Pair{Core.CodeInfo, DataType})
+    @test isa(res[1].code, Array{Any,1})
+
+    if has_cuda_gpu()
+        A = CUDA.ones(1024, 1024)
+        C = similar(A)
+        kernel = addi(CUDADevice(), (32, 32))
+        res = @ka_code_typed kernel(A, C, 1+2, ndrange=size(A))
+        @test isa(res, Pair{Core.CodeInfo, DataType})
+        @test isa(res[1].code, Array{Any,1})
+    end
+end
+
 test_typed_kernel_dynamic()
 test_typed_kernel_dynamic_no_info()
 test_typed_kernel_static()
 test_typed_kernel_no_optimize()
+test_expr_kernel()
