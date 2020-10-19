@@ -52,6 +52,45 @@ function ka_code_llvm(kernel, argtypes; ndrange=nothing, workgroupsize=nothing, 
 end
 
 
+function format_ex(ex0)
+    ex = ()
+    args = gensym(:args)
+    old_args = nothing
+    kern = nothing
+    for i = 1:length(ex0)
+        if ex0[i].head == :call
+            # inside kernel() expr
+            while length(ex0[i].args) > 2
+                if isa(ex0[i].args[end], Expr)
+                    # at expr (like ndrange=10)
+                    kw = ex0[i].args[end]
+                    if kw.head != :kw
+                        # if an expr in place of a variable, skip
+                        break
+                    end
+                    kw.args[2] = esc(kw.args[2])
+                    kw.head = Symbol("=")
+                    resize!(ex0[i].args, length(ex0[i].args) - 1)
+                    ex = (kw,)..., ex...
+                else
+                    # only symbols left
+                    break
+                end
+            end
+            # save kernel args
+            old_args = Expr(:tuple, map(esc, ex0[i].args[2:end])...)
+            resize!(ex0[i].args, 2)
+            ex0[i].args[2] = Expr(:..., args)
+            kern = esc(ex0[i].args[1])
+        end
+        ex = ex..., ex0[i]
+    end
+    @assert(old_args != nothing)
+    @assert(kern != nothing)
+    return ex, args, old_args, kern
+end
+
+
 """
 Get the typed IR for a kernel
 
@@ -72,37 +111,7 @@ If ndrange is statically defined, then you could call
 Works for CPU or CUDA kernels, with static or dynamic declarations
 """
 macro ka_code_typed(ex0...)
-    ex = ()
-    args = gensym(:args)
-    old_args = nothing
-    kern = nothing
-    for i = 1:length(ex0)
-        if ex0[i].head == :call
-            # inside kernel() expr
-            while length(ex0[i].args) > 2
-                if isa(ex0[i].args[end], Expr)
-                    # at expr (like ndrange=10)
-                    kw = ex0[i].args[end]
-                    @assert kw.head == :kw
-                    kw.args[2] = esc(kw.args[2])
-                    kw.head = Symbol("=")
-                    resize!(ex0[i].args, length(ex0[i].args) - 1)
-                    ex = (kw,)..., ex...
-                else
-                    # only symbols left
-                    break
-                end
-            end
-            # save kernel args
-            old_args = Expr(:tuple, map(esc, ex0[i].args[2:end])...)
-            resize!(ex0[i].args, 2)
-            ex0[i].args[2] = Expr(:..., args)
-            kern = esc(ex0[i].args[1])
-        end
-        ex = ex..., ex0[i]
-    end
-    @assert(old_args != nothing)
-    @assert(kern != nothing)
+    ex, args, old_args, kern = format_ex(ex0)
 
     thecall = InteractiveUtils.gen_call_with_extracted_types_and_kwargs(__module__, :ka_code_typed, ex)
 
@@ -137,42 +146,17 @@ If ndrange is statically defined, then you could call
 Works for CPU kernels ONLY, with static or dynamic declarations
 """
 macro ka_code_llvm(ex0...)
-    ex = ()
-    args = gensym(:args)
-    old_args = nothing
-    kern = nothing
-    for i = 1:length(ex0)
-        if ex0[i].head == :call
-            # inside kernel() expr
-            while length(ex0[i].args) > 2
-                if isa(ex0[i].args[end], Expr)
-                    # at expr (like ndrange=10)
-                    kw = ex0[i].args[end]
-                    @assert kw.head == :kw
-                    kw.args[2] = esc(kw.args[2])
-                    kw.head = Symbol("=")
-                    resize!(ex0[i].args, length(ex0[i].args) - 1)
-                    ex = (kw,)..., ex...
-                else
-                    # only symbols left
-                    break
-                end
-            end
-            # save kernel args
-            old_args = Expr(:tuple, map(esc, ex0[i].args[2:end])...)
-            resize!(ex0[i].args, 2)
-            ex0[i].args[2] = Expr(:..., args)
-            kern = esc(ex0[i].args[1])
-        end
-        ex = ex..., ex0[i]
-    end
-    @assert(old_args != nothing)
-    @assert(kern != nothing)
+    ex, args, old_args, kern = format_ex(ex0)
 
     thecall = InteractiveUtils.gen_call_with_extracted_types_and_kwargs(__module__, :ka_code_llvm, ex)
 
     quote
         local $(esc(args)) = $(old_args)
+
+        if isa($kern, Kernel{CUDADevice})
+            # does not support CUDA kernels
+            error("@ka_code_llvm does not support CUDA kernels")
+        end
 
         local results = $thecall
     end
