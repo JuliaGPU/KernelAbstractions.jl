@@ -318,37 +318,7 @@ end
 end
 
 ###
-# GPU implementation of `@Const`
+# GPU implementation of const memory
 ###
-struct ConstCuDeviceArray{T,N,A} <: AbstractArray{T,N}
-    shape::Dims{N}
-    ptr::CUDA.DevicePtr{T,A}
 
-    # inner constructors, fully parameterized, exact types (ie. Int not <:Integer)
-    ConstCuDeviceArray{T,N,A}(shape::Dims{N}, ptr::CUDA.DevicePtr{T,A}) where {T,A,N} = new(shape,ptr)
-end
-
-Adapt.adapt_storage(to::ConstAdaptor, a::CUDA.CuDeviceArray{T,N,A}) where {T,N,A} = ConstCuDeviceArray{T, N, A}(a.shape, a.ptr)
-
-Base.pointer(a::ConstCuDeviceArray) = a.ptr
-Base.pointer(a::ConstCuDeviceArray, i::Integer) =
-    pointer(a) + (i - 1) * Base.elsize(a)
-
-Base.elsize(::Type{<:ConstCuDeviceArray{T}}) where {T} = sizeof(T)
-Base.size(g::ConstCuDeviceArray) = g.shape
-Base.length(g::ConstCuDeviceArray) = prod(g.shape)
-Base.IndexStyle(::Type{<:ConstCuDeviceArray}) = Base.IndexLinear()
-
-Base.unsafe_convert(::Type{CUDA.DevicePtr{T,A}}, a::ConstCuDeviceArray{T,N,A}) where {T,A,N} = pointer(a)
-
-@inline function Base.getindex(A::ConstCuDeviceArray{T}, index::Integer) where {T}
-    @boundscheck checkbounds(A, index)
-    align = Base.datatype_alignment(T)
-    CUDA.unsafe_cached_load(pointer(A), index, Val(align))::T
-end
-
-@inline function Base.unsafe_view(arr::ConstCuDeviceArray{T, 1, A}, I::Vararg{Base.ViewIndex,1}) where {T, A}
-    ptr = pointer(arr) + (I[1].start-1)*sizeof(T)
-    len = I[1].stop - I[1].start + 1
-    return ConstCuDeviceArray{T,1,A}(len, ptr)
-end
+Adapt.adapt_storage(to::ConstAdaptor, a::CUDA.CuDeviceArray) = Base.Experimental.Const(a)
