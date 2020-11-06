@@ -1,0 +1,25 @@
+steps:
+  - label: "Julia 1.5"
+    plugins:
+      - JuliaCI/julia#v0.5:
+          version: 1.5
+      - JuliaCI/julia-test#v0.3:
+      # - JuliaCI/julia-coverage#v0.3:
+      #     codecov: true
+    agents:
+      queue: "juliagpu"
+      cuda: "*"
+
+  - label: "Julia nightly"
+    plugins:
+      - JuliaCI/julia#v0.5:
+          version: nightly
+      - JuliaCI/julia-test#v0.3:
+    agents:
+      queue: "juliagpu"
+      cuda: "*"
+    soft_fail:
+      - exit_status: 1
+
+env:
+  JULIA_PKG_SERVER: "" # it often struggles with our large artifacts
