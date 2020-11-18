@@ -20,26 +20,28 @@ end
 # Possible improvements
 # - Add a background task that occasionally scans all streams
 # - Add a hysterisis by checking a "since last scanned" timestamp
-# - Add locking
+const STREAM_GC_LOCK = Threads.ReentrantLock()
 function next_stream()
-    if !isempty(FREE_STREAMS)
-        return pop!(FREE_STREAMS)
-    end
+    lock(STREAM_GC_LOCK) do
+        if !isempty(FREE_STREAMS)
+            return pop!(FREE_STREAMS)
+        end
 
-    if length(STREAMS) > STREAM_GC_THRESHOLD[]
-        for stream in STREAMS
-            if CUDA.query(stream)
-                push!(FREE_STREAMS, stream)
+        if length(STREAMS) > STREAM_GC_THRESHOLD[]
+            for stream in STREAMS
+                if CUDA.query(stream)
+                    push!(FREE_STREAMS, stream)
+                end
             end
         end
-    end
 
-    if !isempty(FREE_STREAMS)
-        return pop!(FREE_STREAMS)
+        if !isempty(FREE_STREAMS)
+            return pop!(FREE_STREAMS)
+        end
+        stream = CUDA.CuStream(flags = CUDA.STREAM_NON_BLOCKING)
+        push!(STREAMS, stream)
+        return stream
     end
-    stream = CUDA.CuStream(flags = CUDA.STREAM_NON_BLOCKING)
-    push!(STREAMS, stream)
-    return stream
 end
 
 struct CudaEvent <: Event
