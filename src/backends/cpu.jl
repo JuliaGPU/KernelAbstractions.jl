@@ -1,5 +1,13 @@
 import SpecialFunctions
 
+const N_WORKERS = Ref{Int}(Base.Threads.nthreads())
+
+# This code is loaded after an `@init` step
+if haskey(ENV, "KERNELABSTRACTIONS_NWORKERS")
+    global N_WORKERS[] = parse(Int, ENV["KERNELABSTRACTIONS_NWORKERS"])
+end
+
+
 struct CPUEvent <: Event
     task::Core.Task
 end
@@ -115,7 +123,7 @@ end
 # Inference barriers
 function __run(obj, ndrange, iterspace, args, dynamic)
     N = length(iterspace)
-    Nthreads = Threads.nthreads()
+    Nthreads = N_WORKERS[]
     if Nthreads == 1
         len, rem = N, 0
     else
