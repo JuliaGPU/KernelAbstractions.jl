@@ -9,6 +9,7 @@ steps:
     agents:
       queue: "juliagpu"
       cuda: "*"
+    timeout_in_minutes: 60
 
   - label: "Julia nightly"
     plugins:
@@ -20,6 +21,7 @@ steps:
       cuda: "*"
     soft_fail:
       - exit_status: 1
+    timeout_in_minutes: 60
 
 env:
   JULIA_PKG_SERVER: "" # it often struggles with our large artifacts
