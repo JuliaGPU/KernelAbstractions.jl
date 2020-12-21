@@ -1,12 +1,13 @@
 module KernelAbstractions
 
 export @kernel
-export @Const, @localmem, @private, @uniform, @synchronize, @index, groupsize, @print
+export @Const, @localmem, @private, @uniform, @synchronize, @index, groupsize, @print, @printf
 export Device, GPU, CPU, CUDADevice, Event, MultiEvent, NoneEvent
 export async_copy!
 
 
 using MacroTools
+using Printf
 using StaticArrays
 using Cassette
 using Adapt
@@ -28,6 +29,7 @@ and then invoked on the arguments.
 - [`@uniform`](@ref)
 - [`@synchronize`](@ref)
 - [`@print`](@ref)
+- [`@printf`](@ref)
 
 # Example:
 
@@ -234,6 +236,37 @@ macro print(items...)
     quote
         $__print($(map(esc,args)...))
     end
+end
+
+@generated function promote_c_argument(arg)
+    # > When a function with a variable-length argument list is called, the variable
+    # > arguments are passed using C's old ``default argument promotions.'' These say that
+    # > types char and short int are automatically promoted to int, and type float is
+    # > automatically promoted to double. Therefore, varargs functions will never receive
+    # > arguments of type char, short int, or float.
+
+    if arg == Cchar || arg == Cshort
+        return :(Cint(arg))
+    elseif arg == Cfloat
+        return :(Cdouble(arg))
+    else
+        return :(arg)
+    end
+end
+
+"""
+    @printf(fmt::String, args...)
+
+This is a unified formatted print statement.
+
+# Platform differences
+  - `GPU`: This will reorganize the items to print via @cuprintf
+  - `CPU`: This will call `print(items...)`
+"""
+macro printf(fmt::String, args...)
+    fmt_val = Val(Symbol(fmt))
+
+    return :(__printf($fmt_val, $(map(arg -> :(promote_c_argument($arg)), esc.(args))...)))
 end
 
 """
@@ -449,6 +482,78 @@ end
 
     quote
         print($(args...))
+    end
+end
+
+# Results in "Conversion of boxed type String is not allowed"
+# @generated function __printf(::Val{fmt}, argspec...) where {fmt}
+#     arg_exprs = [:( argspec[$i] ) for i in 1:length(argspec)]
+#     arg_types = [argspec...]
+
+#     T_void = LLVM.VoidType(LLVM.Interop.JuliaContext())
+#     T_int32 = LLVM.Int32Type(LLVM.Interop.JuliaContext())
+#     T_pint8 = LLVM.PointerType(LLVM.Int8Type(LLVM.Interop.JuliaContext()))
+
+#     # create functions
+#     param_types = LLVMType[convert.(LLVMType, arg_types)...]
+#     llvm_f, _ = create_function(T_int32, param_types)
+#     mod = LLVM.parent(llvm_f)
+#     sfmt = String(fmt)
+#     # generate IR
+#     Builder(LLVM.Interop.JuliaContext()) do builder
+#         entry = BasicBlock(llvm_f, "entry", LLVM.Interop.JuliaContext())
+#         position!(builder, entry)
+
+#         str = globalstring_ptr!(builder, sfmt)
+
+#         # construct and fill args buffer
+#         if isempty(argspec)
+#             buffer = LLVM.PointerNull(T_pint8)
+#         else
+#             argtypes = LLVM.StructType("printf_args", LLVM.Interop.JuliaContext())
+#             elements!(argtypes, param_types)
+
+#             args = alloca!(builder, argtypes)
+#             for (i, param) in enumerate(parameters(llvm_f))
+#                 p = struct_gep!(builder, args, i-1)
+#                 store!(builder, param, p)
+#             end
+
+#             buffer = bitcast!(builder, args, T_pint8)
+#         end
+
+#         # invoke vprintf and return
+#         vprintf_typ = LLVM.FunctionType(T_int32, [T_pint8, T_pint8])
+#         vprintf = LLVM.Function(mod, "vprintf", vprintf_typ)
+#         chars = call!(builder, vprintf, [str, buffer])
+
+#         ret!(builder, chars)
+#     end
+
+#     arg_tuple = Expr(:tuple, arg_exprs...)
+#     call_function(llvm_f, Int32, Tuple{arg_types...}, arg_tuple)
+# end
+
+# Results in "InvalidIRError: compiling kernel
+# gpu_kernel_printf(... Reason: unsupported dynamic
+# function invocation"
+@generated function __printf(::Val{fmt}, items...) where {fmt}
+    str = ""
+    args = []
+
+    for i in 1:length(items)
+        item = :(items[$i])
+        T = items[i]
+        if T <: Val
+            item = QuoteNode(T.parameters[1])
+        end
+        push!(args, item)
+    end
+    sfmt = String(fmt)
+    quote
+        # @sprintf($sfmt, $(args...))
+        @print(@sprintf($sfmt, $(args...)))
+        # @print("test")
     end
 end
 

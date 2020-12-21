@@ -208,6 +208,10 @@ end
     __print(items...)
 end
 
+@inline function Cassette.overdub(ctx::CPUCtx, ::typeof(__printf), fmt, items...)
+    __printf(fmt, items...)
+end
+
 generate_overdubs(CPUCtx)
 
 # Don't recurse into these functions

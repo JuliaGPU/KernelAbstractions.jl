@@ -319,6 +319,10 @@ end
     CUDA._cuprint(args...)
 end
 
+@inline function Cassette.overdub(ctx::CUDACtx, ::typeof(__printf), fmt, args...)
+    CUDA._cuprintf(fmt, args...)
+end
+
 ###
 # GPU implementation of const memory
 ###
