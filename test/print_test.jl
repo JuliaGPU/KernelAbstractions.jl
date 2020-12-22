@@ -6,6 +6,7 @@ if has_cuda_gpu()
 end
 
 struct Foo{A,B} end
+get_name(::Type{T}) where T<:Foo = "Foo"
 
 @kernel function kernel_print()
   I = @index(Global)
@@ -14,7 +15,11 @@ end
 
 @kernel function kernel_printf()
   I = @index(Global)
-  @printf("Hello printf %s thread %d! type = %s.\n", "from", I, nameof(Foo))
+  # @printf("Hello printf %s thread %d! type = %s.\n", "from", I, nameof(Foo))
+  # @print("Hello printf from thread ", I, "!\n")
+  # @printf("Hello printf %s thread %d! type = %s.\n", "from", I, string(nameof(Foo)))
+  @printf("Hello printf %s thread %d! type = %s.\n", "from", I, "Foo")
+  @printf("Hello printf %s thread %d! type = %s.\n", "from", I, get_name(Foo))
 end
 
 function test_print(backend)

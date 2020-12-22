@@ -238,30 +238,25 @@ macro print(items...)
     end
 end
 
-@generated function promote_c_argument(arg)
-    # > When a function with a variable-length argument list is called, the variable
-    # > arguments are passed using C's old ``default argument promotions.'' These say that
-    # > types char and short int are automatically promoted to int, and type float is
-    # > automatically promoted to double. Therefore, varargs functions will never receive
-    # > arguments of type char, short int, or float.
+# When a function with a variable-length argument list is called, the variable
+# arguments are passed using C's old ``default argument promotions.'' These say that
+# types char and short int are automatically promoted to int, and type float is
+# automatically promoted to double. Therefore, varargs functions will never receive
+# arguments of type char, short int, or float.
 
-    if arg == Cchar || arg == Cshort
-        return :(Cint(arg))
-    elseif arg == Cfloat
-        return :(Cdouble(arg))
-    else
-        return :(arg)
-    end
-end
+promote_c_argument(arg) = arg
+promote_c_argument(arg::Cfloat) = Cdouble(arg)
+promote_c_argument(arg::Cchar) = Cint(arg)
+promote_c_argument(arg::Cshort) = Cint(arg)
 
 """
     @printf(fmt::String, args...)
 
-This is a unified formatted print statement.
+This is a unified formatted printf statement.
 
 # Platform differences
   - `GPU`: This will reorganize the items to print via @cuprintf
-  - `CPU`: This will call `print(items...)`
+  - `CPU`: This will call `sprintf(fmt, items...)`
 """
 macro printf(fmt::String, args...)
     fmt_val = Val(Symbol(fmt))
@@ -551,9 +546,7 @@ end
     end
     sfmt = String(fmt)
     quote
-        # @sprintf($sfmt, $(args...))
-        @print(@sprintf($sfmt, $(args...)))
-        # @print("test")
+        Printf.@printf($sfmt, $(args...))
     end
 end
 

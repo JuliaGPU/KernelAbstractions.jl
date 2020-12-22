@@ -320,7 +320,11 @@ end
 end
 
 @inline function Cassette.overdub(ctx::CUDACtx, ::typeof(__printf), fmt, args...)
-    CUDA._cuprintf(fmt, args...)
+    CUDA._cuprintf(Val(fmt), args...)
+end
+
+@inline function Cassette.overdub(ctx::CUDACtx, ::typeof(__printf), ::Val{fmt}, args...) where fmt
+    CUDA._cuprintf(Val(fmt), args...)
 end
 
 ###
