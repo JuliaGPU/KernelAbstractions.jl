@@ -1,8 +1,10 @@
+delete_merged_branches = true
+
 status = [
-  # Buildkite (GPU CI):
+  ### GPU CI (Buildkite):
   "buildkite/kernelabstractions-dot-jl/julia-1-dot-5",
 
-  # GitHub Actions (CPU CI):
+  ### CPU CI (GitHub Actions):
   "CI (1, macOS-latest, x64)",
   "CI (1, ubuntu-latest, x64)",
   "CI (1, windows-latest, x64)",
@@ -17,4 +19,5 @@ status = [
   "CI (1.5, windows-latest, x64)",
   "Documentation",
 ]
+
 timeout_sec = 600
