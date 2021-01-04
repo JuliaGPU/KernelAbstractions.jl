@@ -2,6 +2,7 @@ KernelAbstractions.jl
 ==============
 *Ash dushum durbatulûk, ash dushum gimbatul, ash dushum thrakatulûk, agh burzum-ishi krimpatul*
 
+[![Documentation (stable)][docs-stable-img]][docs-stable-url]
 [![Documentation (latest)][docs-latest-img]][docs-latest-url]
 [![DOI][doi-img]][doi-url]
 [![Bors][bors-img]][bors-url]
@@ -11,8 +12,10 @@ KernelAbstractions.jl
 | 1.5     | [![CI][ci-img]][ci-url]                             | [![Build status][buildkite-julia1-img]][buildkite-julia1-url]             |
 | nightly | [![CI][ci-julia-nightly-img]][ci-julia-nightly-url] | [![Build status][buildkite-julianightly-img]][buildkite-julianightly-url] |
 
-[docs-latest-img]: https://img.shields.io/badge/docs-latest-blue.svg
-[docs-latest-url]: https://juliagpu.gitlab.io/KernelAbstractions.jl/
+[docs-stable-img]: https://img.shields.io/badge/docs-stable-blue.svg
+[docs-stable-url]: https://juliagpu.github.io/KernelAbstractions.jl/stable
+[docs-latest-img]: https://img.shields.io/badge/docs-dev-blue.svg
+[docs-latest-url]: https://juliagpu.github.io/KernelAbstractions.jl/dev
 [doi-img]: https://zenodo.org/badge/237471203.svg
 [doi-url]: https://zenodo.org/badge/latestdoi/237471203
 [bors-img]: https://bors.tech/images/badge_small.svg
@@ -29,4 +32,4 @@ KernelAbstractions.jl
 License
 -------
 
-KernelAbstractions.jl is licensed under [MIT license](LICENSE.md).
+KernelAbstractions.jl is licensed under the [MIT license](LICENSE.md).
