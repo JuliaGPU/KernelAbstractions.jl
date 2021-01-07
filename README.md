@@ -21,8 +21,8 @@ KernelAbstractions.jl
 [doi-url]: https://zenodo.org/badge/latestdoi/237471203
 [bors-img]: https://bors.tech/images/badge_small.svg
 [bors-url]: https://app.bors.tech/repositories/23203
-[codecov-img]: https://codecov.io/gh/JuliaHealth/FHIRClient.jl/branch/master/graph/badge.svg
-[codecov-url]: https://codecov.io/gh/JuliaHealth/FHIRClient.jl
+[codecov-img]: https://codecov.io/gh/JuliaGPU/KernelAbstractions.jl/branch/master/graph/badge.svg
+[codecov-url]: https://codecov.io/gh/JuliaGPU/KernelAbstractions.jl
 [ci-img]: https://github.com/JuliaGPU/KernelAbstractions.jl/workflows/CI/badge.svg
 [ci-url]: https://github.com/JuliaGPU/KernelAbstractions.jl/actions?query=workflow%3ACI
 [ci-julia-nightly-img]: https://github.com/JuliaGPU/KernelAbstractions.jl/workflows/CI%20(Julia%20nightly)/badge.svg
