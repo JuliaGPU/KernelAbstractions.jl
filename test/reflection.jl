@@ -1,17 +1,17 @@
 using KernelAbstractions, Test, CUDA
 
 @kernel function mul2(A)
-    I = @index(Global)
+    I = @index(Global, Cartesian)
     A[I] = 2 * A[I]
 end
 
 @kernel function add3(A, B, C)
-    I = @index(Global)
+    I = @index(Global, Cartesian)
     A[I] = B[I] + C[I]
 end
 
 @kernel function addi(A, C, i)
-    I = @index(Global)
+    I = @index(Global, Cartesian)
     A[I] = i + C[I]
 end
 
