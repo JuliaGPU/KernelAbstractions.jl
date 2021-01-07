@@ -1,6 +1,8 @@
 import InteractiveUtils
 export @ka_code_typed, @ka_code_llvm
-using CUDA
+
+argconvert(k::Kernel{T}, arg) where T =
+    error("Don't know how to convert arguments for Kernel{$T}")
 
 using UUIDs
 const Cthulhu = Base.PkgId(UUID("f68482b8-f384-11e8-15f7-abe071a5a75f"), "Cthulhu")
@@ -121,10 +123,8 @@ macro ka_code_typed(ex0...)
 
     quote
         local $(esc(args)) = $(old_args)
-        if isa($kern, Kernel{CUDADevice})
-            # translate CuArray to CuDeviceArray
-            $(esc(args)) = map(CUDA.cudaconvert, $(esc(args)))
-        end
+        # e.g. translate CuArray to CuDeviceArray
+        $(esc(args)) = map(x->argconvert($kern, x), $(esc(args)))
 
         local results = $thecall
         if results !== nothing
@@ -157,9 +157,9 @@ macro ka_code_llvm(ex0...)
     quote
         local $(esc(args)) = $(old_args)
 
-        if isa($kern, Kernel{CUDADevice})
-            # does not support CUDA kernels
-            error("@ka_code_llvm does not support CUDA kernels")
+        if isa($kern, Kernel{G} where {G<:GPU})
+            # does not support GPU kernels
+            error("@ka_code_llvm does not support GPU kernels")
         end
 
         local results = $thecall

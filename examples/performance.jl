@@ -1,4 +1,4 @@
-using KernelAbstractions, CUDA, Test
+using KernelAbstractions, CUDAKernels, CUDA, Test
 using KernelAbstractions.Extras: @unroll
 
 has_cuda_gpu() || exit()
