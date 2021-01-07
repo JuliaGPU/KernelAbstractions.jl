@@ -117,6 +117,7 @@ struct WorkgroupLoop
     indicies :: Vector{Any}
     stmts :: Vector{Any}
     allocations :: Vector{Any}
+    private_allocations :: Vector{Any}
     private :: Vector{Any}
 end
 
@@ -146,13 +147,15 @@ function split(stmts,
 
     current     = Any[]
     allocations = Any[]
+    private_allocations = Any[]
     new_stmts   = Any[]
     for stmt in stmts
         has_sync = find_sync(stmt)
         if has_sync
-            loop = WorkgroupLoop(deepcopy(indicies), current, allocations, deepcopy(private))
+            loop = WorkgroupLoop(deepcopy(indicies), current, allocations, private_allocations, deepcopy(private))
             push!(new_stmts, emit(loop))
             allocations = Any[]
+            private_allocations = Any[]
             current     = Any[]
             is_sync(stmt) && continue
 
@@ -177,6 +180,9 @@ function split(stmts,
         if @capture(stmt, @uniform x_)
             push!(allocations, stmt)
             continue
+        elseif @capture(stmt, @private x_)
+            push!(private_allocations, x)
+            continue
         elseif @capture(stmt, lhs_ = rhs_ | (vs__, lhs_ = rhs_))
             if @capture(rhs, @index(args__))
                 push!(indicies, stmt)
@@ -196,7 +202,7 @@ function split(stmts,
 
     # everything since the last `@synchronize`
     if !isempty(current)
-        loop = WorkgroupLoop(deepcopy(indicies), current, allocations, deepcopy(private))
+        loop = WorkgroupLoop(deepcopy(indicies), current, allocations, private_allocations, deepcopy(private))
         push!(new_stmts, emit(loop))
     end
     return new_stmts
@@ -212,6 +218,24 @@ function emit(loop)
     end
     stmts = Any[]
     append!(stmts, loop.allocations)
+
+    # private_allocations turn into lhs = ntuple(i->rhs, length(__workitems_iterspace()))
+    N = gensym(:N)
+    push!(stmts, :($N = length($__workitems_iterspace)))
+
+    private_vars = Set{Symbol}()
+    for stmt in loop.private_allocations
+        if @capture(stmt, lhs_ = rhs_)
+            push!(stmts, :($lhs = ntuple(_->$rhs, $N)))
+            if lhs in private_vars
+                error("$lhs is marked as a private variable twice")
+            end
+            push!(private_vars, lhs)
+        else
+            error("@private $stmt not an assignment")
+        end
+    end
+
     # don't emit empty loops
     if !(isempty(loop.stmts) || all(s->s isa LineNumberNode, loop.stmts))
         body = Expr(:block, loop.stmts...)
@@ -219,6 +243,16 @@ function emit(loop)
             if @capture(expr, A_[i__])
                 if A in loop.private
                     return :($A[$(i...), $(idx).I...])
+                end
+            end
+            if @capture(expr, lhs_ = rhs_)
+                if lhs in private_vars
+                    error("Can't assign to variables marked private")
+                end
+            end
+            if expr isa Symbol
+                if expr in private_vars
+                    return :($expr[$__index_Local_Linear($(idx))])
                 end
             end
             return expr

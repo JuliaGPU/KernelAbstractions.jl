@@ -154,6 +154,10 @@ macro private(T, dims)
     end
 end
 
+macro private(expr)
+    expr
+end
+
 """
     @uniform expr
 
