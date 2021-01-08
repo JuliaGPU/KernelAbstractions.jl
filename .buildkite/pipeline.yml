@@ -19,8 +19,6 @@ steps:
     agents:
       queue: "juliagpu"
       cuda: "*"
-    soft_fail:
-      - exit_status: 1
     timeout_in_minutes: 60
 
 env:
