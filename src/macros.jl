@@ -237,7 +237,7 @@ function emit(loop)
         for stmt in loop.private_allocations
             if @capture(stmt, lhs_ = rhs_)
                 expr = quote
-                    local constructor = function ($idx)
+                    local constructor = function ($idx,)
                         Base.@_inline_meta
                         $(loop.indicies...)
                         $rhs
