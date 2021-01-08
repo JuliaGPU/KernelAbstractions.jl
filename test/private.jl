@@ -57,6 +57,19 @@ end
     end
 end
 
+@kernel function forloop2(A, ::Val{N}) where N
+    I = @index(Global, Linear)
+    i = @index(Local, Linear)
+    @private priv = ntuple(j -> A[i,j], N)
+    A[I, 1] = 0
+    @synchronize
+    for j in 1:N
+        k = mod1(j + i - 1, N)
+        A[k, 1] += priv[j]
+        @synchronize
+    end
+end
+
 function harness(backend, ArrayT)
     A = ArrayT{Int}(undef, 64)
     wait(private(backend, 16)(A, ndrange=size(A)))
@@ -68,6 +81,11 @@ function harness(backend, ArrayT)
     A = ArrayT{Int}(undef, 64, 64)
     A .= 1
     wait(forloop(backend)(A, Val(size(A, 2)), ndrange=size(A,1), workgroupsize=size(A,1)))
+    @test all(A[:, 1] .== 64)
+    @test all(A[:, 2:end] .== 1)
+
+    A .= 1
+    wait(forloop2(backend)(A, Val(size(A, 2)), ndrange=size(A,1), workgroupsize=size(A,1)))
     @test all(A[:, 1] .== 64)
     @test all(A[:, 2:end] .== 1)
 
