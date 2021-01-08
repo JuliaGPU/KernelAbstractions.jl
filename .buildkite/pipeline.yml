@@ -21,7 +21,7 @@ steps:
     command: |
       julia --project -e '
         using Pkg
-        Pkg.pkgstr("add CUDA#master")
+        Pkg.pkg"add CUDA#master"
         Pkg.build()
         Pkg.test()'
     agents:
@@ -39,7 +39,7 @@ steps:
     command: |
       julia --project -e '
         using Pkg
-        Pkg.pkgstr("add CUDA#master")
+        Pkg.pkg"add CUDA#master"
         Pkg.build()
         Pkg.test()'
     agents:
