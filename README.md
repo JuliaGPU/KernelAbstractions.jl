@@ -11,7 +11,7 @@ KernelAbstractions.jl
 | Julia       | CPU CI                                                             | GPU CI                                                                    |
 | ----------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------  |
 | 1.5         | [![CI][ci-img]][ci-url]                                            | [![Build status][buildkite-julia1-img]][buildkite-url]                    |
-| 1.6-nightly |                                                                    | [![Build status][buildkite-julia1.6nightly-img]][buildkite-url]           |
+| 1.6-nightly | [![CI][ci-julia-1-6-nightly-img]][ci-julia-1-6-nightly-url]        | [![Build status][buildkite-julia1.6nightly-img]][buildkite-url]           |
 | nightly     | [![CI][ci-julia-nightly-img]][ci-julia-nightly-url]                | [![Build status][buildkite-julianightly-img]][buildkite-url]              |
 
 [docs-stable-img]: https://img.shields.io/badge/docs-stable-blue.svg
@@ -26,6 +26,8 @@ KernelAbstractions.jl
 [codecov-url]: https://codecov.io/gh/JuliaGPU/KernelAbstractions.jl
 [ci-img]: https://github.com/JuliaGPU/KernelAbstractions.jl/workflows/CI/badge.svg
 [ci-url]: https://github.com/JuliaGPU/KernelAbstractions.jl/actions?query=workflow%3ACI
+[ci-julia-1-6-nightly-img]: https://github.com/JuliaGPU/KernelAbstractions.jl/workflows/CI%20(Julia%201.6-nightly)/badge.svg
+[ci-julia-1-6-nightly-url]: https://github.com/JuliaGPU/KernelAbstractions.jl/actions?query=workflow%3A%22CI+%28Julia+1.6-nightly%29%22
 [ci-julia-nightly-img]: https://github.com/JuliaGPU/KernelAbstractions.jl/workflows/CI%20(Julia%20nightly)/badge.svg
 [ci-julia-nightly-url]: https://github.com/JuliaGPU/KernelAbstractions.jl/actions?query=workflow%3A%22CI+%28Julia+nightly%29%22
 [buildkite-julia1-img]: https://badge.buildkite.com/1509baa1122772e8ec377463a6c188753d35b8fcec300a658e.svg?branch=master&step=Julia%201.5
