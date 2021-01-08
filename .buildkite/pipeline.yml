@@ -4,18 +4,20 @@ steps:
       - JuliaCI/julia#v0.6:
           version: "1.5"
       - JuliaCI/julia-test#v0.3:
-      # - JuliaCI/julia-coverage#v0.3:
-      #     codecov: true
+      - JuliaCI/julia-coverage#v0.3:
+          codecov: true
     agents:
       queue: "juliagpu"
       cuda: "*"
     timeout_in_minutes: 60
-    
+
   - label: "Julia 1.6-nightly"
     plugins:
       - JuliaCI/julia#v0.6:
           version: "1.6-nightly"
       - JuliaCI/julia-test#v0.3:
+      - JuliaCI/julia-coverage#v0.3:
+          codecov: true
     agents:
       queue: "juliagpu"
       cuda: "*"
@@ -26,6 +28,8 @@ steps:
       - JuliaCI/julia#v0.6:
           version: "nightly"
       - JuliaCI/julia-test#v0.3:
+      - JuliaCI/julia-coverage#v0.3:
+          codecov: true
     agents:
       queue: "juliagpu"
       cuda: "*"
@@ -33,3 +37,4 @@ steps:
 
 env:
   JULIA_PKG_SERVER: "" # it often struggles with our large artifacts
+  SECRET_CODECOV_TOKEN: "c5pjPUwULD2L8ss0gRtjCPiagRlTQ11TdbZP6gIhTPeA/gN5w5/7JvDCg36UpKER6FXnQDeBGGkQafHiLdBaH/FWQ2B2VKErtBarIBJa2zWvKu8mYs9PJzw/qLGT2sMXI9kcao63H6/HAwbslJcY0a5Mg+SwM3M05XqSHgnrHMnbBXysKP6VzFEIX7uoyEKOnoWDj8rGJKFYLW2DBRtd6Yc23ESfFXPAqbS7sgXxwQHKzz20FMQBJUmbiDIzPlk3k2n2TvgAWQ0VNK0e4/UooMbULL3UjY4oaMOF0XpJAnWlmvGgy8gEnZKSVp3ieXy/Ubu7BWwH/BT59wDy6LuDxA==;U2FsdGVkX18Wil69f7qJYu6yU5iNx+Zq8akUcOp+McU1CR4Jw4QBsrUKIF4W4uK+/752FQo40BwFsfnIC8CJ/Q=="
