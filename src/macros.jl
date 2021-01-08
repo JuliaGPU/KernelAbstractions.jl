@@ -227,15 +227,27 @@ function emit(loop)
     stmts = Any[]
     append!(stmts, loop.allocations)
 
-    # private_allocations turn into lhs = ntuple(i->rhs, length(__workitems_iterspace()))
-    N = gensym(:N)
-    push!(stmts, :($N = length($__workitems_iterspace())))
+    # Handle private allocations
+    if !isempty(loop.private_allocations)
+        ldims = gensym(:ldims)
+        lsize = gensym(:lsize)
+        push!(stmts, :($ldims = $__workitems_iterspace()))
+        push!(stmts, :($lsize = $size($ldims)))
 
-    for stmt in loop.private_allocations
-        if @capture(stmt, lhs_ = rhs_)
-            push!(stmts, :($lhs = ntuple(_->$rhs, $N)))
-        else
-            error("@private $stmt not an assignment")
+        for stmt in loop.private_allocations
+            if @capture(stmt, lhs_ = rhs_)
+                expr = quote
+                    local constructor = function ($idx)
+                        Base.@_inline_meta
+                        $(loop.indicies...)
+                        $rhs
+                    end
+                    $lhs = $SArray{$__size($lsize)}(constructor(idx) for idx in $ldims)
+                end
+                push!(stmts, expr)
+            else
+                error("@private $stmt not an assignment")
+            end
         end
     end
 
@@ -249,11 +261,11 @@ function emit(loop)
                 end
             elseif @capture(expr, A_[i__])
                 if A in loop.private
-                    return :($A[$__index_Local_Linear($(idx))][$(i...)])
+                    return :($A[$(idx)][$(i...)])
                 end
             elseif expr isa Symbol
                 if expr in loop.private
-                    return :($expr[$__index_Local_Linear($(idx))])
+                    return :($expr[$(idx)])
                 end
             end
             return expr

@@ -426,6 +426,10 @@ include("compiler.jl")
 function __workitems_iterspace end
 function __validindex end
 
+# Utils
+__size(args::Tuple) = Tuple{args...}
+__size(i::Int) = Tuple{i}
+
 include("macros.jl")
 
 ###
@@ -465,10 +469,6 @@ end
 ###
 # Backends/Implementation
 ###
-
-# Utils
-__size(args::Tuple) = Tuple{args...}
-__size(i::Int) = Tuple{i}
 
 include("backends/cpu.jl")
 include("backends/cuda.jl")
