@@ -15,15 +15,9 @@ steps:
     plugins:
       - JuliaCI/julia#v0.6:
           version: "1.6-nightly"
-      # - JuliaCI/julia-test#v0.3:
-      # - JuliaCI/julia-coverage#v0.3:
-      #     codecov: true
-    command: |
-      julia --project -e '
-        using Pkg
-        Pkg.pkg"add CUDA#master"
-        Pkg.build()
-        Pkg.test()'
+      - JuliaCI/julia-test#v0.3:
+      - JuliaCI/julia-coverage#v0.3:
+          codecov: true
     agents:
       queue: "juliagpu"
       cuda: "*"
@@ -33,15 +27,9 @@ steps:
     plugins:
       - JuliaCI/julia#v0.6:
           version: "nightly"
-      # - JuliaCI/julia-test#v0.3:
-      # - JuliaCI/julia-coverage#v0.3:
-      #     codecov: true
-    command: |
-      julia --project -e '
-        using Pkg
-        Pkg.pkg"add CUDA#master"
-        Pkg.build()
-        Pkg.test()'
+      - JuliaCI/julia-test#v0.3:
+      - JuliaCI/julia-coverage#v0.3:
+          codecov: true
     agents:
       queue: "juliagpu"
       cuda: "*"
