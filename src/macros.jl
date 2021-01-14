@@ -233,7 +233,15 @@ function emit(loop)
 
     for stmt in loop.private_allocations
         if @capture(stmt, lhs_ = rhs_)
-            push!(stmts, :($lhs = ntuple(_->$rhs, $N)))
+            constructor = gensym(:constructor)
+            expr = quote
+                $(constructor) = function (_)
+                    Base.@_inline_meta
+                    $rhs
+                end
+            end
+            push!(stmts, expr)
+            push!(stmts, :($lhs = ntuple($constructor, Val($N))))
         else
             error("@private $stmt not an assignment")
         end
