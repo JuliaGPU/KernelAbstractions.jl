@@ -241,9 +241,23 @@ end
 
 ###
 # CPU implementation of scratch memory
-# - memory allocated as a MArray with size `Dims`
+# - private memory for each workitem
+# - memory allocated as a MArray with size `Dims + WorkgroupSize`
 ###
+struct ScratchArray{N, D}
+    data::D
+    ScratchArray{N}(data::D) where {N, D} = new{N, D}(data)
+end
+Base.eltype(a::ScratchArray) = eltype(a.data)
 
 @inline function Cassette.overdub(ctx::CPUCtx, ::typeof(Scratchpad), ::Type{T}, ::Val{Dims}) where {T, Dims}
-    return MArray{__size(Dims), T}(undef)
+    return ScratchArray{length(Dims)}(MArray{__size((Dims..., __groupsize(ctx.metadata)...)), T}(undef))
+end
+
+Base.@propagate_inbounds function Base.getindex(A::ScratchArray, I...)
+    return A.data[I...]
+end
+
+Base.@propagate_inbounds function Base.setindex!(A::ScratchArray, val, I...)
+    A.data[I...] = val
 end

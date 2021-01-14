@@ -117,8 +117,7 @@ struct WorkgroupLoop
     indicies :: Vector{Any}
     stmts :: Vector{Any}
     allocations :: Vector{Any}
-    private_allocations :: Vector{Any}
-    private :: Set{Symbol}
+    private :: Vector{Any}
 end
 
 is_sync(expr) = @capture(expr, @synchronize() | @synchronize(a_))
@@ -139,7 +138,7 @@ end
 
 # TODO proper handling of LineInfo
 function split(stmts,
-               indicies = Any[], private = Set{Symbol}())
+               indicies = Any[], private=Any[])
     # 1. Split the code into blocks separated by `@synchronize`
     # 2. Aggregate `@index` expressions
     # 3. Hoist allocations
@@ -147,15 +146,13 @@ function split(stmts,
 
     current     = Any[]
     allocations = Any[]
-    private_allocations = Any[]
     new_stmts   = Any[]
     for stmt in stmts
         has_sync = find_sync(stmt)
         if has_sync
-            loop = WorkgroupLoop(deepcopy(indicies), current, allocations, private_allocations, deepcopy(private))
+            loop = WorkgroupLoop(deepcopy(indicies), current, allocations, deepcopy(private))
             push!(new_stmts, emit(loop))
             allocations = Any[]
-            private_allocations = Any[]
             current     = Any[]
             is_sync(stmt) && continue
 
@@ -180,10 +177,6 @@ function split(stmts,
         if @capture(stmt, @uniform x_)
             push!(allocations, stmt)
             continue
-        elseif @capture(stmt, @private lhs_ = rhs_)
-            push!(private, lhs)
-            push!(private_allocations, :($lhs = $rhs))
-            continue
         elseif @capture(stmt, lhs_ = rhs_ | (vs__, lhs_ = rhs_))
             if @capture(rhs, @index(args__))
                 push!(indicies, stmt)
@@ -191,15 +184,8 @@ function split(stmts,
             elseif @capture(rhs, @localmem(args__) | @uniform(args__) )
                 push!(allocations, stmt)
                 continue
-            elseif @capture(rhs, @private(T_, dims_))
-                # Implement the legacy `mem = @private T dims` as
-                # @private mem = Scratchpad(T, Val(dims))
-
-                if dims isa Integer
-                    dims = (dims,)
-                end
-                alloc = :($Scratchpad($T, Val($dims)))
-                push!(private_allocations, :($lhs = $alloc))
+            elseif @capture(rhs, @private(args__))
+                push!(allocations, stmt)
                 push!(private, lhs)
                 continue
             end
@@ -210,7 +196,7 @@ function split(stmts,
 
     # everything since the last `@synchronize`
     if !isempty(current)
-        loop = WorkgroupLoop(deepcopy(indicies), current, allocations, private_allocations, deepcopy(private))
+        loop = WorkgroupLoop(deepcopy(indicies), current, allocations, deepcopy(private))
         push!(new_stmts, emit(loop))
     end
     return new_stmts
@@ -226,34 +212,13 @@ function emit(loop)
     end
     stmts = Any[]
     append!(stmts, loop.allocations)
-
-    # private_allocations turn into lhs = ntuple(i->rhs, length(__workitems_iterspace()))
-    N = gensym(:N)
-    push!(stmts, :($N = length($__workitems_iterspace())))
-
-    for stmt in loop.private_allocations
-        if @capture(stmt, lhs_ = rhs_)
-            push!(stmts, :($lhs = ntuple(_->$rhs, $N)))
-        else
-            error("@private $stmt not an assignment")
-        end
-    end
-
     # don't emit empty loops
     if !(isempty(loop.stmts) || all(s->s isa LineNumberNode, loop.stmts))
         body = Expr(:block, loop.stmts...)
         body = postwalk(body) do expr
-            if @capture(expr, lhs_ = rhs_)
-                if lhs in loop.private
-                    error("Can't assign to variables marked private")
-                end
-            elseif @capture(expr, A_[i__])
+            if @capture(expr, A_[i__])
                 if A in loop.private
-                    return :($A[$__index_Local_Linear($(idx))][$(i...)])
-                end
-            elseif expr isa Symbol
-                if expr in loop.private
-                    return :($expr[$__index_Local_Linear($(idx))])
+                    return :($A[$(i...), $(idx).I...])
                 end
             end
             return expr

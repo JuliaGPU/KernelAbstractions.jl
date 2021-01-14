@@ -155,16 +155,6 @@ macro private(T, dims)
 end
 
 """
-    @private mem = 1
-
-Creates a private local of `mem` per item in the workgroup. This can be safely used
-across [`@synchronize`](@ref) statements.
-"""
-macro private(expr)
-    expr
-end
-
-"""
     @uniform expr
 
 `expr` is evaluated outside the workitem scope. This is useful for variable declarations
