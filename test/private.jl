@@ -43,6 +43,20 @@ end
     end
 end
 
+@kernel function reduce_private(out, A)
+    I = @index(Global, NTuple)
+    i = @index(Local)
+
+    priv = @private eltype(A) (1,)
+    @inbounds begin
+      priv[1] = zero(eltype(A))
+      for k in 1:size(A, ndims(A))
+        priv[1] += A[I..., k]
+      end
+      out[I...] = priv[1]
+    end
+end
+
 function harness(backend, ArrayT)
     A = ArrayT{Int}(undef, 64)
     wait(private(backend, 16)(A, ndrange=size(A)))
@@ -60,6 +74,11 @@ function harness(backend, ArrayT)
     B = ArrayT{Bool}(undef, size(A)...)
     wait(typetest(backend, 16)(A, B, ndrange=size(A)))
     @test all(B)
+
+    A = ArrayT{Float64}(ones(64,3));
+    out =  ArrayT{Float64}(undef, 64)
+    wait(reduce_private(CPU(), 8)(out, A, ndrange=size(out)))
+    @test all(out .== 3.0)
 end
 
 @testset "kernels" begin
@@ -67,4 +86,12 @@ end
     if has_cuda_gpu()
         harness(CUDADevice(), CuArray)
     end
+end
+
+@testset "codegen" begin
+    IR = sprint() do io
+        KernelAbstractions.ka_code_llvm(io, reduce_private(CPU(), (8,)), Tuple{Vector{Float64}, Matrix{Float64}},
+                                        optimize=true, ndrange=(64,))
+    end
+    @test !occursin("gcframe", IR)
 end

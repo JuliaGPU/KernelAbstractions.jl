@@ -35,6 +35,10 @@ end
 
 
 function ka_code_llvm(kernel, argtypes; ndrange=nothing, workgroupsize=nothing, dependencies=nothing, kwargs...)
+    ka_code_llvm(stdout, kernel, argtypes;  ndrange=ndrange, workgroupsize=nothing, dependencies=nothing, kwargs...)
+end
+
+function ka_code_llvm(io::IO, kernel, argtypes; ndrange=nothing, workgroupsize=nothing, dependencies=nothing, kwargs...)
     # get the iterspace and dynamic of a kernel
     ndrange, workgroupsize, iterspace, dynamic = KernelAbstractions.launch_config(kernel, ndrange, workgroupsize)
 
@@ -48,7 +52,7 @@ function ka_code_llvm(kernel, argtypes; ndrange=nothing, workgroupsize=nothing, 
         argtypes = argtypes.parameters
     end
     # use code_typed
-    return InteractiveUtils.code_llvm(KernelAbstractions.Cassette.overdub, (typeof(ctx), typeof(kernel.f), argtypes...); kwargs...)
+    return InteractiveUtils.code_llvm(io, KernelAbstractions.Cassette.overdub, (typeof(ctx), typeof(kernel.f), argtypes...); kwargs...)
 end
 
 
