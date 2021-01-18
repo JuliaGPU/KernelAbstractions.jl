@@ -77,7 +77,7 @@ function harness(backend, ArrayT)
 
     A = ArrayT{Float64}(ones(64,3));
     out =  ArrayT{Float64}(undef, 64)
-    wait(reduce_private(CPU(), 8)(out, A, ndrange=size(out)))
+    wait(reduce_private(backend, 8)(out, A, ndrange=size(out)))
     @test all(out .== 3.0)
 end
 
