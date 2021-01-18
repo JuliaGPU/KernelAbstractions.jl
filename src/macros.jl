@@ -193,13 +193,13 @@ function split(stmts,
                 continue
             elseif @capture(rhs, @private(T_, dims_))
                 # Implement the legacy `mem = @private T dims` as
-                # @private mem = Scratchpad(T, Val(dims))
+                # mem = Scratchpad(T, Val(dims))
 
                 if dims isa Integer
                     dims = (dims,)
                 end
                 alloc = :($Scratchpad($T, Val($dims)))
-                push!(private_allocations, :($lhs = $alloc))
+                push!(allocations, :($lhs = $alloc))
                 push!(private, lhs)
                 continue
             end

@@ -244,6 +244,22 @@ end
 # - memory allocated as a MArray with size `Dims`
 ###
 
+struct ScratchArray{N, D}
+    data::D
+    ScratchArray{N}(data::D) where {N, D} = new{N, D}(data)
+end
+
 @inline function Cassette.overdub(ctx::CPUCtx, ::typeof(Scratchpad), ::Type{T}, ::Val{Dims}) where {T, Dims}
-    return MArray{__size(Dims), T}(undef)
+    return ScratchArray{length(Dims)}(MArray{__size((Dims..., prod(__groupsize(ctx.metadata)))), T}(undef))
+end
+
+# Base.view creates a boundscheck which captures A
+# https://github.com/JuliaLang/julia/issues/39308
+@inline function aview(A, I::Vararg{Any, N}) where N
+     J = Base.to_indices(A, I)
+     Base.unsafe_view(Base._maybe_reshape_parent(A, Base.index_ndims(J...)), J...)
+end
+
+@inline function Cassette.overdub(ctx::CPUCtx, ::typeof(Base.getindex), A::ScratchArray{N}, idx) where N
+    return @inbounds aview(A.data, ntuple(_->:, Val(N))..., idx)
 end
