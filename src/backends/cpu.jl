@@ -250,7 +250,7 @@ struct ScratchArray{N, D}
 end
 
 @inline function Cassette.overdub(ctx::CPUCtx, ::typeof(Scratchpad), ::Type{T}, ::Val{Dims}) where {T, Dims}
-    return ScratchArray{length(Dims)}(MArray{__size((Dims..., prod(__groupsize(ctx.metadata)))), T}(undef))
+    return ScratchArray{length(Dims)}(MArray{__size((Dims..., __groupsize(ctx.metadata)...)), T}(undef))
 end
 
 # Base.view creates a boundscheck which captures A
@@ -260,6 +260,6 @@ end
      Base.unsafe_view(Base._maybe_reshape_parent(A, Base.index_ndims(J...)), J...)
 end
 
-@inline function Cassette.overdub(ctx::CPUCtx, ::typeof(Base.getindex), A::ScratchArray{N}, idx) where N
-    return @inbounds aview(A.data, ntuple(_->:, Val(N))..., idx)
+@inline function Cassette.overdub(ctx::CPUCtx, ::typeof(Base.getindex), A::ScratchArray{N}, idx::CartesianIndex) where N
+    return @inbounds aview(A.data, ntuple(_->:, Val(N))..., idx.I...)
 end
