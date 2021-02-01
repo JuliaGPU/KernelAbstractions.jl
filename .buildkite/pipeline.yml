@@ -1,10 +1,10 @@
 steps:
   - label: "Julia v1"
     plugins:
-      - JuliaCI/julia#509009fac1cdde1de29509db9870389499cede0c:
+      - JuliaCI/julia#v1:
           version: "1"
-      - JuliaCI/julia-test#v0.3:
-      - JuliaCI/julia-coverage#v0.3:
+      - JuliaCI/julia-test#v1:
+      - JuliaCI/julia-coverage#v1:
           codecov: true
     agents:
       queue: "juliagpu"
@@ -13,10 +13,10 @@ steps:
 
   - label: "Julia 1.6-nightly"
     plugins:
-      - JuliaCI/julia#v0.6:
+      - JuliaCI/julia#v1:
           version: "1.6-nightly"
-      - JuliaCI/julia-test#v0.3:
-      - JuliaCI/julia-coverage#v0.3:
+      - JuliaCI/julia-test#v1:
+      - JuliaCI/julia-coverage#v1:
           codecov: true
     agents:
       queue: "juliagpu"
@@ -25,10 +25,10 @@ steps:
 
   - label: "Julia nightly"
     plugins:
-      - JuliaCI/julia#v0.6:
+      - JuliaCI/julia#v1:
           version: "nightly"
-      - JuliaCI/julia-test#v0.3:
-      - JuliaCI/julia-coverage#v0.3:
+      - JuliaCI/julia-test#v1:
+      - JuliaCI/julia-coverage#v1:
           codecov: true
     agents:
       queue: "juliagpu"
