@@ -160,9 +160,36 @@ function launch_config(kernel::Kernel{CUDADevice}, ndrange, workgroupsize)
     return ndrange, workgroupsize, iterspace, dynamic
 end
 
+function threads_to_workgroupsize(threads, ndrange)
+    workgroupsize = ones(Int, length(ndrange))
+    workgroupsize[1] = threads
+    i = 1
+    for outer i in 1:length(ndrange)-1
+        workgroupsize[i] > ndrange[i] || break
+        workgroupsize[i+1] = div(threads, prod(ndrange[1:i]))
+        workgroupsize[i] = ndrange[i]
+    end
+    workgroupsize[i] = min(workgroupsize[i], ndrange[i])
+    return Tuple(workgroupsize)
+end
+
 function (obj::Kernel{CUDADevice})(args...; ndrange=nothing, dependencies=nothing, workgroupsize=nothing, progress=yield)
 
-    ndrange, workgroupsize, iterspace, dynamic = launch_config(obj, ndrange, workgroupsize)
+    ndrange, _workgroupsize, iterspace, dynamic = launch_config(obj, ndrange, workgroupsize)
+    kernel = nothing
+
+    if KernelAbstractions.workgroupsize(obj) <: DynamicSize && workgroupsize === nothing
+        ndrange, _, iterspace, _ = launch_config(obj, ndrange, ndrange)
+        ctx = mkcontext(obj, ndrange, iterspace)
+        kernel = CUDA.@cuda name=String(nameof(obj.f)) launch=false Cassette.overdub(ctx, obj.f, args...)
+
+        config = CUDA.launch_configuration(kernel.fun; max_threads=prod(ndrange))
+
+        workgroupsize = threads_to_workgroupsize(config.threads, ndrange)
+        iterspace, dynamic = partition(obj, ndrange, workgroupsize)
+    else
+        workgroupsize = _workgroupsize
+    end
 
     # If the kernel is statically sized we can tell the compiler about that
     if KernelAbstractions.workgroupsize(obj) <: StaticSize
@@ -184,9 +211,13 @@ function (obj::Kernel{CUDADevice})(args...; ndrange=nothing, dependencies=nothin
     ctx = mkcontext(obj, ndrange, iterspace)
     # Launch kernel
     event = CUDA.CuEvent(CUDA.EVENT_DISABLE_TIMING)
-    CUDA.@cuda(threads=threads, blocks=nblocks, stream=stream,
-               name=String(nameof(obj.f)), maxthreads=maxthreads,
-               Cassette.overdub(ctx, obj.f, args...))
+    if kernel === nothing
+        CUDA.@cuda(threads=threads, blocks=nblocks, stream=stream,
+                   name=String(nameof(obj.f)), maxthreads=maxthreads,
+                   Cassette.overdub(ctx, obj.f, args...))
+    else
+        kernel(ctx, obj.f, args...; threads=threads, blocks=nblocks, stream=stream)
+    end
 
     CUDA.record(event, stream)
     return CudaEvent(event)
