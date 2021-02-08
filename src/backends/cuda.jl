@@ -181,7 +181,7 @@ function (obj::Kernel{CUDADevice})(args...; ndrange=nothing, dependencies=nothin
     if KernelAbstractions.workgroupsize(obj) <: DynamicSize && workgroupsize === nothing
         ndrange, _, iterspace, _ = launch_config(obj, ndrange, ndrange)
         ctx = mkcontext(obj, ndrange, iterspace)
-        kernel = CUDA.@cuda name=String(nameof(obj.f)) launch=false Cassette.overdub(ctx, obj.f, args...)
+        kernel = CUDA.@cuda launch=false name=String(nameof(obj.f))  Cassette.overdub(ctx, obj.f, args...)
 
         config = CUDA.launch_configuration(kernel.fun; max_threads=prod(ndrange))
 
