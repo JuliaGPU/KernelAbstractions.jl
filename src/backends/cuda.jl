@@ -144,25 +144,45 @@ function launch_config(kernel::Kernel{CUDADevice}, ndrange, workgroupsize)
         workgroupsize = (workgroupsize, )
     end
 
-    if KernelAbstractions.workgroupsize(kernel) <: DynamicSize && workgroupsize === nothing
-        # TODO: allow for NDRange{1, DynamicSize, DynamicSize}(nothing, nothing)
-        #       and actually use CUDA autotuning
-        workgroupsize = (256,)
-    end
-
     # partition checked that the ndrange's agreed
     if KernelAbstractions.ndrange(kernel) <: StaticSize
         ndrange = nothing
     end
 
-    iterspace, dynamic = partition(kernel, ndrange, workgroupsize)
+    iterspace, dynamic = if KernelAbstractions.workgroupsize(kernel) <: DynamicSize &&
+        workgroupsize === nothing
+        # use ndrange as preliminary workgroupsize for autotuning
+        partition(kernel, ndrange, ndrange)
+    else
+        partition(kernel, ndrange, workgroupsize)
+    end
 
     return ndrange, workgroupsize, iterspace, dynamic
+end
+
+function threads_to_workgroupsize(threads, ndrange)
+    total = 1
+    return map(ndrange) do n
+        x = min(div(threads, total), n)
+        total *= x
+        return x
+    end
 end
 
 function (obj::Kernel{CUDADevice})(args...; ndrange=nothing, dependencies=nothing, workgroupsize=nothing, progress=yield)
 
     ndrange, workgroupsize, iterspace, dynamic = launch_config(obj, ndrange, workgroupsize)
+    # this might not be the final context, since we may tune the workgroupsize
+    ctx = mkcontext(obj, ndrange, iterspace)
+    kernel = CUDA.@cuda launch=false name=String(nameof(obj.f)) Cassette.overdub(ctx, obj.f, args...)
+
+    # figure out the optimal workgroupsize automatically
+    if KernelAbstractions.workgroupsize(obj) <: DynamicSize && workgroupsize === nothing
+        config = CUDA.launch_configuration(kernel.fun; max_threads=prod(ndrange))
+        workgroupsize = threads_to_workgroupsize(config.threads, ndrange)
+        iterspace, dynamic = partition(obj, ndrange, workgroupsize)
+        ctx = mkcontext(obj, ndrange, iterspace)
+    end
 
     # If the kernel is statically sized we can tell the compiler about that
     if KernelAbstractions.workgroupsize(obj) <: StaticSize
@@ -181,12 +201,9 @@ function (obj::Kernel{CUDADevice})(args...; ndrange=nothing, dependencies=nothin
     stream = next_stream()
     wait(CUDADevice(), MultiEvent(dependencies), progress, stream)
 
-    ctx = mkcontext(obj, ndrange, iterspace)
     # Launch kernel
     event = CUDA.CuEvent(CUDA.EVENT_DISABLE_TIMING)
-    CUDA.@cuda(threads=threads, blocks=nblocks, stream=stream,
-               name=String(nameof(obj.f)), maxthreads=maxthreads,
-               Cassette.overdub(ctx, obj.f, args...))
+    kernel(ctx, obj.f, args...; threads=threads, blocks=nblocks, stream=stream)
 
     CUDA.record(event, stream)
     return CudaEvent(event)
