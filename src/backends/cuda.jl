@@ -144,51 +144,43 @@ function launch_config(kernel::Kernel{CUDADevice}, ndrange, workgroupsize)
         workgroupsize = (workgroupsize, )
     end
 
-    if KernelAbstractions.workgroupsize(kernel) <: DynamicSize && workgroupsize === nothing
-        # TODO: allow for NDRange{1, DynamicSize, DynamicSize}(nothing, nothing)
-        #       and actually use CUDA autotuning
-        workgroupsize = (256,)
-    end
-
     # partition checked that the ndrange's agreed
     if KernelAbstractions.ndrange(kernel) <: StaticSize
         ndrange = nothing
     end
 
-    iterspace, dynamic = partition(kernel, ndrange, workgroupsize)
+    iterspace, dynamic = if KernelAbstractions.workgroupsize(kernel) <: DynamicSize &&
+        workgroupsize === nothing
+        # use ndrange as preliminary workgroupsize for autotuning
+        partition(kernel, ndrange, ndrange)
+    else
+        partition(kernel, ndrange, workgroupsize)
+    end
 
     return ndrange, workgroupsize, iterspace, dynamic
 end
 
 function threads_to_workgroupsize(threads, ndrange)
-    workgroupsize = ones(Int, length(ndrange))
-    workgroupsize[1] = threads
-    i = 1
-    for outer i in 1:length(ndrange)-1
-        workgroupsize[i] > ndrange[i] || break
-        workgroupsize[i+1] = div(threads, prod(ndrange[1:i]))
-        workgroupsize[i] = ndrange[i]
+    total = 1
+    return map(ndrange) do n
+        x = min(div(threads, total), n)
+        total *= x
+        return x
     end
-    workgroupsize[i] = min(workgroupsize[i], ndrange[i])
-    return Tuple(workgroupsize)
 end
 
 function (obj::Kernel{CUDADevice})(args...; ndrange=nothing, dependencies=nothing, workgroupsize=nothing, progress=yield)
 
-    ndrange, _workgroupsize, iterspace, dynamic = launch_config(obj, ndrange, workgroupsize)
+    ndrange, workgroupsize, iterspace, dynamic = launch_config(obj, ndrange, workgroupsize)
     kernel = nothing
 
     if KernelAbstractions.workgroupsize(obj) <: DynamicSize && workgroupsize === nothing
-        ndrange, _, iterspace, _ = launch_config(obj, ndrange, ndrange)
         ctx = mkcontext(obj, ndrange, iterspace)
         kernel = CUDA.@cuda launch=false name=String(nameof(obj.f))  Cassette.overdub(ctx, obj.f, args...)
-
         config = CUDA.launch_configuration(kernel.fun; max_threads=prod(ndrange))
 
         workgroupsize = threads_to_workgroupsize(config.threads, ndrange)
         iterspace, dynamic = partition(obj, ndrange, workgroupsize)
-    else
-        workgroupsize = _workgroupsize
     end
 
     # If the kernel is statically sized we can tell the compiler about that
