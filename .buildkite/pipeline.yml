@@ -23,7 +23,7 @@ steps:
     commands:
       - julia --project=test -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd()))'
       - julia --project=test -e 'using Pkg; Pkg.develop(PackageSpec(path=joinpath(pwd(),"lib","CUDAKernels")))'
-      - JULIA_LOAD_PATH=@ julia --project=test --color=yes --check-bounds=yes --code-coverage=user --depwarn=yes test/runtests.jl
+      - julia --project=test --color=yes --check-bounds=yes --code-coverage=user --depwarn=yes test/runtests.jl
     agents:
       queue: "juliagpu"
       cuda: "*"
