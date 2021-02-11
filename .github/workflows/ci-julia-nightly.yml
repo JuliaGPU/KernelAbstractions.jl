@@ -37,8 +37,8 @@ jobs:
             ${{ runner.os }}-test-${{ env.cache-name }}-
             ${{ runner.os }}-test-
             ${{ runner.os }}-
-      - run: julia --project=test -e 'Pkg.develop(PackageSpec(path=pwd()))'
-      - run: julia --project=test -e 'Pkg.develop(PackageSpec(path=joinpath(pwd(),"lib","CUDAKernels")))'
+      - run: julia --project=test -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd()))'
+      - run: julia --project=test -e 'using Pkg; Pkg.develop(PackageSpec(path=joinpath(pwd(),"lib","CUDAKernels")))'
       - run: julia -e 'using Pkg; pkg"add Run@0.1"'
       - run: julia -e 'using Run; Run.prepare_test()'
       - run: julia -e 'using Run; Run.test()'
