@@ -77,7 +77,6 @@ C = zeros(N, M)
 
 kern = coalesced_matmul_kernel!(CPU(), (TILE_DIM, TILE_DIM))
 
-wait(kern(C, A, B, N, R, M, ndrange=size(C)))
 @btime wait(kern(C, $A, $B, $N, $R, $M, ndrange=size(C))) setup=(C = zeros(N, M))
 
 wait(kern(C, A, B, N, R, M, ndrange=size(C)))
