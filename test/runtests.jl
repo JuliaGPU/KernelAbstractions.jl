@@ -1,3 +1,18 @@
+@info(
+    "Start testing with:",
+    pwd(),
+    Base.current_project(),
+    Base.load_path(),
+    Text(Base.load_path_setup_code()),
+)
+let Pkg = Base.require(Base.PkgId(
+        Base.UUID("44cfe95a-1eb2-52ea-b672-e2afdf69b78f"),
+        "Pkg",
+    ))
+    Pkg.status(mode = Pkg.PKGMODE_MANIFEST)
+end
+@info "Trying to `using KernelAbstractions` etc..."
+
 using KernelAbstractions
 using CUDAKernels
 using Test
