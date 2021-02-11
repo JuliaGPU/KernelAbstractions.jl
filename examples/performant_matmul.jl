@@ -1,4 +1,3 @@
-using BenchmarkTools
 using KernelAbstractions
 using StaticArrays
 using Test
