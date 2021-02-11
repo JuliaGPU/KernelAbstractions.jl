@@ -38,13 +38,13 @@ steps:
       - JuliaCI/julia#v1:
           version: "nightly"
       - JuliaCI/julia-coverage#v1:
+          codecov: true
     commands:
       - julia --project=test -e 'Pkg.develop(PackageSpec(path=pwd()))'
       - julia --project=test -e 'Pkg.develop(PackageSpec(path=joinpath(pwd(),"lib","CUDAKernels")))'
       - julia -e 'using Pkg; Pkg.add(name="Run", version="0.1")'
       - julia -e 'using Run; Run.prepare_test()'
       - julia -e 'using Run; Run.test()'
-          codecov: true
     agents:
       queue: "juliagpu"
       cuda: "*"
