@@ -6,6 +6,9 @@ on:
       - staging
       - trying
     tags: '*'
+defaults:
+  run:
+    shell: bash
 jobs:
   CI:
     name: CI
@@ -58,7 +61,6 @@ jobs:
         with:
           version: '1'
       - run: julia --color=yes -e 'using Pkg; VERSION >= v"1.5-" && !isdir(joinpath(DEPOT_PATH[1], "registries", "General")) && Pkg.Registry.add("General")'
-        shell: bash
         env:
           JULIA_PKG_SERVER: ""
       - run: |
@@ -80,7 +82,6 @@ jobs:
         with:
           version: 'nightly'
       - run: julia --color=yes -e 'using Pkg; VERSION >= v"1.5-" && !isdir(joinpath(DEPOT_PATH[1], "registries", "General")) && Pkg.Registry.add("General")'
-        shell: bash
         env:
           JULIA_PKG_SERVER: ""
       - run: |

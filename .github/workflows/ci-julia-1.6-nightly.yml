@@ -6,6 +6,9 @@ on:
       - staging
       - trying
     tags: '*'
+defaults:
+  run:
+    shell: bash
 jobs:
   CI-julia-1-6-nightly:
     name: CI-julia-1-6-nightly
