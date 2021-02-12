@@ -1,4 +1,5 @@
 using KernelAbstractions
+using CUDAKernels
 using CUDA
 using Test
 

@@ -1,21 +1,20 @@
-name = "KernelAbstractions"
-uuid = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
+name = "CUDAKernels"
+uuid = "72cfdca4-0801-4ab0-bf6a-d52aa10adc57"
 authors = ["Valentin Churavy <v.churavy@gmail.com>"]
-version = "0.6.0"
+version = "0.1.0"
 
 [deps]
 Adapt = "79e6a3ab-5dfb-504d-930d-738a2a938a0e"
+CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
 Cassette = "7057c7e9-c182-5462-911a-8362d720325c"
-InteractiveUtils = "b77e0a4c-d291-57a0-90e8-8db25a27a240"
-MacroTools = "1914dd2f-81c6-5fcd-8719-6d5c9610ff09"
+KernelAbstractions = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
 SpecialFunctions = "276daf66-3868-5448-9aa4-cd146d93841b"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
-UUIDs = "cf7118a7-6976-5b1a-9a39-7adc72f591a4"
 
 [compat]
 Adapt = "0.4, 1.0, 2.0, 3.0"
+CUDA = "~1.0, ~1.1, ~1.2, 1.3, 2"
 Cassette = "0.3.3"
-MacroTools = "0.5"
+KernelAbstractions = "0.6"
 SpecialFunctions = "0.10, 1.0"
 StaticArrays = "0.12, 1.0"
-julia = "1.3"

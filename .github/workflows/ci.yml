@@ -6,6 +6,9 @@ on:
       - staging
       - trying
     tags: '*'
+defaults:
+  run:
+    shell: bash
 jobs:
   CI:
     name: CI
@@ -40,8 +43,9 @@ jobs:
             ${{ runner.os }}-test-${{ env.cache-name }}-
             ${{ runner.os }}-test-
             ${{ runner.os }}-
-      - uses: julia-actions/julia-buildpkg@v1
-      - uses: julia-actions/julia-runtest@v1
+      - run: julia --project=test -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd()))'
+      - run: julia --project=test -e 'using Pkg; Pkg.develop(PackageSpec(path=joinpath(pwd(),"lib","CUDAKernels")))'
+      - run: JULIA_LOAD_PATH=@ julia --project=test --color=yes --check-bounds=yes --code-coverage=user --depwarn=yes test/runtests.jl
       - uses: julia-actions/julia-processcoverage@v1
       - uses: codecov/codecov-action@v1
         with:
@@ -55,13 +59,13 @@ jobs:
         with:
           version: '1'
       - run: julia --color=yes -e 'using Pkg; VERSION >= v"1.5-" && !isdir(joinpath(DEPOT_PATH[1], "registries", "General")) && Pkg.Registry.add("General")'
-        shell: bash
         env:
           JULIA_PKG_SERVER: ""
       - run: |
           julia --project=docs -e '
             using Pkg
             Pkg.develop(PackageSpec(path=pwd()))
+            Pkg.develop(PackageSpec(path=joinpath(pwd(),"lib","CUDAKernels")))
             Pkg.instantiate()'
       - run: julia --project=docs docs/make.jl
         env:
@@ -76,13 +80,13 @@ jobs:
         with:
           version: 'nightly'
       - run: julia --color=yes -e 'using Pkg; VERSION >= v"1.5-" && !isdir(joinpath(DEPOT_PATH[1], "registries", "General")) && Pkg.Registry.add("General")'
-        shell: bash
         env:
           JULIA_PKG_SERVER: ""
       - run: |
           julia --project=docs -e '
             using Pkg
             Pkg.develop(PackageSpec(path=pwd()))
+            Pkg.develop(PackageSpec(path=joinpath(pwd(),"lib","CUDAKernels")))
             Pkg.instantiate()'
       - run: |
           julia --project=docs -e '

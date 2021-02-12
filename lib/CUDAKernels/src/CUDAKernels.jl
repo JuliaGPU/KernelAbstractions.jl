@@ -1,5 +1,14 @@
+module CUDAKernels
+
 import CUDA
 import SpecialFunctions
+import StaticArrays
+import StaticArrays: MArray
+import Cassette
+import Adapt
+import KernelAbstractions
+
+export CUDADevice
 
 const FREE_STREAMS = CUDA.CuStream[]
 const STREAMS = CUDA.CuStream[]
@@ -44,6 +53,10 @@ function next_stream()
     end
 end
 
+import KernelAbstractions: Event, CPUEvent, NoneEvent, MultiEvent, CPU, GPU, isdone, failed
+
+struct CUDADevice <: GPU end
+
 struct CudaEvent <: Event
     event::CUDA.CuEvent
 end
@@ -57,6 +70,8 @@ function Event(::CUDADevice)
     CUDA.record(event, stream)
     CudaEvent(event)
 end
+
+import Base: wait
 
 wait(ev::CudaEvent, progress=yield) = wait(CPU(), ev, progress)
 
@@ -113,7 +128,7 @@ function __pin!(a)
     return nothing
 end
 
-function async_copy!(::CUDADevice, A, B; dependencies=nothing, progress=yield)
+function KernelAbstractions.async_copy!(::CUDADevice, A, B; dependencies=nothing, progress=yield)
     A isa Array && __pin!(A)
     B isa Array && __pin!(B)
 
@@ -131,7 +146,7 @@ function async_copy!(::CUDADevice, A, B; dependencies=nothing, progress=yield)
     return CudaEvent(event)
 end
 
-
+import KernelAbstractions: Kernel, StaticSize, DynamicSize, partition, blocks, workitems, launch_config
 
 ###
 # Kernel launch
@@ -186,7 +201,7 @@ function (obj::Kernel{CUDADevice})(args...; ndrange=nothing, dependencies=nothin
 
     # If the kernel is statically sized we can tell the compiler about that
     if KernelAbstractions.workgroupsize(obj) <: StaticSize
-        maxthreads = prod(get(KernelAbstractions.workgroupsize(obj)))
+        maxthreads = prod(KernelAbstractions.get(KernelAbstractions.workgroupsize(obj)))
     else
         maxthreads = nothing
     end
@@ -211,8 +226,12 @@ end
 
 Cassette.@context CUDACtx
 
+import KernelAbstractions: CompilerMetadata, CompilerPass, DynamicCheck, LinearIndices
+import KernelAbstractions: __index_Local_Linear, __index_Group_Linear, __index_Global_Linear, __index_Local_Cartesian, __index_Group_Cartesian, __index_Global_Cartesian, __validindex, __print
+import KernelAbstractions: mkcontext, expand, __iterspace, __ndrange, __dynamic_checkbounds
+
 function mkcontext(kernel::Kernel{CUDADevice}, _ndrange, iterspace)
-    metadata = CompilerMetadata{ndrange(kernel), DynamicCheck}(_ndrange, iterspace)
+    metadata = CompilerMetadata{KernelAbstractions.ndrange(kernel), DynamicCheck}(_ndrange, iterspace)
     Cassette.disablehooks(CUDACtx(pass = CompilerPass, metadata=metadata))
 end
 
@@ -251,7 +270,9 @@ end
     end
 end
 
-generate_overdubs(CUDACtx)
+import KernelAbstractions: groupsize, __groupsize, __workitems_iterspace, add_float_contract, sub_float_contract, mul_float_contract
+
+KernelAbstractions.generate_overdubs(@__MODULE__, CUDACtx)
 
 ###
 # CUDA specific method rewrites
@@ -311,9 +332,12 @@ else
     const emit_shmem = CUDA._shmem
 end
 
+import KernelAbstractions: ConstAdaptor, SharedMemory, Scratchpad, __synchronize, __size
+
 ###
 # GPU implementation of shared memory
 ###
+
 @inline function Cassette.overdub(ctx::CUDACtx, ::typeof(SharedMemory), ::Type{T}, ::Val{Dims}, ::Val{Id}) where {T, Dims, Id}
     ptr = emit_shmem(Val(Id), T, Val(prod(Dims)))
     CUDA.CuDeviceArray(Dims, ptr)
@@ -341,3 +365,8 @@ end
 ###
 
 Adapt.adapt_storage(to::ConstAdaptor, a::CUDA.CuDeviceArray) = Base.Experimental.Const(a)
+
+# Argument conversion
+KernelAbstractions.argconvert(k::Kernel{CUDADevice}, arg) = CUDA.cudaconvert(arg)
+
+end

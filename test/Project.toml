@@ -1,8 +1,9 @@
 [deps]
 CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
+InteractiveUtils = "b77e0a4c-d291-57a0-90e8-8db25a27a240"
 KernelAbstractions = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
 MPI = "da04e1cc-30fd-572f-bb4f-1f8673147195"
+MacroTools = "1914dd2f-81c6-5fcd-8719-6d5c9610ff09"
 SpecialFunctions = "276daf66-3868-5448-9aa4-cd146d93841b"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
-InteractiveUtils = "b77e0a4c-d291-57a0-90e8-8db25a27a240"
