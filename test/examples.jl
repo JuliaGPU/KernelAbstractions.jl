@@ -15,12 +15,14 @@ examples_dir = joinpath(@__DIR__, "..", "examples")
 examples = find_sources(examples_dir)
 filter!(file -> readline(file) != "# EXCLUDE FROM TESTING", examples)
 
-cd(examples_dir) do
-    examples = relpath.(examples, Ref(examples_dir))
-    @testset for example in examples
-        cmd = `$(Base.julia_cmd()) --project=$(Base.current_project()) $example`
-        @test success(pipeline(cmd, stderr=stderr))
-    end
+@testset "$(basename(example))" for example in examples
+    code = """
+    $(Base.load_path_setup_code())
+    include($(repr(example)))
+    """
+    cmd = `$(Base.julia_cmd()) --startup-file=no -e $code`
+    @debug "Testing $example" Text(code) cmd
+    @test success(pipeline(cmd, stderr=stderr))
 end
 
 end

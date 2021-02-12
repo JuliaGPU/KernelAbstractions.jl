@@ -8,9 +8,7 @@ steps:
     commands:
       - julia --project=test -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd()))'
       - julia --project=test -e 'using Pkg; Pkg.develop(PackageSpec(path=joinpath(pwd(),"lib","CUDAKernels")))'
-      - julia -e 'using Pkg; Pkg.add(name="Run", version="0.1")'
-      - julia -e 'using Run; Run.prepare_test()'
-      - julia -e 'using Run; Run.test()'
+      - JULIA_LOAD_PATH=@ julia --project=test --color=yes --check-bounds=yes --code-coverage=user --depwarn=yes test/runtests.jl
     agents:
       queue: "juliagpu"
       cuda: "*"
@@ -25,9 +23,7 @@ steps:
     commands:
       - julia --project=test -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd()))'
       - julia --project=test -e 'using Pkg; Pkg.develop(PackageSpec(path=joinpath(pwd(),"lib","CUDAKernels")))'
-      - julia -e 'using Pkg; Pkg.add(name="Run", version="0.1")'
-      - julia -e 'using Run; Run.prepare_test()'
-      - julia -e 'using Run; Run.test()'
+      - julia --project=test --color=yes --check-bounds=yes --code-coverage=user --depwarn=yes test/runtests.jl
     agents:
       queue: "juliagpu"
       cuda: "*"
@@ -42,9 +38,7 @@ steps:
     commands:
       - julia --project=test -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd()))'
       - julia --project=test -e 'using Pkg; Pkg.develop(PackageSpec(path=joinpath(pwd(),"lib","CUDAKernels")))'
-      - julia -e 'using Pkg; Pkg.add(name="Run", version="0.1")'
-      - julia -e 'using Run; Run.prepare_test()'
-      - julia -e 'using Run; Run.test()'
+      - JULIA_LOAD_PATH=@ julia --project=test --color=yes --check-bounds=yes --code-coverage=user --depwarn=yes test/runtests.jl
     agents:
       queue: "juliagpu"
       cuda: "*"
