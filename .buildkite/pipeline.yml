@@ -6,9 +6,8 @@ steps:
       - JuliaCI/julia-coverage#v1:
           codecov: true
     commands:
-      - julia --project=test -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd()))'
-      - julia --project=test -e 'using Pkg; Pkg.develop(PackageSpec(path=joinpath(pwd(),"lib","CUDAKernels")))'
-      - JULIA_LOAD_PATH=@ julia --project=test --color=yes --check-bounds=yes --code-coverage=user --depwarn=yes test/runtests.jl
+      - julia .ci/develop.jl
+      - julia -e 'import Pkg; Pkg.test(["KernelAbstractions", "CUDAKernels"]; coverage = true)'
     agents:
       queue: "juliagpu"
       cuda: "*"
@@ -21,9 +20,8 @@ steps:
       - JuliaCI/julia-coverage#v1:
           codecov: true
     commands:
-      - julia --project=test -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd()))'
-      - julia --project=test -e 'using Pkg; Pkg.develop(PackageSpec(path=joinpath(pwd(),"lib","CUDAKernels")))'
-      - julia --project=test --color=yes --check-bounds=yes --code-coverage=user --depwarn=yes test/runtests.jl
+      - julia .ci/develop.jl
+      - julia -e 'import Pkg; Pkg.test(["KernelAbstractions", "CUDAKernels"]; coverage = true)'
     agents:
       queue: "juliagpu"
       cuda: "*"
@@ -36,9 +34,8 @@ steps:
       - JuliaCI/julia-coverage#v1:
           codecov: true
     commands:
-      - julia --project=test -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd()))'
-      - julia --project=test -e 'using Pkg; Pkg.develop(PackageSpec(path=joinpath(pwd(),"lib","CUDAKernels")))'
-      - JULIA_LOAD_PATH=@ julia --project=test --color=yes --check-bounds=yes --code-coverage=user --depwarn=yes test/runtests.jl
+      - julia .ci/develop.jl
+      - julia -e 'import Pkg; Pkg.test(["KernelAbstractions", "CUDAKernels"]; coverage = true)'
     agents:
       queue: "juliagpu"
       cuda: "*"

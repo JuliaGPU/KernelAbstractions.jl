@@ -18,3 +18,9 @@ Cassette = "0.3.3"
 KernelAbstractions = "0.6"
 SpecialFunctions = "0.10, 1.0"
 StaticArrays = "0.12, 1.0"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]
