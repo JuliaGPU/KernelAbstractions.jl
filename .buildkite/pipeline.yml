@@ -7,7 +7,7 @@ steps:
           codecov: true
     commands:
       - julia .ci/develop.jl
-      - julia -e 'import Pkg; Pkg.test(["KernelAbstractions", "CUDAKernels"]; coverage = true)'
+      - julia .ci/test.jl
     agents:
       queue: "juliagpu"
       cuda: "*"
@@ -21,7 +21,7 @@ steps:
           codecov: true
     commands:
       - julia .ci/develop.jl
-      - julia -e 'import Pkg; Pkg.test(["KernelAbstractions", "CUDAKernels"]; coverage = true)'
+      - julia .ci/test.jl
     agents:
       queue: "juliagpu"
       cuda: "*"
@@ -35,7 +35,7 @@ steps:
           codecov: true
     commands:
       - julia .ci/develop.jl
-      - julia -e 'import Pkg; Pkg.test(["KernelAbstractions", "CUDAKernels"]; coverage = true)'
+      - julia .ci/test.jl
     agents:
       queue: "juliagpu"
       cuda: "*"
