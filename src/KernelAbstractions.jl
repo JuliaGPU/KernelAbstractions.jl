@@ -2,7 +2,7 @@ module KernelAbstractions
 
 export @kernel
 export @Const, @localmem, @private, @uniform, @synchronize, @index, groupsize, @print
-export Device, GPU, CPU, CUDADevice, Event, MultiEvent, NoneEvent
+export Device, GPU, CPU, Event, MultiEvent, NoneEvent
 export async_copy!
 
 
@@ -330,9 +330,6 @@ abstract type Device end
 abstract type GPU <: Device end
 
 struct CPU <: Device end
-struct CUDADevice <: GPU end
-# struct AMD <: GPU end
-# struct Intel <: GPU end
 
 include("nditeration.jl")
 using .NDIteration
@@ -462,16 +459,9 @@ end
     end
 end
 
-###
-# Backends/Implementation
-###
-
 # Utils
 __size(args::Tuple) = Tuple{args...}
 __size(i::Int) = Tuple{i}
-
-include("backends/cpu.jl")
-include("backends/cuda.jl")
 
 ###
 # Extras
@@ -481,4 +471,9 @@ include("backends/cuda.jl")
 include("extras/extras.jl")
 
 include("reflection.jl")
+
+# CPU backend
+
+include("cpu.jl")
+
 end #module

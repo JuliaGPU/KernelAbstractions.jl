@@ -1,6 +1,7 @@
 # EXCLUDE FROM TESTING
 using KernelAbstractions
-using  CUDA
+using CUDAKernels
+using CUDA
 
 if has_cuda_gpu()
     CUDA.allowscalar(false)

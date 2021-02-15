@@ -30,8 +30,8 @@ end
 include("compiler/contract.jl")
 include("compiler/pass.jl")
 
-function generate_overdubs(Ctx)
-   @eval begin
+function generate_overdubs(mod, Ctx)
+   @eval mod begin
         @inline Cassette.overdub(ctx::$Ctx, ::typeof(groupsize)) = __groupsize(ctx.metadata)
         @inline Cassette.overdub(ctx::$Ctx, ::typeof(__workitems_iterspace)) = workitems(__iterspace(ctx.metadata))
 

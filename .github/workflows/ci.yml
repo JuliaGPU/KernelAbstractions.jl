@@ -6,6 +6,9 @@ on:
       - staging
       - trying
     tags: '*'
+defaults:
+  run:
+    shell: bash
 jobs:
   CI:
     name: CI
@@ -40,8 +43,8 @@ jobs:
             ${{ runner.os }}-test-${{ env.cache-name }}-
             ${{ runner.os }}-test-
             ${{ runner.os }}-
-      - uses: julia-actions/julia-buildpkg@v1
-      - uses: julia-actions/julia-runtest@v1
+      - run: julia .ci/develop.jl
+      - run: julia -e 'import Pkg; Pkg.test(["KernelAbstractions", "CUDAKernels"]; coverage = true)'
       - uses: julia-actions/julia-processcoverage@v1
       - uses: codecov/codecov-action@v1
         with:
@@ -55,14 +58,9 @@ jobs:
         with:
           version: '1'
       - run: julia --color=yes -e 'using Pkg; VERSION >= v"1.5-" && !isdir(joinpath(DEPOT_PATH[1], "registries", "General")) && Pkg.Registry.add("General")'
-        shell: bash
         env:
           JULIA_PKG_SERVER: ""
-      - run: |
-          julia --project=docs -e '
-            using Pkg
-            Pkg.develop(PackageSpec(path=pwd()))
-            Pkg.instantiate()'
+      - run: julia --project=docs .ci/develop.jl
       - run: julia --project=docs docs/make.jl
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -76,16 +74,13 @@ jobs:
         with:
           version: 'nightly'
       - run: julia --color=yes -e 'using Pkg; VERSION >= v"1.5-" && !isdir(joinpath(DEPOT_PATH[1], "registries", "General")) && Pkg.Registry.add("General")'
-        shell: bash
         env:
           JULIA_PKG_SERVER: ""
-      - run: |
-          julia --project=docs -e '
-            using Pkg
-            Pkg.develop(PackageSpec(path=pwd()))
-            Pkg.instantiate()'
+      - run: julia --project=docs .ci/develop.jl
       - run: |
           julia --project=docs -e '
             using Documenter: doctest
             using KernelAbstractions
-            doctest(KernelAbstractions)'
+            using CUDAKernels
+            doctest(KernelAbstractions; manual = true)
+            doctest(CUDAKernels; manual = false)'
