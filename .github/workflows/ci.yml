@@ -44,7 +44,7 @@ jobs:
             ${{ runner.os }}-test-
             ${{ runner.os }}-
       - run: julia .ci/develop.jl
-      - run: julia -e 'import Pkg; Pkg.test(["KernelAbstractions", "CUDAKernels"]; coverage = true)'
+      - run: julia .ci/test.jl
       - uses: julia-actions/julia-processcoverage@v1
       - uses: codecov/codecov-action@v1
         with:
@@ -57,7 +57,7 @@ jobs:
       - uses: julia-actions/setup-julia@v1
         with:
           version: '1'
-      - run: julia --color=yes -e 'using Pkg; VERSION >= v"1.5-" && !isdir(joinpath(DEPOT_PATH[1], "registries", "General")) && Pkg.Registry.add("General")'
+      - run: julia .ci/add-general-registry.jl
         env:
           JULIA_PKG_SERVER: ""
       - run: julia --project=docs .ci/develop.jl
@@ -73,7 +73,7 @@ jobs:
       - uses: julia-actions/setup-julia@v1
         with:
           version: 'nightly'
-      - run: julia --color=yes -e 'using Pkg; VERSION >= v"1.5-" && !isdir(joinpath(DEPOT_PATH[1], "registries", "General")) && Pkg.Registry.add("General")'
+      - run: julia .ci/add-general-registry.jl
         env:
           JULIA_PKG_SERVER: ""
       - run: julia --project=docs .ci/develop.jl
