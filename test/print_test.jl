@@ -24,6 +24,6 @@ end
     wait(test_print(CPU()))
     @test true
 
-    @print("Why this should work")
+    @print("Why this should work\n")
     @test true
 end
