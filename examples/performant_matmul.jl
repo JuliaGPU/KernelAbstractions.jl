@@ -1,0 +1,82 @@
+using KernelAbstractions
+using StaticArrays
+using Test
+
+const TILE_DIM = 32
+
+@kernel function coalesced_matmul_kernel!(output, @Const(input1), @Const(input2), N, R, M,
+                                             ::Val{BANK}=Val(1)) where BANK
+     gi, gj = @index(Group, NTuple)
+     i, j   = @index(Local, NTuple)
+
+     TILE_DIM = @uniform groupsize()[1]
+
+     # +1 to avoid bank conflicts on shared memory
+     tile1 = @localmem eltype(output) (TILE_DIM+BANK, TILE_DIM)
+     tile2 = @localmem eltype(output) (TILE_DIM+BANK, TILE_DIM)
+
+     # private variable for tile output
+     outval = @private eltype(output) 1
+     @inbounds outval[1] = -zero(eltype(output))
+
+     @uniform N = size(output, 1)
+     # number of tiles depends on inner dimension
+     @uniform NUM_TILES = div(R + TILE_DIM - 1, TILE_DIM)
+
+     # loop over all tiles needed for this calculation
+     for t in 0:NUM_TILES-1
+         # Can't use @index(Global), because we use a smaller ndrange
+         I = (gi-1) * TILE_DIM + i
+         J = (gj-1) * TILE_DIM + j
+
+         # load inputs into tiles, with bounds checking for non-square matrices
+         if I <= N && t*TILE_DIM + j <= R
+             @inbounds tile1[i, j] = input1[I, t*TILE_DIM + j]
+         else
+             @inbounds tile1[i, j] = 0.0
+         end
+         if t*TILE_DIM + i <= R && J <= M
+             @inbounds tile2[i, j] = input2[t*TILE_DIM + i, J]
+         else
+             @inbounds tile2[i, j] = 0.0
+         end
+
+         # wait for all tiles to be loaded
+         @synchronize
+
+         # get global values again
+         I = (gi-1) * TILE_DIM + i
+         J = (gj-1) * TILE_DIM + j
+
+         # calculate value of spot in output, use temporary value to allow for vectorization
+         out = zero(eltype(output))
+         @simd for k in 1:TILE_DIM
+             @inbounds out += tile1[i, k] * tile2[k, j]
+         end
+         outval[1] += out
+
+         @synchronize
+     end
+
+     # get global indices again
+     I = (gi-1) * TILE_DIM + i
+     J = (gj-1) * TILE_DIM + j
+
+     # save if inbounds
+     if I <= N && J <= M
+         @inbounds output[I, J] = outval[1]
+     end
+end
+
+N = 1024
+R = 512
+M = 2048
+A = rand(N, R)
+B = rand(R, M)
+C = zeros(N, M)
+
+kern = coalesced_matmul_kernel!(CPU(), (TILE_DIM, TILE_DIM))
+
+
+wait(kern(C, A, B, N, R, M, ndrange=size(C)))
+@test isapprox(A*B, C)
