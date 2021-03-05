@@ -14,6 +14,8 @@ steps:
     agents:
       queue: "juliagpu"
       cuda: "*"
+    env:
+      KERNELABSTRACTIONS_TEST_BACKEND: "CUDA"
     timeout_in_minutes: 60
 
   - label: "Julia 1.6-nightly"
@@ -31,6 +33,8 @@ steps:
     agents:
       queue: "juliagpu"
       cuda: "*"
+    env:
+      KERNELABSTRACTIONS_TEST_BACKEND: "CUDA"
     timeout_in_minutes: 60
 
   - label: "Julia nightly"
@@ -48,6 +52,8 @@ steps:
     agents:
       queue: "juliagpu"
       cuda: "*"
+    env:
+      KERNELABSTRACTIONS_TEST_BACKEND: "CUDA"
     timeout_in_minutes: 60
 
 env:
