@@ -1,45 +1,20 @@
 using KernelAbstractions
-using CUDAKernels
 using Test
 
-@testset "Unittests" begin
-    include("test.jl")
-end
+include("testsuite.jl")
 
-@testset "Localmem" begin
-    include("localmem.jl")
+backend = get(ENV, "KERNELABSTRACTIONS_TEST_BACKEND", "CPU")
+if backend == "CPU"
+    struct CPUDeviceArray{T,N,A} end # Fake and unused
+    Testsuite.testsuite(CPU, Array, CPUDeviceArray)
+elseif backend == "CUDA"
+    using CUDAKernels, CUDA
+    if has_cuda_gpu()
+        CUDA.allowscalar(false)
+        Testsuite.testsuite(CUDADevice, CuArray, CUDA.CuDeviceArray)
+    else
+        error("No CUDA GPUs available!")
+    end
+else
+    error("Unknown backend $backend")
 end
-
-@testset "Private" begin
-    include("private.jl")
-end
-
-@testset "Unroll" begin
-    include("unroll.jl")
-end
-
-@testset "NDIteration" begin
-    include("nditeration.jl")
-end
-
-@testset "async_copy!" begin
-    include("async_copy.jl")
-end
-
-@testset "Events" begin
-    include("events.jl")
-end
-
-@testset "Printing" begin
-    include("print_test.jl")
-end
-
-@testset "Compiler" begin
-    include("compiler.jl")
-end
-
-@testset "Reflection" begin
-    include("reflection.jl")
-end
-
-include("examples.jl")

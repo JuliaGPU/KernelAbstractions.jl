@@ -2,6 +2,7 @@ using KernelAbstractions
 using KernelAbstractions.NDIteration
 using Test
 
+function nditeration_testsuite()
 @testset "iteration" begin
     let ndrange = NDRange{2, DynamicSize, DynamicSize}(CartesianIndices((256, 256)), CartesianIndices((32, 32)));
         @test length(ndrange) == 256*256
@@ -83,4 +84,5 @@ end
             @test check(idx, i-1, ntuple(i->I[i]-1, length(I))..., Dim_x, Dim_y)
         end
     end
+end
 end

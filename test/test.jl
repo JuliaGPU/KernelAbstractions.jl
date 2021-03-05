@@ -1,17 +1,13 @@
 using KernelAbstractions
 using KernelAbstractions.NDIteration
-using CUDA
 using InteractiveUtils
-
-
-if has_cuda_gpu()
-    CUDA.allowscalar(false)
-end
+import SpecialFunctions
 
 identity(x) = x
 
+function unittest_testsuite(backend, ArrayT, DeviceArrayT)
 @testset "partition" begin
-    let kernel = KernelAbstractions.Kernel{CPU, StaticSize{(64,)}, DynamicSize, typeof(identity)}(identity)
+    let kernel = KernelAbstractions.Kernel{backend, StaticSize{(64,)}, DynamicSize, typeof(identity)}(identity)
         iterspace, dynamic = KernelAbstractions.partition(kernel, (128,), nothing)
         @test length(blocks(iterspace)) == 2
         @test dynamic isa NoDynamicCheck
@@ -26,7 +22,7 @@ identity(x) = x
 
         @test_throws ErrorException KernelAbstractions.partition(kernel, (129,), (65,))
     end
-    let kernel = KernelAbstractions.Kernel{CPU, StaticSize{(64,)}, StaticSize{(128,)}, typeof(identity)}(identity)
+    let kernel = KernelAbstractions.Kernel{backend, StaticSize{(64,)}, StaticSize{(128,)}, typeof(identity)}(identity)
         iterspace, dynamic = KernelAbstractions.partition(kernel, (128,), nothing)
         @test length(blocks(iterspace)) == 2
         @test dynamic isa NoDynamicCheck
@@ -68,49 +64,42 @@ end
        A[I] = i
 end
 
-function indextest(backend, ArrayT)
+@testset "indextest" begin
     # TODO: add test for _group and _local_cartesian
     A = ArrayT{Int}(undef, 16, 16)
-    wait(index_linear_global(backend, 8)(A, ndrange=length(A)))
+    wait(index_linear_global(backend(), 8)(A, ndrange=length(A)))
     @test all(A .== LinearIndices(A))
 
     A = ArrayT{Int}(undef, 8)
-    wait(index_linear_local(backend, 8)(A, ndrange=length(A)))
+    wait(index_linear_local(backend(), 8)(A, ndrange=length(A)))
     @test all(A .== 1:8)
 
     A = ArrayT{Int}(undef, 16)
-    wait(index_linear_local(backend, 8)(A, ndrange=length(A)))
+    wait(index_linear_local(backend(), 8)(A, ndrange=length(A)))
     @test all(A[1:8] .== 1:8)
     @test all(A[9:16] .== 1:8)
 
     A = ArrayT{Int}(undef, 8, 2)
-    wait(index_linear_local(backend, 8)(A, ndrange=length(A)))
+    wait(index_linear_local(backend(), 8)(A, ndrange=length(A)))
     @test all(A[1:8] .== 1:8)
     @test all(A[9:16] .== 1:8)
 
     A = ArrayT{CartesianIndex{2}}(undef, 16, 16)
-    wait(index_cartesian_global(backend, 8)(A, ndrange=size(A)))
+    wait(index_cartesian_global(backend(), 8)(A, ndrange=size(A)))
     @test all(A .== CartesianIndices(A))
 
     A = ArrayT{CartesianIndex{1}}(undef, 16, 16)
-    wait(index_cartesian_global(backend, 8)(A, ndrange=length(A)))
+    wait(index_cartesian_global(backend(), 8)(A, ndrange=length(A)))
     @test all(A[:] .== CartesianIndices((length(A),)))
 
     # Non-multiplies of the workgroupsize
     A = ArrayT{Int}(undef, 7, 7)
-    wait(index_linear_global(backend, 8)(A, ndrange=length(A)))
+    wait(index_linear_global(backend(), 8)(A, ndrange=length(A)))
     @test all(A .== LinearIndices(A))
 
     A = ArrayT{Int}(undef, 5)
-    wait(index_linear_local(backend, 8)(A, ndrange=length(A)))
+    wait(index_linear_local(backend(), 8)(A, ndrange=length(A)))
     @test all(A .== 1:5)
-end
-
-@testset "indextest" begin
-    indextest(CPU(), Array)
-    if has_cuda_gpu()
-        indextest(CUDADevice(), CuArray)
-    end
 end
 
 @kernel function constarg(A, @Const(B))
@@ -119,31 +108,29 @@ end
 end
 
 @testset "Const" begin
-    let kernel = constarg(CPU(), 8, (1024,))
+    let kernel = constarg(backend(), 8, (1024,))
         # this is poking at internals
         iterspace = NDRange{1, StaticSize{(128,)}, StaticSize{(8,)}}();
-        ctx = KernelAbstractions.mkcontext(kernel, 1, nothing, iterspace, Val(NoDynamicCheck()))
-        AT = Array{Float32, 2}
+        ctx = if backend == CPU
+            KernelAbstractions.mkcontext(kernel, 1, nothing, iterspace, Val(NoDynamicCheck()))
+        else
+            KernelAbstractions.mkcontext(kernel, nothing, iterspace)
+        end
+        AT = if backend == CPU
+            Array{Float32, 2}
+        else
+            DeviceArrayT{Float32, 2, 1} # AS 1
+        end
         IR = sprint() do io
             code_llvm(io, KernelAbstractions.Cassette.overdub,
                      (typeof(ctx), typeof(kernel.f), AT, AT),
                      optimize=false, raw=true)
         end
-        @test occursin("!alias.scope", IR)
-        @test occursin("!noalias", IR)
-    end
-
-    if has_cuda_gpu()
-        let kernel = constarg(CUDADevice(), 8, (1024,))
-            # this is poking at internals
-            iterspace = NDRange{1, StaticSize{(128,)}, StaticSize{(8,)}}();
-            ctx = KernelAbstractions.mkcontext(kernel, nothing, iterspace)
-            AT = CUDA.CuDeviceArray{Float32, 2, CUDA.AS.Global}
-            IR = sprint() do io
-                CUDA.code_llvm(io, KernelAbstractions.Cassette.overdub,
-                               (typeof(ctx), typeof(kernel.f), AT, AT),
-                               kernel=true, optimize=true)
-            end
+        if backend == CPU
+            @test occursin("!alias.scope", IR)
+            @test occursin("!noalias", IR)
+        else
+            # FIXME: ROCKernels too!
             @test occursin("@llvm.nvvm.ldg", IR)
         end
     end
@@ -154,39 +141,35 @@ end
     @inbounds a[I] = m
 end
 
-A = zeros(Int64, 1024)
-wait(kernel_val!(CPU())(A,Val(3), ndrange=size(A)))
+A = convert(ArrayT, zeros(Int64, 1024))
+wait(kernel_val!(backend())(A,Val(3), ndrange=size(A)))
 @test all((a)->a==3, A)
-if has_cuda_gpu()
-    A = CUDA.zeros(Int64, 1024)
-    wait(kernel_val!(CUDADevice())(A,Val(3), ndrange=size(A)))
-    @test all((a)->a==3, A)
-end
 
 @kernel function kernel_empty()
     nothing
 end
-if has_cuda_gpu()
-    @testset "CPU--CUDA dependencies" begin
+
+if backend != CPU
+    @testset "CPU--$backend dependencies" begin
         event1 = kernel_empty(CPU(), 1)(ndrange=1)
-        event2 = kernel_empty(CUDADevice(), 1)(ndrange=1)
+        event2 = kernel_empty(backend(), 1)(ndrange=1)
         event3 = kernel_empty(CPU(), 1)(ndrange=1)
-        event4 = kernel_empty(CUDADevice(), 1)(ndrange=1)
-        @test_throws ErrorException event5 = kernel_empty(CUDADevice(), 1)(ndrange=1, dependencies=(event1, event2, event3, event4))
+        event4 = kernel_empty(backend(), 1)(ndrange=1)
+        @test_throws ErrorException event5 = kernel_empty(backend(), 1)(ndrange=1, dependencies=(event1, event2, event3, event4))
         # wait(event5)
         # @test event5 isa KernelAbstractions.Event
 
         event1 = kernel_empty(CPU(), 1)(ndrange=1)
-        event2 = kernel_empty(CUDADevice(), 1)(ndrange=1)
+        event2 = kernel_empty(backend(), 1)(ndrange=1)
         event3 = kernel_empty(CPU(), 1)(ndrange=1)
-        event4 = kernel_empty(CUDADevice(), 1)(ndrange=1)
+        event4 = kernel_empty(backend(), 1)(ndrange=1)
         event5 = kernel_empty(CPU(), 1)(ndrange=1, dependencies=(event1, event2, event3, event4))
         wait(event5)
         @test event5 isa KernelAbstractions.Event
     end
-    @testset "CUDA wait" begin
-        event = kernel_empty(CUDADevice(), 1)(ndrange=1)
-        wait(CUDADevice(), event)
+    @testset "$backend wait" begin
+        event = kernel_empty(backend(), 1)(ndrange=1)
+        wait(backend(), event)
         @test event isa KernelAbstractions.Event
     end
 end
@@ -208,11 +191,11 @@ end
   @test MultiEvent((event1, event2, event3)) isa Event
 end
 
-if has_cuda_gpu()
-  @testset "MultiEvent CUDA" begin
-    event1 = kernel_empty(CUDADevice(), 1)(ndrange=1)
+if backend != CPU
+  @testset "MultiEvent $backend" begin
+    event1 = kernel_empty(backend(), 1)(ndrange=1)
     event2 = kernel_empty(CPU(), 1)(ndrange=1)
-    event3 = kernel_empty(CUDADevice(), 1)(ndrange=1)
+    event3 = kernel_empty(backend(), 1)(ndrange=1)
 
     @test MultiEvent(event1) isa Event
     @test MultiEvent((event1, event2, event3)) isa Event
@@ -228,12 +211,12 @@ end
 end
 
 
-if has_cuda_gpu()
-    @testset "Zero iteration space CUDA" begin
-        event1 = kernel_empty(CUDADevice(), 1)(ndrange=1)
-        event2 = kernel_empty(CUDADevice(), 1)(ndrange=0; dependencies=event1)
+if backend != CPU
+    @testset "Zero iteration space $backend" begin
+        event1 = kernel_empty(backend(), 1)(ndrange=1)
+        event2 = kernel_empty(backend(), 1)(ndrange=0; dependencies=event1)
         @test event2 == MultiEvent(event1)
-        event = kernel_empty(CUDADevice(), 1)(ndrange=0)
+        event = kernel_empty(backend(), 1)(ndrange=0)
         @test event == MultiEvent(nothing)
     end
 end
@@ -243,6 +226,7 @@ end
         @eval @kernel function kernel_return()
             return
         end
+        @test false
     catch e
         @test e.error ==
             ErrorException("Return statement not permitted in a kernel function kernel_return")
@@ -250,100 +234,107 @@ end
 end
 
 @testset "fallback test: callable types" begin
-    function f end
-    @kernel function (a::typeof(f))(x, ::Val{m}) where m
-        I = @index(Global)
-        @inbounds x[I] = m
-    end
-    @kernel function (a::typeof(f))(x, ::Val{1})
-        I = @index(Global)
-        @inbounds x[I] = 1
-    end
-    x = [1,2,3]
-    env = f(CPU())(x, Val(4); ndrange=length(x))
-    wait(env)
-    @test x == [4,4,4]
+    @eval begin
+        function f end
+        @kernel function (a::typeof(f))(x, ::Val{m}) where m
+            I = @index(Global)
+            @inbounds x[I] = m
+        end
+        @kernel function (a::typeof(f))(x, ::Val{1})
+            I = @index(Global)
+            @inbounds x[I] = 1
+        end
+        x = [1,2,3]
+        env = f(CPU())(x, Val(4); ndrange=length(x))
+        wait(env)
+        @test x == [4,4,4]
 
-    x = [1,2,3]
-    env = f(CPU())(x, Val(1); ndrange=length(x))
-    wait(env)
-    @test x == [1,1,1]
+        x = [1,2,3]
+        env = f(CPU())(x, Val(1); ndrange=length(x))
+        wait(env)
+        @test x == [1,1,1]
+    end
 end
 
 @testset "special functions: gamma" begin
-    import SpecialFunctions
+    @eval begin
+        @kernel function gamma_knl(A, @Const(B))
+            I = @index(Global)
+            @inbounds A[I] = SpecialFunctions.gamma(B[I])
+        end
 
-    @kernel function gamma_knl(A, @Const(B))
-        I = @index(Global)
-        @inbounds A[I] = SpecialFunctions.gamma(B[I])
-    end
-
-    x = [1.0,2.0,3.0,5.5]
-    y = similar(x)
-    event = gamma_knl(CPU())(y, x; ndrange=length(x))
-    wait(event)
-    @test y == SpecialFunctions.gamma.(x)
-
-    if has_cuda_gpu()
-        cx = CuArray(x)
-        cy = similar(cx)
-        event = gamma_knl(CUDADevice())(cy, cx; ndrange=length(x))
+        x = [1.0,2.0,3.0,5.5]
+        y = similar(x)
+        event = if $backend == CPU
+            gamma_knl(CPU())(y, x; ndrange=length(x))
+        else
+            cx = $ArrayT(x)
+            cy = similar(cx)
+            gamma_knl($backend())(cy, cx; ndrange=length(x))
+        end
         wait(event)
-
-        cy = Array(cy)
-        @test cy[1:3] == SpecialFunctions.gamma.(x[1:3])
-        @test cy[4] ≈ SpecialFunctions.gamma.(x[4])
+        if $backend == CPU
+            @test y == SpecialFunctions.gamma.(x)
+        else
+            cy = Array(cy)
+            @test cy[1:3] == SpecialFunctions.gamma.(x[1:3])
+            @test cy[4] ≈ SpecialFunctions.gamma.(x[4])
+        end
     end
 end
 
 @testset "special functions: erf" begin
-    import SpecialFunctions
+    @eval begin
+        @kernel function erf_knl(A, @Const(B))
+            I = @index(Global)
+            @inbounds A[I] = SpecialFunctions.erf(B[I])
+        end
 
-    @kernel function erf_knl(A, @Const(B))
-        I = @index(Global)
-        @inbounds A[I] = SpecialFunctions.erf(B[I])
-    end
-
-    x = [-1.0,-0.5,0.0,1e-3,1.0,2.0,5.5]
-    y = similar(x)
-    event = erf_knl(CPU())(y, x; ndrange=length(x))
-    wait(event)
-    @test y == SpecialFunctions.erf.(x)
-
-    if has_cuda_gpu()
-        cx = CuArray(x)
-        cy = similar(cx)
-        event = erf_knl(CUDADevice())(cy, cx; ndrange=length(x))
+        x = [-1.0,-0.5,0.0,1e-3,1.0,2.0,5.5]
+        y = similar(x)
+        event = if $backend == CPU
+            erf_knl(CPU())(y, x; ndrange=length(x))
+        else
+            cx = $ArrayT(x)
+            cy = similar(cx)
+            erf_knl($backend())(cy, cx; ndrange=length(x))
+        end
         wait(event)
-
-        cy = Array(cy)
-        @test cy[1:3] == SpecialFunctions.erf.(x[1:3])
-        @test cy[4] ≈ SpecialFunctions.erf.(x[4])
+        if $backend == CPU
+            @test y == SpecialFunctions.erf.(x)
+        else
+            cy = Array(cy)
+            @test cy[1:3] == SpecialFunctions.erf.(x[1:3])
+            @test cy[4] ≈ SpecialFunctions.erf.(x[4])
+        end
     end
 end
 
 @testset "special functions: erfc" begin
-    import SpecialFunctions
+    @eval begin
+        @kernel function erfc_knl(A, @Const(B))
+            I = @index(Global)
+            @inbounds A[I] = SpecialFunctions.erfc(B[I])
+        end
 
-    @kernel function erfc_knl(A, @Const(B))
-        I = @index(Global)
-        @inbounds A[I] = SpecialFunctions.erfc(B[I])
-    end
-
-    x = [-1.0,-0.5,0.0,1e-3,1.0,2.0,5.5]
-    y = similar(x)
-    event = erfc_knl(CPU())(y, x; ndrange=length(x))
-    wait(event)
-    @test y == SpecialFunctions.erfc.(x)
-
-    if has_cuda_gpu()
-        cx = CuArray(x)
-        cy = similar(cx)
-        event = erfc_knl(CUDADevice())(cy, cx; ndrange=length(x))
+        x = [-1.0,-0.5,0.0,1e-3,1.0,2.0,5.5]
+        y = similar(x)
+        event = if $backend == CPU
+            erfc_knl(CPU())(y, x; ndrange=length(x))
+        else
+            cx = $ArrayT(x)
+            cy = similar(cx)
+            erfc_knl($backend())(cy, cx; ndrange=length(x))
+        end
         wait(event)
-
-        cy = Array(cy)
-        @test cy[1:3] == SpecialFunctions.erfc.(x[1:3])
-        @test cy[4] ≈ SpecialFunctions.erfc.(x[4])
+        if $backend == CPU
+            @test y == SpecialFunctions.erfc.(x)
+        else
+            cy = Array(cy)
+            @test cy[1:3] == SpecialFunctions.erfc.(x[1:3])
+            @test cy[4] ≈ SpecialFunctions.erfc.(x[4])
+        end
     end
+end
+
 end

@@ -1,0 +1,63 @@
+module Testsuite
+
+using ..KernelAbstractions
+using ..Test
+
+include("test.jl")
+include("localmem.jl")
+include("private.jl")
+include("unroll.jl")
+include("nditeration.jl")
+include("async_copy.jl")
+include("events.jl")
+include("print_test.jl")
+include("compiler.jl")
+include("reflection.jl")
+
+function testsuite(backend, AT, DAT)
+    @testset "Unittests" begin
+        unittest_testsuite(backend, AT, DAT)
+    end
+
+    @testset "Localmem" begin
+        localmem_testsuite(backend, AT)
+    end
+
+    @testset "Private" begin
+        private_testsuite(backend, AT)
+    end
+
+    @testset "Unroll" begin
+        unroll_testsuite(backend)
+    end
+
+    @testset "NDIteration" begin
+        nditeration_testsuite()
+    end
+
+    @testset "async_copy!" begin
+        asynccopy_testsuite(backend, AT)
+    end
+
+    @testset "Events" begin
+        events_testsuite()
+    end
+
+    @testset "Printing" begin
+        printing_testsuite(backend)
+    end
+
+    if backend == CPU
+        @testset "Compiler" begin
+            compiler_testsuite()
+        end
+    end
+
+    @testset "Reflection" begin
+        reflection_testsuite(backend, AT)
+    end
+end
+
+#include("examples.jl")
+
+end

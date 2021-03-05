@@ -36,11 +36,11 @@ end
   end
 end
 
-let
-  a = zeros(5)
-  kernel! = kernel_unroll!(CPU(), 1, 1)
-  wait(kernel!(a))
-  wait(kernel!(a, Val(5)))
-  kernel2! = kernel_unroll2!(CPU(), 1, 1)
-  wait(kernel2!(a))
+function unroll_testsuite(backend)
+    a = zeros(5)
+    kernel! = kernel_unroll!(backend(), 1, 1)
+    wait(kernel!(a))
+    wait(kernel!(a, Val(5)))
+    kernel2! = kernel_unroll2!(backend(), 1, 1)
+    wait(kernel2!(a))
 end
