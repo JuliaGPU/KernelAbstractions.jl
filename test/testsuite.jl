@@ -13,8 +13,9 @@ include("events.jl")
 include("print_test.jl")
 include("compiler.jl")
 include("reflection.jl")
+include("examples.jl")
 
-function testsuite(backend, AT, DAT)
+function testsuite(backend, backend_str, AT, DAT)
     @testset "Unittests" begin
         unittest_testsuite(backend, AT, DAT)
     end
@@ -56,8 +57,12 @@ function testsuite(backend, AT, DAT)
     @testset "Reflection" begin
         reflection_testsuite(backend, AT)
     end
-end
 
-#include("examples.jl")
+    if backend_str == "CUDA"
+        @testset "Examples" begin
+            examples_testsuite()
+        end
+    end
+end
 
 end
