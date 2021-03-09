@@ -15,9 +15,9 @@ include("compiler.jl")
 include("reflection.jl")
 include("examples.jl")
 
-function testsuite(backend, backend_str, AT, DAT)
+function testsuite(backend, backend_str, backend_mod, AT, DAT)
     @testset "Unittests" begin
-        unittest_testsuite(backend, AT, DAT)
+        unittest_testsuite(backend, backend_str, backend_mod, AT, DAT)
     end
 
     @testset "Localmem" begin
@@ -29,7 +29,7 @@ function testsuite(backend, backend_str, AT, DAT)
     end
 
     @testset "Unroll" begin
-        unroll_testsuite(backend)
+        unroll_testsuite(backend, AT)
     end
 
     @testset "NDIteration" begin

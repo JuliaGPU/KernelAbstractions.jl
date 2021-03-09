@@ -5,7 +5,7 @@ import SpecialFunctions
 
 identity(x) = x
 
-function unittest_testsuite(backend, ArrayT, DeviceArrayT)
+function unittest_testsuite(backend, backend_str, backend_mod, ArrayT, DeviceArrayT)
 @testset "partition" begin
     let kernel = KernelAbstractions.Kernel{backend, StaticSize{(64,)}, DynamicSize, typeof(identity)}(identity)
         iterspace, dynamic = KernelAbstractions.partition(kernel, (128,), nothing)
@@ -122,15 +122,20 @@ end
             DeviceArrayT{Float32, 2, 1} # AS 1
         end
         IR = sprint() do io
-            code_llvm(io, KernelAbstractions.Cassette.overdub,
-                     (typeof(ctx), typeof(kernel.f), AT, AT),
-                     optimize=false, raw=true)
+            if backend_str == "CPU"
+                code_llvm(io, KernelAbstractions.Cassette.overdub,
+                          (typeof(ctx), typeof(kernel.f), AT, AT),
+                          optimize=false, raw=true)
+            else
+                backend_mod.code_llvm(io, KernelAbstractions.Cassette.overdub,
+                               (typeof(ctx), typeof(kernel.f), AT, AT),
+                               kernel=true, optimize=true)
+            end
         end
-        if backend == CPU
+        if backend_str == "CPU"
             @test occursin("!alias.scope", IR)
             @test occursin("!noalias", IR)
-        else
-            # FIXME: ROCKernels too!
+        elseif backend_str == "CUDA"
             @test occursin("@llvm.nvvm.ldg", IR)
         end
     end

@@ -77,11 +77,13 @@ function private_testsuite(backend, ArrayT)
         @test all(out .== 3.0)
     end
 
-    @testset "codegen" begin
-        IR = sprint() do io
-            KernelAbstractions.ka_code_llvm(io, reduce_private(backend(), (8,)), Tuple{ArrayT{Float64,1}, ArrayT{Float64,2}},
-                                            optimize=true, ndrange=(64,))
+    if backend == CPU
+        @testset "codegen" begin
+            IR = sprint() do io
+                KernelAbstractions.ka_code_llvm(io, reduce_private(backend(), (8,)), Tuple{ArrayT{Float64,1}, ArrayT{Float64,2}},
+                                                optimize=true, ndrange=(64,))
+            end
+            @test !occursin("gcframe", IR)
         end
-        @test !occursin("gcframe", IR)
     end
 end

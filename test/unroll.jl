@@ -36,8 +36,8 @@ end
   end
 end
 
-function unroll_testsuite(backend)
-    a = zeros(5)
+function unroll_testsuite(backend, ArrayT)
+    a = ArrayT(zeros(5))
     kernel! = kernel_unroll!(backend(), 1, 1)
     wait(kernel!(a))
     wait(kernel!(a, Val(5)))
