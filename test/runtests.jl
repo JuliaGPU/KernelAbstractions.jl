@@ -9,7 +9,8 @@ if backend == "CPU"
     Testsuite.testsuite(CPU, backend, Base, Array, CPUDeviceArray)
 elseif backend == "CUDA"
     using CUDAKernels, CUDA
-    if has_cuda_gpu()
+    CUDA.versioninfo()
+    if CUDA.functional(true)
         CUDA.allowscalar(false)
         Testsuite.testsuite(CUDADevice, backend, CUDA, CuArray, CUDA.CuDeviceArray)
     else
