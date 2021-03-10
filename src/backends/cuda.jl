@@ -264,16 +264,16 @@ generate_overdubs(CUDACtx)
 @inline Cassette.overdub(::CUDACtx, ::typeof(^), x::Union{Float32, Float64}, y::Int64) = CUDA.pow(x, y)
 
 # libdevice.jl
-const cudafuns = (:cos, :cospi, :sin, :sinpi, :tan,
-          :acos, :asin, :atan,
-          :cosh, :sinh, :tanh,
-          :acosh, :asinh, :atanh,
-          :log, :log10, :log1p, :log2,
-          :exp, :exp2, :exp10, :expm1, :ldexp,
-          # :isfinite, :isinf, :isnan, :signbit,
-          :abs,
-          :sqrt, :cbrt,
-          :ceil, :floor,)
+const cudafuns = (:cos, :cospi, :cosd, :sin, :sinpi, :sind, :tan,
+                  :acos, :asin, :atan,
+                  :cosh, :sinh, :tanh,
+                  :acosh, :asinh, :atanh,
+                  :log, :log10, :log1p, :log2,
+                  :exp, :exp2, :exp10, :expm1, :ldexp,
+                  # :isfinite, :isinf, :isnan, :signbit,
+                  :abs,
+                  :sqrt, :cbrt,
+                  :ceil, :floor,)
 for f in cudafuns
     @eval function Cassette.overdub(ctx::CUDACtx, ::typeof(Base.$f), x::Union{Float32, Float64})
         @Base._inline_meta
