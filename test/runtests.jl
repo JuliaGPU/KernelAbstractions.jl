@@ -16,6 +16,14 @@ elseif backend == "CUDA"
     else
         error("No CUDA GPUs available!")
     end
+elseif backend == "ROCM"
+    using ROCKernels, AMDGPU
+    if length(AMDGPU.get_agents(:gpu)) > 0
+        AMDGPU.allowscalar(false)
+        Testsuite.testsuite(ROCDevice, backend, AMDGPU, ROCArray, AMDGPU.ROCDeviceArray)
+    else
+        error("No AMD GPUs available!")
+    end
 else
     error("Unknown backend $backend")
 end

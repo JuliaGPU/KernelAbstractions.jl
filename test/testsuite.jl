@@ -28,24 +28,30 @@ function testsuite(backend, backend_str, backend_mod, AT, DAT)
         private_testsuite(backend, AT)
     end
 
-    @testset "Unroll" begin
-        unroll_testsuite(backend, AT)
+    if backend_str != "ROCM"
+        @testset "Unroll" begin
+            unroll_testsuite(backend, AT)
+        end
     end
 
     @testset "NDIteration" begin
         nditeration_testsuite()
     end
 
-    @testset "async_copy!" begin
-        asynccopy_testsuite(backend, AT)
+    if backend_str != "ROCM"
+        @testset "async_copy!" begin
+            asynccopy_testsuite(backend, AT)
+        end
     end
 
     @testset "Events" begin
         events_testsuite()
     end
 
-    @testset "Printing" begin
-        printing_testsuite(backend)
+    if backend_str != "ROCM"
+        @testset "Printing" begin
+            printing_testsuite(backend)
+        end
     end
 
     if backend == CPU
