@@ -1,10 +1,5 @@
 using KernelAbstractions
 using Test
-using CUDA
-
-if has_cuda_gpu()
-    CUDA.allowscalar(false)
-end
 
 @kernel function localmem(A)
     N = @uniform prod(groupsize())
@@ -39,20 +34,15 @@ end
     end
 end
 
-function harness(backend, ArrayT)
-    @testset for kernel! in (localmem(backend, 16), localmem2(backend, 16))
-        A = ArrayT{Int}(undef, 64)
-        wait(kernel!(A, ndrange=size(A)))
-        @test all(A[1:16] .== 16:-1:1)
-        @test all(A[17:32] .== 16:-1:1)
-        @test all(A[33:48] .== 16:-1:1)
-        @test all(A[49:64] .== 16:-1:1)
-    end
-end
-
-@testset "kernels" begin
-    harness(CPU(), Array)
-    if has_cuda_gpu()
-        harness(CUDADevice(), CuArray)
+function localmem_testsuite(backend, ArrayT)
+    @testset "kernels" begin
+        @testset for kernel! in (localmem(backend(), 16), localmem2(backend(), 16))
+            A = ArrayT{Int}(undef, 64)
+            wait(kernel!(A, ndrange=size(A)))
+            @test all(A[1:16] .== 16:-1:1)
+            @test all(A[17:32] .== 16:-1:1)
+            @test all(A[33:48] .== 16:-1:1)
+            @test all(A[49:64] .== 16:-1:1)
+        end
     end
 end

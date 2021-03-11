@@ -1,5 +1,3 @@
-@testset "examples" begin
-
 function find_sources(path::String, sources=String[])
     if isdir(path)
         for entry in readdir(path)
@@ -11,18 +9,21 @@ function find_sources(path::String, sources=String[])
     sources
 end
 
-examples_dir = joinpath(@__DIR__, "..", "examples")
-examples = find_sources(examples_dir)
-filter!(file -> readline(file) != "# EXCLUDE FROM TESTING", examples)
+function examples_testsuite()
+@testset "examples" begin
+    examples_dir = joinpath(@__DIR__, "..", "examples")
+    examples = find_sources(examples_dir)
+    filter!(file -> readline(file) != "# EXCLUDE FROM TESTING", examples)
 
-@testset "$(basename(example))" for example in examples
-    code = """
-    $(Base.load_path_setup_code())
-    include($(repr(example)))
-    """
-    cmd = `$(Base.julia_cmd()) --startup-file=no -e $code`
-    @debug "Testing $example" Text(code) cmd
-    @test success(pipeline(cmd, stderr=stderr))
+    @testset "$(basename(example))" for example in examples
+        code = """
+        $(Base.load_path_setup_code())
+        include($(repr(example)))
+        """
+        cmd = `$(Base.julia_cmd()) --startup-file=no -e $code`
+        @debug "Testing $example" Text(code) cmd
+        @test success(pipeline(cmd, stderr=stderr))
+    end
+
 end
-
 end
