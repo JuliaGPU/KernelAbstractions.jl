@@ -1,10 +1,5 @@
 using KernelAbstractions
 using Test
-using CUDA
-
-if has_cuda_gpu()
-    CUDA.allowscalar(false)
-end
 
 @kernel function typetest(A, B)
     priv = @private eltype(A) (1,)
@@ -57,41 +52,38 @@ end
     end
 end
 
-function harness(backend, ArrayT)
-    A = ArrayT{Int}(undef, 64)
-    wait(private(backend, 16)(A, ndrange=size(A)))
-    @test all(A[1:16] .== 16:-1:1)
-    @test all(A[17:32] .== 16:-1:1)
-    @test all(A[33:48] .== 16:-1:1)
-    @test all(A[49:64] .== 16:-1:1)
+function private_testsuite(backend, ArrayT)
+    @testset "kernels" begin
+        A = ArrayT{Int}(undef, 64)
+        wait(private(backend(), 16)(A, ndrange=size(A)))
+        @test all(A[1:16] .== 16:-1:1)
+        @test all(A[17:32] .== 16:-1:1)
+        @test all(A[33:48] .== 16:-1:1)
+        @test all(A[49:64] .== 16:-1:1)
 
-    A = ArrayT{Int}(undef, 64, 64)
-    A .= 1
-    wait(forloop(backend)(A, Val(size(A, 2)), ndrange=size(A,1), workgroupsize=size(A,1)))
-    @test all(A[:, 1] .== 64)
-    @test all(A[:, 2:end] .== 1)
+        A = ArrayT{Int}(undef, 64, 64)
+        A .= 1
+        wait(forloop(backend())(A, Val(size(A, 2)), ndrange=size(A,1), workgroupsize=size(A,1)))
+        @test all(A[:, 1] .== 64)
+        @test all(A[:, 2:end] .== 1)
 
-    B = ArrayT{Bool}(undef, size(A)...)
-    wait(typetest(backend, 16)(A, B, ndrange=size(A)))
-    @test all(B)
+        B = ArrayT{Bool}(undef, size(A)...)
+        wait(typetest(backend(), 16)(A, B, ndrange=size(A)))
+        @test all(B)
 
-    A = ArrayT{Float64}(ones(64,3));
-    out =  ArrayT{Float64}(undef, 64)
-    wait(reduce_private(backend, 8)(out, A, ndrange=size(out)))
-    @test all(out .== 3.0)
-end
-
-@testset "kernels" begin
-    harness(CPU(), Array)
-    if has_cuda_gpu()
-        harness(CUDADevice(), CuArray)
+        A = ArrayT{Float64}(ones(64,3));
+        out = ArrayT{Float64}(undef, 64)
+        wait(reduce_private(backend(), 8)(out, A, ndrange=size(out)))
+        @test all(out .== 3.0)
     end
-end
 
-@testset "codegen" begin
-    IR = sprint() do io
-        KernelAbstractions.ka_code_llvm(io, reduce_private(CPU(), (8,)), Tuple{Vector{Float64}, Matrix{Float64}},
-                                        optimize=true, ndrange=(64,))
+    if backend == CPU
+        @testset "codegen" begin
+            IR = sprint() do io
+                KernelAbstractions.ka_code_llvm(io, reduce_private(backend(), (8,)), Tuple{ArrayT{Float64,1}, ArrayT{Float64,2}},
+                                                optimize=true, ndrange=(64,))
+            end
+            @test !occursin("gcframe", IR)
+        end
     end
-    @test !occursin("gcframe", IR)
 end
