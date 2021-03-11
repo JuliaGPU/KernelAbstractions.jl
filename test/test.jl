@@ -282,8 +282,7 @@ end
             @test y == SpecialFunctions.gamma.(x)
         else
             cy = Array(cy)
-            @test cy[1:3] == SpecialFunctions.gamma.(x[1:3])
-            @test cy[4] ≈ SpecialFunctions.gamma.(x[4])
+            @test cy[1:4] ≈ SpecialFunctions.gamma.(x[1:4])
         end
     end
 end
@@ -309,8 +308,7 @@ end
             @test y == SpecialFunctions.erf.(x)
         else
             cy = Array(cy)
-            @test cy[1:3] == SpecialFunctions.erf.(x[1:3])
-            @test cy[4] ≈ SpecialFunctions.erf.(x[4])
+            @test cy[1:4] ≈ SpecialFunctions.erf.(x[1:4])
         end
     end
 end
@@ -336,8 +334,7 @@ end
             @test y == SpecialFunctions.erfc.(x)
         else
             cy = Array(cy)
-            @test cy[1:3] == SpecialFunctions.erfc.(x[1:3])
-            @test cy[4] ≈ SpecialFunctions.erfc.(x[4])
+            @test cy[1:4] ≈ SpecialFunctions.erfc.(x[1:4])
         end
     end
 end
