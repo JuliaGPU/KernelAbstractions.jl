@@ -9,5 +9,6 @@ rockernels = Pkg.PackageSpec(path = joinpath(root_directory, "lib", "ROCKernels"
 Pkg.develop(kernelabstractions)
 Pkg.develop(cudakernels)
 Pkg.develop(rockernels)
+Pkg.build(rockernels)
 
 Pkg.precompile()
