@@ -60,5 +60,7 @@ function generate_overdubs(Ctx)
             end
             Base.steprangelen_hp(T, start, step, 0, len, 1)
         end
+
+        @inline Cassette.overdub(::$Ctx, ::typeof(Base.literal_pow), f::F, x, p) where F = Base.literal_pow(f, x, p)
     end
 end
