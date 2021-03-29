@@ -62,5 +62,14 @@ function generate_overdubs(Ctx)
         end
 
         @inline Cassette.overdub(::$Ctx, ::typeof(Base.literal_pow), f::F, x, p) where F = Base.literal_pow(f, x, p)
+
+        if VERSION >= v"1.5"
+            @inline function Cassette.overdub(::$Ctx, ::typeof(Base.Checked.throw_overflowerr_binaryop), op, x, y)
+                throw(OverflowError("checked arithmetic: cannot compute"))
+            end
+            @inline function Cassette.overdub(::$Ctx, ::typeof(Base.Checked.throw_overflowerr_negation), x)
+                throw(OverflowError("checked arithmetic: cannot compute -x"))
+            end
+        end
     end
 end
