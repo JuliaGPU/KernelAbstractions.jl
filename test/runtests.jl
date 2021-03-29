@@ -4,26 +4,11 @@ using Test
 include("testsuite.jl")
 
 backend = get(ENV, "KERNELABSTRACTIONS_TEST_BACKEND", "CPU")
-if backend == "CPU"
-    struct CPUDeviceArray{T,N,A} end # Fake and unused
-    Testsuite.testsuite(CPU, backend, Base, Array, CPUDeviceArray)
-elseif backend == "CUDA"
-    using CUDAKernels, CUDA
-    CUDA.versioninfo()
-    if CUDA.functional(true)
-        CUDA.allowscalar(false)
-        Testsuite.testsuite(CUDADevice, backend, CUDA, CuArray, CUDA.CuDeviceArray)
-    else
-        error("No CUDA GPUs available!")
-    end
-elseif backend == "ROCM"
-    using ROCKernels, AMDGPU
-    if length(AMDGPU.get_agents(:gpu)) > 0
-        AMDGPU.allowscalar(false)
-        Testsuite.testsuite(ROCDevice, backend, AMDGPU, ROCArray, AMDGPU.ROCDeviceArray)
-    else
-        error("No AMD GPUs available!")
-    end
-else
-    error("Unknown backend $backend")
+
+if backend != "CPU"
+    @info "CPU backend not selected"
+    exit()
 end
+
+struct CPUDeviceArray{T,N,A} end # Fake and unused
+Testsuite.testsuite(CPU, backend, Base, Array, CPUDeviceArray)
