@@ -19,7 +19,7 @@ steps:
       KERNELABSTRACTIONS_TEST_BACKEND: "CUDA"
     timeout_in_minutes: 60
 
-  - label: "CUDA Julia 1.6-nightly"
+  - label: "CUDA Julia 1.6"
     plugins:
       - JuliaCI/julia#v1:
           version: "1.6"
