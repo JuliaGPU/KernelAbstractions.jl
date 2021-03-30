@@ -1,5 +1,5 @@
 steps:
-  - label: "Julia v1"
+  - label: "CUDA Julia v1"
     plugins:
       - JuliaCI/julia#v1:
           version: "1"
@@ -19,10 +19,10 @@ steps:
       KERNELABSTRACTIONS_TEST_BACKEND: "CUDA"
     timeout_in_minutes: 60
 
-  - label: "Julia 1.6-nightly"
+  - label: "CUDA Julia 1.6"
     plugins:
       - JuliaCI/julia#v1:
-          version: "1.6-nightly"
+          version: "1.6"
       - JuliaCI/julia-coverage#v1:
           codecov: true
           dirs:
@@ -39,7 +39,7 @@ steps:
       KERNELABSTRACTIONS_TEST_BACKEND: "CUDA"
     timeout_in_minutes: 60
 
-  - label: "Julia nightly"
+  - label: "CUDA Julia nightly"
     plugins:
       - JuliaCI/julia#v1:
           version: "nightly"
@@ -57,6 +57,25 @@ steps:
     env:
       JULIA_CUDA_USE_BINARYBUILDER: "true"
       KERNELABSTRACTIONS_TEST_BACKEND: "CUDA"
+    timeout_in_minutes: 60
+
+  - label: "ROCm Julia 1.6"
+    plugins:
+      - JuliaCI/julia#v1:
+          version: "1.6"
+      - JuliaCI/julia-coverage#v1:
+          codecov: true
+          dirs:
+            - src
+            - lib
+    commands:
+      - julia .ci/develop.jl
+      - julia .ci/test.jl
+    agents:
+      queue: "juliagpu"
+      rocm: "*"
+    env:
+      KERNELABSTRACTIONS_TEST_BACKEND: "ROCM"
     timeout_in_minutes: 60
 
 env:
