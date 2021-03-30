@@ -2,9 +2,10 @@ delete_merged_branches = true
 
 status = [
   ### GPU CI (Buildkite):
-  "buildkite/kernelabstractions-dot-jl/julia-v1",
-  "buildkite/kernelabstractions-dot-jl/julia-1-dot-6-nightly",
-  "buildkite/kernelabstractions-dot-jl/julia-nightly",
+  "buildkite/kernelabstractions-dot-jl/cuda-julia-1-dot-6",
+  "buildkite/kernelabstractions-dot-jl/cuda-julia-nightly",
+  "buildkite/kernelabstractions-dot-jl/cuda-julia-v1",
+  "buildkite/kernelabstractions-dot-jl/rocm-julia-1-dot-6",
 
   ### CPU CI (GitHub Actions):
   "CI (1, macOS-latest, x64)",
