@@ -50,16 +50,30 @@ all(A .== 2.0)
     argument to the kernel. See [dependencies](@ref dependencies) for a full
     explanation.
 
+If you have a GPU attached to your machine, it's equally as easy to launch your
+kernel on it instead. For example, launching on a CUDA GPU:
+
+```julia
+using CUDAKernels # Required to access CUDADevice
+A = CUDA.ones(1024, 1024)
+kernel = mul2(CUDADevice(), 16)
+# ... the rest is the same!
+```
+
+AMDGPU (ROCm) support is also available via the ROCKernels.jl package, although
+at this time it is considered experimental. Ping `@jpsamaroo` in any issues
+specific to the ROCKernels backend.
+
 ## Important differences to Julia
 
 1. Functions inside kernels are forcefully inlined, except when marked with `@noinline`.
 2. Floating-point multiplication, addition, subtraction are marked contractable.
 
-## Important differences to CUDA.jl
+## Important differences to CUDA.jl/AMDGPU.jl
 
 1. The kernels are automatically bounds-checked against either the dynamic or statically
    provided `ndrange`.
-2. Functions like `Base.sin` are mapped to `CUDA.sin`.
+2. Functions like `Base.sin` are mapped to `CUDA.sin`/`AMDGPU.sin`.
 
 ## Important differences to GPUifyLoops.jl
 
