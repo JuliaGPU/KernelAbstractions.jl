@@ -46,6 +46,8 @@ function generate_overdubs(mod, Ctx)
         @inline Cassette.overdub(::$Ctx, ::typeof(-), a::T, b::T) where T<:Union{Float32, Float64} = sub_float_contract(a, b)
         @inline Cassette.overdub(::$Ctx, ::typeof(*), a::T, b::T) where T<:Union{Float32, Float64} = mul_float_contract(a, b)
 
+        @inline Cassette.overdub(::$Ctx, ::typeof(Base.literal_pow), f::F, x, p) where F = Base.literal_pow(f, x, p)
+
         function Cassette.overdub(::$Ctx, ::typeof(:), start::T, step::T, stop::T) where T<:Union{Float16,Float32,Float64}
             lf = (stop-start)/step
             if lf < 0
@@ -61,14 +63,41 @@ function generate_overdubs(mod, Ctx)
             Base.steprangelen_hp(T, start, step, 0, len, 1)
         end
 
-        @inline Cassette.overdub(::$Ctx, ::typeof(Base.literal_pow), f::F, x, p) where F = Base.literal_pow(f, x, p)
-
         if VERSION >= v"1.5"
             @inline function Cassette.overdub(::$Ctx, ::typeof(Base.Checked.throw_overflowerr_binaryop), op, x, y)
                 throw(OverflowError("checked arithmetic: cannot compute"))
             end
+
             @inline function Cassette.overdub(::$Ctx, ::typeof(Base.Checked.throw_overflowerr_negation), x)
                 throw(OverflowError("checked arithmetic: cannot compute -x"))
+            end
+
+            @inline function Cassette.overdub(::$Ctx, ::typeof(exponent), x::Union{Float32, Float64})
+                T = typeof(x)
+                xs = reinterpret(Unsigned, x) & ~Base.sign_mask(T)
+                if xs >= Base.exponent_mask(T)
+                    throw(DomainError(x, "Cannot be Nan of Inf."))
+                end
+                k = Int(xs >> Base.significand_bits(T))
+                if k == 0 # x is subnormal
+                    if xs == 0
+                        throw(DomainError(x, "Cannot be subnormal converted to 0."))
+                end
+                    m = Base.leading_zeros(xs) - Base.exponent_bits(T)
+                    k = 1 - m
+                end
+                return k - Base.exponent_bias(T)
+            end
+        end
+
+        if VERSION >= v"1.6"
+            @inline function Cassette.overdub(::$Ctx, ::typeof(Base._unsafe_getindex), 
+                                              ::IndexStyle, A::AbstractArray, I::Vararg{Union{Real, AbstractArray}, N}) where N
+                shape = index_shape(I...)
+                dest = similar(A, shape)
+                map(unsafe_length, axes(dest)) == map(unsafe_length, shape) || throw(DimensionMismatch("output array is the wrong size"))
+                _unsafe_getindex!(dest, A, I...) 
+                return dest
             end
         end
     end
