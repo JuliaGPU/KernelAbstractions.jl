@@ -81,7 +81,7 @@ function wait(::CPU, ev::CudaEvent, progress=nothing)
     event = Base.Threads.Event()
     stream = next_stream()
     wait(CUDADevice(), ev, nothing, stream)
-    CUDA.launch(stream) do
+    CUDA.launch(;stream) do
         notify(event)
     end
     wait(event)
