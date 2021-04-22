@@ -186,7 +186,7 @@ function threads_to_workgroupsize(threads, ndrange)
     end
 end
 
-function (obj::Kernel{CUDADevice})(args...; ndrange=nothing, dependencies=nothing, workgroupsize=nothing, progress=yield)
+function (obj::Kernel{CUDADevice})(args...; ndrange=nothing, dependencies=Event(CUDADevice()), workgroupsize=nothing, progress=yield)
 
     ndrange, workgroupsize, iterspace, dynamic = launch_config(obj, ndrange, workgroupsize)
     # this might not be the final context, since we may tune the workgroupsize
