@@ -75,14 +75,16 @@ import Base: wait
 
 wait(ev::CudaEvent, progress=yield) = wait(CPU(), ev, progress)
 
-function wait(::CPU, ev::CudaEvent, progress=yield)
-    if progress === nothing
-        CUDA.synchronize(ev.event)
-    else
-        while !isdone(ev)
-            progress()
-        end
+function wait(::CPU, ev::CudaEvent, progress=nothing)
+    isdone(ev) && return nothing
+
+    event = Base.Threads.Event()
+    stream = next_stream()
+    wait(CUDADevice(), ev, nothing, stream)
+    CUDA.launch(;stream) do
+        notify(event)
     end
+    wait(event)
 end
 
 # Use this to synchronize between computation using the task local stream
