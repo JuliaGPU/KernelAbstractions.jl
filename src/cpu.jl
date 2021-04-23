@@ -154,57 +154,60 @@ function __thread_run(tid, len, rem, obj, ndrange, iterspace, args, dynamic)
     for i = f:l
         block = @inbounds blocks(iterspace)[i]
         ctx = mkcontext(obj, block, ndrange, iterspace, dynamic)
-        Cassette.overdub(ctx, obj.f, args...)
+        Cassette.overdub(CPUCTX, obj.f, ctx, args...)
     end
     return nothing
 end
 
 Cassette.@context CPUCtx
 
+const CPUCTX = Cassette.disablehooks(CPUCtx(pass = CompilerPass))
+
+cassette(::Kernel{CPU}) = CPUCTX
+
 function mkcontext(kernel::Kernel{CPU}, I, _ndrange, iterspace, ::Dynamic) where Dynamic
-    metadata = CompilerMetadata{ndrange(kernel), Dynamic}(I, _ndrange, iterspace)
-    Cassette.disablehooks(CPUCtx(pass = CompilerPass, metadata=metadata))
+    return CompilerMetadata{ndrange(kernel), Dynamic}(I, _ndrange, iterspace)
 end
 
-@inline function Cassette.overdub(ctx::CPUCtx, ::typeof(__index_Local_Linear), idx::CartesianIndex)
-    indices = workitems(__iterspace(ctx.metadata))
+@inline function Cassette.overdub(::CPUCtx, ::typeof(__index_Local_Linear), ctx, idx::CartesianIndex)
+    indices = workitems(__iterspace(ctx))
     return @inbounds LinearIndices(indices)[idx]
 end
 
-@inline function Cassette.overdub(ctx::CPUCtx, ::typeof(__index_Group_Linear), idx::CartesianIndex)
-    indices = blocks(__iterspace(ctx.metadata))
-    return @inbounds LinearIndices(indices)[__groupindex(ctx.metadata)]
+@inline function Cassette.overdub(::CPUCtx, ::typeof(__index_Group_Linear), ctx, idx::CartesianIndex)
+    indices = blocks(__iterspace(ctx))
+    return @inbounds LinearIndices(indices)[__groupindex(ctx)]
 end
 
-@inline function Cassette.overdub(ctx::CPUCtx, ::typeof(__index_Global_Linear), idx::CartesianIndex)
-    I = @inbounds expand(__iterspace(ctx.metadata), __groupindex(ctx.metadata), idx)
-    @inbounds LinearIndices(__ndrange(ctx.metadata))[I]
+@inline function Cassette.overdub(::CPUCtx, ::typeof(__index_Global_Linear), ctx, idx::CartesianIndex)
+    I = @inbounds expand(__iterspace(ctx), __groupindex(ctx), idx)
+    @inbounds LinearIndices(__ndrange(ctx))[I]
 end
 
-@inline function Cassette.overdub(ctx::CPUCtx, ::typeof(__index_Local_Cartesian), idx::CartesianIndex)
+@inline function Cassette.overdub(::CPUCtx, ::typeof(__index_Local_Cartesian), ctx, idx::CartesianIndex)
     return idx
 end
 
-@inline function Cassette.overdub(ctx::CPUCtx, ::typeof(__index_Group_Cartesian), idx::CartesianIndex)
-    __groupindex(ctx.metadata)
+@inline function Cassette.overdub(::CPUCtx, ::typeof(__index_Group_Cartesian), ctx, idx::CartesianIndex)
+    __groupindex(ctx)
 end
 
-@inline function Cassette.overdub(ctx::CPUCtx, ::typeof(__index_Global_Cartesian), idx::CartesianIndex)
-    return @inbounds expand(__iterspace(ctx.metadata), __groupindex(ctx.metadata), idx)
+@inline function Cassette.overdub(::CPUCtx, ::typeof(__index_Global_Cartesian), ctx, idx::CartesianIndex)
+    return @inbounds expand(__iterspace(ctx), __groupindex(ctx), idx)
 end
 
-@inline function Cassette.overdub(ctx::CPUCtx, ::typeof(__validindex), idx::CartesianIndex)
+@inline function Cassette.overdub(::CPUCtx, ::typeof(__validindex), ctx, idx::CartesianIndex)
     # Turns this into a noop for code where we can turn of checkbounds of
-    if __dynamic_checkbounds(ctx.metadata)
-        I = @inbounds expand(__iterspace(ctx.metadata), __groupindex(ctx.metadata), idx)
-        return I in __ndrange(ctx.metadata)
+    if __dynamic_checkbounds(ctx)
+        I = @inbounds expand(__iterspace(ctx), __groupindex(ctx), idx)
+        return I in __ndrange(ctx)
     else
         return true
     end
 end
 
 
-@inline function Cassette.overdub(ctx::CPUCtx, ::typeof(__print), items...)
+@inline function Cassette.overdub(::CPUCtx, ::typeof(__print), items...)
     __print(items...)
 end
 
@@ -222,7 +225,7 @@ const cpufuns = (:cos, :cospi, :sin, :sinpi, :tan,
           :sqrt, :cbrt,
           :ceil, :floor,)
 for f in cpufuns
-    @eval function Cassette.overdub(ctx::CPUCtx, ::typeof(Base.$f), x::Union{Float32, Float64})
+    @eval function Cassette.overdub(::CPUCtx, ::typeof(Base.$f), x::Union{Float32, Float64})
         @Base._inline_meta
         return Base.$f(x)
     end
@@ -235,7 +238,7 @@ end
 ###
 # CPU implementation of shared memory
 ###
-@inline function Cassette.overdub(ctx::CPUCtx, ::typeof(SharedMemory), ::Type{T}, ::Val{Dims}, ::Val) where {T, Dims}
+@inline function Cassette.overdub(::CPUCtx, ::typeof(SharedMemory), ::Type{T}, ::Val{Dims}, ::Val) where {T, Dims}
     MArray{__size(Dims), T}(undef)
 end
 
@@ -249,8 +252,8 @@ struct ScratchArray{N, D}
     ScratchArray{N}(data::D) where {N, D} = new{N, D}(data)
 end
 
-@inline function Cassette.overdub(ctx::CPUCtx, ::typeof(Scratchpad), ::Type{T}, ::Val{Dims}) where {T, Dims}
-    return ScratchArray{length(Dims)}(MArray{__size((Dims..., prod(__groupsize(ctx.metadata)))), T}(undef))
+@inline function Cassette.overdub(::CPUCtx, ::typeof(Scratchpad), ctx, ::Type{T}, ::Val{Dims}) where {T, Dims}
+    return ScratchArray{length(Dims)}(MArray{__size((Dims..., prod(__groupsize(ctx)))), T}(undef))
 end
 
 # Base.view creates a boundscheck which captures A
@@ -260,7 +263,7 @@ end
      Base.unsafe_view(Base._maybe_reshape_parent(A, Base.index_ndims(J...)), J...)
 end
 
-@inline function Cassette.overdub(ctx::CPUCtx, ::typeof(Base.getindex), A::ScratchArray{N}, idx) where N
+@inline function Cassette.overdub(::CPUCtx, ::typeof(Base.getindex), A::ScratchArray{N}, idx) where N
     return @inbounds aview(A.data, ntuple(_->:, Val(N))..., idx)
 end
 

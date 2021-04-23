@@ -9,7 +9,7 @@ const TILE_DIM = 32
      gi, gj = @index(Group, NTuple)
      i, j   = @index(Local, NTuple)
 
-     TILE_DIM = @uniform groupsize()[1]
+     TILE_DIM = @uniform @groupsize()[1]
 
      # +1 to avoid bank conflicts on shared memory
      tile1 = @localmem eltype(output) (TILE_DIM+BANK, TILE_DIM)

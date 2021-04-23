@@ -19,6 +19,7 @@ function ka_code_typed(kernel, argtypes; ndrange=nothing, workgroupsize=nothing,
     else
         ctx = KernelAbstractions.mkcontext(kernel, ndrange, iterspace)
     end
+    CTX = typeof(KernelAbstractions.cassette(kernel))
     # reformat
     if argtypes isa Type
         argtypes = argtypes.parameters
@@ -29,9 +30,9 @@ function ka_code_typed(kernel, argtypes; ndrange=nothing, workgroupsize=nothing,
         mod = Base.get(Base.loaded_modules, Cthulhu, nothing)
         mod===nothing && error("Interactive code reflection requires Cthulhu; please install and load this package first.")
         descend_code_typed = getfield(mod, :descend_code_typed)
-        return descend_code_typed(KernelAbstractions.Cassette.overdub, (typeof(ctx), typeof(kernel.f), argtypes...); kwargs...)
+        return descend_code_typed(KernelAbstractions.Cassette.overdub, (CTX, typeof(kernel.f), typeof(ctx), argtypes...); kwargs...)
     else
-        return InteractiveUtils.code_typed(KernelAbstractions.Cassette.overdub, (typeof(ctx), typeof(kernel.f), argtypes...); kwargs...)
+        return InteractiveUtils.code_typed(KernelAbstractions.Cassette.overdub, (CTX, typeof(kernel.f), typeof(ctx), argtypes...); kwargs...)
     end
 end
 
@@ -48,13 +49,14 @@ function ka_code_llvm(io::IO, kernel, argtypes; ndrange=nothing, workgroupsize=n
     block = @inbounds KernelAbstractions.blocks(iterspace)[1]
     # get a context of the kernel based on the first block
     ctx = KernelAbstractions.mkcontext(kernel, block, ndrange, iterspace, dynamic)
+    CTX = typeof(KernelAbstractions.cassette(kernel))
 
     # reformat
     if argtypes isa Type
         argtypes = argtypes.parameters
     end
     # use code_typed
-    return InteractiveUtils.code_llvm(io, KernelAbstractions.Cassette.overdub, (typeof(ctx), typeof(kernel.f), argtypes...); kwargs...)
+    return InteractiveUtils.code_llvm(io, KernelAbstractions.Cassette.overdub, (CTX, typeof(kernel.f), typeof(ctx), argtypes...); kwargs...)
 end
 
 

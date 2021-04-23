@@ -30,8 +30,8 @@ end
     I, J = @index(Global, NTuple)
     i, j = @index(Local,  NTuple)
 
-    N = @uniform groupsize()[1]
-    M = @uniform groupsize()[2]
+    N = @uniform @groupsize()[1]
+    M = @uniform @groupsize()[2]
 
     # +1 to avoid bank conflicts on shared memory
     tile = @localmem eltype(output) (N+BANK, M)
@@ -48,8 +48,8 @@ end
     gi, gj = @index(Group, NTuple)
     i, j = @index(Local,  NTuple)
 
-    N = @uniform groupsize()[1]
-    M = @uniform groupsize()[2]
+    N = @uniform @groupsize()[1]
+    M = @uniform @groupsize()[2]
     
     # +1 to avoid bank conflicts on shared memory
     tile = @localmem eltype(output) (N+BANK, M) 
@@ -77,8 +77,8 @@ end
     gi, gj = @index(Group, NTuple)
     i, j   = @index(Local, NTuple)
 
-    TILE_DIM   = @uniform groupsize()[1]
-    BLOCK_ROWS = @uniform groupsize()[2]
+    TILE_DIM   = @uniform @groupsize()[1]
+    BLOCK_ROWS = @uniform @groupsize()[2]
 
     # +1 to avoid bank conflicts on shared memory
     tile = @localmem eltype(output) (TILE_DIM+BANK, TILE_DIM)
@@ -103,8 +103,8 @@ end
     gi, gj = @index(Group, NTuple)
     i, j   = @index(Local, NTuple)
 
-    TILE_DIM   = @uniform groupsize()[1]
-    BLOCK_ROWS = @uniform groupsize()[2]
+    TILE_DIM   = @uniform @groupsize()[1]
+    BLOCK_ROWS = @uniform @groupsize()[2]
 
     # +1 to avoid bank conflicts on shared memory
     tile = @localmem eltype(output) (TILE_DIM+BANK, TILE_DIM)

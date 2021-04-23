@@ -10,7 +10,7 @@ using Test
 end
 
 @kernel function private(A)
-    @uniform N = prod(groupsize())
+    @uniform N = prod(@groupsize())
     I = @index(Global, Linear)
     i = @index(Local, Linear)
     priv = @private Int (1,)

@@ -74,9 +74,9 @@ function transform_gpu!(def, constargs)
             push!(let_constargs, :($arg = $constify($arg)))
         end
     end
-
+    pushfirst!(def[:args], :__ctx__)
     body = quote
-        if $__validindex()
+        if $__validindex(__ctx__)
             $(def[:body])
         end
         return nothing
@@ -101,6 +101,7 @@ function transform_cpu!(def, constargs)
             push!(let_constargs, :($arg = $constify($arg)))
         end
     end
+    pushfirst!(def[:args], :__ctx__)
     new_stmts = Expr[]
     body = MacroTools.flatten(def[:body])
     push!(new_stmts, Expr(:aliasscope))
@@ -198,7 +199,7 @@ function split(stmts,
                 if dims isa Integer
                     dims = (dims,)
                 end
-                alloc = :($Scratchpad($T, Val($dims)))
+                alloc = :($Scratchpad(__ctx__, $T, Val($dims)))
                 push!(allocations, :($lhs = $alloc))
                 push!(private, lhs)
                 continue
@@ -229,7 +230,7 @@ function emit(loop)
 
     # private_allocations turn into lhs = ntuple(i->rhs, length(__workitems_iterspace()))
     N = gensym(:N)
-    push!(stmts, :($N = length($__workitems_iterspace())))
+    push!(stmts, :($N = length($__workitems_iterspace(__ctx__))))
 
     for stmt in loop.private_allocations
         if @capture(stmt, lhs_ = rhs_)
@@ -249,18 +250,18 @@ function emit(loop)
                 end
             elseif @capture(expr, A_[i__])
                 if A in loop.private
-                    return :($A[$__index_Local_Linear($(idx))][$(i...)])
+                    return :($A[$__index_Local_Linear(__ctx__, $(idx))][$(i...)])
                 end
             elseif expr isa Symbol
                 if expr in loop.private
-                    return :($expr[$__index_Local_Linear($(idx))])
+                    return :($expr[$__index_Local_Linear(__ctx__, $(idx))])
                 end
             end
             return expr
         end
         loopexpr = quote
-            for $idx in $__workitems_iterspace()
-                $__validindex($idx) || continue
+            for $idx in $__workitems_iterspace(__ctx__)
+                $__validindex(__ctx__, $idx) || continue
                 $(loop.indicies...)
                 $(unblock(body))
             end

@@ -20,8 +20,8 @@ function compiler_testsuite()
     kernel = index(CPU(), DynamicSize(), DynamicSize())
     iterspace = NDRange{1, StaticSize{(128,)}, StaticSize{(8,)}}();
     ctx = KernelAbstractions.mkcontext(kernel, 1, nothing, iterspace, Val(KernelAbstractions.NoDynamicCheck()))
-
-    @test KernelAbstractions.Cassette.overdub(ctx, KernelAbstractions.__index_Global_NTuple, CartesianIndex(1)) == (1,)
+    CTX = KernelAbstractions.cassette(kernel)
+    @test KernelAbstractions.Cassette.overdub(CTX, KernelAbstractions.__index_Global_NTuple, ctx, CartesianIndex(1)) == (1,)
 
     let (CI, rt) = @ka_code_typed literal_pow(CPU())(zeros(Int,1), ndrange=1)
         # test that there is no invoke of overdub

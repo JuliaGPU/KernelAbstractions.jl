@@ -122,13 +122,14 @@ end
             DeviceArrayT{Float32, 2, 1} # AS 1
         end
         IR = sprint() do io
+            CTX = KernelAbstractions.cassette(kernel)
             if backend_str == "CPU"
                 code_llvm(io, KernelAbstractions.Cassette.overdub,
-                          (typeof(ctx), typeof(kernel.f), AT, AT),
+                          (typeof(CTX), typeof(kernel.f), typeof(ctx), AT, AT),
                           optimize=false, raw=true)
             else
                 backend_mod.code_llvm(io, KernelAbstractions.Cassette.overdub,
-                               (typeof(ctx), typeof(kernel.f), AT, AT),
+                               (typeof(CTX), typeof(kernel.f), typeof(ctx), AT, AT),
                                kernel=true, optimize=true)
             end
         end
