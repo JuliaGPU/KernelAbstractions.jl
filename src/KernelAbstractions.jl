@@ -356,6 +356,10 @@ struct Kernel{Device, WorkgroupSize<:_Size, NDRange<:_Size, Fun}
     f::Fun
 end
 
+function Base.similar(kernel::Kernel{D, WS, ND}, f::F) where {D, WS, ND, F}
+    Kernel{D, WS, ND, F}(f)
+end
+
 workgroupsize(::Kernel{D, WorkgroupSize}) where {D, WorkgroupSize} = WorkgroupSize
 ndrange(::Kernel{D, WorkgroupSize, NDRange}) where {D, WorkgroupSize,NDRange} = NDRange
 
