@@ -78,8 +78,8 @@ end
     I, J = @index(Global, NTuple)
     i, j = @index(Local,  NTuple)
 
-    N = @uniform groupsize()[1]
-    M = @uniform groupsize()[2]
+    N = @uniform @groupsize()[1]
+    M = @uniform @groupsize()[2]
 
     # +1 to avoid bank conflicts on shared memory
     tile = @localmem eltype(output) (N+BANK, M)
@@ -96,8 +96,8 @@ end
     gi, gj = @index(Group, NTuple)
     i, j = @index(Local,  NTuple)
 
-    N = @uniform groupsize()[1]
-    M = @uniform groupsize()[2]
+    N = @uniform @groupsize()[1]
+    M = @uniform @groupsize()[2]
     
     # +1 to avoid bank conflicts on shared memory
     tile = @localmem eltype(output) (N+BANK, M) 
@@ -125,8 +125,8 @@ end
     gi, gj = @index(Group, NTuple)
     i, j   = @index(Local, NTuple)
 
-    TILE_DIM   = @uniform groupsize()[1]
-    BLOCK_ROWS = @uniform groupsize()[2]
+    TILE_DIM   = @uniform @groupsize()[1]
+    BLOCK_ROWS = @uniform @groupsize()[2]
 
     # +1 to avoid bank conflicts on shared memory
     tile = @localmem eltype(output) (TILE_DIM+BANK, TILE_DIM)
@@ -151,8 +151,8 @@ end
     gi, gj = @index(Group, NTuple)
     i, j   = @index(Local, NTuple)
 
-    TILE_DIM   = @uniform groupsize()[1]
-    BLOCK_ROWS = @uniform groupsize()[2]
+    TILE_DIM   = @uniform @groupsize()[1]
+    BLOCK_ROWS = @uniform @groupsize()[2]
 
     # +1 to avoid bank conflicts on shared memory
     tile = @localmem eltype(output) (TILE_DIM+BANK, TILE_DIM)
@@ -248,4 +248,4 @@ for (name, kernel) in (
         end
     end
 end
-</code></pre></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../naive_transpose/">« Naive Transpose</a><a class="docs-footer-nextpage" href="../matmul/">Matmul »</a></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> on <span class="colophon-date" title="Monday 26 April 2021 20:21">Monday 26 April 2021</span>. Using Julia version 1.6.1.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+</code></pre></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../naive_transpose/">« Naive Transpose</a><a class="docs-footer-nextpage" href="../matmul/">Matmul »</a></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> on <span class="colophon-date" title="Monday 26 April 2021 21:45">Monday 26 April 2021</span>. Using Julia version 1.6.1.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
