@@ -221,7 +221,7 @@ if backend != CPU
         event1 = kernel_empty(backend(), 1)(ndrange=1)
         event2 = kernel_empty(backend(), 1)(ndrange=0; dependencies=event1)
         @test event2 == MultiEvent(event1)
-        event = kernel_empty(backend(), 1)(ndrange=0)
+        event = kernel_empty(backend(), 1)(ndrange=0, dependencies=nothing)
         @test event == MultiEvent(nothing)
     end
 end
