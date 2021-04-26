@@ -2,9 +2,9 @@ using KernelAbstractions
 using Test
 
 @kernel function localmem(A)
-    N = @uniform prod(groupsize())
+    N = @uniform prod(@groupsize())
     @uniform begin
-        N2 = prod(groupsize())
+        N2 = prod(@groupsize())
     end
     I = @index(Global, Linear)
     i = @index(Local, Linear)
@@ -17,9 +17,9 @@ using Test
 end
 
 @kernel function localmem2(A)
-    N = @uniform prod(groupsize())
+    N = @uniform prod(@groupsize())
     @uniform begin
-        N2 = prod(groupsize())
+        N2 = prod(@groupsize())
     end
     I = @index(Global, Linear)
     i = @index(Local, Linear)

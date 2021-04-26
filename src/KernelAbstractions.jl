@@ -1,7 +1,7 @@
 module KernelAbstractions
 
 export @kernel
-export @Const, @localmem, @private, @uniform, @synchronize, @index, groupsize, @print
+export @Const, @localmem, @private, @uniform, @synchronize, @index, @groupsize, @print
 export Device, GPU, CPU, Event, MultiEvent, NoneEvent
 export async_copy!
 
@@ -111,13 +111,19 @@ function async_copy! end
 ###
 
 """
-    groupsize()
+    @groupsize()
 
 Query the workgroupsize on the device. This function returns
 a tuple corresponding to kernel configuration. In order to get
-the total size you can use `prod(groupsize())`.
+the total size you can use `prod(@groupsize())`.
 """
 function groupsize end
+
+macro groupsize()
+    quote
+        $groupsize($(esc(:__ctx__)))
+    end 
+end
 
 """
     @localmem T dims
@@ -150,7 +156,7 @@ macro private(T, dims)
         dims = (dims,)
     end
     quote
-        $Scratchpad($(esc(T)), Val($(esc(dims))))
+        $Scratchpad($(esc(:__ctx__)), $(esc(T)), Val($(esc(dims))))
     end
 end
 
@@ -297,7 +303,7 @@ macro index(locale, args...)
     end
 
     index_function = Symbol(:__index_, locale, :_, indexkind)
-    Expr(:call, GlobalRef(KernelAbstractions, index_function), map(esc, args)...)
+    Expr(:call, GlobalRef(KernelAbstractions, index_function), esc(:__ctx__), map(esc, args)...)
 end
 
 ###
@@ -312,9 +318,9 @@ function __index_Local_Cartesian end
 function __index_Group_Cartesian end
 function __index_Global_Cartesian end
 
-__index_Local_NTuple(I...) = Tuple(__index_Local_Cartesian(I...))
-__index_Group_NTuple(I...) = Tuple(__index_Group_Cartesian(I...))
-__index_Global_NTuple(I...) = Tuple(__index_Global_Cartesian(I...))
+__index_Local_NTuple(ctx, I...) = Tuple(__index_Local_Cartesian(ctx, I...))
+__index_Group_NTuple(ctx, I...) = Tuple(__index_Group_Cartesian(ctx, I...))
+__index_Global_NTuple(ctx, I...) = Tuple(__index_Global_Cartesian(ctx, I...))
 
 struct ConstAdaptor end
 
@@ -348,6 +354,10 @@ in a workgroup.
 """
 struct Kernel{Device, WorkgroupSize<:_Size, NDRange<:_Size, Fun}
     f::Fun
+end
+
+function Base.similar(kernel::Kernel{D, WS, ND}, f::F) where {D, WS, ND, F}
+    Kernel{D, WS, ND, F}(f)
 end
 
 workgroupsize(::Kernel{D, WorkgroupSize}) where {D, WorkgroupSize} = WorkgroupSize
@@ -429,7 +439,7 @@ include("macros.jl")
 # Backends/Interface
 ###
 
-function Scratchpad(::Type{T}, ::Val{Dims}) where {T, Dims}
+function Scratchpad(ctx, ::Type{T}, ::Val{Dims}) where {T, Dims}
     throw(MethodError(Scratchpad, (T, Val(Dims))))
 end
 
