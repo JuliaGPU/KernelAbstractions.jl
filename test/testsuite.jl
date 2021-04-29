@@ -14,7 +14,7 @@ include("print_test.jl")
 include("compiler.jl")
 include("reflection.jl")
 include("examples.jl")
-include("colon.jl")
+include("unsafe_getindex.jl")
 
 function testsuite(backend, backend_str, backend_mod, AT, DAT)
     @testset "Unittests" begin
@@ -49,8 +49,8 @@ function testsuite(backend, backend_str, backend_mod, AT, DAT)
         events_testsuite()
     end
 
-    @testset "Colon" begin
-        copy_colon(backend, AT)
+    @testset "_unsafe_getindex" begin
+        unsafe_getindex(backend, AT)
     end
 
     if backend_str != "ROCM"
