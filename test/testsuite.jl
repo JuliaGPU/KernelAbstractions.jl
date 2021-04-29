@@ -14,6 +14,7 @@ include("print_test.jl")
 include("compiler.jl")
 include("reflection.jl")
 include("examples.jl")
+include("colon.jl")
 
 function testsuite(backend, backend_str, backend_mod, AT, DAT)
     @testset "Unittests" begin
@@ -46,6 +47,10 @@ function testsuite(backend, backend_str, backend_mod, AT, DAT)
 
     @testset "Events" begin
         events_testsuite()
+    end
+
+    @testset "Colon" begin
+        copy_colon(backend, AT)
     end
 
     if backend_str != "ROCM"

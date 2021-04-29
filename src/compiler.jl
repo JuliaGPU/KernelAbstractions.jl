@@ -93,10 +93,10 @@ function generate_overdubs(mod, Ctx)
         if VERSION >= v"1.6"
             @inline function Cassette.overdub(::$Ctx, ::typeof(Base._unsafe_getindex), 
                                               ::IndexStyle, A::AbstractArray, I::Vararg{Union{Real, AbstractArray}, N}) where N
-                shape = index_shape(I...)
+                shape = Base.index_shape(I...)
                 dest = similar(A, shape)
-                map(unsafe_length, axes(dest)) == map(unsafe_length, shape) || throw(DimensionMismatch("output array is the wrong size"))
-                _unsafe_getindex!(dest, A, I...) 
+                map(Base.unsafe_length, axes(dest)) == map(Base.unsafe_length, shape) || throw(DimensionMismatch("output array is the wrong size"))
+                Base._unsafe_getindex!(dest, A, I...) 
                 return dest
             end
         end
