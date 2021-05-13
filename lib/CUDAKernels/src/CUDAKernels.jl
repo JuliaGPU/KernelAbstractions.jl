@@ -280,12 +280,6 @@ KernelAbstractions.generate_overdubs(@__MODULE__, CUDACtx)
 # CUDA specific method rewrites
 ###
 
-@inline Cassette.overdub(::CUDACtx, ::typeof(^), x::Float64, y::Float64) = CUDA.pow(x, y)
-@inline Cassette.overdub(::CUDACtx, ::typeof(^), x::Float32, y::Float32) = CUDA.pow(x, y)
-@inline Cassette.overdub(::CUDACtx, ::typeof(^), x::Float64, y::Int32)   = CUDA.pow(x, y)
-@inline Cassette.overdub(::CUDACtx, ::typeof(^), x::Float32, y::Int32)   = CUDA.pow(x, y)
-@inline Cassette.overdub(::CUDACtx, ::typeof(^), x::Union{Float32, Float64}, y::Int64) = CUDA.pow(x, y)
-
 # libdevice.jl
 const cudafuns = (:cos, :cospi, :sin, :sinpi, :tan,
           :acos, :asin, :atan,
@@ -300,7 +294,7 @@ const cudafuns = (:cos, :cospi, :sin, :sinpi, :tan,
 for f in cudafuns
     @eval function Cassette.overdub(ctx::CUDACtx, ::typeof(Base.$f), x::Union{Float32, Float64})
         @Base._inline_meta
-        return CUDA.$f(x)
+        return Base.$f(x)
     end
 end
 
