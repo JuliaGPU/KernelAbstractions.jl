@@ -28,20 +28,20 @@ function compiler_testsuite(backend, ArrayT)
     @test KernelAbstractions.Cassette.overdub(CTX, KernelAbstractions.__index_Global_NTuple, ctx, CartesianIndex(1)) == (1,)
 
     A = ArrayT{Int}(undef, 1)
-    let (CI, rt) = @ka_code_typed literal_pow(backend)(A, ndrange=1)
+    let (CI, rt) = @ka_code_typed literal_pow(backend())(A, ndrange=1)
         # test that there is no invoke of overdub
         @test !any(stmt->(stmt isa Expr) && stmt.head == :invoke, CI.code)
     end
 
     A = ArrayT{Float64}(undef, 1)
-    let (CI, rt) = @ka_code_typed square(backend)(A, A, ndrange=1)
+    let (CI, rt) = @ka_code_typed square(backend())(A, A, ndrange=1)
         # test that there is no invoke of overdub
         @test !any(stmt->(stmt isa Expr) && stmt.head == :invoke, CI.code)
     end
 
     if VERSION >= v"1.5"
         A = ArrayT{Int}(undef, 1)
-        let (CI, rt) = @ka_code_typed checked(backend)(A, 1, 2, ndrange=1)
+        let (CI, rt) = @ka_code_typed checked(backend())(A, 1, 2, ndrange=1)
             # test that there is no invoke of overdub
             @test !any(stmt->(stmt isa Expr) && stmt.head == :invoke, CI.code)
         end
