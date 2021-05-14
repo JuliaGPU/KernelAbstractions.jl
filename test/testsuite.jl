@@ -54,7 +54,7 @@ function testsuite(backend, backend_str, backend_mod, AT, DAT)
         end
     end
 
-    if backend != ROCM
+    if backend_str != "ROCM"
         @testset "Compiler" begin
             compiler_testsuite(backend, AT)
         end
