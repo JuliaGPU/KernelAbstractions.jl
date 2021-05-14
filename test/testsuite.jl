@@ -54,9 +54,9 @@ function testsuite(backend, backend_str, backend_mod, AT, DAT)
         end
     end
 
-    if backend == CPU
+    if backend != ROCM
         @testset "Compiler" begin
-            compiler_testsuite()
+            compiler_testsuite(backend, AT)
         end
     end
 
