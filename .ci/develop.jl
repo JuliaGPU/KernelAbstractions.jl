@@ -13,6 +13,9 @@ if !(VERSION < v"1.6-")
 
     cudakernels = Pkg.PackageSpec(path = joinpath(root_directory, "lib", "CUDAKernels"))
     Pkg.develop(cudakernels)
+
+    kernelgradients = Pkg.PackageSpec(path = joinpath(root_directory, "lib", "KernelGradients"))
+    Pkg.develop(kernelgradients)
 end
 Pkg.build()
 Pkg.precompile()
