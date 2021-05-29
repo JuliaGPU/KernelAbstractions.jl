@@ -300,6 +300,7 @@ end
 @inline Cassette.overdub(::ROCCtx, ::typeof(SpecialFunctions.gamma), x::Union{Float32, Float64}) = AMDGPU.tgamma(x)
 @inline Cassette.overdub(::ROCCtx, ::typeof(SpecialFunctions.erf), x::Union{Float32, Float64}) = AMDGPU.erf(x)
 @inline Cassette.overdub(::ROCCtx, ::typeof(SpecialFunctions.erfc), x::Union{Float32, Float64}) = AMDGPU.erfc(x)
+@inline Cassette.overdub(::ROCCtx, ::typeof(SpecialFunctions.erfcx), x::Union{Float32, Float64}) = AMDGPU.erfcx(x)
 
 import KernelAbstractions: ConstAdaptor, SharedMemory, Scratchpad, __synchronize, __size
 

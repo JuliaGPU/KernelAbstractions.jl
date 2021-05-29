@@ -340,4 +340,32 @@ end
     end
 end
 
+
+@testset "special functions: erfcx" begin
+    @eval begin
+        @kernel function erfcx_knl(A, @Const(B))
+            I = @index(Global)
+            @inbounds A[I] = SpecialFunctions.erfcx(B[I])
+        end
+
+        x = [-1.0,-0.5,0.0,1e-3,1.0,2.0,5.5]
+        y = similar(x)
+        event = if $backend == CPU
+            erfcx_knl(CPU())(y, x; ndrange=length(x))
+        else
+            cx = $ArrayT(x)
+            cy = similar(cx)
+            erfcx_knl($backend())(cy, cx; ndrange=length(x))
+        end
+        wait(event)
+        if $backend == CPU
+            @test y == SpecialFunctions.erfcx.(x)
+        else
+            cy = Array(cy)
+            @test cy[1:4] ≈ SpecialFunctions.erfcx.(x[1:4])
+        end
+    end
+end
+
+
 end
