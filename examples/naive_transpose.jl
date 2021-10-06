@@ -1,12 +1,17 @@
-using KernelAbstractions, CUDAKernels, Test, CUDA
+using KernelAbstractions
+using CUDA
+using CUDAKernels
+using AMDGPU
+using ROCKernels
+using Test
 
 if has_cuda_gpu()
     CUDA.allowscalar(false)
 end
 
 @kernel function naive_transpose_kernel!(a, b)
-  i, j = @index(Global, NTuple)
-  @inbounds b[i, j] = a[j, i]
+    i, j = @index(Global, NTuple)
+    @inbounds b[i, j] = a[j, i]
 end
 
 # create wrapper function to check inputs
@@ -16,11 +21,17 @@ function naive_transpose!(a, b)
         println("Matrix size mismatch!")
         return nothing
     end
+
     if isa(a, Array)
-        kernel! = naive_transpose_kernel!(CPU(),4)
+        kernel! = naive_transpose_kernel!(CPU(), 4)
+    elseif isa(a, CuArray)
+        kernel! = naive_transpose_kernel!(CUDADevice(), 256)
+    elseif isa(a, ROCArray)
+        kernel! = naive_transpose_kernel!(ROCDevice(), 256)
     else
-        kernel! = naive_transpose_kernel!(CUDADevice(),256)
+        println("Unrecognized array type!")
     end
+    
     kernel!(a, b, ndrange=size(a))
 end
 
@@ -49,3 +60,26 @@ if has_cuda_gpu()
 
     @test a == transpose(b)
 end
+
+function has_rocm_gpu()
+    for agent in AMDGPU.get_agents()
+        if agent.type == :gpu
+            return true
+        end
+    end
+    return false
+end
+
+if has_rocm_gpu()
+    d_a = ROCArray(a)
+    d_b = zeros(Float32, res, res) |> ROCArray
+
+    ev = naive_transpose!(d_a, d_b)
+    wait(ev)
+
+    a = Array(d_a)
+    b = Array(d_b)
+    
+    @test a == transpose(b)
+end
+
