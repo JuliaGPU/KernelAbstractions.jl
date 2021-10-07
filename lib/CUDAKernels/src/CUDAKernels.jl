@@ -8,6 +8,10 @@ import KernelAbstractions
 
 export CUDADevice
 
+KernelAbstractions.get_device(::Type{<:CUDA.CuArray}) = CUDADevice()
+KernelAbstractions.get_device(::Type{<:CUDA.CUSPARSE.AbstractCuSparseArray}) = CUDADevice()
+
+
 const FREE_STREAMS = CUDA.CuStream[]
 const STREAMS = CUDA.CuStream[]
 const STREAM_GC_THRESHOLD = Ref{Int}(16)

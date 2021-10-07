@@ -8,6 +8,10 @@ using Test
 include(joinpath(dirname(pathof(KernelAbstractions)), "..", "test", "testsuite.jl"))
 include(joinpath(dirname(pathof(KernelGradients)), "..", "test", "testsuite.jl"))
 
+@test "get_device" begin
+    @test @inferred(KernelAbstractions.get_device(AMDGPU.ROCArray{Float32,3})) == ROCDevice()
+end
+
 CI = parse(Bool, get(ENV, "CI", "false"))
 if CI
     default = "CPU"

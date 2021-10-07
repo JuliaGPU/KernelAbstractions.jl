@@ -336,6 +336,24 @@ abstract type GPU <: Device end
 
 struct CPU <: Device end
 
+
+"""
+    KernelAbstractions.get_device(A::AbstractArray)::KernelAbstractions.Device
+    KernelAbstractions.get_device(TA::Type{<:AbstractArray})::KernelAbstractions.Device
+
+Get a `KernelAbstractions.Device` instance suitable for array `A` resp. array
+type `TA`.
+"""
+function get_device end
+
+get_device(A::AbstractArray) = get_device(typeof(A))
+
+get_device(::Type{<:AbstractArray}) = CPU()
+
+# Would require dependency on GPUArrays:
+# get_device(TA::Type{<:GPUArrays.AbstractGPUArray}) = throw(ArgumentError("NoKernelAbstractions.Device type defined for arrays of type $(TA.name.name)"))
+
+
 include("nditeration.jl")
 using .NDIteration
 import .NDIteration: get

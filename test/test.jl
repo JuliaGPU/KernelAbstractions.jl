@@ -64,6 +64,12 @@ end
        A[I] = i
 end
 
+@testset "get_device" begin
+    A = rand(5)
+    @test @inferred(KernelAbstractions.get_device(typeof(A))) == CPU()
+    @test @inferred(KernelAbstractions.get_device(A)) == KernelAbstractions.get_device(typeof(A))
+end
+
 @testset "indextest" begin
     # TODO: add test for _group and _local_cartesian
     A = ArrayT{Int}(undef, 16, 16)
