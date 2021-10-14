@@ -4,13 +4,14 @@ using Enzyme
 using CUDA
 using CUDAKernels
 using Test
+using SparseArrays
 
 include(joinpath(dirname(pathof(KernelAbstractions)), "..", "test", "testsuite.jl"))
 include(joinpath(dirname(pathof(KernelGradients)), "..", "test", "testsuite.jl"))
 
 @testset "get_device" begin
-    @test @inferred(KernelAbstractions.get_device(CUDA.CuArray{Float32,3})) == CUDADevice()
-    @test @inferred(KernelAbstractions.get_device(CUDA.CUSPARSE.CuSparseMatrixCSC{Float32})) == CUDADevice()
+    @test @inferred(KernelAbstractions.get_device(CuArray(rand(Float32, 3,3)))) == CUDADevice()
+    @test @inferred(KernelAbstractions.get_device(CuArray(sparse(rand(Float32, 3,3))))) == CUDADevice()
 end
 
 CI = parse(Bool, get(ENV, "CI", "false"))

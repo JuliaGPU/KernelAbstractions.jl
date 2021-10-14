@@ -9,7 +9,7 @@ import KernelAbstractions
 
 export ROCDevice
 
-KernelAbstractions.get_device(::Type{<:AMDGPU.ROCArray}) = ROCDevice()
+KernelAbstractions.get_device(::AMDGPU.ROCArray) = ROCDevice()
 
 
 const FREE_QUEUES = HSAQueue[]

@@ -8,8 +8,8 @@ import KernelAbstractions
 
 export CUDADevice
 
-KernelAbstractions.get_device(::Type{<:CUDA.CuArray}) = CUDADevice()
-KernelAbstractions.get_device(::Type{<:CUDA.CUSPARSE.AbstractCuSparseArray}) = CUDADevice()
+KernelAbstractions.get_device(::CUDA.CuArray) = CUDADevice()
+KernelAbstractions.get_device(::CUDA.CUSPARSE.AbstractCuSparseArray) = CUDADevice()
 
 
 const FREE_STREAMS = CUDA.CuStream[]

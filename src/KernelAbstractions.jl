@@ -6,7 +6,9 @@ export Device, GPU, CPU, Event, MultiEvent, NoneEvent
 export async_copy!
 
 
+using LinearAlgebra
 using MacroTools
+using SparseArrays
 using StaticArrays
 using Adapt
 
@@ -339,19 +341,19 @@ struct CPU <: Device end
 
 """
     KernelAbstractions.get_device(A::AbstractArray)::KernelAbstractions.Device
-    KernelAbstractions.get_device(TA::Type{<:AbstractArray})::KernelAbstractions.Device
 
-Get a `KernelAbstractions.Device` instance suitable for array `A` resp. array
-type `TA`.
+Get a `KernelAbstractions.Device` instance suitable for array `A`.
 """
 function get_device end
 
-get_device(A::AbstractArray) = get_device(typeof(A))
+# Should cover SubArray, ReshapedArray, ReinterpretArray, Hermitian, AbstractTriangular, etc.:
+get_device(A::AbstractArray) = get_device(parent(A))
 
-get_device(::Type{<:AbstractArray}) = CPU()
+get_device(A::AbstractSparseArray) = get_device(rowvals(A))
+get_device(A::Diagonal) = get_device(A.diag)
+get_device(A::Tridiagonal) = get_device(A.d)
 
-# Would require dependency on GPUArrays:
-# get_device(TA::Type{<:GPUArrays.AbstractGPUArray}) = throw(ArgumentError("NoKernelAbstractions.Device type defined for arrays of type $(TA.name.name)"))
+get_device(::Array) = CPU()
 
 
 include("nditeration.jl")

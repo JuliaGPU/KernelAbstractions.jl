@@ -1,6 +1,8 @@
 using KernelAbstractions
 using KernelAbstractions.NDIteration
 using InteractiveUtils
+using LinearAlgebra
+using SparseArrays
 import SpecialFunctions
 
 identity(x) = x
@@ -65,9 +67,13 @@ end
 end
 
 @testset "get_device" begin
-    A = rand(5)
-    @test @inferred(KernelAbstractions.get_device(typeof(A))) == CPU()
-    @test @inferred(KernelAbstractions.get_device(A)) == KernelAbstractions.get_device(typeof(A))
+    x = rand(5)
+    A = rand(5,5)
+    @test @inferred(KernelAbstractions.get_device(A)) == CPU()
+    @test @inferred(KernelAbstractions.get_device(view(A, 2:4, 1:3))) == CPU()
+    @test @inferred(KernelAbstractions.get_device(sparse(A))) == CPU()
+    @test @inferred(KernelAbstractions.get_device(Diagonal(x))) == CPU()
+    @test @inferred(KernelAbstractions.get_device(Tridiagonal(A))) == CPU()
 end
 
 @testset "indextest" begin
