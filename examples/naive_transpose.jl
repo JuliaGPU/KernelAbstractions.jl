@@ -61,14 +61,6 @@ if has_cuda_gpu()
     @test a == transpose(b)
 end
 
-function has_rocm_gpu()
-    for agent in AMDGPU.get_agents()
-        if agent.type == :gpu
-            return true
-        end
-    end
-    return false
-end
 
 if has_rocm_gpu()
     d_a = ROCArray(a)

@@ -37,14 +37,6 @@ if has_cuda_gpu()
     @test A == B
 end
 
-function has_rocm_gpu()
-    for agent in AMDGPU.get_agents()
-        if agent.type == :gpu
-            return true
-        end
-    end
-    return false
-end
 
 if has_rocm_gpu()
 
