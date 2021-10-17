@@ -355,7 +355,6 @@ get_device(A::Tridiagonal) = get_device(A.d)
 
 get_device(::Array) = CPU()
 
-
 include("nditeration.jl")
 using .NDIteration
 import .NDIteration: get
