@@ -9,11 +9,6 @@ using SparseArrays
 include(joinpath(dirname(pathof(KernelAbstractions)), "..", "test", "testsuite.jl"))
 include(joinpath(dirname(pathof(KernelGradients)), "..", "test", "testsuite.jl"))
 
-@testset "get_device" begin
-    @test @inferred(KernelAbstractions.get_device(CuArray(rand(Float32, 3,3)))) == CUDADevice()
-    @test @inferred(KernelAbstractions.get_device(CuArray(sparse(rand(Float32, 3,3))))) == CUDADevice()
-end
-
 CI = parse(Bool, get(ENV, "CI", "false"))
 if CI
     default = "CPU"
@@ -36,4 +31,9 @@ if CUDA.functional()
     # GradientsTestsuite.testsuite(CUDADevice, backend, CUDA, CuArray, CUDA.CuDeviceArray)
 elseif !CI
     error("No CUDA GPUs available!")
+end
+
+@testset "get_device" begin
+    @test @inferred(KernelAbstractions.get_device(CuArray(rand(Float32, 3,3)))) == CUDADevice()
+    @test @inferred(KernelAbstractions.get_device(CuArray(sparse(rand(Float32, 3,3))))) == CUDADevice()
 end

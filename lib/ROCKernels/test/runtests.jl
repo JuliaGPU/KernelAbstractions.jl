@@ -8,10 +8,6 @@ using Test
 include(joinpath(dirname(pathof(KernelAbstractions)), "..", "test", "testsuite.jl"))
 include(joinpath(dirname(pathof(KernelGradients)), "..", "test", "testsuite.jl"))
 
-@test "get_device" begin
-    @test @inferred(KernelAbstractions.get_device(ROCArray(rand(Float32, 3, 3)))) == ROCDevice()
-end
-
 CI = parse(Bool, get(ENV, "CI", "false"))
 if CI
     default = "CPU"
@@ -32,4 +28,8 @@ if AMDGPU.has_rocm_gpu()
     # GradientsTestsuite.testsuite(ROCDevice, backend, AMDGPU, ROCArray, AMDGPU.ROCDeviceArray)
 elseif !CI
     error("No AMD GPUs available!")
+end
+
+@test "get_device" begin
+    @test @inferred(KernelAbstractions.get_device(ROCArray(rand(Float32, 3, 3)))) == ROCDevice()
 end
