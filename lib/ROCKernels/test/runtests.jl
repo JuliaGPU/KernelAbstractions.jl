@@ -29,7 +29,3 @@ if AMDGPU.has_rocm_gpu()
 elseif !CI
     error("No AMD GPUs available!")
 end
-
-@test "get_device" begin
-    @test @inferred(KernelAbstractions.get_device(ROCArray(rand(Float32, 3, 3)))) == ROCDevice()
-end

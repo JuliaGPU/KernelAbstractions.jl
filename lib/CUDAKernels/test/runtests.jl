@@ -32,8 +32,3 @@ if CUDA.functional()
 elseif !CI
     error("No CUDA GPUs available!")
 end
-
-@testset "get_device" begin
-    @test @inferred(KernelAbstractions.get_device(CuArray(rand(Float32, 3,3)))) == CUDADevice()
-    @test @inferred(KernelAbstractions.get_device(CuArray(sparse(rand(Float32, 3,3))))) == CUDADevice()
-end

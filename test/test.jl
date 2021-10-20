@@ -67,13 +67,14 @@ end
 end
 
 @testset "get_device" begin
-    x = rand(5)
-    A = rand(5,5)
-    @test @inferred(KernelAbstractions.get_device(A)) == CPU()
-    @test @inferred(KernelAbstractions.get_device(view(A, 2:4, 1:3))) == CPU()
-    @test @inferred(KernelAbstractions.get_device(sparse(A))) == CPU()
-    @test @inferred(KernelAbstractions.get_device(Diagonal(x))) == CPU()
-    @test @inferred(KernelAbstractions.get_device(Tridiagonal(A))) == CPU()
+    x = ArrayT(rand(Float32, 5))
+    A = ArrayT(rand(Float32, 5,5))
+    device = backend()
+    @test @inferred(KernelAbstractions.get_device(A)) == device
+    @test @inferred(KernelAbstractions.get_device(view(A, 2:4, 1:3))) == device
+    @test @inferred(KernelAbstractions.get_device(sparse(A))) == device
+    @test @inferred(KernelAbstractions.get_device(Diagonal(x))) == device
+    @test @inferred(KernelAbstractions.get_device(Tridiagonal(A))) == device
 end
 
 @testset "indextest" begin
