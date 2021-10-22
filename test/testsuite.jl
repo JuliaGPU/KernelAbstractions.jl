@@ -14,6 +14,7 @@ include("print_test.jl")
 include("compiler.jl")
 include("reflection.jl")
 include("examples.jl")
+include("convert.jl")
 
 function testsuite(backend, backend_str, backend_mod, AT, DAT)
     @testset "Unittests" begin
@@ -62,6 +63,10 @@ function testsuite(backend, backend_str, backend_mod, AT, DAT)
 
     @testset "Reflection" begin
         reflection_testsuite(backend, AT)
+    end
+
+    @testset "Convert" begin
+        convert_testsuite(backend, AT)
     end
 
     if backend_str == "CUDA"
