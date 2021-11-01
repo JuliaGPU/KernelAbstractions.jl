@@ -51,6 +51,9 @@ function generate_overdubs(mod, Ctx)
         @inline Cassette.overdub(::$Ctx, ::typeof(Base.throw_boundserror), args...) = Base.throw_boundserror(args...)
         @inline Cassette.overdub(::$Ctx, ::typeof(Base.Math.throw_exp_domainerror), args...) = Base.Math.throw_exp_domainerror(args...)
 
+        @inline Cassette.overdub(::$Ctx, ::typeof(Core.throw_inexacterror), args...) = throw(InexactError(args...))
+        @inline Cassette.overdub(::$Ctx, ::Core.Typeof(Base.InexactError), args...) = InexactError(args...)
+
         function Cassette.overdub(::$Ctx, ::typeof(:), start::T, step::T, stop::T) where T<:Union{Float16,Float32,Float64}
             lf = (stop-start)/step
             if lf < 0
