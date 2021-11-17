@@ -79,8 +79,10 @@ isdone(ev::ROCEvent) = true # FIXME
 
 function Event(::ROCDevice)
     queue = AMDGPU.get_default_queue()
+    # Returns an HSASignalSet containing signals
     event = AMDGPU.barrier_and!(queue, AMDGPU.active_kernels(queue))
-    ROCEvent(event.signal)
+    # Build ROCEvents and put them in a MultiEvent
+    MultiEvent(Tuple(ROCEvent(s) for s in event.signals))
 end
 
 import Base: wait

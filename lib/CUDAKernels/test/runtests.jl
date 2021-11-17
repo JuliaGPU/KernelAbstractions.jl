@@ -1,9 +1,12 @@
 using KernelAbstractions
+using KernelGradients
+using Enzyme
 using CUDA
 using CUDAKernels
 using Test
 
 include(joinpath(dirname(pathof(KernelAbstractions)), "..", "test", "testsuite.jl"))
+include(joinpath(dirname(pathof(KernelGradients)), "..", "test", "testsuite.jl"))
 
 if parse(Bool, get(ENV, "CI", "false"))
     default = "CPU"
@@ -22,6 +25,7 @@ CUDA.versioninfo()
 if CUDA.functional(true)
     CUDA.allowscalar(false)
     Testsuite.testsuite(CUDADevice, backend, CUDA, CuArray, CUDA.CuDeviceArray)
+    GradientsTestsuite.testsuite(CUDADevice, backend, CUDA, CuArray, CUDA.CuDeviceArray)
 else
     error("No CUDA GPUs available!")
 end

@@ -1,0 +1,18 @@
+name = "KernelGradients"
+uuid = "e5faadeb-7f6c-408e-9747-a7a26e81c66a"
+authors = ["Valentin Churavy <v.churavy@gmail.com>"]
+version = "0.1.0"
+
+[deps]
+Cassette = "7057c7e9-c182-5462-911a-8362d720325c"
+Enzyme = "7da242da-08ed-463a-9acd-ee780be4f1d9"
+KernelAbstractions = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
+Requires = "ae029012-a4dd-5104-9daa-d747884805df"
+
+
+[compat]
+Cassette = "0.3"
+KernelAbstractions = "0.7"
+Requires = "1.1"
+Enzyme = "0.7"
+julia = "1.6"

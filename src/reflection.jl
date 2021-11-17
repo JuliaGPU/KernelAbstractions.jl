@@ -76,8 +76,9 @@ function format_ex(ex0)
                         # if an expr in place of a variable, skip
                         break
                     end
-                    kw.args[2] = esc(kw.args[2])
-                    kw.head = Symbol("=")
+                    # see https://github.com/JuliaLang/julia/pull/41040
+                    @static VERSION < v"1.7.0-DEV.1221" && (kw.args[2] = esc(kw.args[2]))
+                    kw.head = :(=)
                     resize!(ex0[i].args, length(ex0[i].args) - 1)
                     ex = (kw,)..., ex...
                 else

@@ -327,7 +327,7 @@ import KernelAbstractions: ConstAdaptor, SharedMemory, Scratchpad, __synchronize
 ###
 
 @inline function Cassette.overdub(::CUDACtx, ::typeof(SharedMemory), ::Type{T}, ::Val{Dims}, ::Val{Id}) where {T, Dims, Id}
-    ptr = emit_shmem(Val(Id), T, Val(prod(Dims)))
+    ptr = emit_shmem(T, Val(prod(Dims)))
     CUDA.CuDeviceArray(Dims, ptr)
 end
 
