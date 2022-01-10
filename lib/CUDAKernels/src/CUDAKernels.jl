@@ -356,4 +356,29 @@ Adapt.adapt_storage(to::ConstAdaptor, a::CUDA.CuDeviceArray) = Base.Experimental
 # Argument conversion
 KernelAbstractions.argconvert(k::Kernel{CUDADevice}, arg) = CUDA.cudaconvert(arg)
 
+# Cassette.jl#195
+# Device intrinsics are inferred in a different World (1.6) or using MethodOverlay tables (1.7)
+# Cassette sees neither of them and thus overdubbing them fails.
+@inline function Cassette.overdub(::CUDACtx, ::typeof(CUDA.arrayref), args...)
+    CUDA.arrayref(args...)
+end
+@inline function Cassette.overdub(::CUDACtx, ::typeof(CUDA.arrayset), args...)
+    CUDA.arrayset(args...)
+end
+@inline function Cassette.overdub(::CUDACtx, ::typeof(CUDA.const_arrayref), args...)
+    CUDA.const_arrayref(args...)
+end
+@inline function Cassette.overdub(::CUDACtx, ::typeof(CUDA.logb), args...)
+    CUDA.logb(args...)
+end
+# @inline function Cassette.overdub(::CUDACtx, ::typeof(CUDA.tgamma), args...)
+#     CUDA.tgamma(args...)
+# end
+@inline function Cassette.overdub(::CUDACtx, ::typeof(CUDA.compute_capability), args...)
+    CUDA.compute_capability(args...)
+end
+@inline function Cassette.overdub(::CUDACtx, ::typeof(CUDA.ptx_isa_version), args...)
+    CUDA.ptx_isa_version(args...)
+end
+
 end
