@@ -5,7 +5,6 @@ KernelAbstractions.jl
 [![Documentation (stable)][docs-stable-img]][docs-stable-url]
 [![Documentation (latest)][docs-latest-img]][docs-latest-url]
 [![DOI][doi-img]][doi-url]
-[![Bors][bors-img]][bors-url]
 [![Code Coverage][codecov-img]][codecov-url]
 
 | Julia       | CPU CI                                                             | GPU CI                                                                    |
@@ -20,8 +19,6 @@ KernelAbstractions.jl
 [docs-latest-url]: https://juliagpu.github.io/KernelAbstractions.jl/dev
 [doi-img]: https://zenodo.org/badge/237471203.svg
 [doi-url]: https://zenodo.org/badge/latestdoi/237471203
-[bors-img]: https://bors.tech/images/badge_small.svg
-[bors-url]: https://app.bors.tech/repositories/23203
 [codecov-img]: https://codecov.io/gh/JuliaGPU/KernelAbstractions.jl/branch/master/graph/badge.svg
 [codecov-url]: https://codecov.io/gh/JuliaGPU/KernelAbstractions.jl
 [ci-img]: https://github.com/JuliaGPU/KernelAbstractions.jl/workflows/CI/badge.svg

@@ -1,7 +1,5 @@
-using KernelAbstractions
-using CUDAKernels
-using CUDA
-using Test
+using KernelAbstractions, Test
+include(joinpath(@__DIR__, "utils.jl")) # Load backend
 
 @kernel function copy_kernel!(A, @Const(B))
     I = @index(Global)
@@ -20,7 +18,7 @@ event = mycopy_static!(A, B)
 wait(event)
 @test A == B
 
-if has_cuda_gpu()
+if has_cuda && has_cuda_gpu()
 
     function mycopy_static!(A::CuArray, B::CuArray)
         @assert size(A) == size(B)

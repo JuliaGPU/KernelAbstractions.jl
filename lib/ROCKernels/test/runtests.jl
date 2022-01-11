@@ -8,7 +8,8 @@ using Test
 include(joinpath(dirname(pathof(KernelAbstractions)), "..", "test", "testsuite.jl"))
 include(joinpath(dirname(pathof(KernelGradients)), "..", "test", "testsuite.jl"))
 
-if parse(Bool, get(ENV, "CI", "false"))
+CI = parse(Bool, get(ENV, "CI", "false"))
+if CI
     default = "CPU"
 else
     default = "ROCM"
@@ -21,10 +22,10 @@ if backend != "ROCM"
     exit()
 end
 
-if length(AMDGPU.get_agents(:gpu)) > 0
+if AMDGPU.has_rocm_gpu()
     AMDGPU.allowscalar(false)
     Testsuite.testsuite(ROCDevice, backend, AMDGPU, ROCArray, AMDGPU.ROCDeviceArray)
-    GradientsTestsuite.testsuite(ROCDevice, backend, AMDGPU, ROCArray, AMDGPU.ROCDeviceArray)
-else
+    # GradientsTestsuite.testsuite(ROCDevice, backend, AMDGPU, ROCArray, AMDGPU.ROCDeviceArray)
+elseif !CI
     error("No AMD GPUs available!")
 end
