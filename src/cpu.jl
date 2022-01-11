@@ -269,3 +269,30 @@ end
 
 # Argument conversion
 KernelAbstractions.argconvert(k::Kernel{CPU}, arg) = arg
+
+###
+# CPU error handling if under 1.7
+###
+
+if Base.VERSION < v"1.7.0"
+
+    import KernelAbstractions: atomic_add!, atomic_and!, atomic_cas!,
+                               atomic_dec!, atomic_inc!, atomic_max!,
+                               atomic_min!, atomic_op!, atomic_or!,
+                               atomic_sub!, atomic_xchg!, atomic_xor!
+
+    function atomic_error(args...)
+        error("CPU Atomics are not allowed for julia version under 1.7!")
+    end
+
+    afxs = [atomic_add!, atomic_and!, atomic_cas!, atomic_dec!,
+            atomic_inc!, atomic_max!, atomic_min!, atomic_op!,
+            atomic_or!, atomic_sub!, atomic_xchg!, atomic_xor!]
+
+    for afx in afxs
+        @inline function Cassette.overdub(::CPUCtx, ::typeof(afx), args...)
+            atomic_error(args...)
+        end
+    end
+end
+

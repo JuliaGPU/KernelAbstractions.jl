@@ -320,6 +320,7 @@ else
 end
 
 import KernelAbstractions: ConstAdaptor, SharedMemory, Scratchpad, __synchronize, __size
+import KernelAbstractions: atomic_add!, atomic_and!, atomic_cas!, atomic_dec!, atomic_inc!, atomic_max!, atomic_min!, atomic_op!, atomic_or!, atomic_sub!, atomic_xchg!, atomic_xor!
 
 ###
 # GPU implementation of shared memory
@@ -379,6 +380,31 @@ end
 end
 @inline function Cassette.overdub(::CUDACtx, ::typeof(CUDA.ptx_isa_version), args...)
     CUDA.ptx_isa_version(args...)
+end
+
+###
+# GPU implementation of atomics
+###
+
+afxs = Dict(
+    atomic_add! => CUDA.atomic_add!,
+    atomic_and! => CUDA.atomic_and!,
+    atomic_cas! => CUDA.atomic_cas!,
+    atomic_dec! => CUDA.atomic_dec!,
+    atomic_inc! => CUDA.atomic_inc!,
+    atomic_max! => CUDA.atomic_max!,
+    atomic_min! => CUDA.atomic_min!,
+    atomic_op! => CUDA.atomic_op!,
+    atomic_or! => CUDA.atomic_or!,
+    atomic_sub! => CUDA.atomic_sub!,
+    atomic_xchg! => CUDA.atomic_xchg!,
+    atomic_xor! => CUDA.atomic_xor!
+)
+
+for (afx, cfx) in afxs
+    @inline function Cassette.overdub(::CUDACtx, ::typeof(afx), args...)
+        cfx(args...)
+    end
 end
 
 end
