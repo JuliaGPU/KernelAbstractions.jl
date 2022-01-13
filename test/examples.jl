@@ -22,7 +22,7 @@ function examples_testsuite()
         """
         cmd = `$(Base.julia_cmd()) --startup-file=no -e $code`
         @debug "Testing $example" Text(code) cmd
-        @test success(pipeline(cmd, stderr=stderr))
+        @test success(pipeline(cmd, stderr=stderr, stdout=stdout))
     end
 
 end

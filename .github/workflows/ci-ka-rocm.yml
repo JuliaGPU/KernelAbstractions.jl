@@ -1,23 +1,28 @@
-name: CI (Julia 1.6-nightly)
+name: CI-KA-ROCM
 on:
   push:
     branches:
       - master
-      - staging
-      - trying
+      - release-*
     tags: '*'
+  pull_request:
 defaults:
   run:
     shell: bash
+concurrency:
+  # Skip intermediate builds: always.
+  # Cancel intermediate builds: only if it is a pull request build.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ startsWith(github.ref, 'refs/pull/') }}
 jobs:
-  CI-julia-1-6-nightly:
-    name: CI-julia-1-6-nightly
+  CI:
+    name: CI
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         version:
-          - '1.6-nightly'
+          - '1.6'
         os:
           - ubuntu-latest
           - macOS-latest
@@ -41,7 +46,11 @@ jobs:
             ${{ runner.os }}-test-
             ${{ runner.os }}-
       - run: julia .ci/develop.jl
+        env: 
+          KERNELABSTRACTIONS_TEST_BACKEND: "ROCM"
       - run: julia .ci/test.jl
+        env: 
+          KERNELABSTRACTIONS_TEST_BACKEND: "ROCM"
       - uses: julia-actions/julia-processcoverage@v1
       - uses: codecov/codecov-action@v1
         with:

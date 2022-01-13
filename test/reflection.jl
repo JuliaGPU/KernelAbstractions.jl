@@ -15,7 +15,7 @@ end
     A[I] = i + C[I]
 end
 
-function test_typed_kernel_dynamic(backend, ArrayT)
+function test_typed_kernel_dynamic(backend, backend_str, ArrayT)
     A = ArrayT(ones(1024, 1024))
     kernel = mul2(backend())
     res = if backend == CPU
@@ -23,21 +23,29 @@ function test_typed_kernel_dynamic(backend, ArrayT)
     else
         @ka_code_typed kernel(A, ndrange=size(A), workgroupsize=(32, 32))
     end
-    @test isa(res, Pair{Core.CodeInfo, DataType})
+    if backend_str == "CUDA"
+        @test_broken isa(res, Pair{Core.CodeInfo, DataType})
+    else
+        @test isa(res, Pair{Core.CodeInfo, DataType})
+    end
     @test isa(res[1].code, Array{Any,1})
 end
 
-function test_typed_kernel_dynamic_no_info(backend, ArrayT)
+function test_typed_kernel_dynamic_no_info(backend, backend_str, ArrayT)
     A = ArrayT(ones(1024, 1024))
     B = similar(A)
     C = similar(A)
     kernel = add3(backend())
     res = @ka_code_typed kernel(A, B, C, ndrange=size(A))
-    @test isa(res, Pair{Core.CodeInfo, DataType})
+    if backend_str == "CUDA"
+        @test_broken isa(res, Pair{Core.CodeInfo, DataType})
+    else
+        @test isa(res, Pair{Core.CodeInfo, DataType})
+    end
     @test isa(res[1].code, Array{Any,1})
 end
 
-function test_typed_kernel_static(backend, ArrayT)
+function test_typed_kernel_static(backend, backend_str, ArrayT)
     A = ArrayT(ones(1024, 1024))
     kernel = if backend == CPU
         mul2(backend(), 16)
@@ -45,11 +53,15 @@ function test_typed_kernel_static(backend, ArrayT)
         mul2(backend(), (32, 32))
     end
     res = @ka_code_typed kernel(A, ndrange=size(A))
-    @test isa(res, Pair{Core.CodeInfo, DataType})
+    if backend_str == "CUDA"
+        @test_broken isa(res, Pair{Core.CodeInfo, DataType})
+    else
+        @test isa(res, Pair{Core.CodeInfo, DataType})
+    end
     @test isa(res[1].code, Array{Any,1})
 end
 
-function test_typed_kernel_no_optimize(backend, ArrayT)
+function test_typed_kernel_no_optimize(backend, backend_str, ArrayT)
     A = ArrayT(ones(1024, 1024))
     B = similar(A)
     C = similar(A)
@@ -64,7 +76,7 @@ function test_typed_kernel_no_optimize(backend, ArrayT)
     @test size(res[1].code) < size(res_opt[1].code)
 end
 
-function test_expr_kernel(backend, ArrayT)
+function test_expr_kernel(backend, backend_str, ArrayT)
     A = ArrayT(ones(1024, 1024))
     C = similar(A)
     kernel = if backend == CPU
@@ -73,14 +85,18 @@ function test_expr_kernel(backend, ArrayT)
         addi(backend(), (32, 32))
     end
     res = @ka_code_typed kernel(A, C, 1+2, ndrange=size(A))
-    @test isa(res, Pair{Core.CodeInfo, DataType})
+    if backend_str == "CUDA"
+        @test_broken isa(res, Pair{Core.CodeInfo, DataType})
+    else
+        @test isa(res, Pair{Core.CodeInfo, DataType})
+    end
     @test isa(res[1].code, Array{Any,1})
 end
 
-function reflection_testsuite(backend, ArrayT)
-    test_typed_kernel_dynamic(backend, ArrayT)
-    test_typed_kernel_dynamic_no_info(backend, ArrayT)
-    test_typed_kernel_static(backend, ArrayT)
-    test_typed_kernel_no_optimize(backend, ArrayT)
-    test_expr_kernel(backend, ArrayT)
+function reflection_testsuite(backend, backend_str, ArrayT)
+    test_typed_kernel_dynamic(backend, backend_str, ArrayT)
+    test_typed_kernel_dynamic_no_info(backend, backend_str, ArrayT)
+    test_typed_kernel_static(backend, backend_str, ArrayT)
+    test_typed_kernel_no_optimize(backend, backend_str, ArrayT)
+    test_expr_kernel(backend, backend_str, ArrayT)
 end

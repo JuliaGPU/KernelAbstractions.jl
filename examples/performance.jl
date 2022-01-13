@@ -1,7 +1,8 @@
-using KernelAbstractions, CUDAKernels, CUDA, Test
+using KernelAbstractions, Test
+include(joinpath(@__DIR__, "utils.jl")) # Load backend
 using KernelAbstractions.Extras: @unroll
 
-has_cuda_gpu() || exit()
+has_cuda && has_cuda_gpu() || exit()
 CUDA.allowscalar(false)
 
 const nreps = 3

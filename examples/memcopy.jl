@@ -1,9 +1,5 @@
-using KernelAbstractions
-using CUDA
-using CUDAKernels
-using AMDGPU
-using ROCKernels
-using Test
+using KernelAbstractions, Test
+include(joinpath(@__DIR__, "utils.jl")) # Load backend
 
 @kernel function copy_kernel!(A, @Const(B))
     I = @index(Global)
@@ -23,8 +19,7 @@ wait(event)
 @test A == B
 
 
-if has_cuda_gpu()
-
+if has_cuda && has_cuda_gpu()
     function mycopy!(A::CuArray, B::CuArray)
         @assert size(A) == size(B)
         copy_kernel!(CUDADevice(), 256)(A, B, ndrange=length(A))
@@ -37,9 +32,7 @@ if has_cuda_gpu()
     @test A == B
 end
 
-
-if has_rocm_gpu()
-
+if has_rocm && has_rocm_gpu()
     function mycopy!(A::ROCArray, B::ROCArray)
         @assert size(A) == size(B)
         copy_kernel!(ROCDevice(), 256)(A, B, ndrange=length(A))

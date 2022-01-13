@@ -1,14 +1,19 @@
-name: CI
+name: CI-KA
 on:
   push:
     branches:
       - master
-      - staging
-      - trying
+      - release-*
     tags: '*'
+  pull_request:
 defaults:
   run:
     shell: bash
+concurrency:
+  # Skip intermediate builds: always.
+  # Cancel intermediate builds: only if it is a pull request build.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ startsWith(github.ref, 'refs/pull/') }}
 jobs:
   CI:
     name: CI
@@ -17,10 +22,9 @@ jobs:
       fail-fast: false
       matrix:
         version:
-          - '1.3'
-          - '1.4'
-          - '1.5'
+          - '1.6'
           - '1' # automatically expands to the latest stable 1.x release of Julia.
+          - 'nightly'
         os:
           - ubuntu-latest
           - macOS-latest
@@ -81,6 +85,4 @@ jobs:
           julia --project=docs -e '
             using Documenter: doctest
             using KernelAbstractions
-            using CUDAKernels
-            doctest(KernelAbstractions; manual = true)
-            doctest(CUDAKernels; manual = false)'
+            doctest(KernelAbstractions; manual = true)'

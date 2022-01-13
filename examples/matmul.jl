@@ -1,6 +1,7 @@
-using KernelAbstractions, CUDAKernels, Test, CUDA
+using KernelAbstractions, Test
+include(joinpath(@__DIR__, "utils.jl")) # Load backend
 
-if has_cuda_gpu()
+if has_cuda && has_cuda_gpu()
     CUDA.allowscalar(false)
 end
 
@@ -42,7 +43,7 @@ wait(ev)
 @test isapprox(c, a*b)
 
 # beginning GPU tests
-if has_cuda_gpu()
+if has_cuda && has_cuda_gpu()
     d_a = CuArray(a)
     d_b = CuArray(b)
     d_c = CuArray(c)

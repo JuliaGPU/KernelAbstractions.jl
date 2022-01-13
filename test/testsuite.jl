@@ -62,7 +62,7 @@ function testsuite(backend, backend_str, backend_mod, AT, DAT)
     end
 
     @testset "Reflection" begin
-        reflection_testsuite(backend, AT)
+        reflection_testsuite(backend, backend_str, AT)
     end
 
     @testset "Convert" begin

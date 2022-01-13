@@ -70,11 +70,9 @@ function compiler_testsuite(backend, ArrayT)
         @test !any(check_for_overdub, CI.code)
     end
 
-    if VERSION >= v"1.5"
-        A = ArrayT{Int}(undef, 1)
-        let (CI, rt) = @ka_code_typed checked(backend())(A, 1, 2, ndrange=1)
-            # test that there is no invoke of overdub
-            @test !any(check_for_overdub, CI.code)
-        end
+    A = ArrayT{Int}(undef, 1)
+    let (CI, rt) = @ka_code_typed checked(backend())(A, 1, 2, ndrange=1)
+        # test that there is no invoke of overdub
+        @test !any(check_for_overdub, CI.code)
     end
 end

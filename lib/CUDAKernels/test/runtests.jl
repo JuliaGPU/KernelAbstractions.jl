@@ -8,7 +8,8 @@ using Test
 include(joinpath(dirname(pathof(KernelAbstractions)), "..", "test", "testsuite.jl"))
 include(joinpath(dirname(pathof(KernelGradients)), "..", "test", "testsuite.jl"))
 
-if parse(Bool, get(ENV, "CI", "false"))
+CI = parse(Bool, get(ENV, "CI", "false"))
+if CI
     default = "CPU"
 else
     default = "CUDA"
@@ -21,11 +22,12 @@ if backend != "CUDA"
     exit()
 end
 
-CUDA.versioninfo()
-if CUDA.functional(true)
+# if CUDA.functional(true)
+if CUDA.functional()
+    CUDA.versioninfo()
     CUDA.allowscalar(false)
     Testsuite.testsuite(CUDADevice, backend, CUDA, CuArray, CUDA.CuDeviceArray)
-    GradientsTestsuite.testsuite(CUDADevice, backend, CUDA, CuArray, CUDA.CuDeviceArray)
-else
+    # GradientsTestsuite.testsuite(CUDADevice, backend, CUDA, CuArray, CUDA.CuDeviceArray)
+elseif !CI
     error("No CUDA GPUs available!")
 end
