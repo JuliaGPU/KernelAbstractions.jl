@@ -12,6 +12,6 @@ end
 if !CI || BACKEND == "CUDA"
     push!(pkgs, "CUDAKernels")
 end
-push!(pkgs, "KernelGradients")
+# push!(pkgs, "KernelGradients")
 
 Pkg.test(pkgs; coverage = true)
