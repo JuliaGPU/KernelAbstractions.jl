@@ -8,7 +8,6 @@ export async_copy!
 
 using MacroTools
 using StaticArrays
-using Cassette
 using Adapt
 
 """
@@ -421,7 +420,7 @@ function partition(kernel, ndrange, workgroupsize)
 end
 
 ###
-# Compiler/Cassette
+# Compiler
 ###
 
 include("compiler.jl")
