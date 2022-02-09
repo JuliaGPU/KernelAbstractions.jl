@@ -63,15 +63,12 @@ end
 
 function test_typed_kernel_no_optimize(backend, backend_str, ArrayT)
     A = ArrayT(ones(1024, 1024))
-    B = similar(A)
-    C = similar(A)
     kernel = if backend == CPU
-        add3(backend(), 16)
+        mul2(backend(), 16)
     else
-        add3(backend(), (32, 32))
+        mul2(backend(), (32, 32))
     end
     res = @ka_code_typed optimize=false kernel(A, ndrange=size(A))
-    @test isa(res, Pair{Core.CodeInfo,Core.TypeofBottom})
     res_opt = @ka_code_typed kernel(A, ndrange=size(A))
     @test size(res[1].code) < size(res_opt[1].code)
 end
