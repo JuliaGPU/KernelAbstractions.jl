@@ -1,6 +1,7 @@
 module KernelGradients
 
 import Enzyme
+import KernelAbstractions: Kernel
 
 function Enzyme.autodiff(kernel::Kernel{<:Any, <:Any, <:Any, Fun}) where Fun
     f = kernel.f
