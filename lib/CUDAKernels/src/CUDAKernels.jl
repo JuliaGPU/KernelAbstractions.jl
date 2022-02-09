@@ -297,7 +297,7 @@ end
     MArray{__size(Dims), T}(undef)
 end
 
-@inline function Cassette.overdub(::CUDACtx, ::typeof(__synchronize))
+@device_override @inline function __synchronize()
     CUDA.sync_threads()
 end
 
