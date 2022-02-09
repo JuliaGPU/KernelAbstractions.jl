@@ -22,7 +22,7 @@ if !CI || BACKEND == "CUDA"
     Pkg.develop(cudakernels)
 end
 
-# kernelgradients = Pkg.PackageSpec(path = joinpath(root_directory, "lib", "KernelGradients"))
-# Pkg.develop(kernelgradients)
+kernelgradients = Pkg.PackageSpec(path = joinpath(root_directory, "lib", "KernelGradients"))
+Pkg.develop(kernelgradients)
 Pkg.build()
 Pkg.precompile()
