@@ -1,10 +1,8 @@
 module CUDAKernels
 
 import CUDA
-import SpecialFunctions
 import StaticArrays
 import StaticArrays: MArray
-import Cassette
 import Adapt
 import KernelAbstractions
 
@@ -191,7 +189,7 @@ function (obj::Kernel{CUDADevice})(args...; ndrange=nothing, dependencies=Event(
     ndrange, workgroupsize, iterspace, dynamic = launch_config(obj, ndrange, workgroupsize)
     # this might not be the final context, since we may tune the workgroupsize
     ctx = mkcontext(obj, ndrange, iterspace)
-    kernel = CUDA.@cuda launch=false name=String(nameof(obj.f)) Cassette.overdub(CUDACTX, obj.f, ctx, args...)
+    kernel = CUDA.@cuda launch=false obj.f(ctx, args...)
 
     # figure out the optimal workgroupsize automatically
     if KernelAbstractions.workgroupsize(obj) <: DynamicSize && workgroupsize === nothing
@@ -220,52 +218,49 @@ function (obj::Kernel{CUDADevice})(args...; ndrange=nothing, dependencies=Event(
 
     # Launch kernel
     event = CUDA.CuEvent(CUDA.EVENT_DISABLE_TIMING)
-    kernel(CUDACTX, obj.f, ctx, args...; threads=threads, blocks=nblocks, stream=stream)
+    kernel(ctx, args...; threads=threads, blocks=nblocks, stream=stream)
 
     CUDA.record(event, stream)
     return CudaEvent(event)
 end
 
-Cassette.@context CUDACtx
+import CUDA: @device_override
 
 import KernelAbstractions: CompilerMetadata, CompilerPass, DynamicCheck, LinearIndices
 import KernelAbstractions: __index_Local_Linear, __index_Group_Linear, __index_Global_Linear, __index_Local_Cartesian, __index_Group_Cartesian, __index_Global_Cartesian, __validindex, __print
 import KernelAbstractions: mkcontext, expand, __iterspace, __ndrange, __dynamic_checkbounds
 
-const CUDACTX = Cassette.disablehooks(CUDACtx(pass = CompilerPass))
-KernelAbstractions.cassette(::Kernel{CUDADevice}) = CUDACTX
-
 function mkcontext(kernel::Kernel{CUDADevice}, _ndrange, iterspace)
     CompilerMetadata{KernelAbstractions.ndrange(kernel), DynamicCheck}(_ndrange, iterspace)
 end
 
-@inline function Cassette.overdub(::CUDACtx, ::typeof(__index_Local_Linear), ctx)
+@device_override @inline function __index_Local_Linear(ctx)
     return CUDA.threadIdx().x
 end
 
-@inline function Cassette.overdub(::CUDACtx, ::typeof(__index_Group_Linear), ctx)
+@device_override @inline function __index_Group_Linear(ctx)
     return CUDA.blockIdx().x
 end
 
-@inline function Cassette.overdub(::CUDACtx, ::typeof(__index_Global_Linear), ctx)
+@device_override @inline function __index_Global_Linear(ctx)
     I =  @inbounds expand(__iterspace(ctx), CUDA.blockIdx().x, CUDA.threadIdx().x)
     # TODO: This is unfortunate, can we get the linear index cheaper
     @inbounds LinearIndices(__ndrange(ctx))[I]
 end
 
-@inline function Cassette.overdub(::CUDACtx, ::typeof(__index_Local_Cartesian), ctx)
+@device_override @inline function __index_Local_Cartesian(ctx)
     @inbounds workitems(__iterspace(ctx))[CUDA.threadIdx().x]
 end
 
-@inline function Cassette.overdub(::CUDACtx, ::typeof(__index_Group_Cartesian), ctx)
+@device_override @inline function __index_Group_Cartesian(ctx)
     @inbounds blocks(__iterspace(ctx))[CUDA.blockIdx().x]
 end
 
-@inline function Cassette.overdub(::CUDACtx, ::typeof(__index_Global_Cartesian), ctx)
+@device_override @inline function __index_Global_Cartesian(ctx)
     return @inbounds expand(__iterspace(ctx), CUDA.blockIdx().x, CUDA.threadIdx().x)
 end
 
-@inline function Cassette.overdub(::CUDACtx, ::typeof(__validindex), ctx)
+@device_override @inline function __validindex(ctx)
     if __dynamic_checkbounds(ctx)
         I = @inbounds expand(__iterspace(ctx), CUDA.blockIdx().x, CUDA.threadIdx().x)
         return I in __ndrange(ctx)
@@ -275,43 +270,6 @@ end
 end
 
 import KernelAbstractions: groupsize, __groupsize, __workitems_iterspace, add_float_contract, sub_float_contract, mul_float_contract
-
-KernelAbstractions.generate_overdubs(@__MODULE__, CUDACtx)
-
-###
-# CUDA specific method rewrites
-###
-
-@inline Cassette.overdub(::CUDACtx, ::typeof(^), x::Float64, y::Float64) = ^(x, y)
-@inline Cassette.overdub(::CUDACtx, ::typeof(^), x::Float32, y::Float32) = ^(x, y)
-@inline Cassette.overdub(::CUDACtx, ::typeof(^), x::Float64, y::Int32)   = ^(x, y)
-@inline Cassette.overdub(::CUDACtx, ::typeof(^), x::Float32, y::Int32)   = ^(x, y)
-@inline Cassette.overdub(::CUDACtx, ::typeof(^), x::Union{Float32, Float64}, y::Int64) = ^(x, y)
-
-# libdevice.jl
-const cudafuns = (:cos, :cospi, :sin, :sinpi, :tan,
-          :acos, :asin, :atan,
-          :cosh, :sinh, :tanh,
-          :acosh, :asinh, :atanh,
-          :log, :log10, :log1p, :log2,
-          :exp, :exp2, :exp10, :expm1, :ldexp,
-          # :isfinite, :isinf, :isnan, :signbit,
-          :abs,
-          :sqrt, :cbrt,
-          :ceil, :floor,)
-for f in cudafuns
-    @eval function Cassette.overdub(ctx::CUDACtx, ::typeof(Base.$f), x::Union{Float32, Float64})
-        @Base._inline_meta
-        return Base.$f(x)
-    end
-end
-
-@inline Cassette.overdub(::CUDACtx, ::typeof(sincos), x::Union{Float32, Float64}) = (Base.sin(x), Base.cos(x))
-@inline Cassette.overdub(::CUDACtx, ::typeof(exp), x::Union{ComplexF32, ComplexF64}) = Base.exp(x)
-
-@inline Cassette.overdub(::CUDACtx, ::typeof(SpecialFunctions.gamma), x::Union{Float32, Float64}) = CUDA.tgamma(x)
-@inline Cassette.overdub(::CUDACtx, ::typeof(SpecialFunctions.erf), x::Union{Float32, Float64}) = SpecialFunctions.erf(x)
-@inline Cassette.overdub(::CUDACtx, ::typeof(SpecialFunctions.erfc), x::Union{Float32, Float64}) = SpecialFunctions.erfc(x)
 
 @static if Base.isbindingresolved(CUDA, :emit_shmem) && Base.isdefined(CUDA, :emit_shmem)
     const emit_shmem = CUDA.emit_shmem
@@ -325,7 +283,7 @@ import KernelAbstractions: ConstAdaptor, SharedMemory, Scratchpad, __synchronize
 # GPU implementation of shared memory
 ###
 
-@inline function Cassette.overdub(::CUDACtx, ::typeof(SharedMemory), ::Type{T}, ::Val{Dims}, ::Val{Id}) where {T, Dims, Id}
+@device_override @inline function SharedMemory(::Type{T}, ::Val{Dims}, ::Val{Id}) where {T, Dims, Id}
     ptr = emit_shmem(T, Val(prod(Dims)))
     CUDA.CuDeviceArray(Dims, ptr)
 end
@@ -335,7 +293,7 @@ end
 # - private memory for each workitem
 ###
 
-@inline function Cassette.overdub(::CUDACtx, ::typeof(Scratchpad), ctx, ::Type{T}, ::Val{Dims}) where {T, Dims}
+@device_override @inline function Scratchpad(ctx, ::Type{T}, ::Val{Dims}) where {T, Dims}
     MArray{__size(Dims), T}(undef)
 end
 
@@ -343,7 +301,7 @@ end
     CUDA.sync_threads()
 end
 
-@inline function Cassette.overdub(::CUDACtx, ::typeof(__print), args...)
+@device_override @inline function __print(args...)
     CUDA._cuprint(args...)
 end
 
@@ -355,30 +313,5 @@ Adapt.adapt_storage(to::ConstAdaptor, a::CUDA.CuDeviceArray) = Base.Experimental
 
 # Argument conversion
 KernelAbstractions.argconvert(k::Kernel{CUDADevice}, arg) = CUDA.cudaconvert(arg)
-
-# Cassette.jl#195
-# Device intrinsics are inferred in a different World (1.6) or using MethodOverlay tables (1.7)
-# Cassette sees neither of them and thus overdubbing them fails.
-@inline function Cassette.overdub(::CUDACtx, ::typeof(CUDA.arrayref), args...)
-    CUDA.arrayref(args...)
-end
-@inline function Cassette.overdub(::CUDACtx, ::typeof(CUDA.arrayset), args...)
-    CUDA.arrayset(args...)
-end
-@inline function Cassette.overdub(::CUDACtx, ::typeof(CUDA.const_arrayref), args...)
-    CUDA.const_arrayref(args...)
-end
-@inline function Cassette.overdub(::CUDACtx, ::typeof(CUDA.logb), args...)
-    CUDA.logb(args...)
-end
-# @inline function Cassette.overdub(::CUDACtx, ::typeof(CUDA.tgamma), args...)
-#     CUDA.tgamma(args...)
-# end
-@inline function Cassette.overdub(::CUDACtx, ::typeof(CUDA.compute_capability), args...)
-    CUDA.compute_capability(args...)
-end
-@inline function Cassette.overdub(::CUDACtx, ::typeof(CUDA.ptx_isa_version), args...)
-    CUDA.ptx_isa_version(args...)
-end
 
 end
