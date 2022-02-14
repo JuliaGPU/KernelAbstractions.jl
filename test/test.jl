@@ -72,7 +72,10 @@ end
     device = backend()
     @test @inferred(KernelAbstractions.get_device(A)) == device
     @test @inferred(KernelAbstractions.get_device(view(A, 2:4, 1:3))) == device
-    @test @inferred(KernelAbstractions.get_device(sparse(A))) == device
+    if !(device isa ROCDevice)
+        # Sparse arrays are not supported by the ROCm backend yet:
+        @test @inferred(KernelAbstractions.get_device(sparse(A))) == device
+    end
     @test @inferred(KernelAbstractions.get_device(Diagonal(x))) == device
     @test @inferred(KernelAbstractions.get_device(Tridiagonal(A))) == device
 end
