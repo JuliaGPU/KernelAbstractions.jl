@@ -204,7 +204,7 @@ function (obj::Kernel{ROCDevice})(args...; ndrange=nothing, dependencies=nothing
     # Launch kernel
     event = AMDGPU.@roc(groupsize=threads, gridsize=nblocks*threads, queue=queue,
                         name=String(nameof(obj.f)), # TODO: maxthreads=maxthreads,
-                        obj.f, ctx, args...)
+                        obj.f(ctx, args...))
 
     return ROCEvent(event.event)
 end
