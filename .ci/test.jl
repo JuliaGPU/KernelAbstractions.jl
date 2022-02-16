@@ -12,6 +12,8 @@ end
 if !CI || BACKEND == "CUDA"
     push!(pkgs, "CUDAKernels")
 end
-push!(pkgs, "KernelGradients")
+if !CI || haskey(ENV, "TEST_KERNELGRADIENTS")
+    push!(pkgs, "KernelGradients")
+end
 
 Pkg.test(pkgs; coverage = true)
