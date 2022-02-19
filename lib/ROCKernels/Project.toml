@@ -12,7 +12,7 @@ SpecialFunctions = "276daf66-3868-5448-9aa4-cd146d93841b"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 
 [compat]
-AMDGPU = "0.3"
+AMDGPU = "0.3.2"
 Adapt = "3.0"
 KernelAbstractions = "0.8"
 StaticArrays = "0.12, 1.0"

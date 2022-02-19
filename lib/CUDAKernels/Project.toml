@@ -11,7 +11,7 @@ StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 
 [compat]
 Adapt = "3.0"
-CUDA = "3.5, 3.6, 3.7, 3.8"
+CUDA = "3.8.2"
 KernelAbstractions = "0.8"
 StaticArrays = "0.12, 1.0"
 julia = "1.7"
