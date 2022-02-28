@@ -2,10 +2,8 @@ module ROCKernels
 
 import AMDGPU
 import AMDGPU: rocfunction, HSAAgent, HSAQueue, HSASignal, HSAStatusSignal, Mem
-import SpecialFunctions
 import StaticArrays
 import StaticArrays: MArray
-import Cassette
 import Adapt
 import KernelAbstractions
 
@@ -206,19 +204,16 @@ function (obj::Kernel{ROCDevice})(args...; ndrange=nothing, dependencies=nothing
     # Launch kernel
     event = AMDGPU.@roc(groupsize=threads, gridsize=nblocks*threads, queue=queue,
                         name=String(nameof(obj.f)), # TODO: maxthreads=maxthreads,
-                        Cassette.overdub(ROCCTX, obj.f, ctx, args...))
+                        obj.f(ctx, args...))
 
     return ROCEvent(event.event)
 end
 
-Cassette.@context ROCCtx
+import AMDGPU: @device_override
 
 import KernelAbstractions: CompilerMetadata, CompilerPass, DynamicCheck, LinearIndices
 import KernelAbstractions: __index_Local_Linear, __index_Group_Linear, __index_Global_Linear, __index_Local_Cartesian, __index_Group_Cartesian, __index_Global_Cartesian, __validindex, __print
 import KernelAbstractions: mkcontext, expand, __iterspace, __ndrange, __dynamic_checkbounds
-
-const ROCCTX = Cassette.disablehooks(ROCCtx(pass = CompilerPass))
-KernelAbstractions.cassette(::Kernel{ROCDevice}) = ROCCTX
 
 function mkcontext(kernel::Kernel{ROCDevice}, _ndrange, iterspace)
     metadata = CompilerMetadata{KernelAbstractions.ndrange(kernel), DynamicCheck}(_ndrange, iterspace)
@@ -227,33 +222,33 @@ function mkcontext(kernel::Kernel{ROCDevice}, I, _ndrange, iterspace, ::Dynamic)
     metadata = CompilerMetadata{KernelAbstractions.ndrange(kernel), Dynamic}(I, _ndrange, iterspace)
 end
 
-@inline function Cassette.overdub(::ROCCtx, ::typeof(__index_Local_Linear), ctx)
+@device_override @inline function __index_Local_Linear(ctx)
     return AMDGPU.threadIdx().x
 end
 
-@inline function Cassette.overdub(::ROCCtx, ::typeof(__index_Group_Linear), ctx)
+@device_override @inline function __index_Group_Linear(ctx)
     return AMDGPU.blockIdx().x
 end
 
-@inline function Cassette.overdub(::ROCCtx, ::typeof(__index_Global_Linear), ctx)
+@device_override @inline function __index_Global_Linear(ctx)
     I =  @inbounds expand(__iterspace(ctx), AMDGPU.blockIdx().x, AMDGPU.threadIdx().x)
     # TODO: This is unfortunate, can we get the linear index cheaper
     @inbounds LinearIndices(__ndrange(ctx))[I]
 end
 
-@inline function Cassette.overdub(::ROCCtx, ::typeof(__index_Local_Cartesian), ctx)
+@device_override @inline function __index_Local_Cartesian(ctx)
     @inbounds workitems(__iterspace(ctx))[AMDGPU.threadIdx().x]
 end
 
-@inline function Cassette.overdub(::ROCCtx, ::typeof(__index_Group_Cartesian), ctx)
+@device_override @inline function __index_Group_Cartesian(ctx)
     @inbounds blocks(__iterspace(ctx))[AMDGPU.blockIdx().x]
 end
 
-@inline function Cassette.overdub(::ROCCtx, ::typeof(__index_Global_Cartesian), ctx)
+@device_override @inline function __index_Global_Cartesian(ctx)
     return @inbounds expand(__iterspace(ctx), AMDGPU.blockIdx().x, AMDGPU.threadIdx().x)
 end
 
-@inline function Cassette.overdub(::ROCCtx, ::typeof(__validindex), ctx)
+@device_override @inline function __validindex(ctx)
     if __dynamic_checkbounds(ctx)
         I = @inbounds expand(__iterspace(ctx), AMDGPU.blockIdx().x, AMDGPU.threadIdx().x)
         return I in __ndrange(ctx)
@@ -263,52 +258,12 @@ end
 end
 
 import KernelAbstractions: groupsize, __groupsize, __workitems_iterspace, add_float_contract, sub_float_contract, mul_float_contract
-
-KernelAbstractions.generate_overdubs(@__MODULE__, ROCCtx)
-
-###
-# AMDGPU specific method rewrites
-###
-
-@inline Cassette.overdub(::ROCCtx, ::typeof(^), x::Float64, y::Float64) = AMDGPU.pow(x, y)
-@inline Cassette.overdub(::ROCCtx, ::typeof(^), x::Float32, y::Float32) = AMDGPU.pow(x, y)
-@inline Cassette.overdub(::ROCCtx, ::typeof(^), x::Float64, y::Int32)   = AMDGPU.pow(x, y)
-@inline Cassette.overdub(::ROCCtx, ::typeof(^), x::Float32, y::Int32)   = AMDGPU.pow(x, y)
-#@inline Cassette.overdub(::ROCCtx, ::typeof(^), x::Union{Float32, Float64}, y::Int64) = AMDGPU.pow(x, y)
-
-# device lib functions
-# TODO: Query these from AMDGPU.MATH_INTRINSICS
-const rocfuns = (:cos, :cospi, :sin, :sinpi, :tan,
-          :acos, :asin, :atan,
-          :cosh, :sinh, :tanh,
-          :acosh, :asinh, :atanh,
-          :log, :log10, :log1p, :log2,
-          :exp, :exp2, :exp10, :expm1, :ldexp,
-          # :isfinite, :isinf, :isnan, :signbit,
-          :abs,
-          :sqrt, :cbrt,
-          :ceil, :floor,)
-for f in rocfuns
-    @eval function Cassette.overdub(ctx::ROCCtx, ::typeof(Base.$f), x::Union{Float32, Float64})
-        @Base._inline_meta
-        return AMDGPU.$f(x)
-    end
-end
-
-@inline Cassette.overdub(::ROCCtx, ::typeof(sincos), x::Union{Float32, Float64}) = (AMDGPU.sin(x), AMDGPU.cos(x)) # TODO: AMDGPU.sincos
-# TODO: @inline Cassette.overdub(::ROCCtx, ::typeof(exp), x::Union{ComplexF32, ComplexF64}) = AMDGPU.exp(x)
-# TODO: SpecialFunctions intrinsics
-
-@inline Cassette.overdub(::ROCCtx, ::typeof(SpecialFunctions.gamma), x::Union{Float32, Float64}) = AMDGPU.tgamma(x)
-@inline Cassette.overdub(::ROCCtx, ::typeof(SpecialFunctions.erf), x::Union{Float32, Float64}) = AMDGPU.erf(x)
-@inline Cassette.overdub(::ROCCtx, ::typeof(SpecialFunctions.erfc), x::Union{Float32, Float64}) = AMDGPU.erfc(x)
-
 import KernelAbstractions: ConstAdaptor, SharedMemory, Scratchpad, __synchronize, __size
 
 ###
 # GPU implementation of shared memory
 ###
-@inline function Cassette.overdub(::ROCCtx, ::typeof(SharedMemory), ::Type{T}, ::Val{Dims}, ::Val{Id}) where {T, Dims, Id}
+@device_override @inline function SharedMemory(::Type{T}, ::Val{Dims}, ::Val{Id}) where {T, Dims, Id}
     ptr = AMDGPU.alloc_special(Val(Id), T, Val(AMDGPU.AS.Local), Val(prod(Dims)))
     AMDGPU.ROCDeviceArray(Dims, ptr)
 end
@@ -318,15 +273,15 @@ end
 # - private memory for each workitem
 ###
 
-@inline function Cassette.overdub(::ROCCtx, ::typeof(Scratchpad), ctx, ::Type{T}, ::Val{Dims}) where {T, Dims}
+@device_override @inline function Scratchpad(ctx, ::Type{T}, ::Val{Dims}) where {T, Dims}
     MArray{__size(Dims), T}(undef)
 end
 
-@inline function Cassette.overdub(::ROCCtx, ::typeof(__synchronize))
+@device_override @inline function __synchronize()
     AMDGPU.sync_workgroup()
 end
 
-@inline function Cassette.overdub(::ROCCtx, ::typeof(__print), args...)
+@device_override @inline function __print(args...)
     for arg in args
         AMDGPU.@rocprintf("%s", arg)
     end
