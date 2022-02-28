@@ -76,13 +76,37 @@ wait(ev::CudaEvent, progress=yield) = wait(CPU(), ev, progress)
 function wait(::CPU, ev::CudaEvent, progress=nothing)
     isdone(ev) && return nothing
 
-    event = Base.Threads.Event()
+    event = Base.Event()
     stream = next_stream()
     wait(CUDADevice(), ev, nothing, stream)
     CUDA.launch(;stream) do
         notify(event)
     end
-    wait(event)
+    dev = CUDA.device()
+    # if an error occurs, the callback may never fire, so use a timer to detect such cases
+    timer = Timer(0; interval=1)
+    Base.@sync begin
+        Threads.@spawn try
+            device!(dev)
+            while true
+                try
+                    Base.wait(timer)
+                catch err
+                    err isa EOFError && break
+                    rethrow()
+                end
+                if CUDA.unsafe_cuStreamQuery(stream) != ERROR_NOT_READY
+                    break
+                end
+            end
+        finally
+            notify(event)
+        end
+        Threads.@spawn begin
+            Base.wait(event)
+            close(timer)
+        end
+    end
 end
 
 # Use this to synchronize between computation using the task local stream
