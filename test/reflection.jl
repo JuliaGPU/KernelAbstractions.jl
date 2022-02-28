@@ -23,7 +23,7 @@ function test_typed_kernel_dynamic(backend, backend_str, ArrayT)
     else
         @ka_code_typed kernel(A, ndrange=size(A), workgroupsize=(32, 32))
     end
-    if backend_str == "CUDA"
+    if backend_str == "CUDA" || backend_str == "ROCM"
         @test_broken isa(res, Pair{Core.CodeInfo, DataType})
     else
         @test isa(res, Pair{Core.CodeInfo, DataType})
@@ -37,7 +37,7 @@ function test_typed_kernel_dynamic_no_info(backend, backend_str, ArrayT)
     C = similar(A)
     kernel = add3(backend())
     res = @ka_code_typed kernel(A, B, C, ndrange=size(A))
-    if backend_str == "CUDA"
+    if backend_str == "CUDA" || backend_str == "ROCM" 
         @test_broken isa(res, Pair{Core.CodeInfo, DataType})
     else
         @test isa(res, Pair{Core.CodeInfo, DataType})
@@ -53,7 +53,7 @@ function test_typed_kernel_static(backend, backend_str, ArrayT)
         mul2(backend(), (32, 32))
     end
     res = @ka_code_typed kernel(A, ndrange=size(A))
-    if backend_str == "CUDA"
+    if backend_str == "CUDA" || backend_str == "ROCM"
         @test_broken isa(res, Pair{Core.CodeInfo, DataType})
     else
         @test isa(res, Pair{Core.CodeInfo, DataType})
@@ -83,7 +83,7 @@ function test_expr_kernel(backend, backend_str, ArrayT)
         addi(backend(), (32, 32))
     end
     res = @ka_code_typed kernel(A, C, 1+2, ndrange=size(A))
-    if backend_str == "CUDA"
+    if backend_str == "CUDA" || backend_str == "ROCM"
         @test_broken isa(res, Pair{Core.CodeInfo, DataType})
     else
         @test isa(res, Pair{Core.CodeInfo, DataType})
