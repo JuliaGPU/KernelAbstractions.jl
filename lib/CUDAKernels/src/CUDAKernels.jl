@@ -76,6 +76,21 @@ wait(ev::CudaEvent, progress=yield) = wait(CPU(), ev, progress)
 function wait(::CPU, ev::CudaEvent, progress=nothing)
     isdone(ev) && return nothing
 
+    # minimize latency of short operations by busy-waiting,
+    # initially without even yielding to other tasks
+    spins = 0
+    while spins < 256
+        if spins < 32
+            ccall(:jl_cpu_pause, Cvoid, ())
+            # Temporary solution before we have gc transition support in codegen.
+            ccall(:jl_gc_safepoint, Cvoid, ())
+        else
+            yield()
+        end
+        isdone(ev) && return
+        spins += 1
+    end
+
     event = Base.Event()
     stream = next_stream()
     wait(CUDADevice(), ev, nothing, stream)
@@ -87,7 +102,7 @@ function wait(::CPU, ev::CudaEvent, progress=nothing)
     timer = Timer(0; interval=1)
     Base.@sync begin
         Threads.@spawn try
-            device!(dev)
+            CUDA.device!(dev)
             while true
                 try
                     Base.wait(timer)
@@ -95,7 +110,7 @@ function wait(::CPU, ev::CudaEvent, progress=nothing)
                     err isa EOFError && break
                     rethrow()
                 end
-                if CUDA.unsafe_cuStreamQuery(stream) != ERROR_NOT_READY
+                if CUDA.unsafe_cuEventQuery(ev.event) != CUDA.ERROR_NOT_READY
                     break
                 end
             end
