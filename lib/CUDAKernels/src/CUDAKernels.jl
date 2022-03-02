@@ -76,13 +76,52 @@ wait(ev::CudaEvent, progress=yield) = wait(CPU(), ev, progress)
 function wait(::CPU, ev::CudaEvent, progress=nothing)
     isdone(ev) && return nothing
 
-    event = Base.Threads.Event()
+    # minimize latency of short operations by busy-waiting,
+    # initially without even yielding to other tasks
+    spins = 0
+    while spins < 256
+        if spins < 32
+            ccall(:jl_cpu_pause, Cvoid, ())
+            # Temporary solution before we have gc transition support in codegen.
+            ccall(:jl_gc_safepoint, Cvoid, ())
+        else
+            yield()
+        end
+        isdone(ev) && return
+        spins += 1
+    end
+
+    event = Base.Event()
     stream = next_stream()
     wait(CUDADevice(), ev, nothing, stream)
     CUDA.launch(;stream) do
         notify(event)
     end
-    wait(event)
+    dev = CUDA.device()
+    # if an error occurs, the callback may never fire, so use a timer to detect such cases
+    timer = Timer(0; interval=1)
+    Base.@sync begin
+        Threads.@spawn try
+            CUDA.device!(dev)
+            while true
+                try
+                    Base.wait(timer)
+                catch err
+                    err isa EOFError && break
+                    rethrow()
+                end
+                if CUDA.unsafe_cuEventQuery(ev.event) != CUDA.ERROR_NOT_READY
+                    break
+                end
+            end
+        finally
+            notify(event)
+        end
+        Threads.@spawn begin
+            Base.wait(event)
+            close(timer)
+        end
+    end
 end
 
 # Use this to synchronize between computation using the task local stream
@@ -226,7 +265,7 @@ end
 
 import CUDA: @device_override
 
-import KernelAbstractions: CompilerMetadata, CompilerPass, DynamicCheck, LinearIndices
+import KernelAbstractions: CompilerMetadata, DynamicCheck, LinearIndices
 import KernelAbstractions: __index_Local_Linear, __index_Group_Linear, __index_Global_Linear, __index_Local_Cartesian, __index_Group_Cartesian, __index_Global_Cartesian, __validindex, __print
 import KernelAbstractions: mkcontext, expand, __iterspace, __ndrange, __dynamic_checkbounds
 

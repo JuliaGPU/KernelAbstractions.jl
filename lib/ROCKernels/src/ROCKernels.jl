@@ -211,7 +211,7 @@ end
 
 import AMDGPU: @device_override
 
-import KernelAbstractions: CompilerMetadata, CompilerPass, DynamicCheck, LinearIndices
+import KernelAbstractions: CompilerMetadata, DynamicCheck, LinearIndices
 import KernelAbstractions: __index_Local_Linear, __index_Group_Linear, __index_Global_Linear, __index_Local_Cartesian, __index_Group_Cartesian, __index_Global_Cartesian, __validindex, __print
 import KernelAbstractions: mkcontext, expand, __iterspace, __ndrange, __dynamic_checkbounds
 
