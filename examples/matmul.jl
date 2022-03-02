@@ -24,11 +24,9 @@ function matmul!(a, b, c)
         println("Matrix size mismatch!")
         return nothing
     end
-    if isa(a, Array)
-        kernel! = matmul_kernel!(CPU(),4)
-    else
-        kernel! = matmul_kernel!(CUDADevice(),256)
-    end
+    device = KernelAbstractions.get_device(a)
+    n = device isa GPU ? 256 : 4
+    kernel! = matmul_kernel!(device, n)
     kernel!(a, b, c, ndrange=size(c)) 
 end
 

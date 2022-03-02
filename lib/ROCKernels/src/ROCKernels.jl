@@ -9,6 +9,9 @@ import KernelAbstractions
 
 export ROCDevice
 
+KernelAbstractions.get_device(::AMDGPU.ROCArray) = ROCDevice()
+
+
 const FREE_QUEUES = HSAQueue[]
 const QUEUES = HSAQueue[]
 const QUEUE_GC_THRESHOLD = Ref{Int}(16)

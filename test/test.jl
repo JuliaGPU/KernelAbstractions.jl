@@ -1,6 +1,8 @@
 using KernelAbstractions
 using KernelAbstractions.NDIteration
 using InteractiveUtils
+using LinearAlgebra
+using SparseArrays
 import SpecialFunctions
 
 identity(x) = x
@@ -62,6 +64,20 @@ end
        I = @index(Global, Cartesian)
        i = @index(Group, Cartesian)
        A[I] = i
+end
+
+@testset "get_device" begin
+    x = ArrayT(rand(Float32, 5))
+    A = ArrayT(rand(Float32, 5,5))
+    device = backend()
+    @test @inferred(KernelAbstractions.get_device(A)) == device
+    @test @inferred(KernelAbstractions.get_device(view(A, 2:4, 1:3))) == device
+    if !(isdefined(Main, :ROCKernels) && (device isa Main.ROCKernels.ROCDevice))
+        # Sparse arrays are not supported by the ROCm backend yet:
+        @test @inferred(KernelAbstractions.get_device(sparse(A))) == device
+    end
+    @test @inferred(KernelAbstractions.get_device(Diagonal(x))) == device
+    @test @inferred(KernelAbstractions.get_device(Tridiagonal(A))) == device
 end
 
 @testset "indextest" begin

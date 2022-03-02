@@ -4,6 +4,7 @@ using Enzyme
 using CUDA
 using CUDAKernels
 using Test
+using SparseArrays
 
 include(joinpath(dirname(pathof(KernelAbstractions)), "..", "test", "testsuite.jl"))
 include(joinpath(dirname(pathof(KernelGradients)), "..", "test", "testsuite.jl"))
