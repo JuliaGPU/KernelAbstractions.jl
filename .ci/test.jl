@@ -13,7 +13,9 @@ if !CI || BACKEND == "CUDA"
     push!(pkgs, "CUDAKernels")
 end
 if !CI || haskey(ENV, "TEST_KERNELGRADIENTS")
-    push!(pkgs, "KernelGradients")
+    if VERSION < v"1.8"
+        push!(pkgs, "KernelGradients")
+    end
 end
 
 Pkg.test(pkgs; coverage = true)
