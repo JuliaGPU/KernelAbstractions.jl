@@ -61,14 +61,11 @@ function next_stream()
     ctx = CUDA.current_context()
     lock(STREAM_GC_LOCK) do
         # see if there is a compatible free stream
-        if haskey(FREE_STREAMS_D,ctx)
-            FREE_STREAMS_CT=FREE_STREAMS_D[ctx]
-            if !isempty(FREE_STREAMS_CT)
-                return pop!(FREE_STREAMS_CT)
-            end
-        else
-           FREE_STREAMS_CT=CUDA.CuStream[]
-           FREE_STREAMS_D[ctx]=FREE_STREAMS_CT
+        FREE_STREAMS_CT  = get!(FREE_STREAMS_D, ctx) do
+           CUDA.CuStream[]
+        end
+        if !isempty(FREE_STREAMS_CT)
+           return pop!(FREE_STREAMS_CT)
         end
 
         # GC to recover streams that are not busy
