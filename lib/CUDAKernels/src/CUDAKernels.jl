@@ -31,6 +31,7 @@ end
 # - Add a background task that occasionally scans all streams
 # - Add a hysterisis by checking a "since last scanned" timestamp
 const STREAM_GC_LOCK = Threads.ReentrantLock()
+#=
 function next_stream()
     lock(STREAM_GC_LOCK) do
         if !isempty(FREE_STREAMS)
@@ -50,6 +51,48 @@ function next_stream()
         end
         stream = CUDA.CuStream(flags = CUDA.STREAM_NON_BLOCKING)
         push!(STREAMS, stream)
+        return stream
+    end
+end
+=#
+const FREE_STREAMS_D = Dict{CUDA.CuContext,CUDA.CuStream[]}()
+const STREAMS_D      = Dict{CUDA.CuContext,CUDA.CuStream[]}()
+function next_stream()
+    ctx = CUDA.current_context()
+    lock(STREAM_GC_LOCK) do
+        # see if there is a compatible free stream
+        if haskey(FREE_STREAMS_D,ctx)
+            FREE_STREAMS_CT=FREE_STREAMS_D[ctx]
+            if !isempty(FREE_STREAMS_CT)
+                return pop!(FREE_STREAMS_CT)
+        else
+           FREE_STREAMS_CT=CUDA.CuStream[]
+           FREE_STREAMS_D[ctx]=FREE_STREAMS_CT
+        end
+
+        # GC to recover streams that are not busy
+        if haskey(STREAMS_D,ctx)
+           STREAMS_CT=STREAMS_D[ctx]
+           if length(STREAMS_CT) > STREAM_GC_THRESHOLD[]
+               for stream in STREAMS_CT
+                   if CUDA.query(stream)
+                       push!(FREE_STREAMS_CT, stream)
+                   end
+               end
+           end
+        else
+           STREAMS_CT=CUDA.CuStream[]
+           STREAMS_D[ctx]=STREAMS_CT
+        end
+
+        # if there is a compatible free stream after GC, return that stream
+        if !isempty(FREE_STREAMS_CT)
+            return pop!(FREE_STREAMS_CT)
+        end
+
+        # no compatible free stream available so create a new one
+        stream = CUDA.CuStream(flags = CUDA.STREAM_NON_BLOCKING)
+        push!(STREAMS_CT, stream)
         return stream
     end
 end
