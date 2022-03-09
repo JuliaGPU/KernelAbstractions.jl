@@ -65,6 +65,7 @@ function next_stream()
             FREE_STREAMS_CT=FREE_STREAMS_D[ctx]
             if !isempty(FREE_STREAMS_CT)
                 return pop!(FREE_STREAMS_CT)
+            end
         else
            FREE_STREAMS_CT=CUDA.CuStream[]
            FREE_STREAMS_D[ctx]=FREE_STREAMS_CT
