@@ -69,18 +69,15 @@ function next_stream()
         end
 
         # GC to recover streams that are not busy
-        if haskey(STREAMS_D,ctx)
-           STREAMS_CT=STREAMS_D[ctx]
-           if length(STREAMS_CT) > STREAM_GC_THRESHOLD[]
-               for stream in STREAMS_CT
-                   if CUDA.query(stream)
-                       push!(FREE_STREAMS_CT, stream)
-                   end
-               end
-           end
-        else
-           STREAMS_CT=CUDA.CuStream[]
-           STREAMS_D[ctx]=STREAMS_CT
+        STREAMS_CT  = get!(STREAMS_D, ctx) do
+            CUDA.CuStream[]
+        end
+        if length(STREAMS_CT) > STREAM_GC_THRESHOLD[]
+            for stream in STREAMS_CT
+                if CUDA.query(stream)
+                    push!(FREE_STREAMS_CT, stream)
+                end
+            end
         end
 
         # if there is a compatible free stream after GC, return that stream
