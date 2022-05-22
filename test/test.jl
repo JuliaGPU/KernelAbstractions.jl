@@ -66,20 +66,6 @@ end
        A[I] = i
 end
 
-@testset "get_device" begin
-    x = ArrayT(rand(Float32, 5))
-    A = ArrayT(rand(Float32, 5,5))
-    device = backend()
-    @test @inferred(KernelAbstractions.get_device(A)) == device
-    @test @inferred(KernelAbstractions.get_device(view(A, 2:4, 1:3))) == device
-    if !(isdefined(Main, :ROCKernels) && (device isa Main.ROCKernels.ROCDevice))
-        # Sparse arrays are not supported by the ROCm backend yet:
-        @test @inferred(KernelAbstractions.get_device(sparse(A))) == device
-    end
-    @test @inferred(KernelAbstractions.get_device(Diagonal(x))) == device
-    @test @inferred(KernelAbstractions.get_device(Tridiagonal(A))) == device
-end
-
 @testset "indextest" begin
     # TODO: add test for _group and _local_cartesian
     A = ArrayT{Int}(undef, 16, 16)

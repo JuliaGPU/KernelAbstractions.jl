@@ -6,10 +6,9 @@ import StaticArrays: MArray
 import Adapt
 import KernelAbstractions
 
-export CUDADevice
+using Adapt: get_computing_device
 
-KernelAbstractions.get_device(::CUDA.CuArray) = CUDADevice()
-KernelAbstractions.get_device(::CUDA.CUSPARSE.AbstractCuSparseArray) = CUDADevice()
+export CUDADevice
 
 const FREE_STREAMS = CUDA.CuStream[]
 const STREAMS = CUDA.CuStream[]
@@ -94,7 +93,7 @@ end
 
 import KernelAbstractions: Event, CPUEvent, NoneEvent, MultiEvent, CPU, GPU, isdone, failed
 
-struct CUDADevice <: GPU end
+const CUDADevice = CUDA.CuDevice
 
 struct CudaEvent <: Event
     event::CUDA.CuEvent
@@ -102,6 +101,8 @@ end
 
 failed(::CudaEvent) = false
 isdone(ev::CudaEvent) = CUDA.query(ev.event)
+
+Adapt.get_computing_device(ev::CudaEvent) = get_computing_device(ev.event)
 
 function Event(::CUDADevice)
     stream = CUDA.stream()
@@ -134,11 +135,11 @@ function wait(::CPU, ev::CudaEvent, progress=nothing)
 
     event = Base.Event()
     stream = next_stream()
-    wait(CUDADevice(), ev, nothing, stream)
+    dev = get_computing_device(ev)
+    wait(dev, ev, nothing, stream)
     CUDA.launch(;stream) do
         notify(event)
     end
-    dev = CUDA.device()
     # if an error occurs, the callback may never fire, so use a timer to detect such cases
     timer = Timer(0; interval=1)
     Base.@sync begin
@@ -169,7 +170,7 @@ end
 wait(::CUDADevice, ev::CudaEvent, progress=nothing, stream=CUDA.stream()) = CUDA.wait(ev.event, stream)
 wait(::CUDADevice, ev::NoneEvent, progress=nothing, stream=nothing) = nothing
 
-function wait(::CUDADevice, ev::MultiEvent, progress=nothing, stream=CUDA.stream())
+function wait(dev::CUDADevice, ev::MultiEvent, progress=nothing, stream=CUDA.stream())
     dependencies = collect(ev.events)
     cudadeps  = filter(d->d isa CudaEvent,    dependencies)
     otherdeps = filter(d->!(d isa CudaEvent), dependencies)
@@ -177,7 +178,7 @@ function wait(::CUDADevice, ev::MultiEvent, progress=nothing, stream=CUDA.stream
         CUDA.wait(event.event, stream)
     end
     for event in otherdeps
-        wait(CUDADevice(), event, progress, stream)
+        wait(dev, event, progress, stream)
     end
 end
 
@@ -208,12 +209,12 @@ function __pin!(a)
     return nothing
 end
 
-function KernelAbstractions.async_copy!(::CUDADevice, A, B; dependencies=nothing, progress=yield)
+function KernelAbstractions.async_copy!(dev::CUDADevice, A, B; dependencies=nothing, progress=yield)
     A isa Array && __pin!(A)
     B isa Array && __pin!(B)
 
     stream = next_stream()
-    wait(CUDADevice(), MultiEvent(dependencies), progress, stream)
+    wait(dev, MultiEvent(dependencies), progress, stream)
     event = CUDA.CuEvent(CUDA.EVENT_DISABLE_TIMING)
     GC.@preserve A B begin
         destptr = pointer(A)
@@ -264,7 +265,7 @@ function threads_to_workgroupsize(threads, ndrange)
     end
 end
 
-function (obj::Kernel{CUDADevice})(args...; ndrange=nothing, dependencies=Event(CUDADevice()), workgroupsize=nothing, progress=yield)
+function (obj::Kernel{CUDADevice})(args...; ndrange=nothing, dependencies=Event(get_computing_device(first(args))), workgroupsize=nothing, progress=yield)
 
     ndrange, workgroupsize, iterspace, dynamic = launch_config(obj, ndrange, workgroupsize)
     # this might not be the final context, since we may tune the workgroupsize
@@ -294,7 +295,7 @@ function (obj::Kernel{CUDADevice})(args...; ndrange=nothing, dependencies=Event(
     end
 
     stream = next_stream()
-    wait(CUDADevice(), MultiEvent(dependencies), progress, stream)
+    wait(get_computing_device(first(args)), MultiEvent(dependencies), progress, stream)
 
     # Launch kernel
     event = CUDA.CuEvent(CUDA.EVENT_DISABLE_TIMING)

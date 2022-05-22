@@ -333,27 +333,12 @@ constify(arg) = adapt(ConstAdaptor(), arg)
 # Backend hierarchy
 ###
 
-abstract type Device end
-abstract type GPU <: Device end
+const Device = AbstractComputingDevice
+const GPU = AbstractGPUDevice
+const CPU = CPUDevice
 
-struct CPU <: Device end
+Base.@deprecate get_device(A::AbstractArray) get_computing_device(A)
 
-
-"""
-    KernelAbstractions.get_device(A::AbstractArray)::KernelAbstractions.Device
-
-Get a `KernelAbstractions.Device` instance suitable for array `A`.
-"""
-function get_device end
-
-# Should cover SubArray, ReshapedArray, ReinterpretArray, Hermitian, AbstractTriangular, etc.:
-get_device(A::AbstractArray) = get_device(parent(A))
-
-get_device(A::AbstractSparseArray) = get_device(rowvals(A))
-get_device(A::Diagonal) = get_device(A.diag)
-get_device(A::Tridiagonal) = get_device(A.d)
-
-get_device(::Array) = CPU()
 
 include("nditeration.jl")
 using .NDIteration

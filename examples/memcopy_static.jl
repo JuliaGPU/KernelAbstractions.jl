@@ -22,7 +22,7 @@ if has_cuda && has_cuda_gpu()
 
     function mycopy_static!(A::CuArray, B::CuArray)
         @assert size(A) == size(B)
-        kernel = copy_kernel!(CUDADevice(), 32, size(A)) # if size(A) varies this will cause recompilation
+        kernel = copy_kernel!(get_computing_device(A), 32, size(A)) # if size(A) varies this will cause recompilation
         kernel(A, B, ndrange=size(A))
     end
 

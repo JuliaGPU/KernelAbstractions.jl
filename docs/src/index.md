@@ -56,7 +56,7 @@ kernel on it instead. For example, launching on a CUDA GPU:
 ```julia
 using CUDAKernels # Required to access CUDADevice
 A = CUDA.ones(1024, 1024)
-kernel = mul2(CUDADevice(), 16)
+kernel = mul2(get_computing_device(A), 16)
 # ... the rest is the same!
 ```
 

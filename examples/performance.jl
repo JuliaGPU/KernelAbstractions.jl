@@ -133,8 +133,8 @@ end
 
 for block_dims in ((TILE_DIM, TILE_DIM), (TILE_DIM*TILE_DIM, 1), (1, TILE_DIM*TILE_DIM))
     for (name, kernel) in ( 
-                            ("copy",      simple_copy_kernel!(CUDADevice(), block_dims)),
-                            ("transpose", simple_transpose_kernel!(CUDADevice(), block_dims)),
+                            ("copy",      simple_copy_kernel!(CUDA.device(), block_dims)),
+                            ("transpose", simple_transpose_kernel!(CUDA.device(), block_dims)),
                           )
         NVTX.@range "Simple $name $block_dims" let
             input = CUDA.rand(T, (N, N))
@@ -154,8 +154,8 @@ end
 
 # Benchmark localmem
 for (name, kernel) in ( 
-                        ("copy",      lmem_copy_kernel!(CUDADevice(), (TILE_DIM, TILE_DIM))),
-                        ("transpose", lmem_transpose_kernel!(CUDADevice(), (TILE_DIM, TILE_DIM))),
+                        ("copy",      lmem_copy_kernel!(CUDA.device(), (TILE_DIM, TILE_DIM))),
+                        ("transpose", lmem_transpose_kernel!(CUDA.device(), (TILE_DIM, TILE_DIM))),
                       )
     for bank in (true, false)
         NVTX.@range "Localmem $name ($TILE_DIM, $TILE_DIM) bank=$bank" let
@@ -176,8 +176,8 @@ end
 
 # Benchmark localmem + multiple elements per lane
 for (name, kernel) in ( 
-                        ("copy",      coalesced_copy_kernel!(CUDADevice(), (TILE_DIM, BLOCK_ROWS))),
-                        ("transpose", coalesced_transpose_kernel!(CUDADevice(), (TILE_DIM, BLOCK_ROWS))),
+                        ("copy",      coalesced_copy_kernel!(CUDA.device(), (TILE_DIM, BLOCK_ROWS))),
+                        ("transpose", coalesced_transpose_kernel!(CUDA.device(), (TILE_DIM, BLOCK_ROWS))),
                       )
     for bank in (true, false)
         NVTX.@range "Localmem + multiple elements $name ($TILE_DIM, $BLOCK_ROWS) bank=$bank" let
