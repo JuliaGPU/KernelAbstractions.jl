@@ -1,0 +1,17 @@
+name = "OneKernels"
+uuid = "50a67b9f-8f73-4f26-a89b-bf2d259f3473"
+authors = ["Michel Schanen <mschanen@anl.gov>"]
+version = "0.1.0"
+
+[deps]
+Adapt = "79e6a3ab-5dfb-504d-930d-738a2a938a0e"
+KernelAbstractions = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
+oneAPI = "8f75cd03-7ff8-4ecb-9b8f-daf728133b1b"
+StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
+
+[compat]
+Adapt = "3.0"
+oneAPI = "0.2.3"
+KernelAbstractions = "0.8"
+StaticArrays = "0.12, 1.0"
+julia = "1.8"
