@@ -457,23 +457,8 @@ include("macros.jl")
 # Backends/Interface
 ###
 
-@inline function SharedMemory(::Type{T}, ::Val{Dims}, ::Val) where {T, Dims}
-    MArray{__size(Dims), T}(undef)
-end
-
-###
-# CPU implementation of scratch memory
-# - memory allocated as a MArray with size `Dims`
-###
-
-struct ScratchArray{N, D}
-    data::D
-    ScratchArray{N}(data::D) where {N, D} = new{N, D}(data)
-end
-
-@inline function Scratchpad(ctx, ::Type{T}, ::Val{Dims}) where {T, Dims}
-    return ScratchArray{length(Dims)}(MArray{__size((Dims..., prod(__groupsize(ctx)))), T}(undef))
-end
+function Scratchpad end
+function SharedMemory end
 
 function __synchronize()
     error("@synchronize used outside kernel or not captured")
