@@ -457,13 +457,8 @@ include("macros.jl")
 # Backends/Interface
 ###
 
-function Scratchpad(ctx, ::Type{T}, ::Val{Dims}) where {T, Dims}
-    throw(MethodError(Scratchpad, (T, Val(Dims))))
-end
-
-function SharedMemory(::Type{T}, ::Val{Dims}, ::Val{Id}) where {T, Dims, Id}
-    throw(MethodError(SharedMemory, (T, Val(Dims), Val(Id))))
-end
+function Scratchpad end
+function SharedMemory end
 
 function __synchronize()
     error("@synchronize used outside kernel or not captured")
