@@ -457,12 +457,22 @@ include("macros.jl")
 # Backends/Interface
 ###
 
-function Scratchpad(ctx, ::Type{T}, ::Val{Dims}) where {T, Dims}
-    throw(MethodError(Scratchpad, (T, Val(Dims))))
+@inline function SharedMemory(::Type{T}, ::Val{Dims}, ::Val) where {T, Dims}
+    MArray{__size(Dims), T}(undef)
 end
 
-function SharedMemory(::Type{T}, ::Val{Dims}, ::Val{Id}) where {T, Dims, Id}
-    throw(MethodError(SharedMemory, (T, Val(Dims), Val(Id))))
+###
+# CPU implementation of scratch memory
+# - memory allocated as a MArray with size `Dims`
+###
+
+struct ScratchArray{N, D}
+    data::D
+    ScratchArray{N}(data::D) where {N, D} = new{N, D}(data)
+end
+
+@inline function Scratchpad(ctx, ::Type{T}, ::Val{Dims}) where {T, Dims}
+    return ScratchArray{length(Dims)}(MArray{__size((Dims..., prod(__groupsize(ctx)))), T}(undef))
 end
 
 function __synchronize()
