@@ -1,5 +1,5 @@
 using KernelAbstractions, Test
-using Atomix: @atomic, @atomicswap, @atomicreplace
+using KernelAbstractions: @atomic, @atomicswap, @atomicreplace
 include(joinpath(@__DIR__, "utils.jl")) # Load backend
 
 
