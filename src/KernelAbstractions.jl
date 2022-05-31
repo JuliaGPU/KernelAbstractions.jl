@@ -5,6 +5,7 @@ export @Const, @localmem, @private, @uniform, @synchronize, @index, @groupsize, 
 export Device, GPU, CPU, Event, MultiEvent, NoneEvent
 export async_copy!
 
+import Atomix: @atomic, @atomicswap, @atomicreplace
 
 using LinearAlgebra
 using MacroTools
