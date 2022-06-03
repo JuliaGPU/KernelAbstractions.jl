@@ -1,4 +1,4 @@
-using KernelAbstractions, Test
+using KernelAbstractions, Adapt, Test
 include(joinpath(@__DIR__, "utils.jl")) # Load backend
 
 if has_cuda && has_cuda_gpu()
@@ -17,7 +17,7 @@ function naive_transpose!(a, b)
         println("Matrix size mismatch!")
         return nothing
     end
-    device = KernelAbstractions.get_device(a)
+    device = get_computing_device(a)
     n = device isa GPU ? 256 : 4
     kernel! = naive_transpose_kernel!(device, n)
     kernel!(a, b, ndrange=size(a))

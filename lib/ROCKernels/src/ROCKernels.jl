@@ -9,7 +9,7 @@ import KernelAbstractions
 
 export ROCDevice
 
-KernelAbstractions.get_device(::AMDGPU.ROCArray) = ROCDevice()
+get_computing_device(::AMDGPU.ROCArray) = ROCDevice()
 
 
 const FREE_QUEUES = HSAQueue[]
@@ -59,8 +59,6 @@ function next_queue()
 end
 
 import KernelAbstractions: Event, CPUEvent, NoneEvent, MultiEvent, CPU, GPU, isdone, failed
-
-struct ROCDevice <: GPU end
 
 struct ROCEvent{T<:Union{AMDGPU.HSA.Signal,HSAStatusSignal}} <: Event
     event::T
