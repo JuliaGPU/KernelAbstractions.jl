@@ -7,6 +7,8 @@ import StaticArrays: MArray
 import Adapt
 import KernelAbstractions
 
+import UnsafeAtomicsLLVM
+
 export ROCDevice
 
 KernelAbstractions.get_device(::AMDGPU.ROCArray) = ROCDevice()

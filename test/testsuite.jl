@@ -69,9 +69,9 @@ function testsuite(backend, backend_str, backend_mod, AT, DAT)
         convert_testsuite(backend, AT)
     end
 
-    if backend_str == "CUDA"
+    if backend_str == "CUDA" || backend_str == "ROCM"
         @testset "Examples" begin
-            examples_testsuite()
+            examples_testsuite(backend_str)
         end
     end
 end
