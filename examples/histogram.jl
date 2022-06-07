@@ -1,3 +1,4 @@
+# INCLUDE ROCM
 using KernelAbstractions, Test
 using KernelAbstractions: @atomic, @atomicswap, @atomicreplace
 include(joinpath(@__DIR__, "utils.jl")) # Load backend

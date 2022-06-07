@@ -9,11 +9,14 @@ function find_sources(path::String, sources=String[])
     sources
 end
 
-function examples_testsuite()
+function examples_testsuite(backend_str)
 @testset "examples" begin
     examples_dir = joinpath(@__DIR__, "..", "examples")
     examples = find_sources(examples_dir)
     filter!(file -> readline(file) != "# EXCLUDE FROM TESTING", examples)
+    if backend_str == "ROCM"
+        filter!(file -> occursin("# INCLUDE ROCM", read(file)), examples)
+    end
 
     @testset "$(basename(example))" for example in examples
         code = """
