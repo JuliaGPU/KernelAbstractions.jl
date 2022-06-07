@@ -65,8 +65,10 @@ function histogram!(histogram_output, input;
 
     if isa(input, Array)
         kernel! = histogram_kernel!(CPU(), numcores)
-    else
+    elseif has_cuda
         kernel! = histogram_kernel!(CUDADevice(), numthreads)
+    elseif has_rocm
+        kernel! = histogram_kernel!(ROCDevice(), numthreads)
     end
 
     kernel!(histogram_output, input, ndrange=size(input))
@@ -96,16 +98,23 @@ end
         @test isapprox(CPU_2_histogram, histogram_2_baseline)
     end
 
-    if has_cuda_gpu()
+    if has_cuda && has_cuda_gpu()
         CUDA.allowscalar(false)
+        GPUArray = CuArray
+        has_gpu = true
+    elseif has_rocm && AMDGPU.functional()
+        AMDGPU.allowscalar(false)
+        GPUArray = ROCArray
+        has_gpu = true
+    end
+    if has_gpu
+        GPU_rand_input = GPUArray(rand_input)
+        GPU_linear_input = GPUArray(linear_input)
+        GPU_2_input = GPUArray(all_2)
 
-        GPU_rand_input = CuArray(rand_input)
-        GPU_linear_input = CuArray(linear_input)
-        GPU_2_input = CuArray(all_2)
-
-        GPU_rand_histogram = CuArray(zeros(Int, 128))
-        GPU_linear_histogram = CuArray(zeros(Int, 1024))
-        GPU_2_histogram = CuArray(zeros(Int, 2))
+        GPU_rand_histogram = GPUArray(zeros(Int, 128))
+        GPU_linear_histogram = GPUArray(zeros(Int, 1024))
+        GPU_2_histogram = GPUArray(zeros(Int, 2))
 
         wait(histogram!(GPU_rand_histogram, GPU_rand_input))
         wait(histogram!(GPU_linear_histogram, GPU_linear_input))
