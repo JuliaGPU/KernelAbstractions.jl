@@ -15,7 +15,7 @@ function examples_testsuite(backend_str)
     examples = find_sources(examples_dir)
     filter!(file -> readline(file) != "# EXCLUDE FROM TESTING", examples)
     if backend_str == "ROCM"
-        filter!(file -> occursin("# INCLUDE ROCM", read(file)), examples)
+        filter!(file -> occursin("# INCLUDE ROCM", String(read(file))), examples)
     end
 
     @testset "$(basename(example))" for example in examples
