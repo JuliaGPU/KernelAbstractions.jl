@@ -1,3 +1,5 @@
+import UnsafeAtomicsLLVM
+
 struct CPUEvent <: Event
     task::Core.Task
 end
