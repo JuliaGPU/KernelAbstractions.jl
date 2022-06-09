@@ -1,7 +1,7 @@
 name = "ROCKernels"
 uuid = "7eb9e9f0-4bd3-4c4c-8bef-26bd9629d9b9"
 authors = ["Valentin Churavy <v.churavy@gmail.com>", "Julian P Samaroo <jpsamaroo@jpsamaroo.me>"]
-version = "0.3.0"
+version = "0.3.1"
 
 [deps]
 AMDGPU = "21141c5a-9bdb-4563-92ae-f87d6854732e"
