@@ -15,7 +15,6 @@ include("compiler.jl")
 include("reflection.jl")
 include("examples.jl")
 include("convert.jl")
-include("atomic_test.jl")
 include("atomix_test.jl")
 
 function testsuite(backend, backend_str, backend_mod, AT, DAT)
