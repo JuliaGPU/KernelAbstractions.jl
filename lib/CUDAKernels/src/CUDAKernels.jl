@@ -359,6 +359,7 @@ else
 end
 
 import KernelAbstractions: ConstAdaptor, SharedMemory, Scratchpad, __synchronize, __size
+import KernelAbstractions: atomic_add!, atomic_and!, atomic_cas!, atomic_dec!, atomic_inc!, atomic_max!, atomic_min!, atomic_op!, atomic_or!, atomic_sub!, atomic_xchg!, atomic_xor!
 
 ###
 # GPU implementation of shared memory
@@ -395,4 +396,29 @@ Adapt.adapt_storage(to::ConstAdaptor, a::CUDA.CuDeviceArray) = Base.Experimental
 # Argument conversion
 KernelAbstractions.argconvert(k::Kernel{CUDADevice}, arg) = CUDA.cudaconvert(arg)
 
+
+###
+# GPU implementation of atomics
+###
+
+afxs = Dict(
+    atomic_add! => CUDA.atomic_add!,
+    atomic_and! => CUDA.atomic_and!,
+    atomic_cas! => CUDA.atomic_cas!,
+    atomic_dec! => CUDA.atomic_dec!,
+    atomic_inc! => CUDA.atomic_inc!,
+    atomic_max! => CUDA.atomic_max!,
+    atomic_min! => CUDA.atomic_min!,
+    atomic_op! => CUDA.atomic_op!,
+    atomic_or! => CUDA.atomic_or!,
+    atomic_sub! => CUDA.atomic_sub!,
+    atomic_xchg! => CUDA.atomic_xchg!,
+    atomic_xor! => CUDA.atomic_xor!
+)
+
+for (afx, cfx) in afxs
+    @device_override @inline function afx(args...)
+        cfx(args...)
+    end
+end
 end

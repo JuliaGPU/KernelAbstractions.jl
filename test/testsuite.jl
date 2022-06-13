@@ -15,6 +15,7 @@ include("compiler.jl")
 include("reflection.jl")
 include("examples.jl")
 include("convert.jl")
+include("atomic_test.jl")
 
 function testsuite(backend, backend_str, backend_mod, AT, DAT)
     @testset "Unittests" begin
@@ -67,6 +68,13 @@ function testsuite(backend, backend_str, backend_mod, AT, DAT)
 
     @testset "Convert" begin
         convert_testsuite(backend, AT)
+    end
+
+    if backend_str != "ROCM" &&
+      !(backend_str == "CPU" && Base.VERSION < v"1.7.0")
+        @testset "Atomics" begin
+            atomics_testsuite(backend, AT)
+        end
     end
 
     if backend_str == "CUDA" || backend_str == "ROCM"

@@ -496,6 +496,10 @@ include("extras/extras.jl")
 
 include("reflection.jl")
 
+# Atomics
+
+include("atomics.jl")
+
 # CPU backend
 
 include("cpu.jl")
