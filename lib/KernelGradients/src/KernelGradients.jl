@@ -7,6 +7,7 @@ function Enzyme.autodiff(kernel::Kernel{<:Any, <:Any, <:Any, Fun}) where Fun
     f = kernel.f
     function df(ctx, args...)
         Enzyme.autodiff_deferred(f::Fun, Enzyme.Const, ctx, args...)
+        return nothing
     end
     similar(kernel, df)
 end
