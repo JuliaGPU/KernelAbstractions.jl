@@ -1,7 +1,7 @@
 name = "KernelGradients"
 uuid = "e5faadeb-7f6c-408e-9747-a7a26e81c66a"
 authors = ["Valentin Churavy <v.churavy@gmail.com>"]
-version = "0.1.1"
+version = "0.1.2"
 
 [deps]
 Enzyme = "7da242da-08ed-463a-9acd-ee780be4f1d9"
