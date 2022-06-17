@@ -1,5 +1,5 @@
 using KernelAbstractions, Test
-include(joinpath(@__DIR__, "utils.jl")) # Load backend
+include(joinpath(dirname(pathof(KernelAbstractions)), "../examples/utils.jl")) # Load backend
 using KernelAbstractions.Extras: @unroll
 
 has_cuda && has_cuda_gpu() || exit()

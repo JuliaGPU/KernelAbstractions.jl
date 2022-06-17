@@ -1,5 +1,5 @@
 using KernelAbstractions, Test
-include(joinpath(@__DIR__, "utils.jl")) # Load backend
+include(joinpath(dirname(pathof(KernelAbstractions)), "../examples/utils.jl")) # Load backend
 
 @kernel function copy_kernel!(A, @Const(B))
     I = @index(Global)
