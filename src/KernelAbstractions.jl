@@ -6,6 +6,7 @@ export Device, GPU, CPU, Event, MultiEvent, NoneEvent
 export async_copy!
 
 import Atomix: @atomic, @atomicswap, @atomicreplace
+import UnsafeAtomics
 
 using LinearAlgebra
 using MacroTools
