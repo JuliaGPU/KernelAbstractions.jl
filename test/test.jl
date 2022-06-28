@@ -283,7 +283,7 @@ end
             @inbounds A[I] = SpecialFunctions.gamma(B[I])
         end
 
-        x = [1.0,2.0,3.0,5.5]
+        x = Float32[1.0,2.0,3.0,5.5]
         y = similar(x)
         event = if $backend == CPU
             gamma_knl(CPU())(y, x; ndrange=length(x))
@@ -309,7 +309,7 @@ end
             @inbounds A[I] = SpecialFunctions.erf(B[I])
         end
 
-        x = [-1.0,-0.5,0.0,1e-3,1.0,2.0,5.5]
+        x = Float32[-1.0,-0.5,0.0,1e-3,1.0,2.0,5.5]
         y = similar(x)
         event = if $backend == CPU
             erf_knl(CPU())(y, x; ndrange=length(x))
@@ -335,7 +335,7 @@ end
             @inbounds A[I] = SpecialFunctions.erfc(B[I])
         end
 
-        x = [-1.0,-0.5,0.0,1e-3,1.0,2.0,5.5]
+        x = Float32[-1.0,-0.5,0.0,1e-3,1.0,2.0,5.5]
         y = similar(x)
         event = if $backend == CPU
             erfc_knl(CPU())(y, x; ndrange=length(x))
