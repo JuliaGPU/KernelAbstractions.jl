@@ -72,8 +72,9 @@ end
     device = backend()
     @test @inferred(KernelAbstractions.get_device(A)) == device
     @test @inferred(KernelAbstractions.get_device(view(A, 2:4, 1:3))) == device
-    if !(isdefined(Main, :ROCKernels) && (device isa Main.ROCKernels.ROCDevice))
-        # Sparse arrays are not supported by the ROCm backend yet:
+    if !(isdefined(Main, :ROCKernels) && (device isa Main.ROCKernels.ROCDevice)) &&
+       !(isdefined(Main, :oneAPIKernels) && (device isa Main.oneAPIKernels.oneAPIDevice))
+        # Sparse arrays are not supported by the ROCm or oneAPI backends yet:
         @test @inferred(KernelAbstractions.get_device(sparse(A))) == device
     end
     @test @inferred(KernelAbstractions.get_device(Diagonal(x))) == device

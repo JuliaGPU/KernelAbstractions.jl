@@ -22,6 +22,11 @@ if !CI || BACKEND == "CUDA"
     Pkg.develop(cudakernels)
 end
 
+if !CI || BACKEND == "oneAPI"
+    oneapikernels = Pkg.PackageSpec(path = joinpath(root_directory, "lib", "oneAPIKernels"))
+    Pkg.develop(oneapikernels)
+end
+
 if VERSION < v"1.8"
     kernelgradients = Pkg.PackageSpec(path = joinpath(root_directory, "lib", "KernelGradients"))
     Pkg.develop(kernelgradients)

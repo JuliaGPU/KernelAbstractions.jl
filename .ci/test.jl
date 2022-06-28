@@ -12,6 +12,9 @@ end
 if !CI || BACKEND == "CUDA"
     push!(pkgs, "CUDAKernels")
 end
+if !CI || BACKEND == "oneAPI"
+    push!(pkgs, "oneAPIKernels")
+end
 if !CI || haskey(ENV, "TEST_KERNELGRADIENTS")
     if VERSION < v"1.8"
         push!(pkgs, "KernelGradients")
