@@ -71,10 +71,10 @@ function private_testsuite(backend, ArrayT)
         wait(typetest(backend(), 16)(A, B, ndrange=size(A)))
         @test all(B)
 
-        A = ArrayT{Float64}(ones(64,3));
-        out = ArrayT{Float64}(undef, 64)
+        A = ArrayT{Float32}(ones(64,3));
+        out = ArrayT{Float32}(undef, 64)
         wait(reduce_private(backend(), 8)(out, A, ndrange=size(out)))
-        @test all(out .== 3.0)
+        @test all(out .== 3f0)
     end
 
     if backend == CPU

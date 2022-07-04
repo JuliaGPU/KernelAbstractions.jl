@@ -20,9 +20,9 @@ end
 # Check that nested `@unroll` doesn't throw a syntax error
 @kernel function kernel_unroll2!(A)
   @uniform begin
-    a = MVector{3, Float64}(1, 2, 3)
-    b = MVector{3, Float64}(3, 2, 1)
-    c = MMatrix{3, 3, Float64}(undef)
+    a = MVector{3, Float32}(1, 2, 3)
+    b = MVector{3, Float32}(3, 2, 1)
+    c = MMatrix{3, 3, Float32}(undef)
   end
   I = @index(Global)
   @inbounds for m in 1:3
@@ -37,7 +37,7 @@ end
 end
 
 function unroll_testsuite(backend, ArrayT)
-    a = ArrayT(zeros(5))
+    a = ArrayT(zeros(Float32, 5))
     kernel! = kernel_unroll!(backend(), 1, 1)
     wait(kernel!(a))
     wait(kernel!(a, Val(5)))

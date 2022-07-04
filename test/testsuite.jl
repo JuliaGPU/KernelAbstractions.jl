@@ -65,8 +65,10 @@ function testsuite(backend, backend_str, backend_mod, AT, DAT)
         reflection_testsuite(backend, backend_str, AT)
     end
 
-    @testset "Convert" begin
-        convert_testsuite(backend, AT)
+    if backend_str != "oneAPI" # uses int128 and allocate for InexactError
+        @testset "Convert" begin
+            convert_testsuite(backend, AT)
+        end
     end
 
     if backend_str == "CUDA" || backend_str == "ROCM"
