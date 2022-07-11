@@ -16,12 +16,13 @@ end
 
 ## Launching kernel on the host
 
-You can construct a kernel for a specific backend by calling the kernel function
-with the first argument being the device of type `KA.Device`, the second argument being the size
+You can construct a kernel for a specific backend by calling the kernel
+function, with the first argument being the device of type `KA.Device`, the
+second argument being the size
 of the workgroup and the third argument being a static `ndrange`. The second and
-third argument are optional. After instantiating the kernel you can launch it by
-calling the kernel object with the right arguments and some keyword arguments that
-configure the specific launch.
+third arguments are optional. After instantiating the kernel, you can launch it by
+calling the kernel object with these arguments and some keyword arguments
+configuring the specific launch.
 
 ```julia
 A = ones(1024, 1024)
@@ -30,16 +31,15 @@ wait(ev)
 all(A .== 2.0)
 ```
 `mul_kernel(CPU(), 16)` creates a kernel for the host device `CPU()` with a static
-workgroup size of `16` and a dynamic `ndrange`. This returns a kernel that is launched with the inputs
-and the dynamic `ndrange` as a keyword argument via `kernel(A,
-ndrange=size(A))`. All of this is reduced to one line of code with the kernel
-eventually returning an event `ev`. All kernels are launched asynchronously,
-thus event `ev` specifies the current state of the execution.
-The [`wait`] blocks the *host* until the event `ev` has completed on the device. This implies
-that no new kernels will be launched by the host on any device until the wait is completed.
+workgroup size of `16` and a dynamic `ndrange`. This function returns a kernel launched with the inputs
+and the dynamic `ndrange` as a keyword argument via `kernel(A,ndrange=size(A))`.
+The kernel
+eventually returning an event `ev`. All kernels are launched asynchronously.
+Thus, event `ev` specifies the current state of the execution.
+The [`wait`] blocks the *host* until the event `ev` has completed on the device. This implies that the host will launch no new kernels on any device until the wait returns.
 ## Launching kernel on the device
 
-To launch the kernel on a CUDA supported GPU we just have to generate the kernel
+To launch the kernel on a CUDA supported GPU we generate the kernel
 for the device of type `CUDADevice` provided by `CUDAKernels` (see [backends](backends.md)).
 
 ```julia
@@ -71,13 +71,13 @@ end
 ```
 
 These statement-level generated kernels like `A .= 1.0` are executed on a
-different stream as the KA kernels.  Launching `mul_kernel` may start before `A
+different stream than the KA kernels.  Launching `mul_kernel` may start before `A
 .= 1.0` has completed. To prevent this, we add a device-wide dependency to the
 kernel by adding `dependencies=Event(CUDADevice())`.
 ```julia
 ev = mul_kernel(CUDADevice(), 16)(A, ndrange=size(A), dependencies=Event(CUDADevice()))
 ```
-This device dependency requires all kernels on the device to be compeleted before this kernel is launched.
+This device dependency requires all kernels on the device to be completed before this kernel is launched.
 In the same vain, multiple events may be added to a wait.
 
 ```julia
