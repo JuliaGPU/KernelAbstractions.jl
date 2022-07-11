@@ -2,7 +2,7 @@ KernelAbstractions.jl
 ==============
 KernelAbstractions (KA) is
 a package that enables you to write GPU-like kernels targetting different
-execution [backends](backends.md). KA is intended to be a minimal and
+execution backends. KA is intended to be a minimal and
 performant library that explores ways to write heterogeneous code.
 Currently, the following backends are supported:
 
