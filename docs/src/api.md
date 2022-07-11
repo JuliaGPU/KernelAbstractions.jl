@@ -9,6 +9,8 @@
 @localmem
 @private
 @synchronize
+@print
+@uniform
 groupsize
 ```
 

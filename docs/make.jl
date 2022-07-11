@@ -13,6 +13,7 @@ makedocs(;
     ),
     pages=[
         "Home" => "index.md",
+        "Quickstart" => "quickstart.md",
         "Writing kernels" => "kernels.md",
         "Examples" => [
             "examples/memcopy.md",
