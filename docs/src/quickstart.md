@@ -44,16 +44,33 @@ This implies that the host will launch no new kernels on any device until the
 wait returns.
 ## Launching kernel on the device
 
-To launch the kernel on a CUDA-supported GPU, we generate the kernel
-for the device of type `CUDADevice` provided by `CUDAKernels` (see [backends](backends.md)).
+To launch the kernel on a backend-supported device `isa(device, KA.GPU)` (e.g., `CUDADevice()`, `ROCDevice()`, `oneDevice()`), we generate the kernel
+for this device provided by `CUDAKernels`, `ROCKernels`, or `oneAPIKernels` (see [backends](backends.md)).
+
+First, we initialize the array using the Array constructor of the chosen device with
 
 ```julia
 using CUDAKernels # Required to access CUDADevice
-A = CUDA.ones(1024, 1024)
-ev = mul2_kernel(CUDADevice(), 16)(A, ndrange=size(A))
+A = CuArray(ones(1024, 1024))
+```
+
+```julia
+using ROCKernels # Required to access CUDADevice
+A = ROCArray(ones(1024, 1024))
+```
+
+```julia
+using oneAPIKernels # Required to access CUDADevice
+A = oneArray(ones(1024, 1024))
+```
+The kernel generation and execution are then
+```julia
+ev = mul2_kernel(device, 16)(A, ndrange=size(A))
 wait(ev)
 all(A .== 2.0)
 ```
+
+For simplicity, we stick with the case of `device=CUDADevice()`.
 
 ## Synchronization
 !!! danger
