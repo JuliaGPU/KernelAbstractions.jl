@@ -1,5 +1,15 @@
 # Quickstart
 
+## Terminology
+CUDA being the most popular GPU programming environment, we take it as a
+reference for defining terminology in KA. A *workgroup is called a block in
+NVIDIA CUDA and designates a group of threads acting in parallel, preferably
+in lockstep. For the GPU, the workgroup size is typically around 256, while for the CPU,
+it is usually less than or equal to the number of CPU cores. An *ndrange* is
+called a grid in NVIDIA CUDA and designates the total number of work items. If
+using a workgroup of size 1 (non-parallel execution), the ndrange is the
+number of items to iterate over in a loop.
+
 ## Writing your first kernel
 
 Kernel functions are marked with the [`@kernel`](@ref). Inside the `@kernel` macro
@@ -16,30 +26,25 @@ end
 
 ## Launching kernel on the host
 
-You can construct a kernel for a specific backend by calling the kernel
-function, with the first argument being the device of type `KA.Device`, the
-second argument being the size
-of the workgroup and the third argument being a static `ndrange`. The second and
-third arguments are optional. After instantiating the kernel, you can launch it by
-calling the kernel object with these arguments and some keyword arguments
-configuring the specific launch.
-
+You can construct a kernel for a specific backend by calling the kernel with
+`mul2_kernel(CPU(), 16)`. The first argument is a device of type `KA.Device`,
+the second argument being the workgroup size. This returns a generated kernel
+executable that is then executed with the input argument `A` and the additional
+argument being a static `ndrange`.
 ```julia
 A = ones(1024, 1024)
 ev = mul2_kernel(CPU(), 16)(A, ndrange=size(A))
 wait(ev)
 all(A .== 2.0)
 ```
-`mul_kernel(CPU(), 16)` creates a kernel for the host device `CPU()` with a static
-workgroup size of `16` and a dynamic `ndrange`. This function returns a kernel launched with the inputs
-and the dynamic `ndrange` as a keyword argument via `kernel(A,ndrange=size(A))`.
-The kernel
-eventually returning an event `ev`. All kernels are launched asynchronously.
-Thus, event `ev` specifies the current state of the execution.
-The [`wait`] blocks the *host* until the event `ev` has completed on the device. This implies that the host will launch no new kernels on any device until the wait returns.
+The kernel eventually returns an event `ev`. All kernels are launched
+asynchronously with the event `ev` specifies the current state of the execution.
+The [`wait`] blocks the *host* until the event `ev` has completed on the device.
+This implies that the host will launch no new kernels on any device until the
+wait returns.
 ## Launching kernel on the device
 
-To launch the kernel on a CUDA supported GPU we generate the kernel
+To launch the kernel on a CUDA-supported GPU, we generate the kernel
 for the device of type `CUDADevice` provided by `CUDAKernels` (see [backends](backends.md)).
 
 ```julia
@@ -78,7 +83,7 @@ kernel by adding `dependencies=Event(CUDADevice())`.
 ev = mul_kernel(CUDADevice(), 16)(A, ndrange=size(A), dependencies=Event(CUDADevice()))
 ```
 This device dependency requires all kernels on the device to be completed before this kernel is launched.
-In the same vain, multiple events may be added to a wait.
+In the same vein, multiple events may be added to a wait.
 
 ```julia
 using CUDAKernels # Required to access CUDADevice

@@ -7,9 +7,8 @@ performant
 library that explores ways to write heterogeneous code. Although parts of
 the package are still experimental, it has been used successfully as part of the
 Exascale Computing Project to run Julia code on pre-Frontier and pre-Aurora
-systems. Currently missing from the documentation is
- * how to debug kernels, and
- * how to profile kernels.
+systems. Currently, profiling and debugging require backend-specific calls like, for example, in
+[`CUDA.jl`](https://cuda.juliagpu.org/dev/development/profiling/).
 
 !!! note
     While `KernelAbstraction.jl` focuses on performance portability, it
