@@ -45,7 +45,7 @@ wait returns.
 ## Launching kernel on the device
 
 To launch the kernel on a backend-supported device `isa(device, KA.GPU)` (e.g., `CUDADevice()`, `ROCDevice()`, `oneDevice()`), we generate the kernel
-for this device provided by `CUDAKernels`, `ROCKernels`, or `oneAPIKernels` (see [backends](backends.md)).
+for this device provided by `CUDAKernels`, `ROCKernels`, or `oneAPIKernels`.
 
 First, we initialize the array using the Array constructor of the chosen device with
 
