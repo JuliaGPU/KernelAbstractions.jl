@@ -6,7 +6,9 @@ execution backends. KA intends to be a minimal and
 performant
 library that explores ways to write heterogeneous code. Although parts of
 the package are still experimental, it has been used successfully as part of the
-Exascale Computing Project to run Julia code on pre-Frontier and pre-Aurora
+[Exascale Computing Project](https://www.exascaleproject.org/) to run Julia code
+on pre-[Frontier](https://www.olcf.ornl.gov/frontier/) and
+pre-[Aurora](https://www.alcf.anl.gov/aurora)
 systems. Currently, profiling and debugging require backend-specific calls like, for example, in
 [`CUDA.jl`](https://cuda.juliagpu.org/dev/development/profiling/).
 
