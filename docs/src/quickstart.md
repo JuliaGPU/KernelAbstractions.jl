@@ -13,7 +13,7 @@ number of items to iterate over in a loop.
 ## Writing your first kernel
 
 Kernel functions are marked with the [`@kernel`](@ref). Inside the `@kernel` macro
-you can use the [kernel language](@ref api_kernel_language). As an example, the `mul2`` kernel
+you can use the [kernel language](@ref api_kernel_language). As an example, the `mul2` kernel
 below will multiply each element of the array `A` by `2`. It uses the [`@index`](@ref) macro
 to obtain the global linear index of the current work item.
 
