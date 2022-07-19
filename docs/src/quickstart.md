@@ -1,8 +1,8 @@
 # Quickstart
 
 ## Terminology
-CUDA being the most popular GPU programming environment, we take it as a
-reference for defining terminology in KA. A *workgroup is called a block in
+Because CUDA is the most popular GPU programming environment, we can use it as a
+reference for defining terminology in KA. A *workgroup* is called a block in
 NVIDIA CUDA and designates a group of threads acting in parallel, preferably
 in lockstep. For the GPU, the workgroup size is typically around 256, while for the CPU,
 it is usually less than or equal to the number of CPU cores. An *ndrange* is
