@@ -13,10 +13,9 @@ systems. Currently, profiling and debugging require backend-specific calls like,
 [`CUDA.jl`](https://cuda.juliagpu.org/dev/development/profiling/).
 
 !!! note
-    While `KernelAbstraction.jl` focuses on performance portability, it
-    currently remains GPU-biased.
-    Therefore, the kernel language requires several specific constructs for good GPU
-    performance but may hurt CPU performance.
+While KernelAbstraction.jl is focused on performance portability, it emulates GPU semantics and therefore the kernel language has several constructs that are necessary for good performance on the GPU, but serve no purpose on the CPU.
+In these cases, we either ignore such statements entirely (such as with `@synchronize`) or swap out the construct for something similar on the CPU (such as using an `MVector`  to replace `@localmem`).
+This means that CPU performance will still be fast, but might be performing extra work to provide a consistent programming model across GPU and CPU
 
 ## Supported backends
 All supported backends rely on their respective Julia interface to the compiler
