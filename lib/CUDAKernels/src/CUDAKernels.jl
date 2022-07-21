@@ -41,7 +41,7 @@ function next_stream()
 
         if length(STREAMS) > STREAM_GC_THRESHOLD[]
             for stream in STREAMS
-                if CUDA.query(stream)
+                if CUDA.isdone(stream)
                     push!(FREE_STREAMS, stream)
                 end
             end
@@ -75,7 +75,7 @@ function next_stream()
         end
         if length(STREAMS_CT) > STREAM_GC_THRESHOLD[]
             for stream in STREAMS_CT
-                if CUDA.query(stream)
+                if CUDA.isdone(stream)
                     push!(FREE_STREAMS_CT, stream)
                 end
             end
@@ -102,7 +102,7 @@ struct CudaEvent <: Event
 end
 
 failed(::CudaEvent) = false
-isdone(ev::CudaEvent) = CUDA.query(ev.event)
+isdone(ev::CudaEvent) = CUDA.isdone(ev.event)
 
 function Event(::CUDADevice)
     stream = CUDA.stream()
