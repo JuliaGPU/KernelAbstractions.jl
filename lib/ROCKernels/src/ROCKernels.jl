@@ -1,7 +1,7 @@
 module ROCKernels
 
 import AMDGPU
-import AMDGPU: rocfunction, HSAAgent, HSAQueue, HSASignal, HSAStatusSignal, Mem
+import AMDGPU: rocfunction, ROCDevice, ROCQueue, ROCSignal, ROCKernelSignal, ROCArray, Mem
 import StaticArrays
 import StaticArrays: MArray
 import Adapt
@@ -11,11 +11,13 @@ import UnsafeAtomicsLLVM
 
 export ROCDevice
 
-KernelAbstractions.get_device(::AMDGPU.ROCArray) = ROCDevice()
+KernelAbstractions.isgpu(::ROCDevice) = true
+
+KernelAbstractions.get_device(A::ROCArray) = AMDGPU.device(A)
 
 
-const FREE_QUEUES = HSAQueue[]
-const QUEUES = HSAQueue[]
+const FREE_QUEUES = ROCQueue[]
+const QUEUES = ROCQueue[]
 const QUEUE_GC_THRESHOLD = Ref{Int}(16)
 
 # This code is loaded after an `@init` step
@@ -53,36 +55,42 @@ function next_queue()
             return pop!(FREE_QUEUES)
         end
 
-        # FIXME: Which agent?
-        queue = HSAQueue()
+        # FIXME: Which device?
+        queue = ROCQueue()
         push!(QUEUES, queue)
         return queue
     end
 end
 
-import KernelAbstractions: Event, CPUEvent, NoneEvent, MultiEvent, CPU, GPU, isdone, failed
+import KernelAbstractions: Event, CPUEvent, NoneEvent, MultiEvent, CPU, GPU, isdone, failed, construct
 
-struct ROCDevice <: GPU end
-
-struct ROCEvent{T<:Union{AMDGPU.HSA.Signal,HSAStatusSignal}} <: Event
+struct ROCEvent{T<:Union{ROCKernelSignal,ROCSignal,AMDGPU.HSA.Signal}} <: Event
     event::T
 end
-ROCEvent(signal::HSASignal) = ROCEvent(signal.signal[])
 
-cpuwait(ev::ROCEvent{AMDGPU.HSA.Signal}) = wait(HSASignal(ev.event))
-cpuwait(ev::ROCEvent{HSAStatusSignal}) = wait(ev.event)
-gpuwait(ev::ROCEvent{AMDGPU.HSA.Signal}) = AMDGPU.device_signal_wait(ev.event, 0)
-gpuwait(ev::ROCEvent{HSAStatusSignal}) = wait(ev.event)
+cpuwait(ev::ROCEvent{ROCSignal}) = wait(ev.event)
+cpuwait(ev::ROCEvent{ROCKernelSignal}) = wait(ev.event)
 
-Adapt.adapt_storage(::AMDGPU.Adaptor, ev::ROCEvent{HSAStatusSignal}) =
+gpuwait(ev::ROCEvent{AMDGPU.HSA.Signal}) = AMDGPU.Device.hostcall_device_signal_wait(ev.event.handle, 0)
+#gpuwait(ev::ROCEvent{ROCSignal}) = wait(ev.event)
+#gpuwait(ev::ROCEvent{ROCKernelSignal}) = wait(ev.event)
+
+Adapt.adapt_storage(::AMDGPU.Runtime.Adaptor, ev::ROCEvent{ROCKernelSignal}) =
     ROCEvent(ev.event.signal.signal[])
 
-failed(::ROCEvent) = false # FIXME
-isdone(ev::ROCEvent) = true # FIXME
+failed(ev::ROCEvent{ROCKernelSignal}) =
+    isdone(ev) && ev.event.exception !== nothing
+isdone(ev::ROCEvent{ROCKernelSignal}) =
+    ev.event.done.set # TODO: Don't access .set
+
+failed(ev::ROCEvent{ROCSignal}) =
+    false # FIXME: We can't know this from just the signal value
+isdone(ev::ROCEvent{ROCSignal}) =
+    AMDGPU.HSA.hsa_signal_load_scacquire(ev.event.signal[]) < 1
 
 function Event(::ROCDevice)
-    queue = AMDGPU.get_default_queue()
-    # Returns an HSASignalSet containing signals
+    queue = AMDGPU.default_queue()
+    # Returns a ROCSignalSet containing signals
     event = AMDGPU.barrier_and!(queue, AMDGPU.active_kernels(queue))
     # Build ROCEvents and put them in a MultiEvent
     MultiEvent(Tuple(ROCEvent(s) for s in event.signals))
@@ -104,34 +112,40 @@ function wait(::CPU, ev::ROCEvent, progress=nothing)
     end
 end
 
-wait(::ROCDevice, ev::ROCEvent, progress=nothing, queue=nothing) = gpuwait(ev)
+wait(::ROCDevice, ev::ROCEvent, progress=nothing, queue=nothing) = cpuwait(ev) #gpuwait(ev)
 wait(::ROCDevice, ev::NoneEvent, progress=nothing, queue=nothing) = nothing
 
-function wait(::ROCDevice, ev::MultiEvent, progress=nothing, queue=AMDGPU.get_default_queue())
+function wait(::ROCDevice, ev::MultiEvent, progress=nothing, queue=AMDGPU.default_queue())
     dependencies = collect(ev.events)
-    rocdeps = map(d->d.event isa HSAStatusSignal ? d.event.signal.signal[] : d.event, filter(d->d isa ROCEvent, dependencies))
+    rocdeps = map(d->d.event isa ROCKernelSignal ? d.event.signal.signal[] : d.event, filter(d->d isa ROCEvent, dependencies))
     wait.(rocdeps)
     #isempty(rocdeps) || wait(AMDGPU.barrier_and!(queue, rocdeps))
     for event in filter(d->!(d isa ROCEvent), dependencies)
-        wait(ROCDevice(), event, progress)
+        wait(queue.device, event, progress)
     end
 end
 
 # TODO: Create a hostcall that waits on a specified Task
 wait(::ROCDevice, ev::CPUEvent, progress=nothing, queue=nothing) = error("GPU->CPU wait not implemented")
 
-function KernelAbstractions.async_copy!(::ROCDevice, A, B; dependencies=nothing, progress=nothing)
+function KernelAbstractions.async_copy!(dev::ROCDevice, A::ROCArray{TA}, B::ROCArray{TB}; dependencies=nothing, progress=nothing) where {TA, TB}
     # TODO: Register A and B
-    wait(ROCDevice(), MultiEvent(dependencies), progress, AMDGPU.get_default_queue())
+    wait(dev, MultiEvent(dependencies), progress, AMDGPU.default_queue(dev))
     GC.@preserve A B begin
         destptr = pointer(A)
         srcptr  = pointer(B)
         N       = length(A)
-        # TODO: memory_copy_multiple, or custom copy kernel
-        AMDGPU.HSA.memory_copy(destptr, srcptr, N) |> AMDGPU.check
+        signal  = ROCSignal()
+        #if TA === TB
+        #    AMDGPU.Mem.unsafe_copy3d!(destptr, srcptr, N; signal, async=true)
+        #else
+            # TODO: We should still be able to unsafe_copy3d with some checks
+            AMDGPU.HSA.memory_copy(destptr, srcptr, N) |> AMDGPU.Runtime.check
+            notify(signal)
+        #end
+        return ROCEvent(signal)
     end
 
-    return ROCEvent(HSASignal(0))
 end
 
 import KernelAbstractions: Kernel, StaticSize, DynamicSize, partition, blocks, workitems, launch_config
@@ -152,10 +166,9 @@ function launch_config(kernel::Kernel{ROCDevice}, ndrange, workgroupsize)
         ndrange = nothing
     end
 
-    iterspace, dynamic = if KernelAbstractions.workgroupsize(kernel) <: DynamicSize &&
-        workgroupsize === nothing
-        # use ndrange as preliminary workgroupsize for autotuning
-        partition(kernel, ndrange, ndrange)
+    iterspace, dynamic = if KernelAbstractions.workgroupsize(kernel) <: DynamicSize && workgroupsize === nothing
+        workgroupsize = ntuple(i->i == 1 ? min(prod(ndrange), AMDGPU.Device._max_group_size) : 1, length(ndrange))
+        partition(kernel, ndrange, workgroupsize)
     else
         partition(kernel, ndrange, workgroupsize)
     end
@@ -172,8 +185,11 @@ function threads_to_workgroupsize(threads, ndrange)
     end
 end
 
-function (obj::Kernel{ROCDevice})(args...; ndrange=nothing, dependencies=nothing, workgroupsize=nothing, progress=nothing)
+function construct(dev::ROCDevice, sz::S, range::NDRange, gpu_name::GPUName) where {S<:KernelAbstractions._Size, NDRange<:KernelAbstractions._Size, GPUName}
+    return Kernel{ROCDevice, S, NDRange, GPUName}(gpu_name)
+end
 
+function (obj::Kernel{ROCDevice})(args...; ndrange=nothing, dependencies=nothing, workgroupsize=nothing, progress=nothing)
     ndrange, workgroupsize, iterspace, dynamic = launch_config(obj, ndrange, workgroupsize)
     # this might not be the final context, since we may tune the workgroupsize
     ctx = mkcontext(obj, ndrange, iterspace)
@@ -197,24 +213,28 @@ function (obj::Kernel{ROCDevice})(args...; ndrange=nothing, dependencies=nothing
     =#
 
     nblocks = length(blocks(iterspace))
-    threads = length(workitems(iterspace))
+    nthreads = length(workitems(iterspace))
 
     if nblocks == 0
         return MultiEvent(dependencies)
     end
 
     queue = next_queue()
-    wait(ROCDevice(), MultiEvent(dependencies), progress, queue)
+    device = queue.device
+    wait(device, MultiEvent(dependencies), progress, queue)
 
     # Launch kernel
-    event = AMDGPU.@roc(groupsize=threads, gridsize=nblocks*threads, queue=queue,
-                        name=String(nameof(obj.f)), # TODO: maxthreads=maxthreads,
+    event = AMDGPU.@roc(groupsize=nthreads,
+                        gridsize=nblocks*nthreads,
+                        queue=queue,
+                        name=String(nameof(obj.f)),
+                        # TODO: maxthreads=maxthreads,
                         obj.f(ctx, args...))
 
-    return ROCEvent(event.event)
+    return ROCEvent(event)
 end
 
-import AMDGPU: @device_override
+import AMDGPU.Device: @device_override
 
 import KernelAbstractions: CompilerMetadata, DynamicCheck, LinearIndices
 import KernelAbstractions: __index_Local_Linear, __index_Group_Linear, __index_Global_Linear, __index_Local_Cartesian, __index_Group_Cartesian, __index_Global_Cartesian, __validindex, __print
@@ -228,34 +248,34 @@ function mkcontext(kernel::Kernel{ROCDevice}, I, _ndrange, iterspace, ::Dynamic)
 end
 
 @device_override @inline function __index_Local_Linear(ctx)
-    return AMDGPU.threadIdx().x
+    return AMDGPU.Device.threadIdx().x
 end
 
 @device_override @inline function __index_Group_Linear(ctx)
-    return AMDGPU.blockIdx().x
+    return AMDGPU.Device.blockIdx().x
 end
 
 @device_override @inline function __index_Global_Linear(ctx)
-    I =  @inbounds expand(__iterspace(ctx), AMDGPU.blockIdx().x, AMDGPU.threadIdx().x)
+    I =  @inbounds expand(__iterspace(ctx), AMDGPU.Device.blockIdx().x, AMDGPU.Device.threadIdx().x)
     # TODO: This is unfortunate, can we get the linear index cheaper
     @inbounds LinearIndices(__ndrange(ctx))[I]
 end
 
 @device_override @inline function __index_Local_Cartesian(ctx)
-    @inbounds workitems(__iterspace(ctx))[AMDGPU.threadIdx().x]
+    @inbounds workitems(__iterspace(ctx))[AMDGPU.Device.threadIdx().x]
 end
 
 @device_override @inline function __index_Group_Cartesian(ctx)
-    @inbounds blocks(__iterspace(ctx))[AMDGPU.blockIdx().x]
+    @inbounds blocks(__iterspace(ctx))[AMDGPU.Device.blockIdx().x]
 end
 
 @device_override @inline function __index_Global_Cartesian(ctx)
-    return @inbounds expand(__iterspace(ctx), AMDGPU.blockIdx().x, AMDGPU.threadIdx().x)
+    return @inbounds expand(__iterspace(ctx), AMDGPU.Device.blockIdx().x, AMDGPU.Device.threadIdx().x)
 end
 
 @device_override @inline function __validindex(ctx)
     if __dynamic_checkbounds(ctx)
-        I = @inbounds expand(__iterspace(ctx), AMDGPU.blockIdx().x, AMDGPU.threadIdx().x)
+        I = @inbounds expand(__iterspace(ctx), AMDGPU.Device.blockIdx().x, AMDGPU.Device.threadIdx().x)
         return I in __ndrange(ctx)
     else
         return true
@@ -267,9 +287,10 @@ import KernelAbstractions: ConstAdaptor, SharedMemory, Scratchpad, __synchronize
 
 ###
 # GPU implementation of shared memory
+# - shared memory for each workgroup
 ###
 @device_override @inline function SharedMemory(::Type{T}, ::Val{Dims}, ::Val{Id}) where {T, Dims, Id}
-    ptr = AMDGPU.alloc_special(Val(Id), T, Val(AMDGPU.AS.Local), Val(prod(Dims)))
+    ptr = AMDGPU.Device.alloc_special(Val(Id), T, Val(AMDGPU.AS.Local), Val(prod(Dims)))
     AMDGPU.ROCDeviceArray(Dims, ptr)
 end
 
@@ -283,52 +304,24 @@ end
 end
 
 @device_override @inline function __synchronize()
-    AMDGPU.sync_workgroup()
+    AMDGPU.Device.sync_workgroup()
 end
 
 @device_override @inline function __print(args...)
     for arg in args
-        AMDGPU.@rocprintf("%s", arg)
+        AMDGPU.Device.@rocprintf("%s", arg)
     end
 end
 
 ###
-# GPU implementation of `@Const`
+# GPU implementation of constant memory
+# - access to constant (unchanging) memory
 ###
-#=
-struct ConstROCDeviceArray{T,N,A} <: AbstractArray{T,N}
-    shape::Dims{N}
-    ptr::Core.LLVMPtr{T,A}
 
-    # inner constructors, fully parameterized, exact types (ie. Int not <:Integer)
-    ConstROCDeviceArray{T,N,A}(shape::Dims{N}, ptr::Core.LLVMPtr{T,A}) where {T,A,N} = new(shape,ptr)
-end
+Adapt.adapt_storage(to::ConstAdaptor, a::AMDGPU.ROCDeviceArray{T,N,A}) where {T,N,A} =
+    AMDGPU.ROCDeviceArray(a.shape, reinterpret(Core.LLVMPtr{T,AMDGPU.Device.AS.Constant}, a.ptr))
 
-Adapt.adapt_storage(to::ConstAdaptor, a::AMDGPU.ROCDeviceArray{T,N,A}) where {T,N,A} = ConstROCDeviceArray{T, N, A}(a.shape, a.ptr)
-
-Base.pointer(a::ConstROCDeviceArray) = a.ptr
-Base.pointer(a::ConstROCDeviceArray, i::Integer) =
-    pointer(a) + (i - 1) * Base.elsize(a)
-
-Base.elsize(::Type{<:ConstROCDeviceArray{T}}) where {T} = sizeof(T)
-Base.size(g::ConstROCDeviceArray) = g.shape
-Base.length(g::ConstROCDeviceArray) = prod(g.shape)
-Base.IndexStyle(::Type{<:ConstROCDeviceArray}) = Base.IndexLinear()
-
-Base.unsafe_convert(::Type{Core.LLVMPtr{T,A}}, a::ConstROCDeviceArray{T,N,A}) where {T,A,N} = pointer(a)
-
-@inline function Base.getindex(A::ConstROCDeviceArray{T}, index::Integer) where {T}
-    @boundscheck checkbounds(A, index)
-    align = Base.datatype_alignment(T)
-    AMDGPU.unsafe_cached_load(pointer(A), index, Val(align))::T
-end
-
-@inline function Base.unsafe_view(arr::ConstROCDeviceArray{T, 1, A}, I::Vararg{Base.ViewIndex,1}) where {T, A}
-    ptr = pointer(arr) + (I[1].start-1)*sizeof(T)
-    len = I[1].stop - I[1].start + 1
-    return ConstROCDeviceArray{T,1,A}(len, ptr)
-end
-=#
+# Argument conversion
 
 KernelAbstractions.argconvert(::Kernel{ROCDevice}, arg) = AMDGPU.rocconvert(arg)
 
