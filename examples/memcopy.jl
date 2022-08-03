@@ -15,7 +15,7 @@ end
 A = zeros(128, 128)
 B = ones(128, 128)
 mycopy!(A, B)
-synchronize(device)
+synchronize(KernelAbstractions.get_device(A))
 @test A == B
 
 
@@ -28,7 +28,7 @@ if has_cuda && has_cuda_gpu()
     A = CuArray{Float32}(undef, 1024)
     B = CUDA.ones(Float32, 1024)
     mycopy!(A, B)
-    synchronize(device)
+    synchronize(KernelAbstractions.get_device(A))
     @test A == B
 end
 
@@ -41,6 +41,6 @@ if has_rocm && has_rocm_gpu()
     A = zeros(Float32, 1024) |> ROCArray
     B = ones(Float32, 1024) |> ROCArray
     mycopy!(A, B)
-    synchronize(device)
+    synchronize(KernelAbstractions.get_device(A))
     @test A == B
 end
