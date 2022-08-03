@@ -18,7 +18,8 @@ function matmul_testsuite(backend, ArrayT)
     a = ArrayT(rand(128, 256))
     b = ArrayT(rand(256, 128))
     c = ArrayT(zeros(128, 128))
-    wait(matmul(a, b, c, ndrange=size(c)))
+    matmul(a, b, c, ndrange=size(c))
+    synchronize(backend())
 
     @test c ≈ a*b
 

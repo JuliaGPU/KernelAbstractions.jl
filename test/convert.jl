@@ -53,7 +53,8 @@ function convert_testsuite(backend, ArrayT)
 
     @testset "convert test" begin
         kernel = convert_kernel!(backend(), 4)
-        wait(kernel(d_A, d_B, ndrange=(N),))
+        kernel(d_A, d_B, ndrange=(N),)
+        synchronize(backend())
 
         for i = 1:10
             @test d_B[:,i] == ceil.(d_A)

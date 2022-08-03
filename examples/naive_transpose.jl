@@ -31,8 +31,8 @@ res = 1024
 a = round.(rand(Float32, (res, res))*100)
 b = zeros(Float32, res, res)
 
-event = naive_transpose!(a,b)
-wait(event)
+naive_transpose!(a,b)
+synchronize(device)
 @test a == transpose(b)
 
 # beginning GPU tests
@@ -41,7 +41,7 @@ if has_cuda && has_cuda_gpu()
     d_b = CUDA.zeros(Float32, res, res)
 
     ev = naive_transpose!(d_a, d_b)
-    wait(ev)
+    synchronize(device)
 
     a = Array(d_a)
     b = Array(d_b)
@@ -55,7 +55,7 @@ if has_rocm && has_rocm_gpu()
     d_b = zeros(Float32, res, res) |> ROCArray
 
     ev = naive_transpose!(d_a, d_b)
-    wait(ev)
+    synchronize(device)
 
     a = Array(d_a)
     b = Array(d_b)

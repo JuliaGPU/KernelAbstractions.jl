@@ -9,188 +9,13 @@ import UnsafeAtomicsLLVM
 
 export CUDADevice
 
+import KernelAbstractions: GPU, synchronize 
+struct CUDADevice <: GPU end
+
 KernelAbstractions.get_device(::CUDA.CuArray) = CUDADevice()
 KernelAbstractions.get_device(::CUDA.CUSPARSE.AbstractCuSparseArray) = CUDADevice()
 
-const FREE_STREAMS = CUDA.CuStream[]
-const STREAMS = CUDA.CuStream[]
-const STREAM_GC_THRESHOLD = Ref{Int}(16)
-
-# This code is loaded after an `@init` step
-if haskey(ENV, "KERNELABSTRACTIONS_STREAMS_GC_THRESHOLD")
-    global STREAM_GC_THRESHOLD[] = parse(Int, ENV["KERNELABSTRACTIONS_STREAMS_GC_THRESHOLD"])
-end
-
-## Stream GC
-# Simplistic stream gc design in which when we have a total number
-# of streams bigger than a threshold, we start scanning the streams
-# and add them back to the freelist if all work on them has completed.
-# Alternative designs:
-# - Enqueue a host function on the stream that adds the stream back to the freelist
-# - Attach a finalizer to events that adds the stream back to the freelist
-# Possible improvements
-# - Add a background task that occasionally scans all streams
-# - Add a hysterisis by checking a "since last scanned" timestamp
-const STREAM_GC_LOCK = Threads.ReentrantLock()
-#=
-function next_stream()
-    lock(STREAM_GC_LOCK) do
-        if !isempty(FREE_STREAMS)
-            return pop!(FREE_STREAMS)
-        end
-
-        if length(STREAMS) > STREAM_GC_THRESHOLD[]
-            for stream in STREAMS
-                if CUDA.isdone(stream)
-                    push!(FREE_STREAMS, stream)
-                end
-            end
-        end
-
-        if !isempty(FREE_STREAMS)
-            return pop!(FREE_STREAMS)
-        end
-        stream = CUDA.CuStream(flags = CUDA.STREAM_NON_BLOCKING)
-        push!(STREAMS, stream)
-        return stream
-    end
-end
-=#
-const FREE_STREAMS_D = Dict{CUDA.CuContext,Array{CUDA.CuStream,1}}()
-const STREAMS_D      = Dict{CUDA.CuContext,Array{CUDA.CuStream,1}}()
-function next_stream()
-    ctx = CUDA.current_context()
-    lock(STREAM_GC_LOCK) do
-        # see if there is a compatible free stream
-        FREE_STREAMS_CT  = get!(FREE_STREAMS_D, ctx) do
-           CUDA.CuStream[]
-        end
-        if !isempty(FREE_STREAMS_CT)
-           return pop!(FREE_STREAMS_CT)
-        end
-
-        # GC to recover streams that are not busy
-        STREAMS_CT  = get!(STREAMS_D, ctx) do
-            CUDA.CuStream[]
-        end
-        if length(STREAMS_CT) > STREAM_GC_THRESHOLD[]
-            for stream in STREAMS_CT
-                if CUDA.isdone(stream)
-                    push!(FREE_STREAMS_CT, stream)
-                end
-            end
-        end
-
-        # if there is a compatible free stream after GC, return that stream
-        if !isempty(FREE_STREAMS_CT)
-            return pop!(FREE_STREAMS_CT)
-        end
-
-        # no compatible free stream available so create a new one
-        stream = CUDA.CuStream(flags = CUDA.STREAM_NON_BLOCKING)
-        push!(STREAMS_CT, stream)
-        return stream
-    end
-end
-
-import KernelAbstractions: Event, CPUEvent, NoneEvent, MultiEvent, CPU, GPU, isdone, failed
-
-struct CUDADevice{PreferBlocks, AlwaysInline} <: GPU end
-CUDADevice(;prefer_blocks=false, always_inline=false) = CUDADevice{prefer_blocks, always_inline}()
-CUDADevice{PreferBlocks}() where PreferBlocks = CUDADevice{PreferBlocks, false}()
-
-struct CudaEvent <: Event
-    event::CUDA.CuEvent
-end
-
-failed(::CudaEvent) = false
-isdone(ev::CudaEvent) = CUDA.isdone(ev.event)
-
-function Event(::CUDADevice)
-    stream = CUDA.stream()
-    event = CUDA.CuEvent(CUDA.EVENT_DISABLE_TIMING)
-    CUDA.record(event, stream)
-    CudaEvent(event)
-end
-
-import Base: wait
-
-wait(ev::CudaEvent, progress=yield) = wait(CPU(), ev, progress)
-
-function wait(::CPU, ev::CudaEvent, progress=nothing)
-    isdone(ev) && return nothing
-
-    # minimize latency of short operations by busy-waiting,
-    # initially without even yielding to other tasks
-    spins = 0
-    while spins < 256
-        if spins < 32
-            ccall(:jl_cpu_pause, Cvoid, ())
-            # Temporary solution before we have gc transition support in codegen.
-            ccall(:jl_gc_safepoint, Cvoid, ())
-        else
-            yield()
-        end
-        isdone(ev) && return
-        spins += 1
-    end
-
-    event = Base.Event()
-    stream = next_stream()
-    wait(CUDADevice(), ev, nothing, stream)
-    CUDA.launch(;stream) do
-        notify(event)
-    end
-    dev = CUDA.device()
-    # if an error occurs, the callback may never fire, so use a timer to detect such cases
-    timer = Timer(0; interval=1)
-    Base.@sync begin
-        Threads.@spawn try
-            CUDA.device!(dev)
-            while true
-                try
-                    Base.wait(timer)
-                catch err
-                    err isa EOFError && break
-                    rethrow()
-                end
-                if CUDA.unsafe_cuEventQuery(ev.event) != CUDA.ERROR_NOT_READY
-                    break
-                end
-            end
-        finally
-            notify(event)
-        end
-        Threads.@spawn begin
-            Base.wait(event)
-            close(timer)
-        end
-    end
-end
-
-# Use this to synchronize between computation using the task local stream
-wait(::CUDADevice, ev::CudaEvent, progress=nothing, stream=CUDA.stream()) = CUDA.wait(ev.event, stream)
-wait(::CUDADevice, ev::NoneEvent, progress=nothing, stream=nothing) = nothing
-
-function wait(::CUDADevice, ev::MultiEvent, progress=nothing, stream=CUDA.stream())
-    dependencies = collect(ev.events)
-    cudadeps  = filter(d->d isa CudaEvent,    dependencies)
-    otherdeps = filter(d->!(d isa CudaEvent), dependencies)
-    for event in cudadeps
-        CUDA.wait(event.event, stream)
-    end
-    for event in otherdeps
-        wait(CUDADevice(), event, progress, stream)
-    end
-end
-
-function wait(::CUDADevice, ev::CPUEvent, progress=nothing, stream=nothing)
-    error("""
-    Waiting on the GPU for an CPU event to finish is currently not supported.
-    We have encountered deadlocks arising, due to interactions with the CUDA
-    driver.
-    """)
-end
+synchronize(::CUDADevice) = CUDA.synchronize()
 
 ###
 # async_copy
@@ -211,22 +36,16 @@ function __pin!(a)
     return nothing
 end
 
-function KernelAbstractions.async_copy!(::CUDADevice, A, B; dependencies=nothing, progress=yield)
+function KernelAbstractions.async_copy!(::CUDADevice, A, B, progress=yield)
     A isa Array && __pin!(A)
     B isa Array && __pin!(B)
 
-    stream = next_stream()
-    wait(CUDADevice(), MultiEvent(dependencies), progress, stream)
-    event = CUDA.CuEvent(CUDA.EVENT_DISABLE_TIMING)
     GC.@preserve A B begin
         destptr = pointer(A)
         srcptr  = pointer(B)
         N       = length(A)
-        unsafe_copyto!(destptr, srcptr, N, async=true, stream=stream)
+        unsafe_copyto!(destptr, srcptr, N, async=true)
     end
-
-    CUDA.record(event, stream)
-    return CudaEvent(event)
 end
 
 import KernelAbstractions: Kernel, StaticSize, DynamicSize, partition, blocks, workitems, launch_config
@@ -267,7 +86,7 @@ function threads_to_workgroupsize(threads, ndrange)
     end
 end
 
-function (obj::Kernel{CUDADevice{PreferBlocks,AlwaysInline}})(args...; ndrange=nothing, dependencies=Event(CUDADevice()), workgroupsize=nothing, progress=yield) where {PreferBlocks, AlwaysInline}
+function (obj::Kernel{CUDADevice{PreferBlocks,AlwaysInline}})(args...; ndrange=nothing, workgroupsize=nothing, progress=yield)
 
     ndrange, workgroupsize, iterspace, dynamic = launch_config(obj, ndrange, workgroupsize)
     # this might not be the final context, since we may tune the workgroupsize
@@ -304,18 +123,13 @@ function (obj::Kernel{CUDADevice{PreferBlocks,AlwaysInline}})(args...; ndrange=n
     threads = length(workitems(iterspace))
 
     if nblocks == 0
-        return MultiEvent(dependencies)
+        return nothing 
     end
 
-    stream = next_stream()
-    wait(CUDADevice(), MultiEvent(dependencies), progress, stream)
-
     # Launch kernel
-    event = CUDA.CuEvent(CUDA.EVENT_DISABLE_TIMING)
-    kernel(ctx, args...; threads=threads, blocks=nblocks, stream=stream)
+    kernel(ctx, args...; threads=threads, blocks=nblocks)
 
-    CUDA.record(event, stream)
-    return CudaEvent(event)
+    return nothing
 end
 
 import CUDA: @device_override

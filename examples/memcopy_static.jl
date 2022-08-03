@@ -14,8 +14,8 @@ end
 
 A = zeros(128, 128)
 B = ones(128, 128)
-event = mycopy_static!(A, B)
-wait(event)
+mycopy_static!(A, B)
+synchronize(CPU())
 @test A == B
 
 if has_cuda && has_cuda_gpu()
@@ -28,7 +28,7 @@ if has_cuda && has_cuda_gpu()
 
     A = CuArray{Float32}(undef, 1024)
     B = CUDA.ones(Float32, 1024)
-    event = mycopy_static!(A, B)
-    wait(event)
+    mycopy_static!(A, B)
+    synchronize(CPU())
     @test A == B
 end

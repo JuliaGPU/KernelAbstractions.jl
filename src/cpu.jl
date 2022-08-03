@@ -1,95 +1,37 @@
 import UnsafeAtomicsLLVM
 
-struct CPUEvent <: Event
-    task::Core.Task
-end
-isdone(ev::CPUEvent) = Base.istaskdone(ev.task)
-failed(ev::CPUEvent) = Base.istaskfailed(ev.task)
-
-function Event(::CPU)
-    return NoneEvent()
-end
-
-"""
-    Event(f, args...; dependencies, progress, sticky=true)
-
-Run function `f` with `args` in a Julia task. If `sticky` is `true` the task
-is run on the thread that launched it.
-"""
-function Event(f, args...; dependencies=nothing, progress=nothing, sticky=true)
-    T = Task() do
-        wait(MultiEvent(dependencies), progress)
-        f(args...)
-    end
-    T.sticky = sticky
-    Base.schedule(T)
-    return CPUEvent(T)
-end
-
-wait(ev::Union{CPUEvent, NoneEvent, MultiEvent}, progress=nothing) = wait(CPU(), ev, progress)
-wait(::CPU, ev::NoneEvent, progress=nothing) = nothing
-
-function wait(cpu::CPU, ev::MultiEvent, progress=nothing)
-    events = ev.events
-    N = length(events)
-    alldone = ntuple(i->false, N)
-
-    while !all(alldone)
-        alldone = ntuple(N) do i
-            if alldone[i]
-                true
-            else
-                isdone(events[i])
-            end
-        end
-        if progress === nothing
-            yield()
-        else
-            progress()
-        end
-    end
-
-    if any(failed, events)
-        ex = CompositeException()
-        for event in events
-            if failed(event) && event isa CPUEvent
-                push!(ex, Base.TaskFailedException(event.task))
-            end
-        end
-        throw(ex)
+function synchronize(::CPU)
+    last = get(task_local_storage, :KA_CPU, nothing)
+    if last !== nothing
+        wait(last)
     end
 end
 
-function wait(::CPU, ev::CPUEvent, progress=nothing)
-    if progress === nothing
-        wait(ev.task)
-    else
-        while !Base.istaskdone(ev.task)
-            progress()
+@inline function do_async(f::F, args...; kwargs...) where F
+    last = get(task_local_storage(), :KA_CPU, nothing)
+    task = Base.Threads.@spawn begin
+        if last !== nothing
+            wait(last)
         end
-        if Base.istaskfailed(ev.task)
-            throw(Base.TaskFailedException(ev.task))
-        end
+        f(args...; kwargs...)
+        nothing
     end
+    task_local_storage(:KA_CPU, task)
+    return nothing
 end
 
-function async_copy!(::CPU, A, B; dependencies=nothing, progress=nothing)
-    Event(copyto!, A, B, dependencies=dependencies, progress=progress)
+function async_copy!(::CPU, A, B; progress=nothing)
+    do_async(copyto!, A, B; progress)
 end
 
-function (obj::Kernel{CPU})(args...; ndrange=nothing, workgroupsize=nothing, dependencies=nothing, progress=nothing)
+function (obj::Kernel{CPU})(args...; ndrange=nothing, workgroupsize=nothing, progress=nothing)
     ndrange, workgroupsize, iterspace, dynamic = launch_config(obj, ndrange, workgroupsize)
 
-    if dependencies isa Event
-        dependencies = (dependencies,)
-    end
-
     if length(blocks(iterspace)) == 0
-        return MultiEvent(dependencies)
+        return nothing
     end
 
-    Event(__run, obj, ndrange, iterspace, args, dynamic,
-          dependencies=dependencies, progress=progress)
+    do_async(__run, obj, ndrange, iterspace, args, dynamic; progress=progress)
 end
 
 function launch_config(kernel::Kernel{CPU}, ndrange, workgroupsize)

@@ -90,9 +90,10 @@ end
         CPU_linear_histogram = zeros(Int, 1024)
         CPU_2_histogram = zeros(Int, 2)
 
-        wait(histogram!(CPU_rand_histogram, rand_input))
-        wait(histogram!(CPU_linear_histogram, linear_input))
-        wait(histogram!(CPU_2_histogram, all_2))
+        histogram!(CPU_rand_histogram, rand_input)
+        histogram!(CPU_linear_histogram, linear_input)
+        histogram!(CPU_2_histogram, all_2)
+        synchronize(CPU())
 
         @test isapprox(CPU_rand_histogram, histogram_rand_baseline)
         @test isapprox(CPU_linear_histogram, histogram_linear_baseline)
@@ -117,9 +118,10 @@ end
         GPU_linear_histogram = GPUArray(zeros(Int, 1024))
         GPU_2_histogram = GPUArray(zeros(Int, 2))
 
-        wait(histogram!(GPU_rand_histogram, GPU_rand_input))
-        wait(histogram!(GPU_linear_histogram, GPU_linear_input))
-        wait(histogram!(GPU_2_histogram, GPU_2_input))
+        histogram!(GPU_rand_histogram, GPU_rand_input)
+        histogram!(GPU_linear_histogram, GPU_linear_input)
+        histogram!(GPU_2_histogram, GPU_2_input)
+        synchronize(get_device(GPU_2_histogram))
 
         @test isapprox(Array(GPU_rand_histogram), histogram_rand_baseline)
         @test isapprox(Array(GPU_linear_histogram), histogram_linear_baseline)

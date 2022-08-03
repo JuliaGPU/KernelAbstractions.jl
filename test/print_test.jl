@@ -8,7 +8,8 @@ end
 function printing_testsuite(backend)
     @testset "print test" begin
         kernel = kernel_print(backend(), 4)
-        wait(kernel(ndrange=(4,)))
+        kernel(ndrange=(4,))
+        synchronize(backend())
         @test true
 
         @print("Why this should work\n")

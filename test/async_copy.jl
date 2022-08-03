@@ -7,9 +7,9 @@ function asynccopy_testsuite(backend, ArrayT)
     B = ArrayT(rand(Float64, M))
 
     a = Array{Float64}(undef, M)
-    event = async_copy!(backend(), a, B, dependencies=Event(CPU()))
-    event = async_copy!(backend(), A, a, dependencies=event)
-    wait(event)
+    async_copy!(backend(), a, B)
+    async_copy!(backend(), A, a)
+    synchronize(backend())
 
     @test isapprox(a, Array(A))
     @test isapprox(a, Array(B))

@@ -39,8 +39,9 @@ end
 function unroll_testsuite(backend, ArrayT)
     a = ArrayT(zeros(Float32, 5))
     kernel! = kernel_unroll!(backend(), 1, 1)
-    wait(kernel!(a))
-    wait(kernel!(a, Val(5)))
+    kernel!(a)
+    kernel!(a, Val(5))
     kernel2! = kernel_unroll2!(backend(), 1, 1)
-    wait(kernel2!(a))
+    kernel2!(a)
+    synchronize(backend())
 end
