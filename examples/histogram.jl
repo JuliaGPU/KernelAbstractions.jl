@@ -1,7 +1,7 @@
 # INCLUDE ROCM
 using KernelAbstractions, Test
 using KernelAbstractions: @atomic, @atomicswap, @atomicreplace
-include(joinpath(@__DIR__, "utils.jl")) # Load backend
+include(joinpath(dirname(pathof(KernelAbstractions)), "../examples/utils.jl")) # Load backend
 
 
 # Function to use as a baseline for CPU metrics
