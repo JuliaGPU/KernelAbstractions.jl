@@ -1,91 +1,75 @@
 # KernelAbstractions
 
-`KernelAbstractions.jl` is a package that allows you to write GPU-like kernels that
-target different execution backends. It is intended to be a minimal, and performant
-library that explores ways to best write heterogenous code.
+[`KernelAbstractions.jl`](https://github.com/JuliaGPU/KernelAbstractions.jl) (KA) is
+a package that allows you to write GPU-like kernels targetting different
+execution backends. KA intends to be a minimal and
+performant
+library that explores ways to write heterogeneous code. Although parts of
+the package are still experimental, it has been used successfully as part of the
+[Exascale Computing Project](https://www.exascaleproject.org/) to run Julia code
+on pre-[Frontier](https://www.olcf.ornl.gov/frontier/) and
+pre-[Aurora](https://www.alcf.anl.gov/aurora)
+systems. Currently, profiling and debugging require backend-specific calls like, for example, in
+[`CUDA.jl`](https://cuda.juliagpu.org/dev/development/profiling/).
 
 !!! note
-    While `KernelAbstraction.jl` is focused on performance portability, it is GPU-biased
-    and therefore the kernel language has several constructs that are necessary for good
-    performance on the GPU, but may hurt performance on the CPU.
+While KernelAbstraction.jl is focused on performance portability, it emulates GPU semantics and therefore the kernel language has several constructs that are necessary for good performance on the GPU, but serve no purpose on the CPU.
+In these cases, we either ignore such statements entirely (such as with `@synchronize`) or swap out the construct for something similar on the CPU (such as using an `MVector`  to replace `@localmem`).
+This means that CPU performance will still be fast, but might be performing extra work to provide a consistent programming model across GPU and CPU
 
-## Quickstart
-
-### Writing your first kernel
-
-Kernel functions have to be marked with the [`@kernel`](@ref). Inside the `@kernel` macro
-you can use the [kernel language](@ref api_kernel_language). As an example the `mul2` kernel
-below will multiply each element of the array `A` by `2`. It uses the [`@index`](@ref) macro
-to obtain the global linear index of the current workitem.
-
+## Supported backends
+All supported backends rely on their respective Julia interface to the compiler
+backend and depend on
+[`GPUArrays.jl`](https://github.com/JuliaGPU/GPUArrays.jl) and
+[`GPUCompiler.jl`](https://github.com/JuliaGPU/GPUCompiler.jl). KA provides
+interface kernel generation modules to those packages in
+[`/lib`](https://github.com/JuliaGPU/KernelAbstractions.jl/tree/master/lib).
+After loading the kernel packages, KA will provide a `KA.Device` for that
+backend to be used in the kernel generation stage.
+### CUDA
 ```julia
-@kernel function mul2(A)
-  I = @index(Global)
-  A[I] = 2 * A[I]
-end
+using CUDA
+using KernelAbstractions
+using CUDAKernels
 ```
-
-### Launching your first kernel
-
-You can construct a kernel for a specific backend by calling the kernel function
-with the first argument being the device kind, the second argument being the size
-of the workgroup and the third argument being a static `ndrange`. The second and
-third argument are optional. After instantiating the kernel you can launch it by
-calling the kernel object with the right arguments and some keyword arguments that
-configure the specific launch. The example below creates a kernel with a static
-workgroup size of `16` and a dynamic `ndrange`. Since the `ndrange` is dynamic it
-has to be provided for the launch as a keyword argument.
-
+[`CUDA.jl`](https://github.com/JuliaGPU/CUDA.jl) is currently the most mature way to program for GPUs.
+This provides a device `CUDADevice <: KA.Device` to
+### AMDGPU
 ```julia
-A = ones(1024, 1024)
-kernel = mul2(CPU(), 16)
-event = kernel(A, ndrange=size(A))
-wait(event)
-all(A .== 2.0)
+using AMDGPU
+using KernelAbstractions
+using ROCKernels
 ```
+Experimental AMDGPU (ROCm) support is available via the
+[`AMDGPU.jl`](https://github.com/JuliaGPU/AMDGPU.jl) and `ROCKernels.jl`. It
+provides the device `ROCDevice <: KA.Device`. Please get in touch with `@jpsamaroo` for
+any issues specific to the ROCKernels backend.
+###  oneAPI
+Experimental support for Intel GPUs has also been added through the oneAPI Intel
+Compute Runtime interfaced to in
+[`oneAPI.jl`](https://github.com/JuliaGPU/oneAPI.jl)
 
-!!! danger
-    All kernel launches are asynchronous, each kernel produces an event token that
-    has to be waited upon, before reading or writing memory that was passed as an
-    argument to the kernel. See [dependencies](@ref dependencies) for a full
-    explanation.
+## Semantic differences
 
-If you have a GPU attached to your machine, it's equally as easy to launch your
-kernel on it instead. For example, launching on a CUDA GPU:
-
-```julia
-using CUDAKernels # Required to access CUDADevice
-A = CUDA.ones(1024, 1024)
-kernel = mul2(CUDADevice(), 16)
-# ... the rest is the same!
-```
-
-AMDGPU (ROCm) support is also available via the ROCKernels.jl package, although
-at this time it is considered experimental. Ping `@jpsamaroo` in any issues
-specific to the ROCKernels backend.
-
-## Important differences to Julia
+### To Julia
 
 1. Functions inside kernels are forcefully inlined, except when marked with `@noinline`.
 2. Floating-point multiplication, addition, subtraction are marked contractable.
 
-## Important differences to CUDA.jl/AMDGPU.jl
+### To CUDA.jl/AMDGPU.jl
 
 1. The kernels are automatically bounds-checked against either the dynamic or statically
    provided `ndrange`.
 2. Functions like `Base.sin` are mapped to `CUDA.sin`/`AMDGPU.sin`.
 
-## Important differences to GPUifyLoops.jl
+### To GPUifyLoops.jl
 
 1. `@scratch` has been renamed to `@private`, and the semantics have changed. Instead
    of denoting how many dimensions are implicit on the GPU, you only ever provide the
    explicit number of dimensions that you require. The implicit CPU dimensions are
    appended.
 
-## How to debug kernels
-
-*TODO*
-
-## How to profile kernels
-
-*TODO*
+## Contributing
+Please file any bug reports through Github issues or fixes through a pull
+request. Any heterogeneous hardware or code aficionados is welcome to join us on
+our journey.
