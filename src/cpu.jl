@@ -1,7 +1,7 @@
 import UnsafeAtomicsLLVM
 
 function synchronize(::CPU)
-    last = Base.get(task_local_storage, :KA_CPU, nothing)
+    last = Base.get(task_local_storage(), :KA_CPU, nothing)
     if last !== nothing
         wait(last)
     end
