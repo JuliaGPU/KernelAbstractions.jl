@@ -1,7 +1,7 @@
 module ROCKernels
 
 import AMDGPU
-import AMDGPU: rocfunction, HSAAgent, HSAQueue, HSASignal, HSAStatusSignal, Mem
+import AMDGPU: rocfunction, ROCQueue, ROCSignal, ROCKernelSignal, Mem
 import StaticArrays
 import StaticArrays: MArray
 import Adapt
@@ -14,8 +14,8 @@ export ROCDevice
 KernelAbstractions.get_device(::AMDGPU.ROCArray) = ROCDevice()
 
 
-const FREE_QUEUES = HSAQueue[]
-const QUEUES = HSAQueue[]
+const FREE_QUEUES = ROCQueue[]
+const QUEUES = ROCQueue[]
 const QUEUE_GC_THRESHOLD = Ref{Int}(16)
 
 # This code is loaded after an `@init` step
@@ -54,7 +54,7 @@ function next_queue()
         end
 
         # FIXME: Which agent?
-        queue = HSAQueue()
+        queue = ROCQueue()
         push!(QUEUES, queue)
         return queue
     end
@@ -64,17 +64,17 @@ import KernelAbstractions: Event, CPUEvent, NoneEvent, MultiEvent, CPU, GPU, isd
 
 struct ROCDevice <: GPU end
 
-struct ROCEvent{T<:Union{AMDGPU.HSA.Signal,HSAStatusSignal}} <: Event
+struct ROCEvent{T<:Union{AMDGPU.HSA.Signal,ROCKernelSignal}} <: Event
     event::T
 end
-ROCEvent(signal::HSASignal) = ROCEvent(signal.signal[])
+ROCEvent(signal::ROCSignal) = ROCEvent(signal.signal[])
 
-cpuwait(ev::ROCEvent{AMDGPU.HSA.Signal}) = wait(HSASignal(ev.event))
-cpuwait(ev::ROCEvent{HSAStatusSignal}) = wait(ev.event)
+cpuwait(ev::ROCEvent{AMDGPU.HSA.Signal}) = wait(ROCSignal(ev.event))
+cpuwait(ev::ROCEvent{ROCKernelSignal}) = wait(ev.event)
 gpuwait(ev::ROCEvent{AMDGPU.HSA.Signal}) = AMDGPU.device_signal_wait(ev.event, 0)
-gpuwait(ev::ROCEvent{HSAStatusSignal}) = wait(ev.event)
+gpuwait(ev::ROCEvent{ROCKernelSignal}) = wait(ev.event)
 
-Adapt.adapt_storage(::AMDGPU.Adaptor, ev::ROCEvent{HSAStatusSignal}) =
+Adapt.adapt_storage(::AMDGPU.Runtime.Adaptor, ev::ROCEvent{ROCKernelSignal}) =
     ROCEvent(ev.event.signal.signal[])
 
 failed(::ROCEvent) = false # FIXME
@@ -82,7 +82,7 @@ isdone(ev::ROCEvent) = true # FIXME
 
 function Event(::ROCDevice)
     queue = AMDGPU.get_default_queue()
-    # Returns an HSASignalSet containing signals
+    # Returns an ROCSignalSet containing signals
     event = AMDGPU.barrier_and!(queue, AMDGPU.active_kernels(queue))
     # Build ROCEvents and put them in a MultiEvent
     MultiEvent(Tuple(ROCEvent(s) for s in event.signals))
@@ -109,7 +109,7 @@ wait(::ROCDevice, ev::NoneEvent, progress=nothing, queue=nothing) = nothing
 
 function wait(::ROCDevice, ev::MultiEvent, progress=nothing, queue=AMDGPU.get_default_queue())
     dependencies = collect(ev.events)
-    rocdeps = map(d->d.event isa HSAStatusSignal ? d.event.signal.signal[] : d.event, filter(d->d isa ROCEvent, dependencies))
+    rocdeps = map(d->d.event isa ROCKernelSignal ? d.event.signal.signal[] : d.event, filter(d->d isa ROCEvent, dependencies))
     wait.(rocdeps)
     #isempty(rocdeps) || wait(AMDGPU.barrier_and!(queue, rocdeps))
     for event in filter(d->!(d isa ROCEvent), dependencies)
@@ -131,7 +131,7 @@ function KernelAbstractions.async_copy!(::ROCDevice, A, B; dependencies=nothing,
         AMDGPU.HSA.memory_copy(destptr, srcptr, N) |> AMDGPU.check
     end
 
-    return ROCEvent(HSASignal(0))
+    return ROCEvent(ROCSignal(0))
 end
 
 import KernelAbstractions: Kernel, StaticSize, DynamicSize, partition, blocks, workitems, launch_config
@@ -214,7 +214,7 @@ function (obj::Kernel{ROCDevice})(args...; ndrange=nothing, dependencies=nothing
     return ROCEvent(event.event)
 end
 
-import AMDGPU: @device_override
+import AMDGPU.Device: @device_override
 
 import KernelAbstractions: CompilerMetadata, DynamicCheck, LinearIndices
 import KernelAbstractions: __index_Local_Linear, __index_Group_Linear, __index_Global_Linear, __index_Local_Cartesian, __index_Group_Cartesian, __index_Global_Cartesian, __validindex, __print
