@@ -11,25 +11,27 @@ CI = parse(Bool, get(ENV, "CI", "false"))
 
 @info "Develop..." CI
 
-Pkg.develop(kernelabstractions)
+pkgs = [kernelabstractions]
+
 if !CI || BACKEND == "ROCM"
     rockernels = Pkg.PackageSpec(path = joinpath(root_directory, "lib", "ROCKernels"))
-    Pkg.develop(rockernels)
+    push!(pkgs, rockernels)
 end
 
 if !CI || BACKEND == "CUDA"
     cudakernels = Pkg.PackageSpec(path = joinpath(root_directory, "lib", "CUDAKernels"))
-    Pkg.develop(cudakernels)
+    push!(pkgs, cudakernels)
 end
 
 if !CI || BACKEND == "oneAPI"
     oneapikernels = Pkg.PackageSpec(path = joinpath(root_directory, "lib", "oneAPIKernels"))
-    Pkg.develop(oneapikernels)
+    push!(pkgs, oneapikernels)
 end
 
 if VERSION < v"1.8"
     kernelgradients = Pkg.PackageSpec(path = joinpath(root_directory, "lib", "KernelGradients"))
-    Pkg.develop(kernelgradients)
+    push!(pkgs, kernelgradients)
 end
+Pkg.develop(pkgs)
 Pkg.build()
 Pkg.precompile()
