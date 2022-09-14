@@ -340,6 +340,9 @@ abstract type GPU <: Device end
 
 struct CPU <: Device end
 
+isgpu(::GPU) = true
+isgpu(::CPU) = false
+
 
 """
     KernelAbstractions.get_device(A::AbstractArray)::KernelAbstractions.Device
@@ -438,6 +441,10 @@ function partition(kernel, ndrange, workgroupsize)
 
     iterspace = NDRange{length(ndrange), static_blocks, static_workgroupsize}(blocks, workgroupsize)
     return iterspace, dynamic
+end
+
+function construct(::Device, ::S, ::NDRange, xpu_name::XPUName) where {Device<:Union{CPU,GPU}, S<:_Size, NDRange<:_Size, XPUName}
+    return Kernel{Device, S, NDRange, XPUName}(xpu_name)
 end
 
 ###

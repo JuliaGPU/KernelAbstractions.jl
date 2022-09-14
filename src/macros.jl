@@ -50,14 +50,15 @@ function __kernel(expr)
     # create constructor functions
     constructors = quote
         if $(name isa Symbol ? :(!@isdefined($name)) : true)
-            Core.@__doc__ $name(dev::$Device) = $name(dev, $DynamicSize(), $DynamicSize())
-            $name(dev::$Device, size) = $name(dev, $StaticSize(size), $DynamicSize())
-            $name(dev::$Device, size, range) = $name(dev, $StaticSize(size), $StaticSize(range))
-            function $name(::Device, ::S, ::NDRange) where {Device<:$CPU, S<:$_Size, NDRange<:$_Size}
-                return $Kernel{Device, S, NDRange, typeof($cpu_name)}($cpu_name)
-            end
-            function $name(::Device, ::S, ::NDRange) where {Device<:$GPU, S<:$_Size, NDRange<:$_Size}
-                return $Kernel{Device, S, NDRange, typeof($gpu_name)}($gpu_name)
+            Core.@__doc__ $name(dev) = $name(dev, $DynamicSize(), $DynamicSize())
+            $name(dev, size) = $name(dev, $StaticSize(size), $DynamicSize())
+            $name(dev, size, range) = $name(dev, $StaticSize(size), $StaticSize(range))
+            function $name(dev::Dev, sz::S, range::NDRange) where {Dev, S<:$_Size, NDRange<:$_Size}
+                if $isgpu(dev)
+                    return $construct(dev, sz, range, $gpu_name)
+                else
+                    return $construct(dev, sz, range, $cpu_name)
+                end
             end
         end
     end

@@ -152,6 +152,8 @@ end
             @test occursin("!noalias", IR)
         elseif backend_str == "CUDA"
             @test occursin("@llvm.nvvm.ldg", IR)
+        elseif backend_str == "ROCM"
+            @test occursin("addrspace(4)", IR)
         end
     end
 end
