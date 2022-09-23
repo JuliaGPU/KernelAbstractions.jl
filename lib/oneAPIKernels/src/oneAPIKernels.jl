@@ -7,7 +7,7 @@ import KernelAbstractions
 
 export oneAPIDevice
 
-KernelAbstractions.get_device(::oneAPI.oneArray) = oneAPIDevice()
+KernelAbstractions.get_device(::Type{<:oneAPI.oneArray}) = oneAPIDevice()
 
 
 const FREE_QUEUES = oneL0.ZeCommandQueue[]

@@ -13,7 +13,7 @@ export ROCDevice
 
 KernelAbstractions.isgpu(::ROCDevice) = true
 
-KernelAbstractions.get_device(A::ROCArray) = AMDGPU.device(A)
+KernelAbstractions.get_device(::Type{<:ROCArray}) = AMDGPU.device(A)
 
 
 const FREE_QUEUES = ROCQueue[]

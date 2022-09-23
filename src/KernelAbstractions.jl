@@ -335,6 +335,16 @@ constify(arg) = adapt(ConstAdaptor(), arg)
 # Backend hierarchy
 ###
 
+"""
+    KernelAbstractions.get_device(A::AbstractArray)::KernelAbstractions.Device
+
+Get a `KernelAbstractions.Device` instance suitable for array `A`.
+"""
+get_device(::Type) = error("Unable to determine KernelAbstractions device for this Array")
+get_device(x) = get_device(typeof(x))
+
+get_device(::Type{WA}) where WA<:Adapt.WrappedArray = parent(WA)
+
 abstract type Device end
 abstract type GPU <: Device end
 
@@ -343,22 +353,7 @@ struct CPU <: Device end
 isgpu(::GPU) = true
 isgpu(::CPU) = false
 
-
-"""
-    KernelAbstractions.get_device(A::AbstractArray)::KernelAbstractions.Device
-
-Get a `KernelAbstractions.Device` instance suitable for array `A`.
-"""
-function get_device end
-
-# Should cover SubArray, ReshapedArray, ReinterpretArray, Hermitian, AbstractTriangular, etc.:
-get_device(A::AbstractArray) = get_device(parent(A))
-
-get_device(A::AbstractSparseArray) = get_device(rowvals(A))
-get_device(A::Diagonal) = get_device(A.diag)
-get_device(A::Tridiagonal) = get_device(A.d)
-
-get_device(::Array) = CPU()
+get_device(::Type{<:Array}) = CPU()
 
 include("nditeration.jl")
 using .NDIteration
