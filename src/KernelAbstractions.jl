@@ -343,7 +343,7 @@ Get a `KernelAbstractions.Device` instance suitable for array `A`.
 get_device(::Type) = error("Unable to determine KernelAbstractions device for this Array")
 get_device(x) = get_device(typeof(x))
 
-get_device(::Type{WA}) where WA<:Adapt.WrappedArray = parent(WA)
+get_device(::Type{WA}) where WA<:Adapt.WrappedArray = Adapt.parent(WA)
 
 abstract type Device end
 abstract type GPU <: Device end
