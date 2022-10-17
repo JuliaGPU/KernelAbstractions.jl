@@ -34,6 +34,7 @@ and then invoked on the arguments.
 
 # Example:
 
+```julia
 @kernel function vecadd(A, @Const(B))
     I = @index(Global)
     @inbounds A[I] += B[I]
@@ -43,6 +44,7 @@ A = ones(1024)
 B = rand(1024)
 event = vecadd(CPU(), 64)(A, B, ndrange=size(A))
 wait(event)
+```
 """
 macro kernel(expr)
     __kernel(expr)
