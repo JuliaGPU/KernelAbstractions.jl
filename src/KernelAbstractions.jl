@@ -15,7 +15,7 @@ using StaticArrays
 using Adapt
 
 """
-   @kernel function f(args) end
+    @kernel function f(args) end
 
 Takes a function definition and generates a Kernel constructor from it.
 The enclosed function is allowed to contain kernel language constructs.
@@ -51,7 +51,7 @@ macro kernel(expr)
 end
 
 """
-   @Const(A)
+    @Const(A)
 
 `@Const` is an argument annotiation that asserts that the memory reference
 by `A` is both not written to as part of the kernel and that it does not alias
