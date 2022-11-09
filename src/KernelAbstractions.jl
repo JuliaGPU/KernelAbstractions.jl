@@ -274,7 +274,7 @@ A cartesian index is a general N-dimensional index that is derived from the iter
   - `Cartesian`: Produces a `CartesianIndex{N}` that can be used to index into memory.
   - `NTuple`: Produces a `NTuple{N}` that can be used to index into memory.
 
-If the index kind is not provided it defaults to `Linear`, this is suspect to change.
+If the index kind is not provided it defaults to `Linear`, this is subject to change.
 
 # Examples
 
