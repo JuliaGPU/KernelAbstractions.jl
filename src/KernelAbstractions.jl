@@ -1,7 +1,9 @@
 module KernelAbstractions
 
 export @kernel
-export @Const, @localmem, @private, @uniform, @synchronize, @index, @groupsize, @print
+export @Const, @localmem, @private, @uniform, @synchronize
+export @index, @groupsize, @ndrange
+export @print
 export Device, GPU, CPU, Event, MultiEvent, NoneEvent
 export async_copy!
 
@@ -110,7 +112,8 @@ function async_copy! end
 # - @uniform
 # - @synchronize
 # - @index
-# - groupsize
+# - @groupsize
+# - @ndrange
 ###
 
 """
@@ -125,6 +128,18 @@ function groupsize end
 macro groupsize()
     quote
         $groupsize($(esc(:__ctx__)))
+    end 
+end
+
+"""
+    @ndrange()
+
+Query the ndrange on the device. This function returns
+a tuple corresponding to kernel configuration.
+"""
+macro ndrange()
+    quote
+        $ndrange($(esc(:__ctx__)))
     end 
 end
 
