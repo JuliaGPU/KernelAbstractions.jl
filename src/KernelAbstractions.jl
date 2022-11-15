@@ -118,6 +118,9 @@ function async_copy! end
 # - @ndrange
 ###
 
+function groupsize end
+function ndrange end
+
 """
     @groupsize()
 
@@ -125,8 +128,6 @@ Query the workgroupsize on the device. This function returns
 a tuple corresponding to kernel configuration. In order to get
 the total size you can use `prod(@groupsize())`.
 """
-function groupsize end
-
 macro groupsize()
     quote
         $groupsize($(esc(:__ctx__)))

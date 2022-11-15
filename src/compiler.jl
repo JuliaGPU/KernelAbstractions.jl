@@ -26,7 +26,9 @@ end
 @inline __dynamic_checkbounds(::CompilerMetadata{NDRange, CB}) where {NDRange, CB} = CB <: DynamicCheck
 @inline __ndrange(::CompilerMetadata{NDRange}) where {NDRange<:StaticSize}  = CartesianIndices(get(NDRange))
 @inline __ndrange(cm::CompilerMetadata{NDRange}) where {NDRange<:DynamicSize} = cm.ndrange
-@inline groupsize(ctx) = __groupsize(ctx)
 @inline __workitems_iterspace(ctx) = workitems(__iterspace(ctx))
+
+@inline groupsize(ctx) = __groupsize(ctx)
+@inline ndrange(ctx) = __ndrange(ctx)
 
 include("compiler/contract.jl")
