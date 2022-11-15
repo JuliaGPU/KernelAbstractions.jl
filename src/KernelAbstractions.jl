@@ -28,6 +28,8 @@ and then invoked on the arguments.
 
 - [`@Const`](@ref)
 - [`@index`](@ref)
+- [`@groupsize`](@ref)
+- [`@ndrange`](@ref)
 - [`@localmem`](@ref)
 - [`@private`](@ref)
 - [`@uniform`](@ref)
