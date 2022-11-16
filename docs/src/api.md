@@ -12,6 +12,7 @@
 @print
 @uniform
 @groupsize
+@ndrange
 ```
 
 ## Host interface
