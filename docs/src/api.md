@@ -11,7 +11,8 @@
 @synchronize
 @print
 @uniform
-groupsize
+@groupsize
+@ndrange
 ```
 
 ## Host interface
