@@ -1,6 +1,12 @@
 using KernelAbstractions
 using Test
 
+@kernel function stmt_form()
+    @uniform bs = @groupsize()[1]
+    @private s = bs ÷ 2
+    @synchronize
+end
+
 @kernel function typetest(A, B)
     priv = @private eltype(A) (1,)
     I = @index(Global, Linear)
@@ -54,6 +60,7 @@ end
 
 function private_testsuite(backend, ArrayT)
     @testset "kernels" begin
+        wait(stmt_form(backend(), 16)(ndrange=16))
         A = ArrayT{Int}(undef, 64)
         wait(private(backend(), 16)(A, ndrange=size(A)))
         @test all(A[1:16] .== 16:-1:1)
