@@ -17,7 +17,7 @@ using StaticArrays
 using Adapt
 
 """
-   @kernel function f(args) end
+    @kernel function f(args) end
 
 Takes a function definition and generates a Kernel constructor from it.
 The enclosed function is allowed to contain kernel language constructs.
@@ -38,6 +38,7 @@ and then invoked on the arguments.
 
 # Example:
 
+```julia
 @kernel function vecadd(A, @Const(B))
     I = @index(Global)
     @inbounds A[I] += B[I]
@@ -47,13 +48,14 @@ A = ones(1024)
 B = rand(1024)
 event = vecadd(CPU(), 64)(A, B, ndrange=size(A))
 wait(event)
+```
 """
 macro kernel(expr)
     __kernel(expr)
 end
 
 """
-   @Const(A)
+    @Const(A)
 
 `@Const` is an argument annotiation that asserts that the memory reference
 by `A` is both not written to as part of the kernel and that it does not alias
