@@ -190,7 +190,7 @@ Creates a private local of `mem` per item in the workgroup. This can be safely u
 across [`@synchronize`](@ref) statements.
 """
 macro private(expr)
-    expr
+    esc(expr)
 end
 
 """
