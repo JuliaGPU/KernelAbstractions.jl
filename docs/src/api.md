@@ -11,7 +11,7 @@
 @synchronize
 @print
 @uniform
-groupsize
+@groupsize
 ```
 
 ## Host interface
