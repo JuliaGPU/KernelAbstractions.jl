@@ -5,7 +5,7 @@ Because CUDA is the most popular GPU programming environment, we can use it as a
 reference for defining terminology in KA. A *workgroup* is called a block in
 NVIDIA CUDA and designates a group of threads acting in parallel, preferably
 in lockstep. For the GPU, the workgroup size is typically around 256, while for the CPU,
-it is usually less than or equal to the number of CPU cores. An *ndrange* is
+it is usually a multiple of the natural vector-width. An *ndrange* is
 called a grid in NVIDIA CUDA and designates the total number of work items. If
 using a workgroup of size 1 (non-parallel execution), the ndrange is the
 number of items to iterate over in a loop.
@@ -33,7 +33,7 @@ executable that is then executed with the input argument `A` and the additional
 argument being a static `ndrange`.
 ```julia
 A = ones(1024, 1024)
-ev = mul2_kernel(CPU(), 16)(A, ndrange=size(A))
+ev = mul2_kernel(CPU(), 64)(A, ndrange=size(A))
 wait(ev)
 all(A .== 2.0)
 ```
@@ -65,7 +65,7 @@ A = oneArray(ones(1024, 1024))
 ```
 The kernel generation and execution are then
 ```julia
-ev = mul2_kernel(device, 16)(A, ndrange=size(A))
+ev = mul2_kernel(device, 64)(A, ndrange=size(A))
 wait(ev)
 all(A .== 2.0)
 ```
@@ -86,7 +86,7 @@ intialize variables.
 using CUDAKernels # Required to access CUDADevice
 function mymul(A::CuArray)
     A .= 1.0
-    ev = mul2_kernel(CUDADevice(), 16)(A, ndrange=size(A))
+    ev = mul2_kernel(CUDADevice(), 64)(A, ndrange=size(A))
     wait(ev)
     all(A .== 2.0)
 end
@@ -97,7 +97,7 @@ different stream than the KA kernels.  Launching `mul_kernel` may start before `
 .= 1.0` has completed. To prevent this, we add a device-wide dependency to the
 kernel by adding `dependencies=Event(CUDADevice())`.
 ```julia
-ev = mul_kernel(CUDADevice(), 16)(A, ndrange=size(A), dependencies=Event(CUDADevice()))
+ev = mul_kernel(CUDADevice(), 64)(A, ndrange=size(A), dependencies=Event(CUDADevice()))
 ```
 This device dependency requires all kernels on the device to be completed before this kernel is launched.
 In the same vein, multiple events may be added to a wait.
@@ -107,8 +107,8 @@ using CUDAKernels # Required to access CUDADevice
 function mymul(A::CuArray, B::CuArray)
     A .= 1.0
     B .= 3.0
-    evA = mul2_kernel(CUDADevice(), 16)(A, ndrange=size(A), dependencies=Event(CUDADevice()))
-    evB = mul2_kernel(CUDADevice(), 16)(A, ndrange=size(A), dependencies=Event(CUDADevice()))
+    evA = mul2_kernel(CUDADevice(), 64)(A, ndrange=size(A), dependencies=Event(CUDADevice()))
+    evB = mul2_kernel(CUDADevice(), 64)(A, ndrange=size(A), dependencies=Event(CUDADevice()))
     wait(evA, evB)
     all(A .+ B .== 8.0)
 end
