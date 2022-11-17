@@ -5,7 +5,7 @@ Because CUDA is the most popular GPU programming environment, we can use it as a
 reference for defining terminology in KA. A *workgroup* is called a block in
 NVIDIA CUDA and designates a group of threads acting in parallel, preferably
 in lockstep. For the GPU, the workgroup size is typically around 256, while for the CPU,
-it is usually a multiply of the natural vector-width. An *ndrange* is
+it is usually a multiple of the natural vector-width. An *ndrange* is
 called a grid in NVIDIA CUDA and designates the total number of work items. If
 using a workgroup of size 1 (non-parallel execution), the ndrange is the
 number of items to iterate over in a loop.
