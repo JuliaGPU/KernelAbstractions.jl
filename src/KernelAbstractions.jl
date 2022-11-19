@@ -144,7 +144,7 @@ a tuple corresponding to kernel configuration.
 """
 macro ndrange()
     quote
-        $ndrange($(esc(:__ctx__)))
+        $size($ndrange($(esc(:__ctx__))))
     end 
 end
 
