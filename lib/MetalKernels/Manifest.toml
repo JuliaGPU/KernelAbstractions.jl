@@ -1,6 +1,6 @@
 # This file is machine-generated - editing it directly is not advised
 
-julia_version = "1.8.2"
+julia_version = "1.8.3"
 manifest_format = "2.0"
 project_hash = "35ceb525a72daefd7e2d70660f72401798368edf"
 
@@ -85,7 +85,7 @@ version = "1.4.1"
 deps = ["Adapt", "Atomix", "InteractiveUtils", "LinearAlgebra", "MacroTools", "SparseArrays", "StaticArrays", "UUIDs", "UnsafeAtomics", "UnsafeAtomicsLLVM"]
 path = "../.."
 uuid = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
-version = "0.8.5"
+version = "0.8.6"
 
 [[deps.LLVM]]
 deps = ["CEnum", "LLVMExtra_jll", "Libdl", "Printf", "Unicode"]
@@ -149,7 +149,9 @@ version = "2.28.0+0"
 
 [[deps.Metal]]
 deps = ["Adapt", "CEnum", "ExprTools", "GPUArrays", "GPUCompiler", "LLVM", "Libdl", "LinearAlgebra", "Metal_LLVM_Tools_jll", "Random", "Reexport", "cmt_jll"]
-path = "/Users/tim/Developer/Metal.jl"
+git-tree-sha1 = "9734facd3f7df4b4cdec2b5705244f8642d94221"
+repo-rev = "main"
+repo-url = "https://github.com/JuliaGPU/Metal.jl.git"
 uuid = "dde4c033-4e86-420c-a63e-0dd931031962"
 version = "0.1.2"
 
