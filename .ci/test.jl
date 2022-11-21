@@ -15,6 +15,9 @@ end
 if !CI || BACKEND == "oneAPI"
     push!(pkgs, "oneAPIKernels")
 end
+if !CI || BACKEND == "Metal"
+    push!(pkgs, "MetalKernels")
+end
 if !CI || haskey(ENV, "TEST_KERNELGRADIENTS")
     if VERSION < v"1.8"
         push!(pkgs, "KernelGradients")
