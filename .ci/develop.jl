@@ -31,6 +31,7 @@ end
 if !CI || BACKEND == "Metal"
     metalkernels = Pkg.PackageSpec(path = joinpath(root_directory, "lib", "MetalKernels"))
     push!(pkgs, metalkernels)
+    push!(pkgs, PackageSpec(name="Metal", rev="main")) # TODO remove when tagged
 end
 
 if VERSION < v"1.8"
