@@ -270,7 +270,7 @@ import KernelAbstractions: SharedMemory, Scratchpad, __synchronize, __size
 ###
 # GPU implementation of shared memory
 ###
-@device_override @inline function SharedMemory(::Type{T}, ::Val{Dims}, ::Val{Id}) where {T, Dims, Id}
+@device_override @inline function SharedMemory(::Type{T}, ::Val{Dims}, ::Val{Id}, ::Val) where {T, Dims, Id}
     ptr = oneAPI.emit_localmemory(T, Val(prod(Dims)))
     oneAPI.oneDeviceArray(Dims, ptr)
 end

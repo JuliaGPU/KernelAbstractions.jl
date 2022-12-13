@@ -133,7 +133,7 @@ the total size you can use `prod(@groupsize())`.
 macro groupsize()
     quote
         $groupsize($(esc(:__ctx__)))
-    end 
+    end
 end
 
 """
@@ -145,7 +145,7 @@ a tuple corresponding to kernel configuration.
 macro ndrange()
     quote
         $size($ndrange($(esc(:__ctx__))))
-    end 
+    end
 end
 
 """
@@ -153,12 +153,12 @@ end
 
 Declare storage that is local to a workgroup.
 """
-macro localmem(T, dims)
+macro localmem(T, dims, zeroinit=false)
     # Stay in sync with CUDAnative
     id = gensym("static_shmem")
 
     quote
-        $SharedMemory($(esc(T)), Val($(esc(dims))), Val($(QuoteNode(id))))
+        $SharedMemory($(esc(T)), Val($(esc(dims))), Val($(QuoteNode(id))), Val($(esc(zeroinit))))
     end
 end
 

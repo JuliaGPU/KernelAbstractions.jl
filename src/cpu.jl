@@ -203,7 +203,7 @@ end
 ###
 # CPU implementation of shared memory
 ###
-@inline function SharedMemory(::Type{T}, ::Val{Dims}, ::Val) where {T, Dims}
+@inline function SharedMemory(::Type{T}, ::Val{Dims}, ::Val, ::Val) where {T, Dims}
     MArray{__size(Dims), T}(undef)
 end
 

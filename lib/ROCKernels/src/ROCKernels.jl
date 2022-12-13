@@ -289,8 +289,8 @@ import KernelAbstractions: ConstAdaptor, SharedMemory, Scratchpad, __synchronize
 # GPU implementation of shared memory
 # - shared memory for each workgroup
 ###
-@device_override @inline function SharedMemory(::Type{T}, ::Val{Dims}, ::Val{Id}) where {T, Dims, Id}
-    ptr = AMDGPU.Device.alloc_special(Val(Id), T, Val(AMDGPU.AS.Local), Val(prod(Dims)))
+@device_override @inline function SharedMemory(::Type{T}, ::Val{Dims}, ::Val{Id}, ::Val{Zeroinit}) where {T, Dims, Id, Zeroinit}
+    ptr = AMDGPU.Device.alloc_special(Val(Id), T, Val(AMDGPU.AS.Local), Val(prod(Dims)), Val(Zeroinit))
     AMDGPU.ROCDeviceArray(Dims, ptr)
 end
 
