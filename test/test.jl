@@ -70,15 +70,20 @@ end
     x = ArrayT(rand(Float32, 5))
     A = ArrayT(rand(Float32, 5,5))
     device = backend()
-    @test @inferred(KernelAbstractions.get_device(A)) == device
-    @test @inferred(KernelAbstractions.get_device(view(A, 2:4, 1:3))) == device
+    if isdefined(Main, :CUDAKernels) && (device isa Main.CUDAKernels.CUDADevice)
+        deviceT = Main.CUDAKernels.CUDADevice
+    else
+        deviceT = typeof(device)
+    end
+    @test @inferred(KernelAbstractions.get_device(A)) isa deviceT
+    @test @inferred(KernelAbstractions.get_device(view(A, 2:4, 1:3))) isa deviceT
     if !(isdefined(Main, :ROCKernels) && (device isa Main.ROCKernels.ROCDevice)) &&
        !(isdefined(Main, :oneAPIKernels) && (device isa Main.oneAPIKernels.oneAPIDevice))
         # Sparse arrays are not supported by the ROCm or oneAPI backends yet:
-        @test @inferred(KernelAbstractions.get_device(sparse(A))) == device
+        @test @inferred(KernelAbstractions.get_device(sparse(A))) isa deviceT
     end
-    @test @inferred(KernelAbstractions.get_device(Diagonal(x))) == device
-    @test @inferred(KernelAbstractions.get_device(Tridiagonal(A))) == device
+    @test @inferred(KernelAbstractions.get_device(Diagonal(x))) isa deviceT
+    @test @inferred(KernelAbstractions.get_device(Tridiagonal(A))) isa deviceT
 end
 
 @testset "indextest" begin

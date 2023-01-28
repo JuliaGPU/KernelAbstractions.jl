@@ -27,7 +27,8 @@ end
 if CUDA.functional()
     CUDA.versioninfo()
     CUDA.allowscalar(false)
-    Testsuite.testsuite(CUDADevice, backend, CUDA, CuArray, CUDA.CuDeviceArray)
+    Testsuite.testsuite(CUDADevice{false}, backend, CUDA, CuArray, CUDA.CuDeviceArray)
+    Testsuite.testsuite(CUDADevice{true}, backend, CUDA, CuArray, CUDA.CuDeviceArray)
     # GradientsTestsuite.testsuite(CUDADevice, backend, CUDA, CuArray, CUDA.CuDeviceArray)
 elseif !CI
     error("No CUDA GPUs available!")

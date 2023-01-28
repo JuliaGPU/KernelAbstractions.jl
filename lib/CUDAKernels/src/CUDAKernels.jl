@@ -95,7 +95,8 @@ end
 
 import KernelAbstractions: Event, CPUEvent, NoneEvent, MultiEvent, CPU, GPU, isdone, failed
 
-struct CUDADevice <: GPU end
+struct CUDADevice{PreferBlocks} <: GPU end
+CUDADevice() = CUDADevice{false}()
 
 struct CudaEvent <: Event
     event::CUDA.CuEvent
@@ -232,7 +233,7 @@ import KernelAbstractions: Kernel, StaticSize, DynamicSize, partition, blocks, w
 ###
 # Kernel launch
 ###
-function launch_config(kernel::Kernel{CUDADevice}, ndrange, workgroupsize)
+function launch_config(kernel::Kernel{<:CUDADevice}, ndrange, workgroupsize)
     if ndrange isa Integer
         ndrange = (ndrange,)
     end
@@ -265,7 +266,7 @@ function threads_to_workgroupsize(threads, ndrange)
     end
 end
 
-function (obj::Kernel{CUDADevice})(args...; ndrange=nothing, dependencies=Event(CUDADevice()), workgroupsize=nothing, progress=yield)
+function (obj::Kernel{CUDADevice{PreferBlocks}})(args...; ndrange=nothing, dependencies=Event(CUDADevice()), workgroupsize=nothing, progress=yield) where PreferBlocks
 
     ndrange, workgroupsize, iterspace, dynamic = launch_config(obj, ndrange, workgroupsize)
     # this might not be the final context, since we may tune the workgroupsize
@@ -275,7 +276,17 @@ function (obj::Kernel{CUDADevice})(args...; ndrange=nothing, dependencies=Event(
     # figure out the optimal workgroupsize automatically
     if KernelAbstractions.workgroupsize(obj) <: DynamicSize && workgroupsize === nothing
         config = CUDA.launch_configuration(kernel.fun; max_threads=prod(ndrange))
-        workgroupsize = threads_to_workgroupsize(config.threads, ndrange)
+        if PreferBlocks
+            # Prefer blocks over threads
+            threads = min(prod(ndrange), config.threads)
+            # XXX: Some kernels performs much better with all blocks active
+            cu_blocks = max(cld(prod(ndrange), threads), config.blocks)
+            threads = cld(prod(ndrange), cu_blocks)
+        else
+            threads = config.threads
+        end
+
+        workgroupsize = threads_to_workgroupsize(threads, ndrange)
         iterspace, dynamic = partition(obj, ndrange, workgroupsize)
         ctx = mkcontext(obj, ndrange, iterspace)
     end
@@ -311,7 +322,7 @@ import KernelAbstractions: CompilerMetadata, DynamicCheck, LinearIndices
 import KernelAbstractions: __index_Local_Linear, __index_Group_Linear, __index_Global_Linear, __index_Local_Cartesian, __index_Group_Cartesian, __index_Global_Cartesian, __validindex, __print
 import KernelAbstractions: mkcontext, expand, __iterspace, __ndrange, __dynamic_checkbounds
 
-function mkcontext(kernel::Kernel{CUDADevice}, _ndrange, iterspace)
+function mkcontext(kernel::Kernel{<:CUDADevice}, _ndrange, iterspace)
     CompilerMetadata{KernelAbstractions.ndrange(kernel), DynamicCheck}(_ndrange, iterspace)
 end
 
@@ -393,6 +404,6 @@ end
 Adapt.adapt_storage(to::ConstAdaptor, a::CUDA.CuDeviceArray) = Base.Experimental.Const(a)
 
 # Argument conversion
-KernelAbstractions.argconvert(k::Kernel{CUDADevice}, arg) = CUDA.cudaconvert(arg)
+KernelAbstractions.argconvert(k::Kernel{<:CUDADevice}, arg) = CUDA.cudaconvert(arg)
 
 end
