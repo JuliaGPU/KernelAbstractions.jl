@@ -20,6 +20,12 @@ const FREE_QUEUES = ROCQueue[]
 const QUEUES = ROCQueue[]
 const QUEUE_GC_THRESHOLD = Ref{Int}(16)
 
+function disable_queue_pooling!()
+    lock(QUEUE_GC_LOCK) do
+        global QUEUE_GC_THRESHOLD[] = 0
+    end
+end
+
 # This code is loaded after an `@init` step
 if haskey(ENV, "KERNELABSTRACTIONS_QUEUES_GC_THRESHOLD")
     global QUEUE_GC_THRESHOLD[] = parse(Int, ENV["KERNELABSTRACTIONS_QUEUES_GC_THRESHOLD"])
@@ -39,11 +45,14 @@ end
 const QUEUE_GC_LOCK = Threads.ReentrantLock()
 function next_queue()
     lock(QUEUE_GC_LOCK) do
+        thresh = QUEUE_GC_THRESHOLD[]
+        thresh == 0 && return AMDGPU.default_queue()
+
         if !isempty(FREE_QUEUES)
             return pop!(FREE_QUEUES)
         end
 
-        if length(QUEUES) > QUEUE_GC_THRESHOLD[]
+        if length(QUEUES) > thresh
             for queue in QUEUES
                 #if AMDGPU.queued_packets(queue) == 0
                     push!(FREE_QUEUES, queue)
@@ -189,49 +198,43 @@ function construct(dev::ROCDevice, sz::S, range::NDRange, gpu_name::GPUName) whe
     return Kernel{ROCDevice, S, NDRange, GPUName}(gpu_name)
 end
 
-function (obj::Kernel{ROCDevice})(args...; ndrange=nothing, dependencies=nothing, workgroupsize=nothing, progress=nothing)
-    ndrange, workgroupsize, iterspace, dynamic = launch_config(obj, ndrange, workgroupsize)
-    # this might not be the final context, since we may tune the workgroupsize
+function (obj::Kernel{ROCDevice})(
+    args...; ndrange=nothing, dependencies=nothing,
+    workgroupsize=nothing, progress=nothing,
+)
+    ndrange, new_workgroupsize, iterspace, dynamic = launch_config(obj, ndrange, workgroupsize)
     ctx = mkcontext(obj, ndrange, iterspace)
-    #= TODO: Autotuning
-    kernel = AMDGPU.@roc launch=false name=String(nameof(obj.f)) Cassette.overdub(ctx, obj.f, args...)
+    kernel = AMDGPU.@roc launch=false name=String(nameof(obj.f)) obj.f(ctx, args...)
 
-    # figure out the optimal workgroupsize automatically
-    if KernelAbstractions.workgroupsize(obj) <: DynamicSize && workgroupsize === nothing
-        config = AMDGPU.launch_configuration(kernel.fun; max_threads=prod(ndrange))
-        workgroupsize = threads_to_workgroupsize(config.threads, ndrange)
-        iterspace, dynamic = partition(obj, ndrange, workgroupsize)
+    # If dynamic, figure out the optimal groupsize automatically.
+    is_dynamic =
+        KernelAbstractions.workgroupsize(obj) <: DynamicSize &&
+        isnothing(workgroupsize)
+    if is_dynamic
+        (; groupsize) = AMDGPU.launch_configuration(kernel)
+        new_workgroupsize = threads_to_workgroupsize(groupsize, ndrange)
+        iterspace, dynamic = partition(obj, ndrange, new_workgroupsize)
         ctx = mkcontext(obj, ndrange, iterspace)
     end
 
-    # If the kernel is statically sized we can tell the compiler about that
-    if KernelAbstractions.workgroupsize(obj) <: StaticSize
-        maxthreads = prod(KernelAbstractions.get(KernelAbstractions.workgroupsize(obj)))
-    else
-        maxthreads = nothing
-    end
-    =#
-
     nblocks = length(blocks(iterspace))
     nthreads = length(workitems(iterspace))
+    nblocks == 0 && return MultiEvent(dependencies)
 
-    if nblocks == 0
-        return MultiEvent(dependencies)
-    end
+    queue = next_queue() #AMDGPU.default_queue()
+    isnothing(dependencies) || wait(queue.device, MultiEvent(dependencies), progress, queue)
 
-    queue = next_queue()
-    device = queue.device
-    wait(device, MultiEvent(dependencies), progress, queue)
+    # Launch kernel.
+    groupsize, gridsize = nthreads, (nblocks * nthreads)
+    foreach(AMDGPU.wait!, args)
 
-    # Launch kernel
-    event = AMDGPU.@roc(groupsize=nthreads,
-                        gridsize=nblocks*nthreads,
-                        queue=queue,
-                        name=String(nameof(obj.f)),
-                        # TODO: maxthreads=maxthreads,
-                        obj.f(ctx, args...))
+    kernel_instance = AMDGPU.create_kernel(kernel)
+    kernel_args = map(AMDGPU.rocconvert, args)
+    signal = ROCKernelSignal(ROCSignal(), queue, kernel_instance)
+    kernel(ctx, kernel_args...; signal, groupsize, gridsize)
 
-    return ROCEvent(event)
+    foreach(x -> AMDGPU.mark!(x, signal), args)
+    return ROCEvent(signal)
 end
 
 import AMDGPU.Device: @device_override
