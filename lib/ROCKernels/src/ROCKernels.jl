@@ -221,7 +221,7 @@ function (obj::Kernel{ROCDevice})(
     nthreads = length(workitems(iterspace))
     nblocks == 0 && return MultiEvent(dependencies)
 
-    queue = next_queue() #AMDGPU.default_queue()
+    queue = next_queue()
     isnothing(dependencies) || wait(queue.device, MultiEvent(dependencies), progress, queue)
 
     # Launch kernel.
