@@ -95,8 +95,8 @@ end
 
 import KernelAbstractions: Event, CPUEvent, NoneEvent, MultiEvent, CPU, GPU, isdone, failed
 
-struct CUDADevice{PreferBlocks} <: GPU end
-CUDADevice() = CUDADevice{false}()
+struct CUDADevice{PreferBlocks, AlwaysInline} <: GPU end
+CUDADevice(;prefer_blocks=false, always_inline=false) = CUDADevice{prefer_blocks, always_inline}()
 
 struct CudaEvent <: Event
     event::CUDA.CuEvent
@@ -266,12 +266,20 @@ function threads_to_workgroupsize(threads, ndrange)
     end
 end
 
-function (obj::Kernel{CUDADevice{PreferBlocks}})(args...; ndrange=nothing, dependencies=Event(CUDADevice()), workgroupsize=nothing, progress=yield) where PreferBlocks
+function (obj::Kernel{CUDADevice{PreferBlocks,AlwaysInline}})(args...; ndrange=nothing, dependencies=Event(CUDADevice()), workgroupsize=nothing, progress=yield) where {PreferBlocks, AlwaysInline}
 
     ndrange, workgroupsize, iterspace, dynamic = launch_config(obj, ndrange, workgroupsize)
     # this might not be the final context, since we may tune the workgroupsize
     ctx = mkcontext(obj, ndrange, iterspace)
-    kernel = CUDA.@cuda launch=false obj.f(ctx, args...)
+
+    # If the kernel is statically sized we can tell the compiler about that
+    if KernelAbstractions.workgroupsize(obj) <: StaticSize
+        maxthreads = prod(KernelAbstractions.get(KernelAbstractions.workgroupsize(obj)))
+    else
+        maxthreads = nothing
+    end
+
+    kernel = CUDA.@cuda launch=false always_inline=AlwaysInline maxthreads=maxthreads obj.f(ctx, args...)
 
     # figure out the optimal workgroupsize automatically
     if KernelAbstractions.workgroupsize(obj) <: DynamicSize && workgroupsize === nothing
@@ -289,13 +297,6 @@ function (obj::Kernel{CUDADevice{PreferBlocks}})(args...; ndrange=nothing, depen
         workgroupsize = threads_to_workgroupsize(threads, ndrange)
         iterspace, dynamic = partition(obj, ndrange, workgroupsize)
         ctx = mkcontext(obj, ndrange, iterspace)
-    end
-
-    # If the kernel is statically sized we can tell the compiler about that
-    if KernelAbstractions.workgroupsize(obj) <: StaticSize
-        maxthreads = prod(KernelAbstractions.get(KernelAbstractions.workgroupsize(obj)))
-    else
-        maxthreads = nothing
     end
 
     nblocks = length(blocks(iterspace))
