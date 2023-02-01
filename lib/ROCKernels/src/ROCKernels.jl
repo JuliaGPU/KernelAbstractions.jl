@@ -20,12 +20,6 @@ const FREE_QUEUES = ROCQueue[]
 const QUEUES = ROCQueue[]
 const QUEUE_GC_THRESHOLD = Ref{Int}(16)
 
-function disable_queue_pooling!()
-    lock(QUEUE_GC_LOCK) do
-        global QUEUE_GC_THRESHOLD[] = 0
-    end
-end
-
 # This code is loaded after an `@init` step
 if haskey(ENV, "KERNELABSTRACTIONS_QUEUES_GC_THRESHOLD")
     global QUEUE_GC_THRESHOLD[] = parse(Int, ENV["KERNELABSTRACTIONS_QUEUES_GC_THRESHOLD"])
@@ -45,14 +39,11 @@ end
 const QUEUE_GC_LOCK = Threads.ReentrantLock()
 function next_queue()
     lock(QUEUE_GC_LOCK) do
-        thresh = QUEUE_GC_THRESHOLD[]
-        thresh == 0 && return AMDGPU.default_queue()
-
         if !isempty(FREE_QUEUES)
             return pop!(FREE_QUEUES)
         end
 
-        if length(QUEUES) > thresh
+        if length(QUEUES) > QUEUE_GC_THRESHOLD[]
             for queue in QUEUES
                 #if AMDGPU.queued_packets(queue) == 0
                     push!(FREE_QUEUES, queue)
