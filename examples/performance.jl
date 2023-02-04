@@ -5,6 +5,8 @@ using KernelAbstractions.Extras: @unroll
 has_cuda && has_cuda_gpu() || exit()
 CUDA.allowscalar(false)
 
+using NVTX
+
 const nreps = 3
 const N = 2048
 const T = Float32
