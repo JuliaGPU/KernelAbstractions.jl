@@ -15,7 +15,6 @@ steps:
       queue: "juliagpu"
       cuda: "*"
     env:
-      JULIA_CUDA_USE_BINARYBUILDER: "true"
       KERNELABSTRACTIONS_TEST_BACKEND: "CUDA"
     timeout_in_minutes: 60
 
@@ -35,7 +34,6 @@ steps:
       queue: "juliagpu"
       cuda: "*"
     env:
-      JULIA_CUDA_USE_BINARYBUILDER: "true"
       KERNELABSTRACTIONS_TEST_BACKEND: "CUDA"
     timeout_in_minutes: 60
 
@@ -55,8 +53,26 @@ steps:
       queue: "juliagpu"
       cuda: "*"
     env:
-      JULIA_CUDA_USE_BINARYBUILDER: "true"
       KERNELABSTRACTIONS_TEST_BACKEND: "CUDA"
+    timeout_in_minutes: 60
+
+  - label: "ROCm Julia 1"
+    plugins:
+      - JuliaCI/julia#v1:
+          version: "1"
+      - JuliaCI/julia-coverage#v1:
+          codecov: true
+          dirs:
+            - src
+            - lib
+    commands:
+      - julia .ci/develop.jl
+      - julia .ci/test.jl
+    agents:
+      queue: "juliagpu"
+      rocm: "*"
+    env:
+      KERNELABSTRACTIONS_TEST_BACKEND: "ROCM"
     timeout_in_minutes: 60
 
   - label: "ROCm Julia 1.7"
@@ -78,6 +94,44 @@ steps:
       KERNELABSTRACTIONS_TEST_BACKEND: "ROCM"
     timeout_in_minutes: 60
 
+  - label: "ROCm Julia nightly"
+    plugins:
+      - JuliaCI/julia#v1:
+          version: "nightly"
+      - JuliaCI/julia-coverage#v1:
+          codecov: true
+          dirs:
+            - src
+            - lib
+    commands:
+      - julia .ci/develop.jl
+      - julia .ci/test.jl
+    agents:
+      queue: "juliagpu"
+      rocm: "*"
+    env:
+      KERNELABSTRACTIONS_TEST_BACKEND: "ROCM"
+    timeout_in_minutes: 60
+
+  - label: "oneAPI Julia 1"
+    plugins:
+      - JuliaCI/julia#v1:
+          version: "1"
+      - JuliaCI/julia-coverage#v1:
+          codecov: true
+          dirs:
+            - src
+            - lib
+    commands:
+      - julia .ci/develop.jl
+      - julia .ci/test.jl
+    agents:
+      queue: "juliagpu"
+      intel: "*"
+    env:
+      KERNELABSTRACTIONS_TEST_BACKEND: "oneAPI"
+    timeout_in_minutes: 60
+
   - label: "oneAPI Julia 1.7"
     plugins:
       - JuliaCI/julia#v1:
@@ -96,6 +150,26 @@ steps:
     env:
       KERNELABSTRACTIONS_TEST_BACKEND: "oneAPI"
     timeout_in_minutes: 60
+
+  - label: "oneAPI Julia nightly"
+    plugins:
+      - JuliaCI/julia#v1:
+          version: "nightly"
+      - JuliaCI/julia-coverage#v1:
+          codecov: true
+          dirs:
+            - src
+            - lib
+    commands:
+      - julia .ci/develop.jl
+      - julia .ci/test.jl
+    agents:
+      queue: "juliagpu"
+      intel: "*"
+    env:
+      KERNELABSTRACTIONS_TEST_BACKEND: "oneAPI"
+    timeout_in_minutes: 60
+
 
 env:
   JULIA_PKG_SERVER: "" # it often struggles with our large artifacts
