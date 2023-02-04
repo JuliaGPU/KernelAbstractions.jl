@@ -12,7 +12,7 @@ UnsafeAtomicsLLVM = "d80eeb9a-aca5-4d75-85e5-170c8b632249"
 
 [compat]
 Adapt = "3.0"
-CUDA = "3.8.2"
+CUDA = "3.8.2, 4.0"
 KernelAbstractions = "0.8"
 StaticArrays = "0.12, 1.0"
 julia = "1.7"

@@ -376,8 +376,7 @@ import KernelAbstractions: ConstAdaptor, SharedMemory, Scratchpad, __synchronize
 ###
 
 @device_override @inline function SharedMemory(::Type{T}, ::Val{Dims}, ::Val{Id}) where {T, Dims, Id}
-    ptr = emit_shmem(T, Val(prod(Dims)))
-    CUDA.CuDeviceArray(Dims, ptr)
+    CUDA.CuStaticSharedArray(T, Dims)
 end
 
 ###
