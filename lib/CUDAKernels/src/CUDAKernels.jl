@@ -97,6 +97,7 @@ import KernelAbstractions: Event, CPUEvent, NoneEvent, MultiEvent, CPU, GPU, isd
 
 struct CUDADevice{PreferBlocks, AlwaysInline} <: GPU end
 CUDADevice(;prefer_blocks=false, always_inline=false) = CUDADevice{prefer_blocks, always_inline}()
+CUDADevice{PreferBlocks}() where PreferBlocks = CUDADevice{PreferBlocks, false}()
 
 struct CudaEvent <: Event
     event::CUDA.CuEvent
