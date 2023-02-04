@@ -75,7 +75,7 @@ steps:
       KERNELABSTRACTIONS_TEST_BACKEND: "ROCM"
     timeout_in_minutes: 60
 
-    - label: "ROCm Julia 1.7"
+  - label: "ROCm Julia 1.7"
     plugins:
       - JuliaCI/julia#v1:
           version: "1.7"
@@ -150,6 +150,7 @@ steps:
     env:
       KERNELABSTRACTIONS_TEST_BACKEND: "oneAPI"
     timeout_in_minutes: 60
+
   - label: "oneAPI Julia nightly"
     plugins:
       - JuliaCI/julia#v1:
