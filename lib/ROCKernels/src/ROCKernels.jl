@@ -216,15 +216,10 @@ function (obj::Kernel{ROCDevice})(
     isnothing(dependencies) || wait(queue.device, MultiEvent(dependencies), progress, queue)
 
     # Launch kernel.
-    groupsize, gridsize = nthreads, (nblocks * nthreads)
-    foreach(AMDGPU.wait!, args)
-
-    kernel_instance = AMDGPU.create_kernel(kernel)
-    kernel_args = map(AMDGPU.rocconvert, args)
-    signal = ROCKernelSignal(ROCSignal(), queue, kernel_instance)
-    kernel(ctx, kernel_args...; signal, groupsize, gridsize)
-
-    foreach(x -> AMDGPU.mark!(x, signal), args)
+    signal = AMDGPU.@roc(
+        groupsize=nthreads, gridsize=(nblocks * nthreads),
+        queue=queue, name=String(nameof(obj.f)),
+        obj.f(ctx, args...))
     return ROCEvent(signal)
 end
 
