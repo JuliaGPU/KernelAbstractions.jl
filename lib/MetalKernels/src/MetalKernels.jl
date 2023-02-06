@@ -285,6 +285,6 @@ end
     # TODO
 end
 
-KernelAbstractions.argconvert(::Kernel{MetalDevice}, arg) = mtlconvert(arg)
+KernelAbstractions.argconvert(::Kernel{MetalDevice}, arg) = Metal.mtlconvert(arg)
 
 end
