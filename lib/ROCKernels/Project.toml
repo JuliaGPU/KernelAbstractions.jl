@@ -11,7 +11,7 @@ StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 UnsafeAtomicsLLVM = "d80eeb9a-aca5-4d75-85e5-170c8b632249"
 
 [compat]
-AMDGPU = "0.4.2"
+AMDGPU = "0.4.7"
 Adapt = "3.0"
 KernelAbstractions = "0.8.4"
 StaticArrays = "0.12, 1.0"
