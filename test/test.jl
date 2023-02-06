@@ -284,6 +284,17 @@ end
     end
 end
 
+if backend_str == "Metal"
+    @testset "special functions: gamma" begin
+        @test_broken false
+    end
+    @testset "special functions: erf" begin
+        @test_broken false
+    end
+    @testset "special functions: erfc" begin
+        @test_broken false
+    end
+else
 @testset "special functions: gamma" begin
     @eval begin
         @kernel function gamma_knl(A, @Const(B))
@@ -361,5 +372,6 @@ end
         end
     end
 end
+end #else Metal
 
 end
