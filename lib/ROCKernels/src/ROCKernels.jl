@@ -76,17 +76,16 @@ gpuwait(ev::ROCEvent{AMDGPU.HSA.Signal}) = AMDGPU.Device.hostcall_device_signal_
 #gpuwait(ev::ROCEvent{ROCKernelSignal}) = wait(ev.event)
 
 Adapt.adapt_storage(::AMDGPU.Runtime.Adaptor, ev::ROCEvent{ROCKernelSignal}) =
-    ROCEvent(ev.event.signal.signal[])
+    ROCEvent(ev.event.signal.signal)
 
 failed(ev::ROCEvent{ROCKernelSignal}) =
     isdone(ev) && ev.event.exception !== nothing
-isdone(ev::ROCEvent{ROCKernelSignal}) =
-    ev.event.done.set # TODO: Don't access .set
+isdone(ev::ROCEvent{ROCKernelSignal}) = !ev.event.active
 
 failed(ev::ROCEvent{ROCSignal}) =
     false # FIXME: We can't know this from just the signal value
 isdone(ev::ROCEvent{ROCSignal}) =
-    AMDGPU.HSA.hsa_signal_load_scacquire(ev.event.signal[]) < 1
+    AMDGPU.HSA.hsa_signal_load_scacquire(ev.event.signal) < 1
 
 function Event(::ROCDevice)
     queue = AMDGPU.default_queue()
@@ -117,7 +116,7 @@ wait(::ROCDevice, ev::NoneEvent, progress=nothing, queue=nothing) = nothing
 
 function wait(::ROCDevice, ev::MultiEvent, progress=nothing, queue=AMDGPU.default_queue())
     dependencies = collect(ev.events)
-    rocdeps = map(d->d.event isa ROCKernelSignal ? d.event.signal.signal[] : d.event, filter(d->d isa ROCEvent, dependencies))
+    rocdeps = map(d->d.event isa ROCKernelSignal ? d.event.signal.signal : d.event, filter(d->d isa ROCEvent, dependencies))
     wait.(rocdeps)
     #isempty(rocdeps) || wait(AMDGPU.barrier_and!(queue, rocdeps))
     for event in filter(d->!(d isa ROCEvent), dependencies)
@@ -308,7 +307,7 @@ end
 ###
 
 Adapt.adapt_storage(to::ConstAdaptor, a::AMDGPU.ROCDeviceArray{T,N,A}) where {T,N,A} =
-    AMDGPU.ROCDeviceArray(a.shape, reinterpret(Core.LLVMPtr{T,AMDGPU.Device.AS.Constant}, a.ptr))
+    AMDGPU.ROCDeviceArray(a.shape, LLVM.Interop.addrspacecast(Core.LLVMPtr{T,AMDGPU.Device.AS.Constant}, a.ptr))
 
 # Argument conversion
 
