@@ -153,7 +153,7 @@ the total size you can use `prod(@groupsize())`.
 macro groupsize()
     quote
         $groupsize($(esc(:__ctx__)))
-    end 
+    end
 end
 
 """
@@ -165,7 +165,7 @@ a tuple corresponding to kernel configuration.
 macro ndrange()
     quote
         $size($ndrange($(esc(:__ctx__))))
-    end 
+    end
 end
 
 """
@@ -714,6 +714,10 @@ PrecompileTools.@compile_workload begin
             @synchronize
         end
     end
+end
+
+if !isdefined(Base, :get_extension)
+    include("../ext/EnzymeExt.jl")
 end
 
 end #module
