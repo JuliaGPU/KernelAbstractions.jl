@@ -10,35 +10,43 @@ module EnzymeExt
         @show func.val
         @show args
         @show Event
-
+        
         # Pre-allocate tape according to ndrange... * inner_tape
-        # kernel = func.val
-        # f = kernel.f
-        # function df(ctx, args...)
-        #     Enzyme.autodiff_deferred(Split, f, Enzyme.Const, ctx, args...)
-        #     return nothing
-        # end
-        # kernel' = similar(kernel, df)
+        kernel = func.val
+        f = kernel.f
+
+        tt′ = Tuple{map(typeof, args)...}
 
         # TODO autodiff_deferred on the func.val
-        forward, reverse = thunk(...)
+        # TODO modified between use config info
+        forward, reverse = thunk(f, #=df=#nothing, Const{Nothing}, tt′,  Val(Enzyme.API.DEM_ReverseModePrimal), Val(get_width(config)), #=ModifiedBetween=#Val(true))
+        TapeType = typeof(forward(ctx, args...))
 
-        subtape = nothing
-        if EnzymeRules.needs_primal(config)
-            primal, subtape = forward(args...)
-        else
-            primal = nothing
+        subtape = Vector{TapeType}(ndrange(...))
+        
+        function fwd(ctx, subtape, args...)
+            subtape[ctx.idx] = forward(ctx, args...)
+            return nothing
         end
+        
+        function rev(ctx, subtape, args...)
+            reverse(ctx, args..., subtape[ctx.idx])
+            return nothing
+        end
+
+        aug_kernel = similar(kernel)
+        aug_kernel.f = fwd
+        
+        rev_kernel = similar(kernel)
+        rev_kernel.f = rev
+
+        primal = aug_kernel(subtape, args...)
 
         tape = Ref{Event}()
-        if EnzymeRules.needs_shadow(config)
-            function reverse_launch()
-                tape[] = reverse(args..., subtape)
-            end
-            shadow = reverse_launch
-        else
-            shadow = nothing
+        function reverse_launch()
+            tape[] = rev_kernel(subtape, args...)
         end
+        shadow = reverse_launch
         return AugmentedReturnFlexShadow(primal, shadow, tape)
     end
 
@@ -48,16 +56,16 @@ module EnzymeExt
     end
 
     function EnzymeRules.augmented_primal(config::Config, func::Const{typeof(wait)}, RT, args...)
-        if EnzymeRules.needs_primal(config)
-            primal = func.val(args...)
-        else
+        primal = func.val(args...)
+        if !EnzymeRules.needs_primal(config)
             primal = nothing
         end
         return AugmentedReturn(primal, nothing, nothing)
     end
 
     function reverse(::Config, ::Const{typeof(wait)}, ::Type{<:Const}, tape, arg)
-        closure = cast(fn, arg.dval)
+        # This duplicated is invalid, it contains the fake shadow
+        closure = arg.dval
         ev = closure()
 
         wait(rev)
