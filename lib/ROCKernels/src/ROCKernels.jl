@@ -6,7 +6,7 @@ import StaticArrays
 import StaticArrays: MArray
 import Adapt
 import KernelAbstractions
-
+import LLVM
 import UnsafeAtomicsLLVM
 
 export ROCDevice
