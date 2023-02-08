@@ -1,75 +1,85 @@
 module EnzymeExt
     using EnzymeCore
+    using Enzyme
     using EnzymeCore.EnzymeRules
-    import KernelAbstractions: Kernel, wait
+    import KernelAbstractions: Kernel, wait, StaticSize, launch_config, __groupsize, __groupindex, blocks, mkcontext, CPUEvent
 
     #TODO: Keywords are the worst
+    #
+    # EnzymeRules.inactive(::typeof(Core._compute_sparams), x...) = nothing
+    EnzymeRules.inactive(::typeof(StaticSize), x...) = nothing
 
-    function EnzymeRules.augmented_primal(config::Config, func::Const{<:Kernel}, ::Duplicated{Event}, args...) where Event
-        @show config
-        @show func.val
-        @show args
-        @show Event
-        
+    function first_type(::Type{NamedTuple{A, B}}) where {A,B}
+        first_type(B)
+    end
+    function first_type(::Type{T}) where {T<:Tuple}
+        T.parameters[1]
+    end
+
+    function EnzymeRules.augmented_primal(config::Config, func::Const{<:Kernel}, ::Event, args...; ndrange = nothing, workgroupsize = nothing, dependencies = nothing, progress = nothing) where Event
         # Pre-allocate tape according to ndrange... * inner_tape
         kernel = func.val
         f = kernel.f
 
-        tt′ = Tuple{map(typeof, args)...}
+        ndrange, workgroupsize, iterspace, dynamic = launch_config(kernel, ndrange, workgroupsize)
+        block = first(blocks(iterspace))
 
+        ctx = mkcontext(kernel, block, ndrange, iterspace, dynamic)
+        ctxTy = typeof(ctx) # Base._return_type(mkcontext, Tuple{typeof(kernel), typeof(block), typeof(ndrange), typeof(iterspace), typeof(dynamic)})
+        tt′ = Tuple{Const{ctxTy}, map(Core.typeof, args)...}
+        
         # TODO autodiff_deferred on the func.val
         # TODO modified between use config info
-        forward, reverse = thunk(f, #=df=#nothing, Const{Nothing}, tt′,  Val(Enzyme.API.DEM_ReverseModePrimal), Val(get_width(config)), #=ModifiedBetween=#Val(true))
-        TapeType = typeof(forward(ctx, args...))
+        forward, reverse = Enzyme.Compiler.thunk(f, #=df=#nothing, Const{Nothing}, tt′,  Val(Enzyme.API.DEM_ReverseModePrimal), Val(width(config)), #=ModifiedBetween=#Val(true))
+        TapeType = first_type(Base._return_type(forward, tt′))
 
-        subtape = Vector{TapeType}(ndrange(...))
+        subtape = Array{TapeType}(undef, __groupsize(ctx))
         
         function fwd(ctx, subtape, args...)
-            subtape[ctx.idx] = forward(ctx, args...)
+            subtape[__groupindex(ctx)] = forward(Const(ctx), args...)[1]
             return nothing
         end
         
         function rev(ctx, subtape, args...)
-            reverse(ctx, args..., subtape[ctx.idx])
+            reverse(Const(ctx), args..., subtape[__groupindex(ctx)])
             return nothing
         end
 
-        aug_kernel = similar(kernel)
-        aug_kernel.f = fwd
-        
-        rev_kernel = similar(kernel)
-        rev_kernel.f = rev
+        aug_kernel = similar(kernel, fwd)
+        rev_kernel = similar(kernel, rev)
 
-        primal = aug_kernel(subtape, args...)
+        primal = aug_kernel(subtape, args...; ndrange, workgroupsize, dependencies, progress)::CPUEvent
 
-        tape = Ref{Event}()
+        tape = Ref{CPUEvent}()
         function reverse_launch()
-            tape[] = rev_kernel(subtape, args...)
+            # TODO dependencies ?
+            tape[] = rev_kernel(subtape, args...; ndrange, workgroupsize, progress)
+            nothing
         end
-        shadow = reverse_launch
-        return AugmentedReturnFlexShadow(primal, shadow, tape)
+        if !EnzymeRules.needs_primal(config)
+            primal = nothing
+        end
+        shadow = CPUEvent(Task(reverse_launch))
+        return AugmentedReturn(primal, shadow, tape)
     end
 
-    function reverse(::Config, ::Const{<:Kernel}, ::Type{<:Const}, tape, args...)
+    function EnzymeRules.reverse(::Config, ::Const{<:Kernel}, ::Type{<:EnzymeCore.Annotation}, tape, args...)
         wait(tape[])
         return ()
     end
 
-    function EnzymeRules.augmented_primal(config::Config, func::Const{typeof(wait)}, RT, args...)
-        primal = func.val(args...)
+    function EnzymeRules.augmented_primal(config::Config, func::Const{typeof(wait)}, RT, arg)
+        primal = func.val(arg.val)
         if !EnzymeRules.needs_primal(config)
             primal = nothing
         end
         return AugmentedReturn(primal, nothing, nothing)
     end
 
-    function reverse(::Config, ::Const{typeof(wait)}, ::Type{<:Const}, tape, arg)
+    function EnzymeRules.reverse(::Config, ::Const{typeof(wait)}, ::Type{<:Const}, tape, arg)
         # This duplicated is invalid, it contains the fake shadow
-        closure = arg.dval
-        ev = closure()
-
-        wait(rev)
-
+        closure = arg.dval.task.code
+        closure()
         return ()
     end
 end
