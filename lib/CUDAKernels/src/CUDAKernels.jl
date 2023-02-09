@@ -99,16 +99,61 @@ struct CUDADevice{PreferBlocks, AlwaysInline} <: GPU end
 CUDADevice(;prefer_blocks=false, always_inline=false) = CUDADevice{prefer_blocks, always_inline}()
 CUDADevice{PreferBlocks}() where PreferBlocks = CUDADevice{PreferBlocks, false}()
 
-struct CudaEvent <: Event
+mutable struct Pool{T, Alloc}
+    entries::Vector{T}
+    lock::Threads.ReentrantLock
+    alloc::Alloc
+    maximum::Int
+    Pool{T}(alloc::F; maximum=256) where {T,F} = new{T,F}(Vector{T}(undef, 0), Threads.ReentrantLock(), alloc, maximum)
+end
+
+function obtain!(p::Pool{T}) where T
+    @lock p.lock begin
+        if length(p.entries) == 0
+            return p.alloc()::T
+        else
+            return pop!(p.entries)
+        end
+    end
+end
+
+function retain!(p::Pool{T}, entry::T) where T
+    @lock p.lock begin
+        if length(p.entries) <= p.maximum
+            push!(p.entries, entry)
+        end
+    end
+end
+
+const EventPool = Pool{CUDA.CuEvent}() do
+    CUDA.CuEvent(CUDA.EVENT_DISABLE_TIMING)
+end
+
+mutable struct CudaEvent <: Event
     event::CUDA.CuEvent
+    @atomic done::Bool
+    CudaEvent(event) = new(event, false)
 end
 
 failed(::CudaEvent) = false
-isdone(ev::CudaEvent) = CUDA.isdone(ev.event)
+function isdone(ev::CudaEvent)
+    # TODO do we need to
+    done = @atomic ev.done
+    if !done
+        done = CUDA.isdone(ev.event)
+        if done
+            (old, success) = @atomicreplace ev.done false => true
+            if success
+                retain!(EventPool, ev.event) # pool reclaims ownership
+            end
+        end
+    end
+    return done
+end
 
 function Event(::CUDADevice)
     stream = CUDA.stream()
-    event = CUDA.CuEvent(CUDA.EVENT_DISABLE_TIMING)
+    event = obtain!(EventPool)
     CUDA.record(event, stream)
     CudaEvent(event)
 end
@@ -217,7 +262,7 @@ function KernelAbstractions.async_copy!(::CUDADevice, A, B; dependencies=nothing
 
     stream = next_stream()
     wait(CUDADevice(), MultiEvent(dependencies), progress, stream)
-    event = CUDA.CuEvent(CUDA.EVENT_DISABLE_TIMING)
+    event = obtain!(EventPool)
     GC.@preserve A B begin
         destptr = pointer(A)
         srcptr  = pointer(B)
@@ -311,7 +356,7 @@ function (obj::Kernel{CUDADevice{PreferBlocks,AlwaysInline}})(args...; ndrange=n
     wait(CUDADevice(), MultiEvent(dependencies), progress, stream)
 
     # Launch kernel
-    event = CUDA.CuEvent(CUDA.EVENT_DISABLE_TIMING)
+    event = obtain!(EventPool)
     kernel(ctx, args...; threads=threads, blocks=nblocks, stream=stream)
 
     CUDA.record(event, stream)
