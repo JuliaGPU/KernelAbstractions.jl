@@ -134,7 +134,7 @@ function KernelAbstractions.async_copy!(::MetalDevice, A, B; dependencies=nothin
     src = pointer(B)
     N = length(A)
 
-    unsafe_copyto!(dev, dst, src, N, queue)
+    unsafe_copyto!(dev, dst, src, N, queue=queue, async=true)
 
     MTL.encode_signal!(cmdbuf, event, METAL_EVENT_SIGNAL_VALUE)
     Metal.commit!(cmdbuf)
