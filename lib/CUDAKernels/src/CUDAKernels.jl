@@ -1,6 +1,6 @@
 module CUDAKernels
 
-import CUDA
+import CUDA: CuArray
 import StaticArrays
 import StaticArrays: MArray
 import Adapt
@@ -9,7 +9,7 @@ import UnsafeAtomicsLLVM
 
 export CUDADevice
 
-KernelAbstractions.get_device(::CUDA.CuArray) = CUDADevice()
+KernelAbstractions.get_device(::CuArray) = CUDADevice()
 KernelAbstractions.get_device(::CUDA.CUSPARSE.AbstractCuSparseArray) = CUDADevice()
 
 const FREE_STREAMS = CUDA.CuStream[]

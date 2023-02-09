@@ -2,6 +2,7 @@ module oneAPIKernels
 
 import oneAPI
 import oneAPI: oneL0, oneArray
+import Adapt
 import StaticArrays
 import KernelAbstractions
 
