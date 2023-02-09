@@ -404,6 +404,11 @@ end
 
 Adapt.adapt_storage(to::ConstAdaptor, a::CUDA.CuDeviceArray) = Base.Experimental.Const(a)
 
+# Adapt rules for device to array types
+Adapt.adapt_storage(::CPU, a::CuArray) = Adapt.adapt(Array, a)
+Adapt.adapt_storage(::CUDADevice, a::CuArray) = a
+Adapt.adapt_storage(::CUDADevice, a::Array) = Adapt.adapt(CuArray, a)
+
 # Argument conversion
 KernelAbstractions.argconvert(k::Kernel{<:CUDADevice}, arg) = CUDA.cudaconvert(arg)
 

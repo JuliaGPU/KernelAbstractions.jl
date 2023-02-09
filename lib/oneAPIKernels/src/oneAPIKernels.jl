@@ -1,13 +1,13 @@
 module oneAPIKernels
 
 import oneAPI
-import oneAPI: oneL0
+import oneAPI: oneL0, oneArray
 import StaticArrays
 import KernelAbstractions
 
 export oneAPIDevice
 
-KernelAbstractions.get_device(::oneAPI.oneArray) = oneAPIDevice()
+KernelAbstractions.get_device(::oneArray) = oneAPIDevice()
 
 
 const FREE_QUEUES = oneL0.ZeCommandQueue[]
@@ -291,6 +291,11 @@ end
 @device_override @inline function __print(args...)
     oneAPI._print(args...)
 end
+
+# Adapt rules for device to array types
+Adapt.adapt_storage(::CPU, a::oneArray) = Adapt.adapt(Array, a)
+Adapt.adapt_storage(::oneAPIDevice, a::oneArray) = a
+Adapt.adapt_storage(::oneAPIDevice, a::Array) = Adapt.adapt(oneArray, a)
 
 KernelAbstractions.argconvert(::Kernel{oneAPIDevice}, arg) = oneAPI.kernel_convert(arg)
 

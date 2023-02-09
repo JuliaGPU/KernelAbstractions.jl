@@ -309,6 +309,11 @@ end
 Adapt.adapt_storage(to::ConstAdaptor, a::AMDGPU.ROCDeviceArray{T,N,A}) where {T,N,A} =
     AMDGPU.ROCDeviceArray(a.shape, LLVM.Interop.addrspacecast(Core.LLVMPtr{T,AMDGPU.Device.AS.Constant}, a.ptr))
 
+# Adapt rules for device to array types
+Adapt.adapt_storage(::CPU, a::ROCArray) = Adapt.adapt(Array, a)
+Adapt.adapt_storage(::ROCDevice, a::ROCArray) = a
+Adapt.adapt_storage(::ROCDevice, a::Array) = Adapt.adapt(ROCArray, a)
+
 # Argument conversion
 
 KernelAbstractions.argconvert(::Kernel{ROCDevice}, arg) = AMDGPU.rocconvert(arg)
