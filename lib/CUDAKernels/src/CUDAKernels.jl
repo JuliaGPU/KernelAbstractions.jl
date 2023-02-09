@@ -1,5 +1,6 @@
 module CUDAKernels
 
+import CUDA
 import CUDA: CuArray
 import StaticArrays
 import StaticArrays: MArray
