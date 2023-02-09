@@ -41,7 +41,7 @@ function testsuite(backend, backend_str, backend_mod, AT, DAT)
 
     if backend_str != "ROCM"
         @testset "async_copy!" begin
-            asynccopy_testsuite(backend, AT)
+            asynccopy_testsuite(backend, backend_str, AT)
         end
     end
 

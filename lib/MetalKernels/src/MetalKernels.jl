@@ -124,22 +124,22 @@ wait(::MetalDevice, ev::CPUEvent, progress=nothing; queue=nothing) = error("GPU-
 
 function KernelAbstractions.async_copy!(::MetalDevice, A, B; dependencies=nothing, progress=nothing)
     queue = next_queue()
+    dev = Metal.current_device()
     wait(MetalDevice(), MultiEvent(dependencies), progress; queue)
 
-    event = Metal.MtlSharedEvent(Metal.current_device())  ### FIXME: Event vs SharedEvent
+    event = Metal.MtlSharedEvent(dev)  ### FIXME: Event vs SharedEvent
     cmdbuf = Metal.MtlCommandBuffer(queue)
     
     dst = pointer(A)
     src = pointer(B)
+    N = length(A)
 
-    MtlBlitCommandEncoder(cmdbuf) do enc
-        MTL.append_copy!(enc, dst.buffer, dst.offset, src.buffer, src.offset, sizeof(A))
-    end
+    unsafe_copyto!(dev, dst, src, N, queue)
 
     MTL.encode_signal!(cmdbuf, event, METAL_EVENT_SIGNAL_VALUE)
     Metal.commit!(cmdbuf)
 
-    MetalEvent(event)
+    return MetalEvent(event)
 end
 
 import KernelAbstractions: Kernel, StaticSize, DynamicSize, partition, blocks, workitems, launch_config
