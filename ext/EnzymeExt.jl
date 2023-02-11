@@ -2,11 +2,13 @@ module EnzymeExt
     using EnzymeCore
     using Enzyme
     using EnzymeCore.EnzymeRules
-    import KernelAbstractions: Kernel, wait, StaticSize, launch_config, __groupsize, __groupindex, blocks, mkcontext, CPUEvent
+    import KernelAbstractions: Kernel, wait, StaticSize, launch_config, __groupsize, __groupindex, blocks, mkcontext, CPUEvent, CPU, construct
 
     #TODO: Keywords are the worst
     #
-    # EnzymeRules.inactive(::typeof(Core._compute_sparams), x...) = nothing
+    EnzymeRules.inactive(::typeof(construct), x...) = nothing
+    
+    EnzymeRules.inactive(::typeof(Core._compute_sparams), x...) = nothing
     EnzymeRules.inactive(::typeof(StaticSize), x...) = nothing
 
     function first_type(::Type{NamedTuple{A, B}}) where {A,B}
@@ -51,6 +53,7 @@ module EnzymeExt
         primal = aug_kernel(subtape, args...; ndrange, workgroupsize, dependencies, progress)::CPUEvent
 
         tape = Ref{CPUEvent}()
+        @assert dependencies === nothing
         function reverse_launch()
             # TODO dependencies ?
             tape[] = rev_kernel(subtape, args...; ndrange, workgroupsize, progress)
@@ -68,7 +71,7 @@ module EnzymeExt
         return ()
     end
 
-    function EnzymeRules.augmented_primal(config::Config, func::Const{typeof(wait)}, RT, arg)
+    function EnzymeRules.augmented_primal(config::Config, func::Const{typeof(wait)}, RT, ::Const{CPU}, arg::Duplicated{CPUEvent})
         primal = func.val(arg.val)
         if !EnzymeRules.needs_primal(config)
             primal = nothing
@@ -76,7 +79,7 @@ module EnzymeExt
         return AugmentedReturn(primal, nothing, nothing)
     end
 
-    function EnzymeRules.reverse(::Config, ::Const{typeof(wait)}, ::Type{<:Const}, tape, arg)
+    function EnzymeRules.reverse(::Config, ::Const{typeof(wait)}, ::Type{<:Const}, tape, ::Const{CPU}, arg::Duplicated{CPUEvent})
         # This duplicated is invalid, it contains the fake shadow
         closure = arg.dval.task.code
         closure()
