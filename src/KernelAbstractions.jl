@@ -718,6 +718,6 @@ end
 
 if !isdefined(Base, :get_extension)
     include("../ext/EnzymeExt.jl")
-end
+# end
 
 end #module
