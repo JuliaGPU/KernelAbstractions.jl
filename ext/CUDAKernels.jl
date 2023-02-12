@@ -1,11 +1,11 @@
 module CUDAKernels
 
-import CUDA
-import StaticArrays
-import StaticArrays: MArray
-import Adapt
 import KernelAbstractions
-import UnsafeAtomicsLLVM
+isdefined(Base, :get_extension) ? (import CUDA) : (import ..CUDA)
+
+# Import through parent
+import KernelAbstractions: StaticArrays, Adapt
+import StaticArrays: MArray
 
 export CUDADevice
 
