@@ -6,7 +6,7 @@ export @index, @groupsize, @ndrange
 export @print
 export Device, GPU, CPU
 export CUDADevice # TODO move to CUDA.jl itself
-export async_copy!, synchronize
+export async_copy!, synchronize, get_device
 
 import Atomix: @atomic, @atomicswap, @atomicreplace
 import UnsafeAtomics
