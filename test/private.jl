@@ -60,7 +60,8 @@ end
 
 function private_testsuite(backend, ArrayT)
     @testset "kernels" begin
-        wait(stmt_form(backend(), 16)(ndrange=16))
+        stmt_form(backend(), 16)(ndrange=16)
+        synchronize(backend())
         A = ArrayT{Int}(undef, 64)
         private(backend(), 16)(A, ndrange=size(A))
         synchronize(backend())

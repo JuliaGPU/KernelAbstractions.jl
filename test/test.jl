@@ -211,31 +211,8 @@ if backend != CPU
 end
 
 @testset "CPU dependencies" begin
-    Event(CPU())
-    kernel_empty(CPU(), 1)(ndrange=1, dependencies=(event))
-    synchronize(device)
-end
-
-@testset "MultiEvent" begin
-  kernel_empty(CPU(), 1)(ndrange=1)
-  kernel_empty(CPU(), 1)(ndrange=1)
-  kernel_empty(CPU(), 1)(ndrange=1)
-
-  @test MultiEvent(nothing) isa Event
-  @test MultiEvent((MultiEvent(nothing),)) isa Event
-  @test MultiEvent(event1) isa Event
-  @test MultiEvent((event1, event2, event3)) isa Event
-end
-
-if backend != CPU
-  @testset "MultiEvent $backend" begin
-    kernel_empty(backend(), 1)(ndrange=1)
     kernel_empty(CPU(), 1)(ndrange=1)
-    kernel_empty(backend(), 1)(ndrange=1)
-
-    @test MultiEvent(event1) isa Event
-    @test MultiEvent((event1, event2, event3)) isa Event
-  end
+    synchronize(CPU())
 end
 
 @testset "Zero iteration space $backend" begin
@@ -273,12 +250,12 @@ end
         end
         x = [1,2,3]
         env = f(CPU())(x, Val(4); ndrange=length(x))
-        synchronize(device)
+        synchronize(CPU())
         @test x == [4,4,4]
 
         x = [1,2,3]
         env = f(CPU())(x, Val(1); ndrange=length(x))
-        synchronize(device)
+        synchronize(CPU())
         @test x == [1,1,1]
     end
 end
@@ -299,7 +276,7 @@ end
             cy = similar(cx)
             gamma_knl($backend())(cy, cx; ndrange=length(x))
         end
-        synchronize(device)
+        synchronize($backend())
         if $backend == CPU
             @test y == SpecialFunctions.gamma.(x)
         else
@@ -325,7 +302,7 @@ end
             cy = similar(cx)
             erf_knl($backend())(cy, cx; ndrange=length(x))
         end
-        synchronize(device)
+        synchronize($backend())
         if $backend == CPU
             @test y == SpecialFunctions.erf.(x)
         else
@@ -351,7 +328,7 @@ end
             cy = similar(cx)
             erfc_knl($backend())(cy, cx; ndrange=length(x))
         end
-        synchronize(device)
+        synchronize($backend())
         if $backend == CPU
             @test y == SpecialFunctions.erfc.(x)
         else

@@ -7,7 +7,7 @@ function synchronize(::CPU)
     end
 end
 
-@inline function do_async(f::F, args...; kwargs...) where F
+@inline function do_async(f::F, args...; progress=nothing, kwargs...) where F
     last = Base.get(task_local_storage(), :KA_CPU, nothing)
     task = Base.Threads.@spawn begin
         if last !== nothing
@@ -31,7 +31,7 @@ function (obj::Kernel{CPU})(args...; ndrange=nothing, workgroupsize=nothing, pro
         return nothing
     end
 
-    do_async(__run, obj, ndrange, iterspace, args, dynamic; progress=progress)
+    do_async(__run, obj, ndrange, iterspace, args, dynamic; progress)
 end
 
 function launch_config(kernel::Kernel{CPU}, ndrange, workgroupsize)
