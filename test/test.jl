@@ -185,32 +185,7 @@ synchronize(backend())
     nothing
 end
 
-if backend != CPU
-    @testset "CPU--$backend dependencies" begin
-        kernel_empty(CPU(), 1)(ndrange=1)
-        kernel_empty(backend(), 1)(ndrange=1)
-        kernel_empty(CPU(), 1)(ndrange=1)
-        kernel_empty(backend(), 1)(ndrange=1)
-        @test_throws ErrorException kernel_empty(backend(), 1)(ndrange=1, dependencies=(event1, event2, event3, event4))
-        # synchronize(device)
-        # @test event5 isa KernelAbstractions.Event
-
-        kernel_empty(CPU(), 1)(ndrange=1)
-        kernel_empty(backend(), 1)(ndrange=1)
-        kernel_empty(CPU(), 1)(ndrange=1)
-        kernel_empty(backend(), 1)(ndrange=1)
-        kernel_empty(CPU(), 1)(ndrange=1, dependencies=(event1, event2, event3, event4))
-        synchronize(device)
-        @test event5 isa KernelAbstractions.Event
-    end
-    @testset "$backend wait" begin
-        kernel_empty(backend(), 1)(ndrange=1)
-        synchronize(device)
-        @test event isa KernelAbstractions.Event
-    end
-end
-
-@testset "CPU dependencies" begin
+@testset "CPU synchronization" begin
     kernel_empty(CPU(), 1)(ndrange=1)
     synchronize(CPU())
 end
