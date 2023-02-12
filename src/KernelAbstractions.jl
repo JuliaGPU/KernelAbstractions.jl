@@ -503,16 +503,4 @@ include("reflection.jl")
 
 include("cpu.jl")
 
-if !isdefined(Base, :get_extension)
-using Requires
-end
-
-function __init__()
-    # Other init functionality here
-
-    @static if !isdefined(Base, :get_extension)
-        @require CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba" include("../ext/CUDAKernels.jl")
-    end
-end
-
 end #module

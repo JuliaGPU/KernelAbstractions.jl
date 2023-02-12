@@ -1,7 +1,7 @@
 module CUDAKernels
 
 import KernelAbstractions
-isdefined(Base, :get_extension) ? (import CUDA) : (import ..CUDA)
+import CUDA
 
 # Import through parent
 import KernelAbstractions: StaticArrays, Adapt
