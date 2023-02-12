@@ -1,6 +1,5 @@
 # EXCLUDE FROM TESTING
 using KernelAbstractions
-using CUDAKernels
 using CUDA
 
 if has_cuda_gpu()
@@ -41,7 +40,7 @@ function exchange!(h_send_buf, d_recv_buf, h_recv_buf, src_rank, dst_rank,
     recv = Base.Threads.@spawn begin 
         __testall!(recv_request)
         async_copy!(device(d_recv_buf), d_recv_buf, h_recv_buf; progress=mpiyield)
-        synchronize(device(d_recv_buf))
+        KernelAbstractions.synchronize(device(d_recv_buf))
     end
 
     send = Base.Threads.@spawn begin
@@ -76,7 +75,7 @@ function main()
     send_request = fill(MPI.REQUEST_NULL, 1)
     recv_request = fill(MPI.REQUEST_NULL, 1)
 
-    synchronize(device(d_recv_buf))
+    KernelAbstractions.synchronize(device(d_recv_buf))
 
     recv_task, send_task = exchange!(h_send_buf, d_recv_buf, h_recv_buf,
                                        src_rank, dst_rank, send_request,

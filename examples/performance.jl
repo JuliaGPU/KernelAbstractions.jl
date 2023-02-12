@@ -1,3 +1,4 @@
+# EXCLUDE FROM TESTING
 using KernelAbstractions, Test
 include(joinpath(dirname(pathof(KernelAbstractions)), "../examples/utils.jl")) # Load backend
 using KernelAbstractions.Extras: @unroll
@@ -148,7 +149,7 @@ for block_dims in ((TILE_DIM, TILE_DIM), (TILE_DIM*TILE_DIM, 1), (1, TILE_DIM*TI
                 for rep in 1:nreps
                   kernel(input, output, ndrange=size(output))
                 end
-                synchronize(CUDADevice())
+                KernelAbstractions.synchronize(CUDADevice())
             end
         end
     end
@@ -170,7 +171,7 @@ for (name, kernel) in (
                 for rep in 1:nreps
                     kernel(input, output, Val(Int(bank)), ndrange=size(output))
                 end
-                synchronize(CUDADevice())
+                KernelAbstractions.synchronize(CUDADevice())
             end
         end
     end
@@ -198,7 +199,7 @@ for (name, kernel) in (
                 for rep in 1:nreps
                     kernel(input, output, Val(Int(bank)), ndrange=ndrange)
                 end
-                synchronize(CUDADevice())
+                KernelAbstractions.synchronize(CUDADevice())
             end
         end
     end

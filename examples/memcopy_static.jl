@@ -15,7 +15,7 @@ end
 A = zeros(128, 128)
 B = ones(128, 128)
 mycopy_static!(A, B)
-synchronize(KernelAbstractions.get_device(A))
+KernelAbstractions.synchronize(KernelAbstractions.get_device(A))
 @test A == B
 
 if has_cuda && has_cuda_gpu()
@@ -29,6 +29,6 @@ if has_cuda && has_cuda_gpu()
     A = CuArray{Float32}(undef, 1024)
     B = CUDA.ones(Float32, 1024)
     mycopy_static!(A, B)
-    synchronize(KernelAbstractions.get_device(A))
+    KernelAbstractions.synchronize(KernelAbstractions.get_device(A))
     @test A == B
 end
