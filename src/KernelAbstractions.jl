@@ -5,6 +5,7 @@ export @Const, @localmem, @private, @uniform, @synchronize
 export @index, @groupsize, @ndrange
 export @print
 export Device, GPU, CPU
+export CUDADevice # TODO move to CUDA.jl itself
 export async_copy!, synchronize
 
 import Atomix: @atomic, @atomicswap, @atomicreplace
@@ -332,6 +333,10 @@ constify(arg) = adapt(ConstAdaptor(), arg)
 
 abstract type Device end
 abstract type GPU <: Device end
+
+struct CUDADevice{PreferBlocks, AlwaysInline} <: GPU end
+CUDADevice(;prefer_blocks=false, always_inline=false) = CUDADevice{prefer_blocks, always_inline}()
+CUDADevice{PreferBlocks}() where PreferBlocks = CUDADevice{PreferBlocks, false}()
 
 struct CPU <: Device end
 

@@ -6,11 +6,7 @@ import CUDA
 # Import through parent
 import KernelAbstractions: StaticArrays, Adapt
 import StaticArrays: MArray
-
-export CUDADevice
-
-import KernelAbstractions: GPU, synchronize 
-struct CUDADevice <: GPU end
+import KernelAbstractions: CUDADevice, synchronize 
 
 KernelAbstractions.get_device(::CUDA.CuArray) = CUDADevice()
 KernelAbstractions.get_device(::CUDA.CUSPARSE.AbstractCuSparseArray) = CUDADevice()
@@ -86,7 +82,7 @@ function threads_to_workgroupsize(threads, ndrange)
     end
 end
 
-function (obj::Kernel{CUDADevice{PreferBlocks,AlwaysInline}})(args...; ndrange=nothing, workgroupsize=nothing, progress=yield)
+function (obj::Kernel{CUDADevice{PreferBlocks,AlwaysInline}})(args...; ndrange=nothing, workgroupsize=nothing, progress=yield) where {PreferBlocks,AlwaysInline}
 
     ndrange, workgroupsize, iterspace, dynamic = launch_config(obj, ndrange, workgroupsize)
     # this might not be the final context, since we may tune the workgroupsize
