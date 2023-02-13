@@ -3,7 +3,12 @@ steps:
     matrix:
       setup:
         version:
+          - "1.6"
+          - "1.7"
+          - "1.8"
           - "nightly"
+        cuda:
+          - "vc/ka_transition"
     plugins:
       - JuliaCI/julia#v1:
           version: "{{matrix.version}}"
@@ -11,15 +16,14 @@ steps:
           codecov: true
           dirs:
             - src
-            - ext
     commands:
       - |
-        julia --project="test" -e '
-          import Pkg
-          Pkg.dev(.)
-          Pkg.add("CUDA")
-        '
-        julia --project="test" --code-coverage=@$(pwd) test/runtests.jl
+        julia -e 'using Pkg
+                println("--- :julia: Instantiating project")
+                Pkg.develop(; path=pwd())
+                Pkg.add(; name="CUDA", version="{{matrix.cuda}}")
+                println("+++ :julia: Running tests")
+                Pkg.test("CUDA"; coverage=true)'
     agents:
       queue: "juliagpu"
       cuda: "*"
