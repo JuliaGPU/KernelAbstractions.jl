@@ -1,5 +1,5 @@
 steps:
-  - label: "CUDA Julia v{{matrix.version}}"
+  - label: "CUDA Julia {{matrix.version}}"
     matrix:
       setup:
         version:
@@ -10,8 +10,6 @@ steps:
         cuda:
           - "vc/ka_transition"
     plugins:
-      - JuliaCI/julia#v1:
-          version: "{{matrix.version}}"
       - JuliaCI/julia-coverage#v1:
           codecov: true
           dirs:
