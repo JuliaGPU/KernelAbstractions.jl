@@ -6,7 +6,7 @@ steps:
           - "1.6"
           - "1.7"
           - "1.8"
-          - "nightly"
+          - "beta"
         cuda:
           - "vc/ka_transition"
     plugins:
@@ -17,6 +17,9 @@ steps:
           dirs:
             - src
     commands:
+      - |
+        echo "Setting up Julia"
+        curl -fsSL https://install.julialang.org | sh -s -- --yes --default-channel "{{matrix.version}}"
       - |
         julia -e 'using Pkg
                 println("--- :julia: Instantiating project")
