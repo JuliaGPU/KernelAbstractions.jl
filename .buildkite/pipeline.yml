@@ -20,7 +20,7 @@ steps:
         curl -fsSL https://install.julialang.org | sh -s -- --yes --default-channel "{{matrix.version}}"
       - |
         export PATH="/root/.juliaup/bin:${PATH}"
-        julia -e 'using Pkg
+        julia +{{matrix.version}} -e 'using Pkg
                 println("--- :julia: Instantiating project")
                 Pkg.develop(; path=pwd())
                 Pkg.add(; name="CUDA", rev="{{matrix.cuda}}")
