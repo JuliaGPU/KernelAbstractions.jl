@@ -334,10 +334,6 @@ constify(arg) = adapt(ConstAdaptor(), arg)
 abstract type Device end
 abstract type GPU <: Device end
 
-struct CUDADevice{PreferBlocks, AlwaysInline} <: GPU end
-CUDADevice(;prefer_blocks=false, always_inline=false) = CUDADevice{prefer_blocks, always_inline}()
-CUDADevice{PreferBlocks}() where PreferBlocks = CUDADevice{PreferBlocks, false}()
-
 struct CPU <: Device end
 
 isgpu(::GPU) = true
