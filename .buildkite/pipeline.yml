@@ -23,7 +23,7 @@ steps:
         julia -e 'using Pkg
                 println("--- :julia: Instantiating project")
                 Pkg.develop(; path=pwd())
-                Pkg.add(; name="CUDA", version="{{matrix.cuda}}")
+                Pkg.add(; name="CUDA", rev="{{matrix.cuda}}")
                 println("+++ :julia: Running tests")
                 Pkg.test("CUDA"; coverage=true)'
     agents:
