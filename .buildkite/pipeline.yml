@@ -19,6 +19,7 @@ steps:
         echo "Setting up Julia"
         curl -fsSL https://install.julialang.org | sh -s -- --yes --default-channel "{{matrix.version}}"
       - |
+        export PATH="/root/.juliaup/bin:${PATH}"
         julia -e 'using Pkg
                 println("--- :julia: Instantiating project")
                 Pkg.develop(; path=pwd())
