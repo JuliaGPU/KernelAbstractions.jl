@@ -71,7 +71,7 @@ end
     A = ArrayT(rand(Float32, 5,5))
     device = backend()
     if isdefined(Main, :CUDA) && (device isa Main.CUDA.CUDAKernels.CUDADevice)
-        deviceT = CUDADevice
+        deviceT = Main.CUDA.CUDAKernels.CUDADevice
     else
         deviceT = typeof(device)
     end
