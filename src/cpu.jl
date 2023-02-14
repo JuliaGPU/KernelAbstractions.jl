@@ -1,22 +1,24 @@
 import UnsafeAtomicsLLVM
 
 function synchronize(::CPU)
-    last = Base.get(task_local_storage(), :KA_CPU, nothing)
-    if last !== nothing
-        wait(last)
-    end
+    nothing
+    # last = Base.get(task_local_storage(), :KA_CPU, nothing)
+    # if last !== nothing
+    #     wait(last)
+    # end
 end
 
 @inline function do_async(f::F, args...; progress=nothing, kwargs...) where F
-    last = Base.get(task_local_storage(), :KA_CPU, nothing)
-    task = Base.Threads.@spawn begin
-        if last !== nothing
-            wait(last)
-        end
-        f(args...; kwargs...)
-        nothing
-    end
-    task_local_storage(:KA_CPU, task)
+    # last = Base.get(task_local_storage(), :KA_CPU, nothing)
+    # task = Base.Threads.@spawn begin
+    #     if last !== nothing
+    #         wait(last)
+    #     end
+    #     f(args...; kwargs...)
+    #     nothing
+    # end
+    # task_local_storage(:KA_CPU, task)
+    f(args...; kwargs...)
     return nothing
 end
 
