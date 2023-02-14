@@ -30,5 +30,3 @@ end
 
 @inline groupsize(ctx) = __groupsize(ctx)
 @inline ndrange(ctx) = __ndrange(ctx)
-
-include("compiler/contract.jl")
