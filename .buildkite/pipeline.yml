@@ -6,21 +6,20 @@ steps:
           - "1.6"
           - "1.7"
           - "1.8"
-          - "beta"
+          - "nightly"
         cuda:
           - "vc/ka_transition"
+    env:
+      BUILDKITE_PLUGIN_JULIA_VERSION: "{{matrix.version}}"
     plugins:
+      - JuliaCI/julia#v1: ~
       - JuliaCI/julia-coverage#v1:
           codecov: true
           dirs:
             - src
-    commands:
+    commands: 
       - |
-        echo "Setting up Julia"
-        curl -fsSL https://install.julialang.org | sh -s -- --yes --default-channel "{{matrix.version}}"
-      - |
-        export PATH="/root/.juliaup/bin:${PATH}"
-        julia +{{matrix.version}} -e 'using Pkg
+        julia -e 'using Pkg
                 println("--- :julia: Instantiating project")
                 Pkg.develop(; path=pwd())
                 Pkg.add(; name="CUDA", rev="{{matrix.cuda}}")
