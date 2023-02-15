@@ -35,8 +35,8 @@ b = rand(123, 45)
 c = zeros(256, 45)
 
 # beginning CPU tests, returns event
-ev = matmul!(a,b,c)
-wait(ev)
+matmul!(a,b,c)
+KernelAbstractions.synchronize(KernelAbstractions.get_device(a))
 
 @test isapprox(c, a*b)
 
@@ -47,7 +47,7 @@ if has_cuda && has_cuda_gpu()
     d_c = CuArray(c)
 
     ev = matmul!(d_a, d_b, d_c)
-    wait(ev)
+    KernelAbstractions.synchronize(KernelAbstractions.get_device(a))
 
     @test isapprox(Array(d_c), a*b)
 end

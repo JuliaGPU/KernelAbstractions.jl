@@ -7,7 +7,7 @@ argconvert(k::Kernel{T}, arg) where T =
 using UUIDs
 const Cthulhu = Base.PkgId(UUID("f68482b8-f384-11e8-15f7-abe071a5a75f"), "Cthulhu")
 
-function ka_code_typed(kernel, argtypes; ndrange=nothing, workgroupsize=nothing, dependencies=nothing, interactive=false, kwargs...)
+function ka_code_typed(kernel, argtypes; ndrange=nothing, workgroupsize=nothing, interactive=false, kwargs...)
     # get the iterspace and dynamic of a kernel
     ndrange, workgroupsize, iterspace, dynamic = KernelAbstractions.launch_config(kernel, ndrange, workgroupsize)
 
@@ -36,11 +36,11 @@ function ka_code_typed(kernel, argtypes; ndrange=nothing, workgroupsize=nothing,
 end
 
 
-function ka_code_llvm(kernel, argtypes; ndrange=nothing, workgroupsize=nothing, dependencies=nothing, kwargs...)
-    ka_code_llvm(stdout, kernel, argtypes;  ndrange=ndrange, workgroupsize=nothing, dependencies=nothing, kwargs...)
+function ka_code_llvm(kernel, argtypes; ndrange=nothing, workgroupsize=nothing, kwargs...)
+    ka_code_llvm(stdout, kernel, argtypes;  ndrange=ndrange, workgroupsize=nothing, kwargs...)
 end
 
-function ka_code_llvm(io::IO, kernel, argtypes; ndrange=nothing, workgroupsize=nothing, dependencies=nothing, kwargs...)
+function ka_code_llvm(io::IO, kernel, argtypes; ndrange=nothing, workgroupsize=nothing, kwargs...)
     # get the iterspace and dynamic of a kernel
     ndrange, workgroupsize, iterspace, dynamic = KernelAbstractions.launch_config(kernel, ndrange, workgroupsize)
 

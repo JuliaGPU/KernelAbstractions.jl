@@ -70,8 +70,8 @@ end
     x = ArrayT(rand(Float32, 5))
     A = ArrayT(rand(Float32, 5,5))
     device = backend()
-    if isdefined(Main, :CUDAKernels) && (device isa Main.CUDAKernels.CUDADevice)
-        deviceT = Main.CUDAKernels.CUDADevice
+    if isdefined(Main, :CUDA) && (device isa Main.CUDA.CUDAKernels.CUDADevice)
+        deviceT = Main.CUDA.CUDAKernels.CUDADevice
     else
         deviceT = typeof(device)
     end
@@ -89,38 +89,46 @@ end
 @testset "indextest" begin
     # TODO: add test for _group and _local_cartesian
     A = ArrayT{Int}(undef, 16, 16)
-    wait(index_linear_global(backend(), 8)(A, ndrange=length(A)))
+    index_linear_global(backend(), 8)(A, ndrange=length(A))
+    synchronize(backend())
     @test all(A .== LinearIndices(A))
 
     A = ArrayT{Int}(undef, 8)
-    wait(index_linear_local(backend(), 8)(A, ndrange=length(A)))
+    index_linear_local(backend(), 8)(A, ndrange=length(A))
+    synchronize(backend())
     @test all(A .== 1:8)
 
     A = ArrayT{Int}(undef, 16)
-    wait(index_linear_local(backend(), 8)(A, ndrange=length(A)))
+    index_linear_local(backend(), 8)(A, ndrange=length(A))
+    synchronize(backend())
     @test all(A[1:8] .== 1:8)
     @test all(A[9:16] .== 1:8)
 
     A = ArrayT{Int}(undef, 8, 2)
-    wait(index_linear_local(backend(), 8)(A, ndrange=length(A)))
+    index_linear_local(backend(), 8)(A, ndrange=length(A))
+    synchronize(backend())
     @test all(A[1:8] .== 1:8)
     @test all(A[9:16] .== 1:8)
 
     A = ArrayT{CartesianIndex{2}}(undef, 16, 16)
-    wait(index_cartesian_global(backend(), 8)(A, ndrange=size(A)))
+    index_cartesian_global(backend(), 8)(A, ndrange=size(A))
+    synchronize(backend())
     @test all(A .== CartesianIndices(A))
 
     A = ArrayT{CartesianIndex{1}}(undef, 16, 16)
-    wait(index_cartesian_global(backend(), 8)(A, ndrange=length(A)))
+    index_cartesian_global(backend(), 8)(A, ndrange=length(A))
+    synchronize(backend())
     @test all(A[:] .== CartesianIndices((length(A),)))
 
     # Non-multiplies of the workgroupsize
     A = ArrayT{Int}(undef, 7, 7)
-    wait(index_linear_global(backend(), 8)(A, ndrange=length(A)))
+    index_linear_global(backend(), 8)(A, ndrange=length(A))
+    synchronize(backend())
     @test all(A .== LinearIndices(A))
 
     A = ArrayT{Int}(undef, 5)
-    wait(index_linear_local(backend(), 8)(A, ndrange=length(A)))
+    index_linear_local(backend(), 8)(A, ndrange=length(A))
+    synchronize(backend())
     @test all(A .== 1:5)
 end
 
@@ -169,84 +177,28 @@ end
 end
 
 A = convert(ArrayT, zeros(Int64, 1024))
-wait(kernel_val!(backend())(A,Val(3), ndrange=size(A)))
+kernel_val!(backend())(A,Val(3), ndrange=size(A))
+synchronize(backend())
 @test all((a)->a==3, A)
 
 @kernel function kernel_empty()
     nothing
 end
 
-if backend != CPU
-    @testset "CPU--$backend dependencies" begin
-        event1 = kernel_empty(CPU(), 1)(ndrange=1)
-        event2 = kernel_empty(backend(), 1)(ndrange=1)
-        event3 = kernel_empty(CPU(), 1)(ndrange=1)
-        event4 = kernel_empty(backend(), 1)(ndrange=1)
-        @test_throws ErrorException event5 = kernel_empty(backend(), 1)(ndrange=1, dependencies=(event1, event2, event3, event4))
-        # wait(event5)
-        # @test event5 isa KernelAbstractions.Event
-
-        event1 = kernel_empty(CPU(), 1)(ndrange=1)
-        event2 = kernel_empty(backend(), 1)(ndrange=1)
-        event3 = kernel_empty(CPU(), 1)(ndrange=1)
-        event4 = kernel_empty(backend(), 1)(ndrange=1)
-        event5 = kernel_empty(CPU(), 1)(ndrange=1, dependencies=(event1, event2, event3, event4))
-        wait(event5)
-        @test event5 isa KernelAbstractions.Event
-    end
-    @testset "$backend wait" begin
-        event = kernel_empty(backend(), 1)(ndrange=1)
-        wait(backend(), event)
-        @test event isa KernelAbstractions.Event
-    end
+@testset "CPU synchronization" begin
+    kernel_empty(CPU(), 1)(ndrange=1)
+    synchronize(CPU())
 end
 
-@testset "CPU dependencies" begin
-    event = Event(CPU())
-    event = kernel_empty(CPU(), 1)(ndrange=1, dependencies=(event))
-    wait(event)
+@testset "Zero iteration space $backend" begin
+    kernel_empty(backend(), 1)(ndrange=1)
+    kernel_empty(backend(), 1)(ndrange=0)
+    synchronize(backend())
+
+    kernel_empty(backend(), 1)(ndrange=0)
+    synchronize(backend())
 end
 
-@testset "MultiEvent" begin
-  event1 = kernel_empty(CPU(), 1)(ndrange=1)
-  event2 = kernel_empty(CPU(), 1)(ndrange=1)
-  event3 = kernel_empty(CPU(), 1)(ndrange=1)
-
-  @test MultiEvent(nothing) isa Event
-  @test MultiEvent((MultiEvent(nothing),)) isa Event
-  @test MultiEvent(event1) isa Event
-  @test MultiEvent((event1, event2, event3)) isa Event
-end
-
-if backend != CPU
-  @testset "MultiEvent $backend" begin
-    event1 = kernel_empty(backend(), 1)(ndrange=1)
-    event2 = kernel_empty(CPU(), 1)(ndrange=1)
-    event3 = kernel_empty(backend(), 1)(ndrange=1)
-
-    @test MultiEvent(event1) isa Event
-    @test MultiEvent((event1, event2, event3)) isa Event
-  end
-end
-
-@testset "Zero iteration space" begin
-    event1 = kernel_empty(CPU(), 1)(ndrange=1)
-    event2 = kernel_empty(CPU(), 1)(ndrange=0; dependencies=event1)
-    @test event2 == MultiEvent(event1)
-    event = kernel_empty(CPU(), 1)(ndrange=0)
-    @test event == MultiEvent(nothing)
-end
-
-
-if backend != CPU
-    @testset "Zero iteration space $backend" begin
-        event1 = kernel_empty(backend(), 1)(ndrange=1)
-        event2 = kernel_empty(backend(), 1)(ndrange=0; dependencies=event1)
-        @test event2 == MultiEvent(event1)
-        event = kernel_empty(backend(), 1)(ndrange=0, dependencies=nothing)
-        @test event == MultiEvent(nothing)
-    end
-end
 
 @testset "return statement" begin
     try
@@ -273,12 +225,12 @@ end
         end
         x = [1,2,3]
         env = f(CPU())(x, Val(4); ndrange=length(x))
-        wait(env)
+        synchronize(CPU())
         @test x == [4,4,4]
 
         x = [1,2,3]
         env = f(CPU())(x, Val(1); ndrange=length(x))
-        wait(env)
+        synchronize(CPU())
         @test x == [1,1,1]
     end
 end
@@ -292,14 +244,14 @@ end
 
         x = Float32[1.0,2.0,3.0,5.5]
         y = similar(x)
-        event = if $backend == CPU
+        if $backend == CPU
             gamma_knl(CPU())(y, x; ndrange=length(x))
         else
             cx = $ArrayT(x)
             cy = similar(cx)
             gamma_knl($backend())(cy, cx; ndrange=length(x))
         end
-        wait(event)
+        synchronize($backend())
         if $backend == CPU
             @test y == SpecialFunctions.gamma.(x)
         else
@@ -318,14 +270,14 @@ end
 
         x = Float32[-1.0,-0.5,0.0,1e-3,1.0,2.0,5.5]
         y = similar(x)
-        event = if $backend == CPU
+        if $backend == CPU
             erf_knl(CPU())(y, x; ndrange=length(x))
         else
             cx = $ArrayT(x)
             cy = similar(cx)
             erf_knl($backend())(cy, cx; ndrange=length(x))
         end
-        wait(event)
+        synchronize($backend())
         if $backend == CPU
             @test y == SpecialFunctions.erf.(x)
         else
@@ -344,14 +296,14 @@ end
 
         x = Float32[-1.0,-0.5,0.0,1e-3,1.0,2.0,5.5]
         y = similar(x)
-        event = if $backend == CPU
+        if $backend == CPU
             erfc_knl(CPU())(y, x; ndrange=length(x))
         else
             cx = $ArrayT(x)
             cy = similar(cx)
             erfc_knl($backend())(cy, cx; ndrange=length(x))
         end
-        wait(event)
+        synchronize($backend())
         if $backend == CPU
             @test y == SpecialFunctions.erfc.(x)
         else

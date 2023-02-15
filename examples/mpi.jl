@@ -1,6 +1,5 @@
 # EXCLUDE FROM TESTING
 using KernelAbstractions
-using CUDAKernels
 using CUDA
 
 if has_cuda_gpu()
@@ -26,7 +25,7 @@ function __Isend!(request, buf, dst, tag, comm)
     request[1] = MPI.Isend(buf, dst, tag, comm)
 end
 
-function __testall!(requests; dependencies=nothing)
+function __testall!(requests)
     done = false
     while !done
         done, _ = MPI.Testall!(requests)
@@ -35,20 +34,21 @@ function __testall!(requests; dependencies=nothing)
 end
 
 function exchange!(h_send_buf, d_recv_buf, h_recv_buf, src_rank, dst_rank,
-                   send_request, recv_request, comm; dependencies=nothing)
+                   send_request, recv_request, comm)
 
-    event = Event(__Irecv!, recv_request, h_recv_buf, src_rank, 666, comm;
-                  dependencies = dependencies, progress=mpiyield)
-    event = Event(__testall!, recv_request; dependencies = event, progress=mpiyield)
+    __Irecv!(recv_request, h_recv_buf, src_rank, 666, comm)
+    recv = Base.Threads.@spawn begin 
+        __testall!(recv_request)
+        async_copy!(device(d_recv_buf), d_recv_buf, h_recv_buf; progress=mpiyield)
+        KernelAbstractions.synchronize(device(d_recv_buf))
+    end
 
-    recv_event = async_copy!(device(d_recv_buf), d_recv_buf, h_recv_buf;
-                             dependencies = event, progress=mpiyield)
+    send = Base.Threads.@spawn begin
+        __Isend!(send_request, h_send_buf, dst_rank, 666, comm)
+        __testall!(send_request)
+    end
 
-    event = Event(__Isend!, send_request, h_send_buf, dst_rank, 666, comm;
-                  dependencies = dependencies, progress=mpiyield)
-    send_event = Event(__testall!, send_request; dependencies = event, progress=mpiyield)
-
-    return recv_event, send_event
+    return recv, send
 end
 
 function main()
@@ -75,13 +75,13 @@ function main()
     send_request = fill(MPI.REQUEST_NULL, 1)
     recv_request = fill(MPI.REQUEST_NULL, 1)
 
-    synchronize()
+    KernelAbstractions.synchronize(device(d_recv_buf))
 
-    recv_event, send_event = exchange!(h_send_buf, d_recv_buf, h_recv_buf,
+    recv_task, send_task = exchange!(h_send_buf, d_recv_buf, h_recv_buf,
                                        src_rank, dst_rank, send_request,
                                        recv_request, comm)
-    wait(recv_event)
-    wait(send_event)
+    wait(recv_task)
+    wait(send_task)
 
     @test all(d_recv_buf .== src_rank)
 end

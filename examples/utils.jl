@@ -1,7 +1,7 @@
 # EXCLUDE FROM TESTING
 if Base.find_package("CUDA") !== nothing
     using CUDA
-    using CUDAKernels
+    using CUDA.CUDAKernels
     const has_cuda = true
 else
     const has_cuda = false

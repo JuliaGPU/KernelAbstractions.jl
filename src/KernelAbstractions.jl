@@ -4,8 +4,8 @@ export @kernel
 export @Const, @localmem, @private, @uniform, @synchronize
 export @index, @groupsize, @ndrange
 export @print
-export Device, GPU, CPU, Event, MultiEvent, NoneEvent
-export async_copy!
+export Device, GPU, CPU
+export async_copy!, synchronize, get_device
 
 import Atomix: @atomic, @atomicswap, @atomicreplace
 import UnsafeAtomics
@@ -46,8 +46,8 @@ end
 
 A = ones(1024)
 B = rand(1024)
-event = vecadd(CPU(), 64)(A, B, ndrange=size(A))
-wait(event)
+vecadd(CPU(), 64)(A, B, ndrange=size(A))
+synchronize(device)
 ```
 """
 macro kernel(expr)
@@ -69,45 +69,20 @@ allowed to call the kernel with `kernel(A, A)` or `kernel(A, view(A, :))`.
 """
 macro Const end
 
-abstract type Event end
-import Base.wait
-
-struct NoneEvent <: Event end
-isdone(::NoneEvent) = true
-failed(::NoneEvent) = false
-
-struct MultiEvent{T} <: Event
-    events::T
-    MultiEvent() = new{Tuple{}}(())
-    function MultiEvent(events::Tuple{Vararg{<:Event}})
-        evs = tuplejoin(map(flatten, events)...)
-        new{typeof(evs)}(evs)
-    end
-    function MultiEvent(event::E) where {E<:Event}
-        new{Tuple{E}}((event,))
-    end
-end
-MultiEvent(::Nothing) = MultiEvent()
-MultiEvent(ev::MultiEvent) = ev
-
-isdone(ev::MultiEvent) = all(ev->isdone(ev), ev.events)
-failed(ev::MultiEvent) = all(ev->failed(ev), ev.events)
-
-@inline tuplejoin() = ()
-@inline tuplejoin(x) = x
-@inline tuplejoin(x, y) = (x..., y...)
-@inline tuplejoin(x, y, z...) = (x..., tuplejoin(y, z...)...)
-
-flatten(ev::MultiEvent) = tuplejoin(map(flatten, ev.events)...)
-flatten(ev::NoneEvent) = ()
-flatten(ev::Event) = (ev,)
-
 """
-    async_copy!(::Device, dest::AbstractArray, src::AbstractArray; dependencies = nothing)
+    async_copy!(::Device, dest::AbstractArray, src::AbstractArray)
 
-Perform an asynchronous copy on the device. Returns an event that can be waited upon.
+Perform an asynchronous copy on the device.
 """
 function async_copy! end
+
+"""
+    synchronize(::Device)
+
+Synchronize the current device.
+"""
+function synchronize end
+
 
 ###
 # Kernel language

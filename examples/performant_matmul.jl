@@ -77,6 +77,7 @@ C = zeros(N, M)
 
 kern = coalesced_matmul_kernel!(CPU(), (TILE_DIM, TILE_DIM))
 
+kern(C, A, B, N, R, M, ndrange=size(C))
+KernelAbstractions.synchronize(CPU())
 
-wait(kern(C, A, B, N, R, M, ndrange=size(C)))
 @test isapprox(A*B, C)

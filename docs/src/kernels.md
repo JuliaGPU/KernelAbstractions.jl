@@ -21,5 +21,3 @@ There are several [`@index`](@ref) variants.
 [`@localmem`](@ref), [`@synchronize`](@ref), [`@private`](@ref)
 
 # Launching kernels
-
-## [Kernel dependencies](@id dependencies)

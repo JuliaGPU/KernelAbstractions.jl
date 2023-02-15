@@ -9,7 +9,6 @@ include("private.jl")
 include("unroll.jl")
 include("nditeration.jl")
 include("async_copy.jl")
-include("events.jl")
 include("print_test.jl")
 include("compiler.jl")
 include("reflection.jl")
@@ -43,10 +42,6 @@ function testsuite(backend, backend_str, backend_mod, AT, DAT)
         @testset "async_copy!" begin
             asynccopy_testsuite(backend, AT)
         end
-    end
-
-    @testset "Events" begin
-        events_testsuite()
     end
 
     if backend_str != "ROCM"

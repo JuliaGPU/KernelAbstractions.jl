@@ -60,9 +60,11 @@ end
 
 function private_testsuite(backend, ArrayT)
     @testset "kernels" begin
-        wait(stmt_form(backend(), 16)(ndrange=16))
+        stmt_form(backend(), 16)(ndrange=16)
+        synchronize(backend())
         A = ArrayT{Int}(undef, 64)
-        wait(private(backend(), 16)(A, ndrange=size(A)))
+        private(backend(), 16)(A, ndrange=size(A))
+        synchronize(backend())
         @test all(A[1:16] .== 16:-1:1)
         @test all(A[17:32] .== 16:-1:1)
         @test all(A[33:48] .== 16:-1:1)
@@ -70,17 +72,20 @@ function private_testsuite(backend, ArrayT)
 
         A = ArrayT{Int}(undef, 64, 64)
         A .= 1
-        wait(forloop(backend())(A, Val(size(A, 2)), ndrange=size(A,1), workgroupsize=size(A,1)))
+        forloop(backend())(A, Val(size(A, 2)), ndrange=size(A,1), workgroupsize=size(A,1))
+        synchronize(backend())
         @test all(A[:, 1] .== 64)
         @test all(A[:, 2:end] .== 1)
 
         B = ArrayT{Bool}(undef, size(A)...)
-        wait(typetest(backend(), 16)(A, B, ndrange=size(A)))
+        typetest(backend(), 16)(A, B, ndrange=size(A))
+        synchronize(backend())
         @test all(B)
 
         A = ArrayT{Float32}(ones(64,3));
         out = ArrayT{Float32}(undef, 64)
-        wait(reduce_private(backend(), 8)(out, A, ndrange=size(out)))
+        reduce_private(backend(), 8)(out, A, ndrange=size(out))
+        synchronize(backend())
         @test all(out .== 3f0)
     end
 

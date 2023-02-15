@@ -1,3 +1,4 @@
+# EXCLUDE FROM TESTING
 using KernelAbstractions, Test
 include(joinpath(dirname(pathof(KernelAbstractions)), "../examples/utils.jl")) # Load backend
 using KernelAbstractions.Extras: @unroll
@@ -143,12 +144,12 @@ for block_dims in ((TILE_DIM, TILE_DIM), (TILE_DIM*TILE_DIM, 1), (1, TILE_DIM*TI
             output = similar(input)
 
             # compile kernel
-            ev = kernel(input, output, ndrange=size(output))
+            kernel(input, output, ndrange=size(output))
             CUDA.@profile begin
                 for rep in 1:nreps
-                  ev = kernel(input, output, ndrange=size(output), dependencies=(ev,))
+                  kernel(input, output, ndrange=size(output))
                 end
-                wait(ev)
+                KernelAbstractions.synchronize(CUDADevice())
             end
         end
     end
@@ -165,12 +166,12 @@ for (name, kernel) in (
             output = similar(input)
 
             # compile kernel
-            ev = kernel(input, output, Val(Int(bank)), ndrange=size(output))
+            kernel(input, output, Val(Int(bank)), ndrange=size(output))
             CUDA.@profile begin
                 for rep in 1:nreps
-                    ev = kernel(input, output, Val(Int(bank)), ndrange=size(output), dependencies=(ev,))
+                    kernel(input, output, Val(Int(bank)), ndrange=size(output))
                 end
-                wait(ev)
+                KernelAbstractions.synchronize(CUDADevice())
             end
         end
     end
@@ -193,12 +194,12 @@ for (name, kernel) in (
             ndrange = (N, div(N, block_factor))
 
             # compile kernel
-            ev = kernel(input, output, Val(Int(bank)), ndrange=ndrange)
+            kernel(input, output, Val(Int(bank)), ndrange=ndrange)
             CUDA.@profile begin
                 for rep in 1:nreps
-                    ev = kernel(input, output, Val(Int(bank)), ndrange=ndrange, dependencies=(ev,))
+                    kernel(input, output, Val(Int(bank)), ndrange=ndrange)
                 end
-                wait(ev)
+                KernelAbstractions.synchronize(CUDADevice())
             end
         end
     end
