@@ -31,8 +31,8 @@ module EnzymeExt
         tt′ = Tuple{Const{ctxTy}, map(Core.typeof, args)...}
 
         # TODO autodiff_deferred on the func.val
-        # TODO modified between use config info
-        forward, reverse = Enzyme.Compiler.thunk(f, #=df=#nothing, Const{Nothing}, tt′,  Val(Enzyme.API.DEM_ReverseModePrimal), Val(width(config)), #=ModifiedBetween=#Val(true))
+        ModifiedBetween = Val((overwritten(config)[1], false, overwritten(config)[2:end]...))
+        forward, reverse = Enzyme.Compiler.thunk(f, #=df=#nothing, Const{Nothing}, tt′,  Val(Enzyme.API.DEM_ReverseModePrimal), Val(width(config)), ModifiedBetween)
         TapeType = first_type(Base._return_type(forward, tt′))
 
         subtape = Array{TapeType}(undef, __groupsize(ctx))
