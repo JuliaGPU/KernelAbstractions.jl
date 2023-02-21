@@ -84,10 +84,7 @@ wait(ev::MetalEvent, progress=nothing) = wait(CPU(), ev, progress)
 
 
 function wait(::CPU, ev::MetalEvent, progress=nothing)
-    buf = Metal.MtlCommandBuffer(next_queue())
-    Metal.encode_wait!(buf, ev.event, METAL_EVENT_SIGNAL_VALUE)
-    Metal.commit!(buf)
-    Metal.wait_completed(buf)
+    Metal.wait(ev.event, METAL_EVENT_SIGNAL_VALUE)
 end
 
 
