@@ -407,4 +407,46 @@ Adapt.adapt_storage(to::ConstAdaptor, a::CUDA.CuDeviceArray) = Base.Experimental
 # Argument conversion
 KernelAbstractions.argconvert(k::Kernel{<:CUDADevice}, arg) = CUDA.cudaconvert(arg)
 
+# reduce block
+@device_override @inline function reduce(T,val)
+    shared = CUDA.CuStaticSharedArray(T, 32)
+
+    Sid, lane = fldmod1(CUDA.threadIdx().x, CUDA.warpsize())
+
+    val = reduce_warp(val)
+
+    # Enkel de eerste lane van iedere SIMD unit mag de waarde naar shared memory schrijven
+    if lane == 1
+        @inbounds shared[Sid] = val
+    end
+
+    CUDA.sync_threads()
+
+    # de eerste 32 values worden in val gestoken, als er er minder dan 32 warps passen in 1 block
+    # dan vullen we de rest op met nullen
+    val = if CUDA.threadIdx().x <= fld1(CUDA.blockDim().x, CUDA.warpsize())
+            @inbounds shared[lane]
+    else
+        0
+    end
+
+    # final reduce within first warp
+    if Sid == 1
+        val = reduce_warp(val)
+    end
+    return val
 end
+
+function reduce_warp(val)
+    offset = 0x00000001
+    while offset < CUDA.warpsize()
+
+        val += CUDA.shfl_down_sync(0xffffffff, val, offset)
+        offset <<= 1
+    end
+
+    return val
+end
+
+end
+
