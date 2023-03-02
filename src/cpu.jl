@@ -4,7 +4,7 @@ function synchronize(::CPU)
     nothing
 end
 
-allocate!(::CPU, ::Type{T}, dims...) where T = Array{T}(undef, dims)
+allocate(::CPU, ::Type{T}, dims...) where T = Array{T}(undef, dims)
 zeros(::CPU, ::Type{T}, dims...) where T = Base.zeros(T, dims)
 ones(::CPU, ::Type{T}, dims...) where T = Base.ones(T, dims)
 

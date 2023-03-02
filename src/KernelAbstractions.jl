@@ -7,6 +7,8 @@ export @print
 export Backend, GPU, CPU
 export synchronize, get_backend, allocate
 
+import SnoopPrecompile
+
 import Atomix: @atomic, @atomicswap, @atomicreplace
 import UnsafeAtomics
 
@@ -526,5 +528,17 @@ include("reflection.jl")
 # CPU backend
 
 include("cpu.jl")
+
+# precompile
+SnoopPrecompile.@precompile_all_calls begin
+    @eval begin
+        @kernel function precompile_kernel(A, @Const(B))
+            i = @index(Global, Linear)
+            lmem = @localmem Float32 (5,)
+            pmem = @private Float32 (1,)
+            @synchronize
+        end
+    end
+end
 
 end #module

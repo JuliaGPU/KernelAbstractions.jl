@@ -6,7 +6,7 @@ using SparseArrays
 
 identity(x) = x
 
-function unittest_testsuite(Backend, backend_str, backend_mod)
+function unittest_testsuite(Backend, backend_str, backend_mod, BackendArrayT)
 @testset "partition" begin
     backend = Backend()
     let kernel = KernelAbstractions.Kernel{Backend, StaticSize{(64,)}, DynamicSize, typeof(identity)}(backend, identity)
@@ -138,12 +138,12 @@ end
     let kernel = constarg(Backend(), 8, (1024,))
         # this is poking at internals
         iterspace = NDRange{1, StaticSize{(128,)}, StaticSize{(8,)}}();
-        ctx = if backend == CPU
+        ctx = if Backend == CPU
             KernelAbstractions.mkcontext(kernel, 1, nothing, iterspace, Val(NoDynamicCheck()))
         else
             KernelAbstractions.mkcontext(kernel, nothing, iterspace)
         end
-        AT = if backend == CPU
+        AT = if Backend == CPU
             Array{Float32, 2}
         else
             BackendArrayT{Float32, 2, 1} # AS 1

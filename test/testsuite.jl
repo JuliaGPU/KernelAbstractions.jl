@@ -30,11 +30,11 @@ end
 
 function testsuite(backend, backend_str, backend_mod, AT, DAT; skip_tests = Set{String}())
     @conditional_testset "Unittests" skip_tests begin
-        unittest_testsuite(backend, backend_str, backend_mod)
+        unittest_testsuite(backend, backend_str, backend_mod, DAT)
     end
 
     @conditional_testset "SpecialFunctions" skip_tests begin
-        examples_testsuite(backend)
+        specialfunctions_testsuite(backend)
     end
 
     @conditional_testset "Localmem" skip_tests begin

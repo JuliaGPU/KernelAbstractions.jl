@@ -17,7 +17,7 @@ end
     @inbounds A[I] = SpecialFunctions.erfc(B[I])
 end
 
-function specialfunctions(Backend)
+function specialfunctions_testsuite(Backend)
     backend = Backend()
     @testset "special functions: gamma" begin
         x = Float32[1.0,2.0,3.0,5.5]
