@@ -26,7 +26,7 @@ function matmul!(a, b, c)
 end
 
 a = rand!(allocate(backend, Float32, 256, 123))
-a = rand!(allocate(backend, Float32, 123, 45))
+b = rand!(allocate(backend, Float32, 123, 45))
 c = KernelAbstractions.zeros(backend, Float32, 256, 45)
 
 matmul!(a,b,c)
