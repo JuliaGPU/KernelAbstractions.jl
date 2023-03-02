@@ -15,32 +15,32 @@ end
 A = zeros(128, 128)
 B = ones(128, 128)
 mycopy!(A, B)
-KernelAbstractions.synchronize(KernelAbstractions.get_device(A))
+KernelAbstractions.synchronize(KernelAbstractions.get_backend(A))
 @test A == B
 
 
 if has_cuda && has_cuda_gpu()
     function mycopy!(A::CuArray, B::CuArray)
         @assert size(A) == size(B)
-        copy_kernel!(CUDADevice(), 256)(A, B, ndrange=length(A))
+        copy_kernel!(CUDABackend(), 256)(A, B, ndrange=length(A))
     end
 
     A = CuArray{Float32}(undef, 1024)
     B = CUDA.ones(Float32, 1024)
     mycopy!(A, B)
-    KernelAbstractions.synchronize(KernelAbstractions.get_device(A))
+    KernelAbstractions.synchronize(KernelAbstractions.get_backend(A))
     @test A == B
 end
 
 if has_rocm && has_rocm_gpu()
     function mycopy!(A::ROCArray, B::ROCArray)
         @assert size(A) == size(B)
-        copy_kernel!(ROCDevice(), 256)(A, B, ndrange=length(A))
+        copy_kernel!(ROCBackend(), 256)(A, B, ndrange=length(A))
     end
 
     A = zeros(Float32, 1024) |> ROCArray
     B = ones(Float32, 1024) |> ROCArray
     mycopy!(A, B)
-    KernelAbstractions.synchronize(KernelAbstractions.get_device(A))
+    KernelAbstractions.synchronize(KernelAbstractions.get_backend(A))
     @test A == B
 end

@@ -124,7 +124,7 @@ macro ka_code_typed(ex0...)
 
     quote
         local $(esc(args)) = $(old_args)
-        # e.g. translate CuArray to CuDeviceArray
+        # e.g. translate CuArray to CuBackendArray
         $(esc(args)) = map(x->argconvert($kern, x), $(esc(args)))
 
         local results = $thecall

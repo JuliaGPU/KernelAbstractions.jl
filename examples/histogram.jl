@@ -67,9 +67,9 @@ function histogram!(histogram_output, input;
     if isa(input, Array)
         kernel! = histogram_kernel!(CPU(), numcores)
     elseif has_cuda
-        kernel! = histogram_kernel!(CUDADevice(), numthreads)
+        kernel! = histogram_kernel!(CUDABackend(), numthreads)
     elseif has_rocm
-        kernel! = histogram_kernel!(ROCDevice(), numthreads)
+        kernel! = histogram_kernel!(ROCBackend(), numthreads)
     end
 
     kernel!(histogram_output, input, ndrange=size(input))
@@ -121,7 +121,7 @@ end
         histogram!(GPU_rand_histogram, GPU_rand_input)
         histogram!(GPU_linear_histogram, GPU_linear_input)
         histogram!(GPU_2_histogram, GPU_2_input)
-        KernelAbstractions.synchronize(get_device(GPU_2_histogram))
+        KernelAbstractions.synchronize(get_backend(GPU_2_histogram))
 
         @test isapprox(Array(GPU_rand_histogram), histogram_rand_baseline)
         @test isapprox(Array(GPU_linear_histogram), histogram_linear_baseline)

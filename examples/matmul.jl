@@ -24,9 +24,9 @@ function matmul!(a, b, c)
         println("Matrix size mismatch!")
         return nothing
     end
-    device = KernelAbstractions.get_device(a)
-    n = device isa GPU ? 256 : 4
-    kernel! = matmul_kernel!(device, n)
+    backend = KernelAbstractions.get_backend(a)
+    n = backend isa GPU ? 256 : 4
+    kernel! = matmul_kernel!(backend, n)
     kernel!(a, b, c, ndrange=size(c)) 
 end
 
@@ -36,7 +36,7 @@ c = zeros(256, 45)
 
 # beginning CPU tests, returns event
 matmul!(a,b,c)
-KernelAbstractions.synchronize(KernelAbstractions.get_device(a))
+KernelAbstractions.synchronize(KernelAbstractions.get_backend(a))
 
 @test isapprox(c, a*b)
 
@@ -47,7 +47,7 @@ if has_cuda && has_cuda_gpu()
     d_c = CuArray(c)
 
     ev = matmul!(d_a, d_b, d_c)
-    KernelAbstractions.synchronize(KernelAbstractions.get_device(a))
+    KernelAbstractions.synchronize(KernelAbstractions.get_backend(a))
 
     @test isapprox(Array(d_c), a*b)
 end

@@ -10,7 +10,7 @@ end
 
 using MPI
 
-device(A) = typeof(A) <: Array ? CPU() : CUDADevice()
+backend(A) = typeof(A) <: Array ? CPU() : CUDABackend()
 
 function mpiyield()
     MPI.Iprobe(MPI.MPI_ANY_SOURCE, MPI.MPI_ANY_TAG, MPI.COMM_WORLD)
@@ -39,8 +39,8 @@ function exchange!(h_send_buf, d_recv_buf, h_recv_buf, src_rank, dst_rank,
     __Irecv!(recv_request, h_recv_buf, src_rank, 666, comm)
     recv = Base.Threads.@spawn begin 
         __testall!(recv_request)
-        async_copy!(device(d_recv_buf), d_recv_buf, h_recv_buf; progress=mpiyield)
-        KernelAbstractions.synchronize(device(d_recv_buf))
+        async_copy!(backend(d_recv_buf), d_recv_buf, h_recv_buf; progress=mpiyield)
+        KernelAbstractions.synchronize(backend(d_recv_buf))
     end
 
     send = Base.Threads.@spawn begin
@@ -75,7 +75,7 @@ function main()
     send_request = fill(MPI.REQUEST_NULL, 1)
     recv_request = fill(MPI.REQUEST_NULL, 1)
 
-    KernelAbstractions.synchronize(device(d_recv_buf))
+    KernelAbstractions.synchronize(backend(d_recv_buf))
 
     recv_task, send_task = exchange!(h_send_buf, d_recv_buf, h_recv_buf,
                                        src_rank, dst_rank, send_request,

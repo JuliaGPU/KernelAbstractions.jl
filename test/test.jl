@@ -7,7 +7,7 @@ import SpecialFunctions
 
 identity(x) = x
 
-function unittest_testsuite(backend, backend_str, backend_mod, ArrayT, DeviceArrayT)
+function unittest_testsuite(backend, backend_str, backend_mod, ArrayT, BackendArrayT)
 @testset "partition" begin
     let kernel = KernelAbstractions.Kernel{backend, StaticSize{(64,)}, DynamicSize, typeof(identity)}(identity)
         iterspace, dynamic = KernelAbstractions.partition(kernel, (128,), nothing)
@@ -66,24 +66,24 @@ end
        A[I] = i
 end
 
-@testset "get_device" begin
+@testset "get_backend" begin
     x = ArrayT(rand(Float32, 5))
     A = ArrayT(rand(Float32, 5,5))
-    device = backend()
-    if isdefined(Main, :CUDA) && (device isa Main.CUDA.CUDAKernels.CUDADevice)
-        deviceT = Main.CUDA.CUDAKernels.CUDADevice
+    backend = backend()
+    if isdefined(Main, :CUDA) && (backend isa Main.CUDA.CUDAKernels.CUDABackend)
+        backendT = Main.CUDA.CUDAKernels.CUDABackend
     else
-        deviceT = typeof(device)
+        backendT = typeof(backend)
     end
-    @test @inferred(KernelAbstractions.get_device(A)) isa deviceT
-    @test @inferred(KernelAbstractions.get_device(view(A, 2:4, 1:3))) isa deviceT
-    if !(isdefined(Main, :ROCKernels) && (device isa Main.ROCKernels.ROCDevice)) &&
-       !(isdefined(Main, :oneAPIKernels) && (device isa Main.oneAPIKernels.oneAPIDevice))
+    @test @inferred(KernelAbstractions.get_backend(A)) isa backendT
+    @test @inferred(KernelAbstractions.get_backend(view(A, 2:4, 1:3))) isa backendT
+    if !(isdefined(Main, :ROCKernels) && (backend isa Main.ROCKernels.ROCBackend)) &&
+       !(isdefined(Main, :oneAPIKernels) && (backend isa Main.oneAPIKernels.oneAPIBackend))
         # Sparse arrays are not supported by the ROCm or oneAPI backends yet:
-        @test @inferred(KernelAbstractions.get_device(sparse(A))) isa deviceT
+        @test @inferred(KernelAbstractions.get_backend(sparse(A))) isa backendT
     end
-    @test @inferred(KernelAbstractions.get_device(Diagonal(x))) isa deviceT
-    @test @inferred(KernelAbstractions.get_device(Tridiagonal(A))) isa deviceT
+    @test @inferred(KernelAbstractions.get_backend(Diagonal(x))) isa backendT
+    @test @inferred(KernelAbstractions.get_backend(Tridiagonal(A))) isa backendT
 end
 
 @testset "indextest" begin
@@ -149,7 +149,7 @@ end
         AT = if backend == CPU
             Array{Float32, 2}
         else
-            DeviceArrayT{Float32, 2, 1} # AS 1
+            BackendArrayT{Float32, 2, 1} # AS 1
         end
         IR = sprint() do io
             if backend_str == "CPU"

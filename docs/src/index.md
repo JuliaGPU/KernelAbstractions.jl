@@ -24,7 +24,7 @@ backend and depend on
 [`GPUCompiler.jl`](https://github.com/JuliaGPU/GPUCompiler.jl). KA provides
 interface kernel generation modules to those packages in
 [`/lib`](https://github.com/JuliaGPU/KernelAbstractions.jl/tree/master/lib).
-After loading the kernel packages, KA will provide a `KA.Device` for that
+After loading the kernel packages, KA will provide a `KA.Backend` for that
 backend to be used in the kernel generation stage.
 ### CUDA
 ```julia
@@ -33,7 +33,7 @@ using KernelAbstractions
 using CUDAKernels
 ```
 [`CUDA.jl`](https://github.com/JuliaGPU/CUDA.jl) is currently the most mature way to program for GPUs.
-This provides a device `CUDADevice <: KA.Device` to
+This provides a backend `CUDABackend <: KA.Backend` to
 ### AMDGPU
 ```julia
 using AMDGPU
@@ -42,7 +42,7 @@ using ROCKernels
 ```
 Experimental AMDGPU (ROCm) support is available via the
 [`AMDGPU.jl`](https://github.com/JuliaGPU/AMDGPU.jl) and `ROCKernels.jl`. It
-provides the device `ROCDevice <: KA.Device`. Please get in touch with `@jpsamaroo` for
+provides the backend `ROCBackend <: KA.Backend`. Please get in touch with `@jpsamaroo` for
 any issues specific to the ROCKernels backend.
 ###  oneAPI
 Experimental support for Intel GPUs has also been added through the oneAPI Intel

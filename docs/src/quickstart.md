@@ -27,7 +27,7 @@ end
 ## Launching kernel on the host
 
 You can construct a kernel for a specific backend by calling the kernel with
-`mul2_kernel(CPU(), 16)`. The first argument is a device of type `KA.Device`,
+`mul2_kernel(CPU(), 16)`. The first argument is a backend of type `KA.Backend`,
 the second argument being the workgroup size. This returns a generated kernel
 executable that is then executed with the input argument `A` and the additional
 argument being a static `ndrange`.
@@ -41,64 +41,64 @@ all(A .== 2.0)
 ```
 
 All kernels are launched asynchronously.
-The [`synchronize`](@ref) blocks the *host* until the kernel has completed on the device.
+The [`synchronize`](@ref) blocks the *host* until the kernel has completed on the backend.
 
-## Launching kernel on the device
+## Launching kernel on the backend
 
-To launch the kernel on a backend-supported device `isa(device, KA.GPU)` (e.g., `CUDADevice()`, `ROCDevice()`, `oneDevice()`), we generate the kernel
-for this device provided by `CUDAKernels`, `ROCKernels`, or `oneAPIKernels`.
+To launch the kernel on a backend-supported backend `isa(backend, KA.GPU)` (e.g., `CUDABackend()`, `ROCBackend()`, `oneBackend()`), we generate the kernel
+for this backend provided by `CUDAKernels`, `ROCKernels`, or `oneAPIKernels`.
 
-First, we initialize the array using the Array constructor of the chosen device with
+First, we initialize the array using the Array constructor of the chosen backend with
 
 ```julia
-using CUDAKernels # Required to access CUDADevice
+using CUDAKernels # Required to access CUDABackend
 A = CuArray(ones(1024, 1024))
 ```
 
 ```julia
-using ROCKernels # Required to access CUDADevice
+using ROCKernels # Required to access CUDABackend
 A = ROCArray(ones(1024, 1024))
 ```
 
 ```julia
-using oneAPIKernels # Required to access CUDADevice
+using oneAPIKernels # Required to access CUDABackend
 A = oneArray(ones(1024, 1024))
 ```
 The kernel generation and execution are then
 ```julia
-mul2_kernel(device, 64)(A, ndrange=size(A))
-synchronize(device)
+mul2_kernel(backend, 64)(A, ndrange=size(A))
+synchronize(backend)
 all(A .== 2.0)
 ```
 
-For simplicity, we stick with the case of `device=CUDADevice()`.
+For simplicity, we stick with the case of `backend=CUDABackend()`.
 
 ## Synchronization
 !!! danger
-    All kernel launches are asynchronous, use [`synchronize(device)`](@ref)
+    All kernel launches are asynchronous, use [`synchronize(backend)`](@ref)
     to wait on a series of kernel launches. 
 
 The code around KA may heavily rely on
 [`GPUArrays`](https://github.com/JuliaGPU/GPUArrays.jl), for example, to
 intialize variables.
 ```julia
-using CUDAKernels # Required to access CUDADevice
+using CUDAKernels # Required to access CUDABackend
 function mymul(A::CuArray)
     A .= 1.0
-    ev = mul2_kernel(CUDADevice(), 64)(A, ndrange=size(A))
-    synchronize(device)
+    ev = mul2_kernel(CUDABackend(), 64)(A, ndrange=size(A))
+    synchronize(backend)
     all(A .== 2.0)
 end
 ```
 
 ```julia
-using CUDAKernels # Required to access CUDADevice
+using CUDAKernels # Required to access CUDABackend
 function mymul(A::CuArray, B::CuArray)
     A .= 1.0
     B .= 3.0
-    mul2_kernel(CUDADevice(), 64)(A, ndrange=size(A))
-    mul2_kernel(CUDADevice(), 64)(A, ndrange=size(A))
-    synchronize(CUDADevice())
+    mul2_kernel(CUDABackend(), 64)(A, ndrange=size(A))
+    mul2_kernel(CUDABackend(), 64)(A, ndrange=size(A))
+    synchronize(CUDABackend())
     all(A .+ B .== 8.0)
 end
 ```
