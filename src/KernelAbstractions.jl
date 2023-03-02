@@ -5,7 +5,7 @@ export @Const, @localmem, @private, @uniform, @synchronize
 export @index, @groupsize, @ndrange
 export @print
 export Backend, GPU, CPU
-export async_copy!, synchronize, get_backend
+export synchronize, get_backend
 
 import Atomix: @atomic, @atomicswap, @atomicreplace
 import UnsafeAtomics
@@ -70,11 +70,11 @@ any other memory in the kernel.
 macro Const end
 
 """
-    async_copy!(::Backend, dest::AbstractArray, src::AbstractArray)
+    copyto!(::Backend, dest::AbstractArray, src::AbstractArray)
 
-Perform an asynchronous copy on the backend.
+Perform a `copyto!` operation that execution ordered with respect to the backend.
 """
-function async_copy! end
+function copyto! end
 
 """
     synchronize(::Backend)
@@ -330,6 +330,9 @@ constify(arg) = adapt(ConstAdaptor(), arg)
 # Backend hierarchy
 ###
 
+"""
+    Abstract type for all KernelAbstractions backends.
+"""
 abstract type Backend end
 abstract type GPU <: Backend end
 
@@ -340,9 +343,9 @@ isgpu(::CPU) = false
 
 
 """
-    KernelAbstractions.get_backend(A::AbstractArray)::KernelAbstractions.Backend
+    get_backend(A::AbstractArray)::Backend
 
-Get a `KernelAbstractions.Backend` instance suitable for array `A`.
+Get a [`Backend`](@ref) instance suitable for array `A`.
 """
 function get_backend end
 
@@ -354,6 +357,25 @@ get_backend(A::Diagonal) = get_backend(A.diag)
 get_backend(A::Tridiagonal) = get_backend(A.d)
 
 get_backend(::Array) = CPU()
+
+"""
+    allocate(::Backend, Type, dims...)
+
+Allocate a storage array appropriate for the computational backend.
+"""
+function allocate end  
+
+function zeros(backend, ::Type{T}, dims...) where T
+    data = allocate(backend, T, dims...)
+    fill!(data, zero(T))
+    return data
+end
+
+function ones(backend, ::Type{T}, dims...) where T
+    data = allocate(backend, T, dims...)
+    fill!(data, one(T))
+    return data
+end
 
 include("nditeration.jl")
 using .NDIteration

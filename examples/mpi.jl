@@ -39,7 +39,7 @@ function exchange!(h_send_buf, d_recv_buf, h_recv_buf, src_rank, dst_rank,
     __Irecv!(recv_request, h_recv_buf, src_rank, 666, comm)
     recv = Base.Threads.@spawn begin 
         __testall!(recv_request)
-        async_copy!(backend(d_recv_buf), d_recv_buf, h_recv_buf; progress=mpiyield)
+        KernelAbstractions.copyto!(backend(d_recv_buf), d_recv_buf, h_recv_buf)
         KernelAbstractions.synchronize(backend(d_recv_buf))
     end
 
