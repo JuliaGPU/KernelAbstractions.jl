@@ -1,9 +1,5 @@
-using KernelAbstractions, Test
+using KernelAbstractions, Test, Random
 include(joinpath(dirname(pathof(KernelAbstractions)), "../examples/utils.jl")) # Load backend
-
-if has_cuda && has_cuda_gpu()
-    CUDA.allowscalar(false)
-end
 
 @kernel function naive_transpose_kernel!(a, b)
     i, j = @index(Global, NTuple)
@@ -17,49 +13,21 @@ function naive_transpose!(a, b)
         println("Matrix size mismatch!")
         return nothing
     end
-    backend = KernelAbstractions.get_backend(a)
-    n = backend isa GPU ? 256 : 4
-    kernel! = naive_transpose_kernel!(backend, n)
+    backend = get_backend(a)
+    @assert get_backend(b) == backend
+    groupsize = KernelAbstractions.is_gpu(backend) ? 256 : 1024
+    kernel! = naive_transpose_kernel!(backend, groupsize)
     kernel!(a, b, ndrange=size(a))
 end
-
 
 # resolution of grid will be res*res
 res = 1024
 
 # creating initial arrays
-a = round.(rand(Float32, (res, res))*100)
-b = zeros(Float32, res, res)
+a = rand!(allocate(backend, Float32, res, res))
+b = KernelAbstractions.zeros(backend, Float32, res, res)
 
 naive_transpose!(a,b)
-KernelAbstractions.synchronize(KernelAbstractions.get_backend(a))
+KernelAbstractions.synchronize(backend)
 @test a == transpose(b)
-
-# beginning GPU tests
-if has_cuda && has_cuda_gpu()
-    d_a = CuArray(a)
-    d_b = CUDA.zeros(Float32, res, res)
-
-    ev = naive_transpose!(d_a, d_b)
-    KernelAbstractions.synchronize(KernelAbstractions.get_backend(d_a))
-
-    a = Array(d_a)
-    b = Array(d_b)
-
-    @test a == transpose(b)
-end
-
-
-if has_rocm && has_rocm_gpu()
-    d_a = ROCArray(a)
-    d_b = zeros(Float32, res, res) |> ROCArray
-
-    ev = naive_transpose!(d_a, d_b)
-    KernelAbstractions.synchronize(KernelAbstractions.get_backend(d_a))
-
-    a = Array(d_a)
-    b = Array(d_b)
-    
-    @test a == transpose(b)
-end
 

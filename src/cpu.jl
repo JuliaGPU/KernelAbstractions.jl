@@ -1,6 +1,9 @@
 import UnsafeAtomicsLLVM
 
-function synchronize(::CPU)
+function synchronize(::CPU; progress=nothing)
+    if progress !== nothing
+        progress() # Call progress at least once
+    end
     nothing
 end
 
