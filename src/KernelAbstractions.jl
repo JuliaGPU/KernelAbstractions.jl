@@ -19,7 +19,7 @@ using Adapt
 """
     @kernel function f(args) end
 
-Takes a function definition and generates a Kernel constructor from it.
+Takes a function definition and generates a [`Kernel`](@ref) constructor from it.
 The enclosed function is allowed to contain kernel language constructs.
 In order to call it the kernel has first to be specialized on the backend
 and then invoked on the arguments.
@@ -63,9 +63,9 @@ any other memory in the kernel.
 
 !!! danger
     Violating those constraints will lead to arbitrary behaviour.
-
-as an example given a kernel signature `kernel(A, @Const(B))`, you are not
-allowed to call the kernel with `kernel(A, A)` or `kernel(A, view(A, :))`.
+    
+    As an example given a kernel signature `kernel(A, @Const(B))`, you are not
+    allowed to call the kernel with `kernel(A, A)` or `kernel(A, view(A, :))`.
 """
 macro Const end
 
@@ -322,7 +322,7 @@ __index_Global_NTuple(ctx, I...) = Tuple(__index_Global_Cartesian(ctx, I...))
 
 struct ConstAdaptor end
 
-Adapt.adapt_storage(to::ConstAdaptor, a::Array) = Base.Experimental.Const(a)
+Adapt.adapt_storage(::ConstAdaptor, a::Array) = Base.Experimental.Const(a)
 
 constify(arg) = adapt(ConstAdaptor(), arg)
 
@@ -371,6 +371,7 @@ kernel on the host. `WorkgroupSize` is the number of workitems
 in a workgroup.
 """
 struct Kernel{Backend, WorkgroupSize<:_Size, NDRange<:_Size, Fun}
+    backend::Backend
     f::Fun
 end
 
@@ -380,6 +381,7 @@ end
 
 workgroupsize(::Kernel{D, WorkgroupSize}) where {D, WorkgroupSize} = WorkgroupSize
 ndrange(::Kernel{D, WorkgroupSize, NDRange}) where {D, WorkgroupSize,NDRange} = NDRange
+backend(kernel::Kernel) = kernel.backend
 
 function partition(kernel, ndrange, workgroupsize)
     static_ndrange = KernelAbstractions.ndrange(kernel)
@@ -438,8 +440,8 @@ function partition(kernel, ndrange, workgroupsize)
     return iterspace, dynamic
 end
 
-function construct(::Backend, ::S, ::NDRange, xpu_name::XPUName) where {Backend<:Union{CPU,GPU}, S<:_Size, NDRange<:_Size, XPUName}
-    return Kernel{Backend, S, NDRange, XPUName}(xpu_name)
+function construct(backend::Backend, ::S, ::NDRange, xpu_name::XPUName) where {Backend<:Union{CPU,GPU}, S<:_Size, NDRange<:_Size, XPUName}
+    return Kernel{Backend, S, NDRange, XPUName}(backend, xpu_name)
 end
 
 ###
