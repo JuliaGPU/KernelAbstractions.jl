@@ -3,13 +3,13 @@ using KernelAbstractions.NDIteration
 using InteractiveUtils
 using LinearAlgebra
 using SparseArrays
-import SpecialFunctions
 
 identity(x) = x
 
-function unittest_testsuite(backend, backend_str, backend_mod, ArrayT, BackendArrayT)
+function unittest_testsuite(Backend, backend_str, backend_mod)
 @testset "partition" begin
-    let kernel = KernelAbstractions.Kernel{backend, StaticSize{(64,)}, DynamicSize, typeof(identity)}(identity)
+    backend = Backend()
+    let kernel = KernelAbstractions.Kernel{Backend, StaticSize{(64,)}, DynamicSize, typeof(identity)}(backend, identity)
         iterspace, dynamic = KernelAbstractions.partition(kernel, (128,), nothing)
         @test length(blocks(iterspace)) == 2
         @test dynamic isa NoDynamicCheck
@@ -23,8 +23,9 @@ function unittest_testsuite(backend, backend_str, backend_mod, ArrayT, BackendAr
         @test dynamic isa DynamicCheck
 
         @test_throws ErrorException KernelAbstractions.partition(kernel, (129,), (65,))
+        @test KernelAbstractions.backend(kernel) == backend
     end
-    let kernel = KernelAbstractions.Kernel{backend, StaticSize{(64,)}, StaticSize{(128,)}, typeof(identity)}(identity)
+    let kernel = KernelAbstractions.Kernel{Backend, StaticSize{(64,)}, StaticSize{(128,)}, typeof(identity)}(backend, identity)
         iterspace, dynamic = KernelAbstractions.partition(kernel, (128,), nothing)
         @test length(blocks(iterspace)) == 2
         @test dynamic isa NoDynamicCheck
@@ -34,6 +35,7 @@ function unittest_testsuite(backend, backend_str, backend_mod, ArrayT, BackendAr
         @test dynamic isa NoDynamicCheck
 
         @test_throws ErrorException KernelAbstractions.partition(kernel, (129,), nothing)
+        @test KernelAbstractions.backend(kernel) == backend
     end
 end
 
@@ -67,68 +69,63 @@ end
 end
 
 @testset "get_backend" begin
-    x = ArrayT(rand(Float32, 5))
-    A = ArrayT(rand(Float32, 5,5))
-    backend = backend()
-    if isdefined(Main, :CUDA) && (backend isa Main.CUDA.CUDAKernels.CUDABackend)
-        backendT = Main.CUDA.CUDAKernels.CUDABackend
-    else
-        backendT = typeof(backend)
-    end
+    backend = Backend()
+    backendT = typeof(backend).name.wrapper # To look through CUDABacken{true, false}
+    @test backend isa backendT
+
+    x = allocate(backend, Float32, 5)
+    A = allocate(backend, Float32, 5, 5)
     @test @inferred(KernelAbstractions.get_backend(A)) isa backendT
     @test @inferred(KernelAbstractions.get_backend(view(A, 2:4, 1:3))) isa backendT
-    if !(isdefined(Main, :ROCKernels) && (backend isa Main.ROCKernels.ROCBackend)) &&
-       !(isdefined(Main, :oneAPIKernels) && (backend isa Main.oneAPIKernels.oneAPIBackend))
-        # Sparse arrays are not supported by the ROCm or oneAPI backends yet:
-        @test @inferred(KernelAbstractions.get_backend(sparse(A))) isa backendT
-    end
+    @test @inferred(KernelAbstractions.get_backend(sparse(A))) isa backendT
     @test @inferred(KernelAbstractions.get_backend(Diagonal(x))) isa backendT
     @test @inferred(KernelAbstractions.get_backend(Tridiagonal(A))) isa backendT
 end
 
+# TODO: add test for _group and _local_cartesian
 @testset "indextest" begin
-    # TODO: add test for _group and _local_cartesian
-    A = ArrayT{Int}(undef, 16, 16)
-    index_linear_global(backend(), 8)(A, ndrange=length(A))
-    synchronize(backend())
+    backend = Backend()
+    A = allocate(backend, Int, 16, 16)
+    index_linear_global(backend, 8)(A, ndrange=length(A))
+    synchronize(backend)
     @test all(A .== LinearIndices(A))
 
-    A = ArrayT{Int}(undef, 8)
-    index_linear_local(backend(), 8)(A, ndrange=length(A))
-    synchronize(backend())
+    A = allocate(backend, Int, 8)
+    index_linear_local(backend, 8)(A, ndrange=length(A))
+    synchronize(backend)
     @test all(A .== 1:8)
 
-    A = ArrayT{Int}(undef, 16)
-    index_linear_local(backend(), 8)(A, ndrange=length(A))
-    synchronize(backend())
+    A = allocate(backend, Int, 16)
+    index_linear_local(backend, 8)(A, ndrange=length(A))
+    synchronize(backend)
     @test all(A[1:8] .== 1:8)
     @test all(A[9:16] .== 1:8)
 
-    A = ArrayT{Int}(undef, 8, 2)
-    index_linear_local(backend(), 8)(A, ndrange=length(A))
-    synchronize(backend())
+    A = allocate(backend, Int, 8, 2)
+    index_linear_local(backend, 8)(A, ndrange=length(A))
+    synchronize(backend)
     @test all(A[1:8] .== 1:8)
     @test all(A[9:16] .== 1:8)
 
-    A = ArrayT{CartesianIndex{2}}(undef, 16, 16)
-    index_cartesian_global(backend(), 8)(A, ndrange=size(A))
-    synchronize(backend())
+    A = allocate(backend, CartesianIndex{2}, 16, 16)
+    index_cartesian_global(backend, 8)(A, ndrange=size(A))
+    synchronize(backend)
     @test all(A .== CartesianIndices(A))
 
-    A = ArrayT{CartesianIndex{1}}(undef, 16, 16)
-    index_cartesian_global(backend(), 8)(A, ndrange=length(A))
-    synchronize(backend())
+    A = allocate(backend, CartesianIndex{1}, 16, 16)
+    index_cartesian_global(backend, 8)(A, ndrange=length(A))
+    synchronize(backend)
     @test all(A[:] .== CartesianIndices((length(A),)))
 
     # Non-multiplies of the workgroupsize
-    A = ArrayT{Int}(undef, 7, 7)
-    index_linear_global(backend(), 8)(A, ndrange=length(A))
-    synchronize(backend())
+    A = allocate(backend, Int, 7, 7)
+    index_linear_global(backend, 8)(A, ndrange=length(A))
+    synchronize(backend)
     @test all(A .== LinearIndices(A))
 
-    A = ArrayT{Int}(undef, 5)
-    index_linear_local(backend(), 8)(A, ndrange=length(A))
-    synchronize(backend())
+    A = allocate(backend, Int, 5)
+    index_linear_local(backend, 8)(A, ndrange=length(A))
+    synchronize(backend)
     @test all(A .== 1:5)
 end
 
@@ -138,7 +135,7 @@ end
 end
 
 @testset "Const" begin
-    let kernel = constarg(backend(), 8, (1024,))
+    let kernel = constarg(Backend(), 8, (1024,))
         # this is poking at internals
         iterspace = NDRange{1, StaticSize{(128,)}, StaticSize{(8,)}}();
         ctx = if backend == CPU
@@ -167,6 +164,8 @@ end
             @test occursin("@llvm.nvvm.ldg", IR)
         elseif backend_str == "ROCM"
             @test occursin("addrspace(4)", IR)
+        else
+            @test_skip false
         end
     end
 end
@@ -176,9 +175,9 @@ end
     @inbounds a[I] = m
 end
 
-A = convert(ArrayT, zeros(Int64, 1024))
-kernel_val!(backend())(A,Val(3), ndrange=size(A))
-synchronize(backend())
+A = KernelAbstractions.zeros(Backend(), Int64, 1024)
+kernel_val!(Backend())(A,Val(3), ndrange=size(A))
+synchronize(Backend())
 @test all((a)->a==3, A)
 
 @kernel function kernel_empty()
@@ -190,13 +189,13 @@ end
     synchronize(CPU())
 end
 
-@testset "Zero iteration space $backend" begin
-    kernel_empty(backend(), 1)(ndrange=1)
-    kernel_empty(backend(), 1)(ndrange=0)
-    synchronize(backend())
+@testset "Zero iteration space $Backend" begin
+    kernel_empty(Backend(), 1)(ndrange=1)
+    kernel_empty(Backend(), 1)(ndrange=0)
+    synchronize(Backend())
 
-    kernel_empty(backend(), 1)(ndrange=0)
-    synchronize(backend())
+    kernel_empty(Backend(), 1)(ndrange=0)
+    synchronize(Backend())
 end
 
 
@@ -232,84 +231,6 @@ end
         env = f(CPU())(x, Val(1); ndrange=length(x))
         synchronize(CPU())
         @test x == [1,1,1]
-    end
-end
-
-@testset "special functions: gamma" begin
-    @eval begin
-        @kernel function gamma_knl(A, @Const(B))
-            I = @index(Global)
-            @inbounds A[I] = SpecialFunctions.gamma(B[I])
-        end
-
-        x = Float32[1.0,2.0,3.0,5.5]
-        y = similar(x)
-        if $backend == CPU
-            gamma_knl(CPU())(y, x; ndrange=length(x))
-        else
-            cx = $ArrayT(x)
-            cy = similar(cx)
-            gamma_knl($backend())(cy, cx; ndrange=length(x))
-        end
-        synchronize($backend())
-        if $backend == CPU
-            @test y == SpecialFunctions.gamma.(x)
-        else
-            cy = Array(cy)
-            @test cy[1:4] ≈ SpecialFunctions.gamma.(x[1:4])
-        end
-    end
-end
-
-@testset "special functions: erf" begin
-    @eval begin
-        @kernel function erf_knl(A, @Const(B))
-            I = @index(Global)
-            @inbounds A[I] = SpecialFunctions.erf(B[I])
-        end
-
-        x = Float32[-1.0,-0.5,0.0,1e-3,1.0,2.0,5.5]
-        y = similar(x)
-        if $backend == CPU
-            erf_knl(CPU())(y, x; ndrange=length(x))
-        else
-            cx = $ArrayT(x)
-            cy = similar(cx)
-            erf_knl($backend())(cy, cx; ndrange=length(x))
-        end
-        synchronize($backend())
-        if $backend == CPU
-            @test y == SpecialFunctions.erf.(x)
-        else
-            cy = Array(cy)
-            @test cy[1:4] ≈ SpecialFunctions.erf.(x[1:4])
-        end
-    end
-end
-
-@testset "special functions: erfc" begin
-    @eval begin
-        @kernel function erfc_knl(A, @Const(B))
-            I = @index(Global)
-            @inbounds A[I] = SpecialFunctions.erfc(B[I])
-        end
-
-        x = Float32[-1.0,-0.5,0.0,1e-3,1.0,2.0,5.5]
-        y = similar(x)
-        if $backend == CPU
-            erfc_knl(CPU())(y, x; ndrange=length(x))
-        else
-            cx = $ArrayT(x)
-            cy = similar(cx)
-            erfc_knl($backend())(cy, cx; ndrange=length(x))
-        end
-        synchronize($backend())
-        if $backend == CPU
-            @test y == SpecialFunctions.erfc.(x)
-        else
-            cy = Array(cy)
-            @test cy[1:4] ≈ SpecialFunctions.erfc.(x[1:4])
-        end
     end
 end
 

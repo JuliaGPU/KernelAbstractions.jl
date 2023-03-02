@@ -5,7 +5,7 @@ export @Const, @localmem, @private, @uniform, @synchronize
 export @index, @groupsize, @ndrange
 export @print
 export Backend, GPU, CPU
-export synchronize, get_backend
+export synchronize, get_backend, allocate
 
 import Atomix: @atomic, @atomicswap, @atomicreplace
 import UnsafeAtomics

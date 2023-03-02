@@ -14,6 +14,7 @@ include("compiler.jl")
 include("reflection.jl")
 include("examples.jl")
 include("convert.jl")
+include("specialfunctions.jl")
 
 macro conditional_testset(name, skip_tests, expr)
     esc(quote
@@ -29,7 +30,11 @@ end
 
 function testsuite(backend, backend_str, backend_mod, AT, DAT; skip_tests = Set{String}())
     @conditional_testset "Unittests" skip_tests begin
-        unittest_testsuite(backend, backend_str, backend_mod, AT, DAT)
+        unittest_testsuite(backend, backend_str, backend_mod)
+    end
+
+    @conditional_testset "SpecialFunctions" skip_tests begin
+        examples_testsuite(backend)
     end
 
     @conditional_testset "Localmem" skip_tests begin
