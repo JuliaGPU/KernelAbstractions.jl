@@ -64,7 +64,9 @@ jobs:
       - uses: julia-actions/setup-julia@v1
         with:
           version: '1'
-      - run: julia --project=docs docs/make.jl
+      - run: |
+          julia --project=docs -e 'import Pkg; Pkg.dev(".")'
+          julia --project=docs docs/make.jl
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DOCUMENTER_KEY: ${{ secrets.DOCUMENTER_KEY }}
@@ -77,6 +79,7 @@ jobs:
         with:
           version: '1'
       - run: |
+          julia --project=docs -e 'import Pkg; Pkg.dev(".")'
           julia --project=docs -e '
             using Documenter: doctest
             using KernelAbstractions
