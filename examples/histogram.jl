@@ -72,13 +72,6 @@ function move(backend, input)
 end
 
 @testset "histogram tests" begin
-    if has_cuda
-        backend = CUDABackend()
-    elseif has_rocm
-        backend = ROCMBackend()
-    else
-        backend = CPUBackend()
-    end
     if !(Base.VERSION >= v"1.7.0" || KernelAbstractions.is_gpu(backend))
         @test_skip false
     else
