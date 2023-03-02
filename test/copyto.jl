@@ -1,5 +1,6 @@
 using KernelAbstractions, Test
 import KernelAbstractions: allocate, copyto!
+using Random
 
 function copyto_testsuite(Backend)
     M = 1024
