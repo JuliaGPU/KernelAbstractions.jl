@@ -2,6 +2,7 @@ using KernelAbstractions
 using StaticArrays
 using Test
 using Random
+include(joinpath(dirname(pathof(KernelAbstractions)), "../examples/utils.jl")) # Load backend
 
 const TILE_DIM = 32
 
