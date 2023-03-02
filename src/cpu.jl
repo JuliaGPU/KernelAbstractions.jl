@@ -1,11 +1,6 @@
 import UnsafeAtomicsLLVM
 
-function synchronize(::CPU; progress=nothing)
-    if progress !== nothing
-        progress() # Call progress at least once
-    end
-    nothing
-end
+synchronize(::CPU) = nothing
 
 allocate(::CPU, ::Type{T}, dims::Tuple) where T = Array{T}(undef, dims)
 zeros(::CPU, ::Type{T}, dims::Tuple) where T = Base.zeros(T, dims)

@@ -368,7 +368,7 @@ Allocate a storage array appropriate for the computational backend.
 allocate(backend, T, dims...) = return allocate(backend, T, dims)
 
 zeros(backend, T, dims...) = zeros(backend, T, dims)
-function zeros(backend, ::Type{T}, dims::Tuple)
+function zeros(backend, ::Type{T}, dims::Tuple) where T
     data = allocate(backend, T, dims...)
     fill!(data, zero(T))
     return data

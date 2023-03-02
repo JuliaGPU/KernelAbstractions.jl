@@ -68,7 +68,7 @@ end
 function move(backend, input)
     # TODO replace with adapt(backend, input)
     out = KernelAbstractions.allocate(backend, eltype(input), size(input))
-    KernelAbstractions.copyto!(out, input)
+    KernelAbstractions.copyto!(backend, out, input)
 end
 
 @testset "histogram tests" begin
@@ -81,7 +81,7 @@ end
 
         histogram_rand_baseline = create_histogram(rand_input)
         histogram_linear_baseline = create_histogram(linear_input)
-        histogram_2_baseline = create_histogram(all_two)
+        histogram_two_baseline = create_histogram(all_two)
 
         rand_input = move(backend, rand_input)
         linear_input = move(backend, linear_input)

@@ -2,12 +2,8 @@
 using KernelAbstractions
 using MPI
 
-function mpiprogress()
-    MPI.Iprobe(MPI.MPI_ANY_SOURCE, MPI.MPI_ANY_TAG, MPI.COMM_WORLD)
-    yield()
-end
-
-function test!(req)
+# TODO: Implement in MPI.jl
+function cooperative_test!(req)
     done = false
     while !done
         done, _ = MPI.Test(req, MPI.Status)
@@ -15,18 +11,25 @@ function test!(req)
     end
 end
 
+function cooperative_wait(task::Task)
+    while !Base.istaskdone(task)
+        MPI.Iprobe(MPI.MPI_ANY_SOURCE, MPI.MPI_ANY_TAG, MPI.COMM_WORLD)
+        yield()
+    end
+    wait(task)
+end
+
 function exchange!(h_send_buf, d_recv_buf, h_recv_buf, src_rank, dst_rank, comm)
     recv_req = MPI.Irecv!(h_recv_buf, src_rank, 666, comm)
     recv = Base.Threads.@spawn begin 
-        test!(recv_req)
+        cooperative_test!(recv_req)
         KernelAbstractions.copyto!(backend, d_recv_buf, h_recv_buf)
-        # Call back into MPI to gurantuee that we can make progress
-        KernelAbstractions.synchronize(backend; progress = mpiprogress)
+        KernelAbstractions.synchronize(backend) # Gurantueed to be cooperative
     end
 
     send = Base.Threads.@spawn begin
         send_req = MPI.Isend!(h_send_buf, dst_rank, 666, comm)
-        test!(send_req)
+        cooperative_test!(send_req)
     end
 
     return recv, send
@@ -57,8 +60,9 @@ function main(backend)
 
     recv_task, send_task = exchange!(h_send_buf, d_recv_buf, h_recv_buf,
                                        src_rank, dst_rank, comm)
-    wait(recv_task)
-    wait(send_task)
+    
+    cooperative_wait(recv_task)
+    cooperative_wait(send_task)
 
     @test all(d_recv_buf .== src_rank)
 end
