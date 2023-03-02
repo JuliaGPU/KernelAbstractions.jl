@@ -365,16 +365,18 @@ get_backend(::Array) = CPU()
 
 Allocate a storage array appropriate for the computational backend.
 """
-function allocate end  
+allocate(backend, T, dims...) = return allocate(backend, T, dims)
 
-function zeros(backend, ::Type{T}, dims...) where T
+zeros(backend, T, dims...) = zeros(backend, T, dims)
+function zeros(backend, ::Type{T}, dims::Tuple)
     data = allocate(backend, T, dims...)
     fill!(data, zero(T))
     return data
 end
 
-function ones(backend, ::Type{T}, dims...) where T
-    data = allocate(backend, T, dims...)
+ones(backend, T, dims...) = ones(backend, T, dims)
+function ones(backend, ::Type{T}, dims::Tuple) where T
+    data = allocate(backend, T, dims)
     fill!(data, one(T))
     return data
 end

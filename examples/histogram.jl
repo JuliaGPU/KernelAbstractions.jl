@@ -67,7 +67,7 @@ end
 
 function move(backend, input)
     # TODO replace with adapt(backend, input)
-    out = KernelAbstractions.allocate(backend, eltype(input), dims(input)...)
+    out = KernelAbstractions.allocate(backend, eltype(input), size(input))
     KernelAbstractions.copyto!(out, input)
 end
 

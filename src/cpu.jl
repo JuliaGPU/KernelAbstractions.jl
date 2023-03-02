@@ -7,9 +7,9 @@ function synchronize(::CPU; progress=nothing)
     nothing
 end
 
-allocate(::CPU, ::Type{T}, dims...) where T = Array{T}(undef, dims)
-zeros(::CPU, ::Type{T}, dims...) where T = Base.zeros(T, dims)
-ones(::CPU, ::Type{T}, dims...) where T = Base.ones(T, dims)
+allocate(::CPU, ::Type{T}, dims::Tuple) where T = Array{T}(undef, dims)
+zeros(::CPU, ::Type{T}, dims::Tuple) where T = Base.zeros(T, dims)
+ones(::CPU, ::Type{T}, dims::Tuple) where T = Base.ones(T, dims)
 
 copyto!(::CPU, A, B) = Base.copyto!(A, B)
 
