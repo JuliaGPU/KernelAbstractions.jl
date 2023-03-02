@@ -53,8 +53,8 @@ function testsuite(backend, backend_str, backend_mod, AT, DAT; skip_tests = Set{
         nditeration_testsuite()
     end
 
-    @conditional_testset "async_copy!" skip_tests begin
-        asynccopy_testsuite(backend)
+    @conditional_testset "copyto!" skip_tests begin
+        copyto_testsuite(backend)
     end
 
     @conditional_testset "Printing" skip_tests begin
