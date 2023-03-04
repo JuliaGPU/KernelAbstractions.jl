@@ -41,7 +41,7 @@ function testsuite(backend, backend_str, backend_mod, AT, DAT)
 
     if backend_str != "ROCM"
         @testset "async_copy!" begin
-            asynccopy_testsuite(backend, AT)
+            asynccopy_testsuite(backend, backend_str, AT)
         end
     end
 
@@ -65,7 +65,7 @@ function testsuite(backend, backend_str, backend_mod, AT, DAT)
         reflection_testsuite(backend, backend_str, AT)
     end
 
-    if backend_str != "oneAPI" # uses int128 and allocate for InexactError
+    if backend_str != "oneAPI" && backend_str != "Metal" # uses int128 and allocate for InexactError
         @testset "Convert" begin
             convert_testsuite(backend, AT)
         end

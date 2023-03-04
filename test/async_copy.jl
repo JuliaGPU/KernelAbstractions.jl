@@ -1,12 +1,14 @@
 using KernelAbstractions, Test
 
-function asynccopy_testsuite(backend, ArrayT)
+function asynccopy_testsuite(backend, backend_str, ArrayT)
     M = 1024
 
-    A = ArrayT(rand(Float64, M))
-    B = ArrayT(rand(Float64, M))
+    T = backend_str == "Metal" ? Float32 : Float64
 
-    a = Array{Float64}(undef, M)
+    A = ArrayT(rand(T, M))
+    B = ArrayT(rand(T, M))
+
+    a = Array{T}(undef, M)
     event = async_copy!(backend(), a, B, dependencies=Event(CPU()))
     event = async_copy!(backend(), A, a, dependencies=event)
     wait(event)
