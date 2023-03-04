@@ -67,14 +67,14 @@ struct MetalDevice <: GPU end
 const METAL_EVENT_SIGNAL_VALUE = UInt64(2)
 
 struct MetalEvent <: Event
-    event::Metal.MtlEvent
+    event::Metal.MtlSharedEvent
 end
 
 failed(::MetalEvent) = false
 isdone(ev::MetalEvent) = ev.event.signaledValue == METAL_EVENT_SIGNAL_VALUE
 
 function Event(::MetalDevice)
-    event = Metal.MtlEvent(Metal.current_device())
+    event = Metal.MtlSharedEvent(Metal.current_device())  ### FIXME: Event vs SharedEvent
     MetalEvent(event)
 end
 
@@ -198,7 +198,7 @@ function (obj::Kernel{MetalDevice})(args...; ndrange=nothing, dependencies=nothi
     queue = next_queue()
     wait(MetalDevice(), MultiEvent(dependencies), progress; queue)
 
-    event = Metal.MtlEvent(Metal.current_device())
+    event = Metal.MtlSharedEvent(Metal.current_device())  ### FIXME: Event vs SharedEvent
 
     # Launch kernel
     kernel(ctx, args...; threads=threads, grid=nblocks, queue=queue)
