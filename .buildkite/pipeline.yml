@@ -9,10 +9,10 @@ steps:
         cuda:
           - "vc/ka_transition"
     env:
-      BUILDKITE_PLUGIN_JULIA_VERSION: "{{matrix.version}}"
       KERNELABSTRACTIONS_TEST_BACKEND: "CUDA"
     plugins:
-      - JuliaCI/julia#v1: ~
+      - JuliaCI/julia#v1:
+          version: "{{matrix.version}}"
       - JuliaCI/julia-coverage#v1:
           codecov: true
           dirs:
