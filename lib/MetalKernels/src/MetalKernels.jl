@@ -189,7 +189,7 @@ function threads_to_workgroupsize(threads, ndrange)
     end
 end
 
-function (obj::Kernel{MetalDevice})(args...; ndrange=nothing, dependencies=nothing, workgroupsize=nothing, progress=nothing)
+function (obj::Kernel{MetalDevice})(args...; ndrange=nothing, dependencies=Event(MetalDevice()), workgroupsize=nothing, progress=nothing)
     ndrange, workgroupsize, iterspace, dynamic = launch_config(obj, ndrange, workgroupsize)
     # this might not be the final context, since we may tune the workgroupsize
     ctx = mkcontext(obj, ndrange, iterspace)
