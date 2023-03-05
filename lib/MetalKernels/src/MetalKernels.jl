@@ -74,7 +74,16 @@ failed(::MetalEvent) = false
 isdone(ev::MetalEvent) = ev.event.signaledValue == METAL_EVENT_SIGNAL_VALUE
 
 function Event(::MetalDevice)
-    event = Metal.MtlSharedEvent(Metal.current_device())  ### FIXME: Event vs SharedEvent
+    device = Metal.current_device()
+    queue = Metal.global_queue(device)
+    cmdbuf = Metal.MtlCommandBuffer(queue)
+    event = Metal.MtlSharedEvent(device)
+
+    # The cmdbuf executes in-order on the global queue
+    # so this one just triggers our signal
+    MTL.encode_signal!(cmdbuf, event, METAL_EVENT_SIGNAL_VALUE)
+    Metal.commit!(cmdbuf)
+
     MetalEvent(event)
 end
 
