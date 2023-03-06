@@ -323,6 +323,8 @@ import CUDA: @device_override
 import KernelAbstractions: CompilerMetadata, DynamicCheck, LinearIndices
 import KernelAbstractions: __index_Local_Linear, __index_Group_Linear, __index_Global_Linear, __index_Local_Cartesian, __index_Group_Cartesian, __index_Global_Cartesian, __validindex, __print
 import KernelAbstractions: mkcontext, expand, __iterspace, __ndrange, __dynamic_checkbounds
+import KernelAbstractions: __reduce
+
 
 function mkcontext(kernel::Kernel{<:CUDADevice}, _ndrange, iterspace)
     CompilerMetadata{KernelAbstractions.ndrange(kernel), DynamicCheck}(_ndrange, iterspace)
@@ -407,13 +409,14 @@ Adapt.adapt_storage(to::ConstAdaptor, a::CUDA.CuDeviceArray) = Base.Experimental
 # Argument conversion
 KernelAbstractions.argconvert(k::Kernel{<:CUDADevice}, arg) = CUDA.cudaconvert(arg)
 
-# reduce block
-@device_override @inline function reduce(T,val)
+
+# group reduce that uses warp level reduction
+@device_override @inline function __reduce(op, val, ::Type{T}) where T
     shared = CUDA.CuStaticSharedArray(T, 32)
 
     Sid, lane = fldmod1(CUDA.threadIdx().x, CUDA.warpsize())
 
-    val = reduce_warp(val)
+    val = reduce_warp(op, val)
 
     # Enkel de eerste lane van iedere SIMD unit mag de waarde naar shared memory schrijven
     if lane == 1
@@ -432,16 +435,15 @@ KernelAbstractions.argconvert(k::Kernel{<:CUDADevice}, arg) = CUDA.cudaconvert(a
 
     # final reduce within first warp
     if Sid == 1
-        val = reduce_warp(val)
+        val = reduce_warp(op, val)
     end
     return val
 end
 
-function reduce_warp(val)
+@inline function reduce_warp(op, val)
     offset = 0x00000001
     while offset < CUDA.warpsize()
-
-        val += CUDA.shfl_down_sync(0xffffffff, val, offset)
+        val = op(val, CUDA.shfl_down_sync(0xffffffff, val, offset))
         offset <<= 1
     end
 

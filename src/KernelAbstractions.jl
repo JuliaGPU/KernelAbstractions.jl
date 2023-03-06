@@ -4,6 +4,7 @@ export @kernel
 export @Const, @localmem, @private, @uniform, @synchronize
 export @index, @groupsize, @ndrange
 export @print
+export @reduce
 export Device, GPU, CPU, Event, MultiEvent, NoneEvent
 export async_copy!
 
@@ -329,6 +330,14 @@ macro index(locale, args...)
     Expr(:call, GlobalRef(KernelAbstractions, index_function), esc(:__ctx__), map(esc, args)...)
 end
 
+# TODO: Where should we havdle the logic of neutral, adding it to the macro's logic would reduce complexity in terms of using the macro
+# but adding it to the macro may cause some overhead
+macro reduce(op, val)
+    quote
+        $__reduce($(esc(op)), $(esc(val)), typeof($(esc(val))))
+    end
+end
+
 ###
 # Internal kernel functions
 ###
@@ -493,6 +502,7 @@ function __synchronize()
     error("@synchronize used outside kernel or not captured")
 end
 
+
 @generated function __print(items...)
     str = ""
     args = []
@@ -514,6 +524,14 @@ end
 # Utils
 __size(args::Tuple) = Tuple{args...}
 __size(i::Int) = Tuple{i}
+
+
+# reduction
+function __reduce(op, val, ::Type{T}) where T
+    error("@reduce used outside kernel or not captured")
+end
+
+
 
 ###
 # Extras
