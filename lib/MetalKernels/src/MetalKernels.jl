@@ -136,7 +136,7 @@ function KernelAbstractions.async_copy!(::MetalDevice, A, B; dependencies=nothin
     dev = Metal.current_device()
     wait(MetalDevice(), MultiEvent(dependencies), progress; queue)
 
-    event = Metal.MtlSharedEvent(dev)  ### FIXME: Event vs SharedEvent
+    event = Metal.MtlSharedEvent(dev)
     cmdbuf = Metal.MtlCommandBuffer(queue)
     
     dst = pointer(A)
@@ -195,7 +195,15 @@ function (obj::Kernel{MetalDevice})(args...; ndrange=nothing, dependencies=Event
     ctx = mkcontext(obj, ndrange, iterspace)
     kernel = Metal.@metal launch=false obj.f(ctx, args...)
 
-    # TODO: Autotuning
+    is_dynamic =
+        KernelAbstractions.workgroupsize(obj) <: DynamicSize &&
+        isnothing(workgroupsize)
+    if is_dynamic
+        groupsize = kernel.pipeline_state.maxTotalThreadsPerThreadgroup
+        new_workgroupsize = threads_to_workgroupsize(groupsize, ndrange)
+        iterspace, dynamic = partition(obj, ndrange, new_workgroupsize)
+        ctx = mkcontext(obj, ndrange, iterspace)
+    end
 
     nblocks = length(blocks(iterspace))
     threads = length(workitems(iterspace))
@@ -207,7 +215,7 @@ function (obj::Kernel{MetalDevice})(args...; ndrange=nothing, dependencies=Event
     queue = next_queue()
     wait(MetalDevice(), MultiEvent(dependencies), progress; queue)
 
-    event = Metal.MtlSharedEvent(Metal.current_device())  ### FIXME: Event vs SharedEvent
+    event = Metal.MtlSharedEvent(Metal.current_device())
 
     # Launch kernel
     kernel(ctx, args...; threads=threads, grid=nblocks, queue=queue)
