@@ -78,7 +78,8 @@ end
     @test @inferred(KernelAbstractions.get_device(A)) isa deviceT
     @test @inferred(KernelAbstractions.get_device(view(A, 2:4, 1:3))) isa deviceT
     if !(isdefined(Main, :ROCKernels) && (device isa Main.ROCKernels.ROCDevice)) &&
-       !(isdefined(Main, :oneAPIKernels) && (device isa Main.oneAPIKernels.oneAPIDevice))
+       !(isdefined(Main, :oneAPIKernels) && (device isa Main.oneAPIKernels.oneAPIDevice)) &&
+       !(isdefined(Main, :MetalKernels) && (device isa Main.MetalKernels.MetalDevice))
         # Sparse arrays are not supported by the ROCm or oneAPI backends yet:
         @test @inferred(KernelAbstractions.get_device(sparse(A))) isa deviceT
     end
@@ -283,6 +284,17 @@ end
     end
 end
 
+if backend_str == "Metal"
+    @testset "special functions: gamma" begin
+        @test_broken false
+    end
+    @testset "special functions: erf" begin
+        @test_broken false
+    end
+    @testset "special functions: erfc" begin
+        @test_broken false
+    end
+else
 @testset "special functions: gamma" begin
     @eval begin
         @kernel function gamma_knl(A, @Const(B))
@@ -360,5 +372,6 @@ end
         end
     end
 end
+end #else Metal
 
 end

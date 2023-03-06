@@ -28,6 +28,12 @@ if !CI || BACKEND == "oneAPI"
     push!(pkgs, oneapikernels)
 end
 
+if !CI || BACKEND == "Metal"
+    metalkernels = Pkg.PackageSpec(path = joinpath(root_directory, "lib", "MetalKernels"))
+    push!(pkgs, metalkernels)
+    Pkg.add(Pkg.PackageSpec(name="Metal", rev="main")) # TODO remove when tagged
+end
+
 if VERSION < v"1.8"
     kernelgradients = Pkg.PackageSpec(path = joinpath(root_directory, "lib", "KernelGradients"))
     push!(pkgs, kernelgradients)
