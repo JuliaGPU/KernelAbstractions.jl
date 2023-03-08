@@ -28,6 +28,7 @@ makedocs(;
         "Extras" => [
             "extras/unrolling.md",
         ], # Extras
+        "Notes for implementations" => "implementations.md"
     ], # pages
 )
 
