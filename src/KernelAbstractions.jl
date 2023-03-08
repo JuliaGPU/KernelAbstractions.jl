@@ -381,6 +381,21 @@ function ones(backend, ::Type{T}, dims::Tuple) where T
     return data
 end
 
+"""
+   priority!(::Backend, prio::Symbol)
+
+Set the priority for the backend stream/queue. This is an optional
+feature that backends may or may not implement. If a backend shall
+support priorities it must accept `:high`, `:normal`, `:low`.
+Where `:normal` is the default.
+"""
+function priority!(::Backend, prio::Symbol)
+    if !(prio in (:high, :normal, :low))
+        error("priority must be one of :high, :normal, :low")
+    end
+    return nothing
+end
+
 include("nditeration.jl")
 using .NDIteration
 import .NDIteration: get

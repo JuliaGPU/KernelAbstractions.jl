@@ -21,7 +21,8 @@ end
 
 function exchange!(h_send_buf, d_recv_buf, h_recv_buf, src_rank, dst_rank, comm)
     recv_req = MPI.Irecv!(h_recv_buf, src_rank, 666, comm)
-    recv = Base.Threads.@spawn begin 
+    recv = Base.Threads.@spawn begin
+        KernelAbstractions.priority!(backend, :high)
         cooperative_test!(recv_req)
         KernelAbstractions.copyto!(backend, d_recv_buf, h_recv_buf)
         KernelAbstractions.synchronize(backend) # Gurantueed to be cooperative
@@ -60,7 +61,7 @@ function main(backend)
 
     recv_task, send_task = exchange!(h_send_buf, d_recv_buf, h_recv_buf,
                                        src_rank, dst_rank, comm)
-    
+
     cooperative_wait(recv_task)
     cooperative_wait(send_task)
 
