@@ -15,7 +15,7 @@ elseif backend == "CUDA"
         CUDA.allowscalar(false)
         Testsuite.testsuite(CUDABackend{false, false}, backend, CUDA, CuArray, CUDA.CuBackendArray)
         for (PreferBlocks, AlwaysInline) in Iterators.product((true, false), (true, false))
-            Testsuite.unittest_testsuite(CUDABackend{true, false}, backend, CUDA, CuArray, CUDA.CuBackendArray)
+            Testsuite.unittest_testsuite(CUDABackend{true, false}, backend, CUDA, CUDA.CuBackendArray)
         end
     end
 end
