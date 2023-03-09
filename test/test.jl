@@ -3,6 +3,7 @@ using KernelAbstractions.NDIteration
 using InteractiveUtils
 using LinearAlgebra
 using SparseArrays
+using Adapt
 
 identity(x) = x
 
