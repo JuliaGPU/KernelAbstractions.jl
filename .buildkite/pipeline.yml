@@ -17,7 +17,7 @@ steps:
             - src
     commands: 
       - |
-        julia --project=test/projects/cuda 'using Pkg
+        julia --project=test/projects/cuda -e 'using Pkg
                 println("--- :julia: Instantiating project")
                 Pkg.develop(; path=pwd())
                 println("+++ :julia: Running tests")
