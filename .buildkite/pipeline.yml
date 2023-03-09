@@ -19,6 +19,7 @@ steps:
       - |
         julia --project=test/projects/cuda -e 'using Pkg
                 println("--- :julia: Instantiating project")
+                Pkg.instantiate()
                 Pkg.develop(; path=pwd())
                 println("+++ :julia: Running tests")
                 Pkg.test("CUDA"; coverage=true, test_args=["kernelabstractions"])'
