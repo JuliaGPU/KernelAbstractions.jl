@@ -360,6 +360,11 @@ get_backend(A::Tridiagonal) = get_backend(A.d)
 
 get_backend(::Array) = CPU()
 
+# Define:
+#   adapt_storage(::Backend, a::Array) = adapt(BackendArray, a)
+#   adapt_storage(::Backend, a::BackendArray) = a
+Adapt.adapt_storage(::CPU, a::Array) = a
+
 """
     allocate(::Backend, Type, dims...)
 
