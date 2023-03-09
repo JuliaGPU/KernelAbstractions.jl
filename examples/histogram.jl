@@ -72,7 +72,7 @@ function move(backend, input)
 end
 
 @testset "histogram tests" begin
-    if Base.VERSION < v"1.7.0"
+    if Base.VERSION < v"1.7.0" && KernelAbstractions.iscpu(backend)
         @test_skip false
     else
         rand_input = [rand(1:128) for i = 1:1000]
