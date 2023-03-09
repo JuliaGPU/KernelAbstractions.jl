@@ -70,7 +70,7 @@ end
 
 @testset "get_backend" begin
     backend = Backend()
-    backendT = typeof(backend).name.wrapper # To look through CUDABacken{true, false}
+    backendT = typeof(backend).name.wrapper # To look through CUDABackend{true, false}
     @test backend isa backendT
 
     x = allocate(backend, Float32, 5)
@@ -80,6 +80,14 @@ end
     @test @inferred(KernelAbstractions.get_backend(sparse(A))) isa backendT
     @test @inferred(KernelAbstractions.get_backend(Diagonal(x))) isa backendT
     @test @inferred(KernelAbstractions.get_backend(Tridiagonal(A))) isa backendT
+end
+
+@testset "adapt" begin
+    backend = Backend()
+    x = allocate(backend, Float32, 5)
+    @test adapt(CPU(), x) isa Array
+    y = adapt(backend, Array{Float32}(undef, 5))
+    @test typeof(y) == typeof(x)
 end
 
 # TODO: add test for _group and _local_cartesian
