@@ -21,53 +21,30 @@ systems. Currently, profiling and debugging require backend-specific calls like,
 All supported backends rely on their respective Julia interface to the compiler
 backend and depend on
 [`GPUArrays.jl`](https://github.com/JuliaGPU/GPUArrays.jl) and
-[`GPUCompiler.jl`](https://github.com/JuliaGPU/GPUCompiler.jl). KA provides
-interface kernel generation modules to those packages in
-[`/lib`](https://github.com/JuliaGPU/KernelAbstractions.jl/tree/master/lib).
-After loading the kernel packages, KA will provide a `KA.Device` for that
-backend to be used in the kernel generation stage.
+[`GPUCompiler.jl`](https://github.com/JuliaGPU/GPUCompiler.jl).
+
 ### CUDA
 ```julia
 using CUDA
 using KernelAbstractions
-using CUDAKernels
 ```
 [`CUDA.jl`](https://github.com/JuliaGPU/CUDA.jl) is currently the most mature way to program for GPUs.
-This provides a device `CUDADevice <: KA.Device` to
-### AMDGPU
-```julia
-using AMDGPU
-using KernelAbstractions
-using ROCKernels
-```
-Experimental AMDGPU (ROCm) support is available via the
-[`AMDGPU.jl`](https://github.com/JuliaGPU/AMDGPU.jl) and `ROCKernels.jl`. It
-provides the device `ROCDevice <: KA.Device`. Please get in touch with `@jpsamaroo` for
-any issues specific to the ROCKernels backend.
-###  oneAPI
-Experimental support for Intel GPUs has also been added through the oneAPI Intel
-Compute Runtime interfaced to in
-[`oneAPI.jl`](https://github.com/JuliaGPU/oneAPI.jl)
+CUDAThis provides a backend `CUDABackend <: KA.Backend` to
+
+## Changelog
+
+### 0.9
+Major refactor of KernelAbstractions. In particular:
+- Removal of the event system. Kernel are now implicitly ordered.
+- Removal of backend packages, backends are now directly provided by CUDA.jl and similar
 
 ## Semantic differences
-
-### To Julia
-
-1. Functions inside kernels are forcefully inlined, except when marked with `@noinline`.
-2. Floating-point multiplication, addition, subtraction are marked contractable.
 
 ### To CUDA.jl/AMDGPU.jl
 
 1. The kernels are automatically bounds-checked against either the dynamic or statically
    provided `ndrange`.
-2. Functions like `Base.sin` are mapped to `CUDA.sin`/`AMDGPU.sin`.
-
-### To GPUifyLoops.jl
-
-1. `@scratch` has been renamed to `@private`, and the semantics have changed. Instead
-   of denoting how many dimensions are implicit on the GPU, you only ever provide the
-   explicit number of dimensions that you require. The implicit CPU dimensions are
-   appended.
+2. Kernels implictly return `nothing`
 
 ## Contributing
 Please file any bug reports through Github issues or fixes through a pull

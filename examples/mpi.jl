@@ -1,57 +1,41 @@
 # EXCLUDE FROM TESTING
 using KernelAbstractions
-using CUDA
-
-if has_cuda_gpu()
-    CUDA.allowscalar(false)
-else
-    exit()
-end
-
 using MPI
 
-device(A) = typeof(A) <: Array ? CPU() : CUDADevice()
-
-function mpiyield()
-    MPI.Iprobe(MPI.MPI_ANY_SOURCE, MPI.MPI_ANY_TAG, MPI.COMM_WORLD)
-    yield()
-end
-
-function __Irecv!(request, buf, src, tag, comm)
-    request[1] = MPI.Irecv!(buf, src, tag, comm)
-end
-
-function __Isend!(request, buf, dst, tag, comm)
-    request[1] = MPI.Isend(buf, dst, tag, comm)
-end
-
-function __testall!(requests)
+# TODO: Implement in MPI.jl
+function cooperative_test!(req)
     done = false
     while !done
-        done, _ = MPI.Testall!(requests)
+        done, _ = MPI.Test(req, MPI.Status)
         yield()
     end
 end
 
-function exchange!(h_send_buf, d_recv_buf, h_recv_buf, src_rank, dst_rank,
-                   send_request, recv_request, comm)
+function cooperative_wait(task::Task)
+    while !Base.istaskdone(task)
+        MPI.Iprobe(MPI.MPI_ANY_SOURCE, MPI.MPI_ANY_TAG, MPI.COMM_WORLD)
+        yield()
+    end
+    wait(task)
+end
 
-    __Irecv!(recv_request, h_recv_buf, src_rank, 666, comm)
+function exchange!(h_send_buf, d_recv_buf, h_recv_buf, src_rank, dst_rank, comm)
+    recv_req = MPI.Irecv!(h_recv_buf, src_rank, 666, comm)
     recv = Base.Threads.@spawn begin 
-        __testall!(recv_request)
-        async_copy!(device(d_recv_buf), d_recv_buf, h_recv_buf; progress=mpiyield)
-        KernelAbstractions.synchronize(device(d_recv_buf))
+        cooperative_test!(recv_req)
+        KernelAbstractions.copyto!(backend, d_recv_buf, h_recv_buf)
+        KernelAbstractions.synchronize(backend) # Gurantueed to be cooperative
     end
 
     send = Base.Threads.@spawn begin
-        __Isend!(send_request, h_send_buf, dst_rank, 666, comm)
-        __testall!(send_request)
+        send_req = MPI.Isend!(h_send_buf, dst_rank, 666, comm)
+        cooperative_test!(send_req)
     end
 
     return recv, send
 end
 
-function main()
+function main(backend)
     if !MPI.Initialized()
         MPI.Init()
     end
@@ -64,26 +48,23 @@ function main()
     T = Int64
     M = 10
 
-    d_recv_buf = CUDA.zeros(T, M)
+    d_recv_buf = allocate(backend, T, M)
+    fill!(d_recv_buf, -1)
+
     h_send_buf = zeros(T, M)
     h_recv_buf = zeros(T, M)
-
-    fill!(d_recv_buf, -1)
     fill!(h_send_buf, MPI.Comm_rank(comm))
     fill!(h_recv_buf, -1)
 
-    send_request = fill(MPI.REQUEST_NULL, 1)
-    recv_request = fill(MPI.REQUEST_NULL, 1)
-
-    KernelAbstractions.synchronize(device(d_recv_buf))
+    KernelAbstractions.synchronize(backend)
 
     recv_task, send_task = exchange!(h_send_buf, d_recv_buf, h_recv_buf,
-                                       src_rank, dst_rank, send_request,
-                                       recv_request, comm)
-    wait(recv_task)
-    wait(send_task)
+                                       src_rank, dst_rank, comm)
+    
+    cooperative_wait(recv_task)
+    cooperative_wait(send_task)
 
     @test all(d_recv_buf .== src_rank)
 end
 
-main()
+main(backend)

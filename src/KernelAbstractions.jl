@@ -4,8 +4,10 @@ export @kernel
 export @Const, @localmem, @private, @uniform, @synchronize
 export @index, @groupsize, @ndrange
 export @print
-export Device, GPU, CPU
-export async_copy!, synchronize, get_device
+export Backend, GPU, CPU
+export synchronize, get_backend, allocate
+
+import SnoopPrecompile
 
 import Atomix: @atomic, @atomicswap, @atomicreplace
 import UnsafeAtomics
@@ -19,7 +21,7 @@ using Adapt
 """
     @kernel function f(args) end
 
-Takes a function definition and generates a Kernel constructor from it.
+Takes a function definition and generates a [`Kernel`](@ref) constructor from it.
 The enclosed function is allowed to contain kernel language constructs.
 In order to call it the kernel has first to be specialized on the backend
 and then invoked on the arguments.
@@ -47,7 +49,7 @@ end
 A = ones(1024)
 B = rand(1024)
 vecadd(CPU(), 64)(A, B, ndrange=size(A))
-synchronize(device)
+synchronize(backend)
 ```
 """
 macro kernel(expr)
@@ -64,22 +66,22 @@ any other memory in the kernel.
 !!! danger
     Violating those constraints will lead to arbitrary behaviour.
 
-as an example given a kernel signature `kernel(A, @Const(B))`, you are not
-allowed to call the kernel with `kernel(A, A)` or `kernel(A, view(A, :))`.
+    As an example given a kernel signature `kernel(A, @Const(B))`, you are not
+    allowed to call the kernel with `kernel(A, A)` or `kernel(A, view(A, :))`.
 """
 macro Const end
 
 """
-    async_copy!(::Device, dest::AbstractArray, src::AbstractArray)
+    copyto!(::Backend, dest::AbstractArray, src::AbstractArray)
 
-Perform an asynchronous copy on the device.
+Perform a `copyto!` operation that execution ordered with respect to the backend.
 """
-function async_copy! end
+function copyto! end
 
 """
-    synchronize(::Device)
+    synchronize(::Backend)
 
-Synchronize the current device.
+Synchronize the current backend.
 """
 function synchronize end
 
@@ -101,7 +103,7 @@ function ndrange end
 """
     @groupsize()
 
-Query the workgroupsize on the device. This function returns
+Query the workgroupsize on the backend. This function returns
 a tuple corresponding to kernel configuration. In order to get
 the total size you can use `prod(@groupsize())`.
 """
@@ -114,7 +116,7 @@ end
 """
     @ndrange()
 
-Query the ndrange on the device. This function returns
+Query the ndrange on the backend. This function returns
 a tuple corresponding to kernel configuration.
 """
 macro ndrange()
@@ -322,7 +324,7 @@ __index_Global_NTuple(ctx, I...) = Tuple(__index_Global_Cartesian(ctx, I...))
 
 struct ConstAdaptor end
 
-Adapt.adapt_storage(to::ConstAdaptor, a::Array) = Base.Experimental.Const(a)
+Adapt.adapt_storage(::ConstAdaptor, a::Array) = Base.Experimental.Const(a)
 
 constify(arg) = adapt(ConstAdaptor(), arg)
 
@@ -330,30 +332,54 @@ constify(arg) = adapt(ConstAdaptor(), arg)
 # Backend hierarchy
 ###
 
-abstract type Device end
-abstract type GPU <: Device end
+"""
+    Abstract type for all KernelAbstractions backends.
+"""
+abstract type Backend end
+abstract type GPU <: Backend end
 
-struct CPU <: Device end
+struct CPU <: Backend end
 
 isgpu(::GPU) = true
 isgpu(::CPU) = false
 
 
 """
-    KernelAbstractions.get_device(A::AbstractArray)::KernelAbstractions.Device
+    get_backend(A::AbstractArray)::Backend
 
-Get a `KernelAbstractions.Device` instance suitable for array `A`.
+Get a [`Backend`](@ref) instance suitable for array `A`.
 """
-function get_device end
+function get_backend end
 
 # Should cover SubArray, ReshapedArray, ReinterpretArray, Hermitian, AbstractTriangular, etc.:
-get_device(A::AbstractArray) = get_device(parent(A))
+get_backend(A::AbstractArray) = get_backend(parent(A))
 
-get_device(A::AbstractSparseArray) = get_device(rowvals(A))
-get_device(A::Diagonal) = get_device(A.diag)
-get_device(A::Tridiagonal) = get_device(A.d)
+get_backend(A::AbstractSparseArray) = get_backend(rowvals(A))
+get_backend(A::Diagonal) = get_backend(A.diag)
+get_backend(A::Tridiagonal) = get_backend(A.d)
 
-get_device(::Array) = CPU()
+get_backend(::Array) = CPU()
+
+"""
+    allocate(::Backend, Type, dims...)
+
+Allocate a storage array appropriate for the computational backend.
+"""
+allocate(backend, T, dims...) = return allocate(backend, T, dims)
+
+zeros(backend, T, dims...) = zeros(backend, T, dims)
+function zeros(backend, ::Type{T}, dims::Tuple) where T
+    data = allocate(backend, T, dims...)
+    fill!(data, zero(T))
+    return data
+end
+
+ones(backend, T, dims...) = ones(backend, T, dims)
+function ones(backend, ::Type{T}, dims::Tuple) where T
+    data = allocate(backend, T, dims)
+    fill!(data, one(T))
+    return data
+end
 
 include("nditeration.jl")
 using .NDIteration
@@ -364,13 +390,14 @@ import .NDIteration: get
 ###
 
 """
-    Kernel{Device, WorkgroupSize, NDRange, Func}
+    Kernel{Backend, WorkgroupSize, NDRange, Func}
 
-Kernel closure struct that is used to represent the device
+Kernel closure struct that is used to represent the backend
 kernel on the host. `WorkgroupSize` is the number of workitems
 in a workgroup.
 """
-struct Kernel{Device, WorkgroupSize<:_Size, NDRange<:_Size, Fun}
+struct Kernel{Backend, WorkgroupSize<:_Size, NDRange<:_Size, Fun}
+    backend::Backend
     f::Fun
 end
 
@@ -380,6 +407,7 @@ end
 
 workgroupsize(::Kernel{D, WorkgroupSize}) where {D, WorkgroupSize} = WorkgroupSize
 ndrange(::Kernel{D, WorkgroupSize, NDRange}) where {D, WorkgroupSize,NDRange} = NDRange
+backend(kernel::Kernel) = kernel.backend
 
 function partition(kernel, ndrange, workgroupsize)
     static_ndrange = KernelAbstractions.ndrange(kernel)
@@ -438,8 +466,8 @@ function partition(kernel, ndrange, workgroupsize)
     return iterspace, dynamic
 end
 
-function construct(::Device, ::S, ::NDRange, xpu_name::XPUName) where {Device<:Union{CPU,GPU}, S<:_Size, NDRange<:_Size, XPUName}
-    return Kernel{Device, S, NDRange, XPUName}(xpu_name)
+function construct(backend::Backend, ::S, ::NDRange, xpu_name::XPUName) where {Backend<:Union{CPU,GPU}, S<:_Size, NDRange<:_Size, XPUName}
+    return Kernel{Backend, S, NDRange, XPUName}(backend, xpu_name)
 end
 
 ###
@@ -502,5 +530,17 @@ include("reflection.jl")
 # CPU backend
 
 include("cpu.jl")
+
+# precompile
+SnoopPrecompile.@precompile_all_calls begin
+    @eval begin
+        @kernel function precompile_kernel(A, @Const(B))
+            i = @index(Global, Linear)
+            lmem = @localmem Float32 (5,)
+            pmem = @private Float32 (1,)
+            @synchronize
+        end
+    end
+end
 
 end #module

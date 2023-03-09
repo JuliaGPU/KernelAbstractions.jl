@@ -1,12 +1,9 @@
 # EXCLUDE FROM TESTING
-using KernelAbstractions, Test
+using KernelAbstractions, Test, Random
 include(joinpath(dirname(pathof(KernelAbstractions)), "../examples/utils.jl")) # Load backend
 using KernelAbstractions.Extras: @unroll
 
-has_cuda && has_cuda_gpu() || exit()
-CUDA.allowscalar(false)
-
-using NVTX
+using NVTX # TODO: Common front-end
 
 const nreps = 3
 const N = 2048
@@ -136,55 +133,49 @@ end
 
 for block_dims in ((TILE_DIM, TILE_DIM), (TILE_DIM*TILE_DIM, 1), (1, TILE_DIM*TILE_DIM))
     for (name, kernel) in ( 
-                            ("copy",      simple_copy_kernel!(CUDADevice(), block_dims)),
-                            ("transpose", simple_transpose_kernel!(CUDADevice(), block_dims)),
+                            ("copy",      simple_copy_kernel!(backend, block_dims)),
+                            ("transpose", simple_transpose_kernel!(backend, block_dims)),
                           )
         NVTX.@range "Simple $name $block_dims" let
-            input = CUDA.rand(T, (N, N))
+            input = rand!(allocate(backend, T, N, N))
             output = similar(input)
 
             # compile kernel
             kernel(input, output, ndrange=size(output))
-            CUDA.@profile begin
-                for rep in 1:nreps
-                  kernel(input, output, ndrange=size(output))
-                end
-                KernelAbstractions.synchronize(CUDADevice())
-            end
+            for rep in 1:nreps
+            KernelAbstractions.synchronize(backend)
         end
     end
 end
 
 # Benchmark localmem
 for (name, kernel) in ( 
-                        ("copy",      lmem_copy_kernel!(CUDADevice(), (TILE_DIM, TILE_DIM))),
-                        ("transpose", lmem_transpose_kernel!(CUDADevice(), (TILE_DIM, TILE_DIM))),
+                        ("copy",      lmem_copy_kernel!(backend, (TILE_DIM, TILE_DIM))),
+                        ("transpose", lmem_transpose_kernel!(backend, (TILE_DIM, TILE_DIM))),
                       )
     for bank in (true, false)
         NVTX.@range "Localmem $name ($TILE_DIM, $TILE_DIM) bank=$bank" let
-            input = CUDA.rand(T, (N, N))
+            input = rand!(allocate(backend, T, N, N))
             output = similar(input)
 
             # compile kernel
             kernel(input, output, Val(Int(bank)), ndrange=size(output))
-            CUDA.@profile begin
-                for rep in 1:nreps
-                    kernel(input, output, Val(Int(bank)), ndrange=size(output))
-                end
-                KernelAbstractions.synchronize(CUDADevice())
+            for rep in 1:nreps
+                kernel(input, output, Val(Int(bank)), ndrange=size(output))
             end
+            KernelAbstractions.synchronize(backend)
         end
     end
 end
 
 # Benchmark localmem + multiple elements per lane
 for (name, kernel) in ( 
-                        ("copy",      coalesced_copy_kernel!(CUDADevice(), (TILE_DIM, BLOCK_ROWS))),
-                        ("transpose", coalesced_transpose_kernel!(CUDADevice(), (TILE_DIM, BLOCK_ROWS))),
+                        ("copy",      coalesced_copy_kernel!(backend, (TILE_DIM, BLOCK_ROWS))),
+                        ("transpose", coalesced_transpose_kernel!(backend, (TILE_DIM, BLOCK_ROWS))),
                       )
     for bank in (true, false)
         NVTX.@range "Localmem + multiple elements $name ($TILE_DIM, $BLOCK_ROWS) bank=$bank" let
-            input = CUDA.rand(T, (N, N))
+            input = rand!(allocate(backend, T, N, N))
             output = similar(input)
 
             # We want a number of blocks equivalent to (TILE_DIM, TILE_DIM)
@@ -195,12 +186,10 @@ for (name, kernel) in (
 
             # compile kernel
             kernel(input, output, Val(Int(bank)), ndrange=ndrange)
-            CUDA.@profile begin
-                for rep in 1:nreps
-                    kernel(input, output, Val(Int(bank)), ndrange=ndrange)
-                end
-                KernelAbstractions.synchronize(CUDADevice())
+            for rep in 1:nreps
+                kernel(input, output, Val(Int(bank)), ndrange=ndrange)
             end
+            KernelAbstractions.synchronize(backend)
         end
     end
 end

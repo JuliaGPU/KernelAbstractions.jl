@@ -1,39 +1,21 @@
 import UnsafeAtomicsLLVM
 
-function synchronize(::CPU)
-    nothing
-    # last = Base.get(task_local_storage(), :KA_CPU, nothing)
-    # if last !== nothing
-    #     wait(last)
-    # end
-end
+synchronize(::CPU) = nothing
 
-@inline function do_async(f::F, args...; progress=nothing, kwargs...) where F
-    # last = Base.get(task_local_storage(), :KA_CPU, nothing)
-    # task = Base.Threads.@spawn begin
-    #     if last !== nothing
-    #         wait(last)
-    #     end
-    #     f(args...; kwargs...)
-    #     nothing
-    # end
-    # task_local_storage(:KA_CPU, task)
-    f(args...; kwargs...)
-    return nothing
-end
+allocate(::CPU, ::Type{T}, dims::Tuple) where T = Array{T}(undef, dims)
+zeros(::CPU, ::Type{T}, dims::Tuple) where T = Base.zeros(T, dims)
+ones(::CPU, ::Type{T}, dims::Tuple) where T = Base.ones(T, dims)
 
-function async_copy!(::CPU, A, B; progress=nothing)
-    do_async(copyto!, A, B; progress)
-end
+copyto!(::CPU, A, B) = Base.copyto!(A, B)
 
-function (obj::Kernel{CPU})(args...; ndrange=nothing, workgroupsize=nothing, progress=nothing)
+function (obj::Kernel{CPU})(args...; ndrange=nothing, workgroupsize=nothing, )
     ndrange, workgroupsize, iterspace, dynamic = launch_config(obj, ndrange, workgroupsize)
 
     if length(blocks(iterspace)) == 0
         return nothing
     end
 
-    do_async(__run, obj, ndrange, iterspace, args, dynamic; progress)
+    __run(obj, ndrange, iterspace, args, dynamic)
 end
 
 function launch_config(kernel::Kernel{CPU}, ndrange, workgroupsize)

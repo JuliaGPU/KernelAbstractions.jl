@@ -1,11 +1,13 @@
 using KernelAbstractions
 using StaticArrays
 using Test
+using Random
+include(joinpath(dirname(pathof(KernelAbstractions)), "../examples/utils.jl")) # Load backend
 
 const TILE_DIM = 32
 
 @kernel function coalesced_matmul_kernel!(output, @Const(input1), @Const(input2), N, R, M,
-                                             ::Val{BANK}=Val(1)) where BANK
+                                          ::Val{BANK}=Val(1)) where BANK
      gi, gj = @index(Group, NTuple)
      i, j   = @index(Local, NTuple)
 
@@ -71,13 +73,13 @@ end
 N = 1024
 R = 512
 M = 2048
-A = rand(N, R)
-B = rand(R, M)
-C = zeros(N, M)
+A = rand!(allocate(backend, Float32, N, R))
+B = rand!(allocate(backend, Float32, R, M))
+C = KernelAbstractions.zeros(backend, Float32, N, M)
 
-kern = coalesced_matmul_kernel!(CPU(), (TILE_DIM, TILE_DIM))
+kern = coalesced_matmul_kernel!(backend, (TILE_DIM, TILE_DIM))
 
 kern(C, A, B, N, R, M, ndrange=size(C))
-KernelAbstractions.synchronize(CPU())
+KernelAbstractions.synchronize(backend)
 
 @test isapprox(A*B, C)
