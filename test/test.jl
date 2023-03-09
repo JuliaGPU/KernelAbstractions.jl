@@ -234,4 +234,12 @@ end
     end
 end
 
+@testset "priority" begin
+    KernelAbstractions.priority!(Backend(), :normal)
+    KernelAbstractions.priority!(Backend(), :high)
+    KernelAbstractions.priority!(Backend(), :low)
+
+    @test_throws ErrorException KernelAbstractions.priority!(Backend(), :default)
+end
+
 end
