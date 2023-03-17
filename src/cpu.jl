@@ -53,7 +53,7 @@ function __run(obj, ndrange, iterspace, args, dynamic)
         len, rem = 1, 0
     end
     if Nthreads == 1
-        __thread_run(1, len, rem, obj, ndrange, iterspace, args, dynamic)
+        @invokelatest __thread_run(1, len, rem, obj, ndrange, iterspace, args, dynamic)
     else
         @sync for tid in 1:Nthreads
             Threads.@spawn __thread_run(tid, len, rem, obj, ndrange, iterspace, args, dynamic)
