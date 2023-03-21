@@ -44,12 +44,13 @@ using KernelAbstractions, Test
 end
 
 function convert_testsuite(backend, ArrayT)
+    ET = KernelAbstractions.is_float64_suppported(backend) ? Float64 : Float32
 
     N = 32
-    d_A = ArrayT([rand()*3 for i = 1:N])
+    d_A = ArrayT([rand(ET)*3 for i = 1:N])
 
     # 30 because we have 10 integer types and we have 3 operations
-    d_B = ArrayT(zeros(N, 30))
+    d_B = ArrayT(zeros(ET, N, 30))
 
     @testset "convert test" begin
         kernel = convert_kernel!(backend(), 4)
