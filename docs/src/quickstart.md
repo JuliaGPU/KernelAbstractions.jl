@@ -56,12 +56,12 @@ A = CuArray(ones(1024, 1024))
 ```
 
 ```julia
-using ROCKernels # Required to access CUDABackend
+using ROCKernels # Required to access ROCBackend
 A = ROCArray(ones(1024, 1024))
 ```
 
 ```julia
-using oneAPIKernels # Required to access CUDABackend
+using oneAPIKernels # Required to access oneBackend
 A = oneArray(ones(1024, 1024))
 ```
 The kernel generation and execution are then
