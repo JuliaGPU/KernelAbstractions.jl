@@ -387,7 +387,21 @@ function ones(backend, ::Type{T}, dims::Tuple) where T
 end
 
 """
-   priority!(::Backend, prio::Symbol)
+    supports_atomics(::Backend)
+
+Returns whether `@atomic` operations are supported by the backend.
+"""
+supports_atomics(backend) = true
+
+"""
+    supports_float64(::Backend)
+
+Returns whether `Float64` values are supported by the backend.
+"""
+supports_float64(backend) = true
+
+"""
+    priority!(::Backend, prio::Symbol)
 
 Set the priority for the backend stream/queue. This is an optional
 feature that backends may or may not implement. If a backend shall
