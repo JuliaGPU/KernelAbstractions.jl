@@ -7,8 +7,8 @@ using Adapt
 
 identity(x) = x
 
-function unittest_testsuite(Backend, backend_str, backend_mod, BackendArrayT)
-@testset "partition" begin
+function unittest_testsuite(Backend, backend_str, backend_mod, BackendArrayT; skip_tests = Set{String}())
+@conditional_testset "partition" skip_tests begin
     backend = Backend()
     let kernel = KernelAbstractions.Kernel{typeof(backend), StaticSize{(64,)}, DynamicSize, typeof(identity)}(backend, identity)
         iterspace, dynamic = KernelAbstractions.partition(kernel, (128,), nothing)
@@ -69,7 +69,7 @@ end
        A[I] = i
 end
 
-@testset "get_backend" begin
+@conditional_testset "get_backend" skip_tests begin
     backend = Backend()
     backendT = typeof(backend).name.wrapper # To look through CUDABackend{true, false}
     @test backend isa backendT
@@ -78,12 +78,20 @@ end
     A = allocate(backend, Float32, 5, 5)
     @test @inferred(KernelAbstractions.get_backend(A)) isa backendT
     @test @inferred(KernelAbstractions.get_backend(view(A, 2:4, 1:3))) isa backendT
-    @test @inferred(KernelAbstractions.get_backend(sparse(A))) isa backendT
     @test @inferred(KernelAbstractions.get_backend(Diagonal(x))) isa backendT
     @test @inferred(KernelAbstractions.get_backend(Tridiagonal(A))) isa backendT
 end
 
-@testset "adapt" begin
+@conditional_testset "sparse" skip_tests begin
+    backend = Backend()
+    backendT = typeof(backend).name.wrapper # To look through CUDABackend{true, false}
+    @test backend isa backendT
+
+    A = allocate(backend, Float32, 5, 5)
+    @test @inferred(KernelAbstractions.get_backend(sparse(A))) isa backendT
+end
+
+@conditional_testset "adapt" skip_tests begin
     backend = Backend()
     x = allocate(backend, Float32, 5)
     @test adapt(CPU(), x) isa Array
@@ -92,7 +100,7 @@ end
 end
 
 # TODO: add test for _group and _local_cartesian
-@testset "indextest" begin
+@conditional_testset "indextest" skip_tests begin
     backend = Backend()
     A = allocate(backend, Int, 16, 16)
     index_linear_global(backend, 8)(A, ndrange=length(A))
@@ -143,7 +151,7 @@ end
     @inbounds A[I] = B[I]
 end
 
-@testset "Const" begin
+@conditional_testset "Const" skip_tests begin
     let kernel = constarg(Backend(), 8, (1024,))
         # this is poking at internals
         iterspace = NDRange{1, StaticSize{(128,)}, StaticSize{(8,)}}();
@@ -193,12 +201,12 @@ synchronize(Backend())
     nothing
 end
 
-@testset "CPU synchronization" begin
+@conditional_testset "CPU synchronization" skip_tests begin
     kernel_empty(CPU(), 1)(ndrange=1)
     synchronize(CPU())
 end
 
-@testset "Zero iteration space $Backend" begin
+@conditional_testset "Zero iteration space $Backend" skip_tests begin
     kernel_empty(Backend(), 1)(ndrange=1)
     kernel_empty(Backend(), 1)(ndrange=0)
     synchronize(Backend())
@@ -208,7 +216,7 @@ end
 end
 
 
-@testset "return statement" begin
+@conditional_testset "return statement" skip_tests begin
     try
         @eval @kernel function kernel_return()
             return
@@ -220,7 +228,7 @@ end
     end
 end
 
-@testset "fallback test: callable types" begin
+@conditional_testset "fallback test: callable types" skip_tests begin
     @eval begin
         function f end
         @kernel function (a::typeof(f))(x, ::Val{m}) where m
@@ -243,7 +251,7 @@ end
     end
 end
 
-@testset "priority" begin
+@conditional_testset "priority" skip_tests begin
     KernelAbstractions.priority!(Backend(), :normal)
     KernelAbstractions.priority!(Backend(), :high)
     KernelAbstractions.priority!(Backend(), :low)

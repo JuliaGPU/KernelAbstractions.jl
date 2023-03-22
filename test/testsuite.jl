@@ -3,6 +3,18 @@ module Testsuite
 using ..KernelAbstractions
 using ..Test
 
+macro conditional_testset(name, skip_tests, expr)
+    esc(quote
+        @testset $name begin
+            if $name ∉ $skip_tests
+                $expr
+            else
+                @test_skip false
+            end
+        end
+    end)
+end
+
 include("test.jl")
 include("localmem.jl")
 include("private.jl")
@@ -16,21 +28,9 @@ include("examples.jl")
 include("convert.jl")
 include("specialfunctions.jl")
 
-macro conditional_testset(name, skip_tests, expr)
-    esc(quote
-        @testset $name begin
-            if $name ∉ $skip_tests
-                $expr
-            else
-                @test_skip false
-            end
-        end
-    end)
-end
-
 function testsuite(backend, backend_str, backend_mod, AT, DAT; skip_tests = Set{String}())
     @conditional_testset "Unittests" skip_tests begin
-        unittest_testsuite(backend, backend_str, backend_mod, DAT)
+        unittest_testsuite(backend, backend_str, backend_mod, DAT; skip_tests)
     end
 
     @conditional_testset "SpecialFunctions" skip_tests begin
