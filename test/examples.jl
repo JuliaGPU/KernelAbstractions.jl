@@ -19,13 +19,10 @@ function examples_testsuite(backend_str)
     end
 
     @testset "$(basename(example))" for example in examples
-        code = """
-        $(Base.load_path_setup_code())
-        include($(repr(example)))
-        """
-        cmd = `$(Base.julia_cmd()) --startup-file=no -e $code`
-        @debug "Testing $example" Text(code) cmd
-        @test success(pipeline(cmd, stderr=stderr, stdout=stdout))
+        @eval module $(gensym())
+            include($example)
+        end
+        @test true
     end
 
 end
