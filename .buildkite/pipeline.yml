@@ -6,55 +6,53 @@ steps:
           - "1.6"
           - "1.7"
           - "1.8"
-    env:
-      KERNELABSTRACTIONS_TEST_BACKEND: "CUDA"
     plugins:
       - JuliaCI/julia#v1:
           version: "{{matrix.version}}"
       - JuliaCI/julia-coverage#v1:
           codecov: true
-          dirs:
-            - src
-    commands: 
-      - |
-        julia --project=test/projects/cuda -e 'using Pkg
-                println("--- :julia: Instantiating project")
-                Pkg.instantiate()
+    command: |
+      julia -e 'println("--- :julia: Instantiating project")
+                using Pkg
                 Pkg.develop(; path=pwd())
-                println("+++ :julia: Running tests")
+                Pkg.develop(; name="CUDA")' || exit 3
+
+      julia -e 'println("+++ :julia: Running tests")
+                using Pkg
                 Pkg.test("CUDA"; coverage=true, test_args=["kernelabstractions"])'
     agents:
       queue: "juliagpu"
       cuda: "*"
     timeout_in_minutes: 120
+    soft_fail:
+      - exit_status: 3
 
   - label: "Metal Julia {{matrix.version}}"
     matrix:
       setup:
         version:
           - "1.8"
-    env:
-      KERNELABSTRACTIONS_TEST_BACKEND: "Metal"
     plugins:
       - JuliaCI/julia#v1:
           version: "{{matrix.version}}"
       - JuliaCI/julia-coverage#v1:
           codecov: true
-          dirs:
-            - src
-    commands:
-      - |
-        julia --project=test/projects/metal -e 'using Pkg
-                println("--- :julia: Instantiating project")
-                Pkg.instantiate()
+    command: |
+      julia -e 'println("--- :julia: Instantiating project")
+                using Pkg
                 Pkg.develop(; path=pwd())
-                println("+++ :julia: Running tests")
+                Pkg.develop(; name="Metal")' || exit 3
+
+      julia -e 'println("+++ :julia: Running tests")
+                using Pkg
                 Pkg.test("Metal"; coverage=true, test_args=["kernelabstractions"])'
     agents:
       queue: "juliaecosystem"
       os: "macos"
       arch: "aarch64"
     timeout_in_minutes: 120
+    soft_fail:
+      - exit_status: 3
 
 env:
   JULIA_PKG_SERVER: "" # it often struggles with our large artifacts
