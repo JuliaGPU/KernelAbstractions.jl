@@ -332,9 +332,9 @@ end
 
 # TODO: Where should we havdle the logic of neutral, adding it to the macro's logic would reduce complexity in terms of using the macro
 # but adding it to the macro may cause some overhead
-macro reduce(op, val)
+macro reduce(op, val, neutral)
     quote
-        $__reduce($(esc(op)), $(esc(val)), typeof($(esc(val))))
+        $__reduce($(esc(:__ctx__)),$(esc(op)), $(esc(val)), $(esc(neutral)), typeof($(esc(val))))
     end
 end
 
@@ -530,8 +530,6 @@ __size(i::Int) = Tuple{i}
 function __reduce(op, val, ::Type{T}) where T
     error("@reduce used outside kernel or not captured")
 end
-
-
 
 ###
 # Extras

@@ -409,44 +409,39 @@ Adapt.adapt_storage(to::ConstAdaptor, a::CUDA.CuDeviceArray) = Base.Experimental
 # Argument conversion
 KernelAbstractions.argconvert(k::Kernel{<:CUDADevice}, arg) = CUDA.cudaconvert(arg)
 
+# TODO: make variable block size possible
+# TODO: figure out where to place this
 
 # group reduce that uses warp level reduction
-@device_override @inline function __reduce(op, val, ::Type{T}) where T
-    shared = CUDA.CuStaticSharedArray(T, 32)
+@device_override @inline function __reduce(__ctx__ , op, val, neutral, ::Type{T}) where T
+    threads = KernelAbstractions.@groupsize()[1]
+    threadIdx = KernelAbstractions.@index(Local)
 
-    Sid, lane = fldmod1(CUDA.threadIdx().x, CUDA.warpsize())
+    # shared mem for a complete reduction
+    shared = KernelAbstractions.@localmem(T, 1024)
+    @inbounds shared[threadIdx] = val
 
-    val = reduce_warp(op, val)
-
-    # Enkel de eerste lane van iedere SIMD unit mag de waarde naar shared memory schrijven
-    if lane == 1
-        @inbounds shared[Sid] = val
+    # perform the reduction
+    d = 1
+    while d < threads
+        KernelAbstractions.@synchronize()
+        index = 2 * d * (threadIdx-1) + 1
+        @inbounds if index <= threads
+            other_val = if index + d <= threads
+                shared[index+d]
+            else
+                neutral
+            end
+            shared[index] = op(shared[index], other_val)
+        end
+        d *= 2
     end
 
-    CUDA.sync_threads()
-
-    # de eerste 32 values worden in val gestoken, als er er minder dan 32 warps passen in 1 block
-    # dan vullen we de rest op met nullen
-    val = if CUDA.threadIdx().x <= fld1(CUDA.blockDim().x, CUDA.warpsize())
-            @inbounds shared[lane]
-    else
-        0
+    # load the final value on the first thread
+    if threadIdx == 1
+        val = @inbounds shared[threadIdx]
     end
-
-    # final reduce within first warp
-    if Sid == 1
-        val = reduce_warp(op, val)
-    end
-    return val
-end
-
-@inline function reduce_warp(op, val)
-    offset = 0x00000001
-    while offset < CUDA.warpsize()
-        val = op(val, CUDA.shfl_down_sync(0xffffffff, val, offset))
-        offset <<= 1
-    end
-
+    # every thread will return the reduced value of the group
     return val
 end
 
