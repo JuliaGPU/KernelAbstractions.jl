@@ -411,8 +411,7 @@ KernelAbstractions.argconvert(k::Kernel{<:CUDADevice}, arg) = CUDA.cudaconvert(a
 
 # TODO: make variable block size possible
 # TODO: figure out where to place this
-
-# group reduce that uses warp level reduction
+# reduction functionality for a group
 @device_override @inline function __reduce(__ctx__ , op, val, neutral, ::Type{T}) where T
     threads = KernelAbstractions.@groupsize()[1]
     threadIdx = KernelAbstractions.@index(Local)
