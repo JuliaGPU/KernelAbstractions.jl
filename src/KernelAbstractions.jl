@@ -85,6 +85,21 @@ Synchronize the current backend.
 """
 function synchronize end
 
+"""
+    unsafe_free!(x::AbstractArray)
+
+Release the memory of an array for reuse by future allocations
+and reduce pressure on the allocator.
+After releasing the memory of an array, it should no longer be accessed.
+
+This function is optional both to implement and call.
+If not implemented for a particular backend, default action is a no-op.
+Otherwise, it should be defined for backend's array type.
+
+!!! note
+    On CPU backend this is always a no-op.
+"""
+function unsafe_free! end
 
 ###
 # Kernel language
