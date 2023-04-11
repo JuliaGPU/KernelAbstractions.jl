@@ -4,6 +4,7 @@ export @kernel
 export @Const, @localmem, @private, @uniform, @synchronize
 export @index, @groupsize, @ndrange
 export @print
+export @reduce
 export Device, GPU, CPU, Event, MultiEvent, NoneEvent
 export async_copy!
 
@@ -329,6 +330,18 @@ macro index(locale, args...)
     Expr(:call, GlobalRef(KernelAbstractions, index_function), esc(:__ctx__), map(esc, args)...)
 end
 
+macro reduce(op, val, neutral)
+    quote
+        $__reduce($(esc(:__ctx__)),$(esc(op)), $(esc(val)), $(esc(neutral)), typeof($(esc(val))))
+    end
+end
+
+macro test(conf)
+    quote
+        $__test($(esc(:__ctx__)),$(esc(conf)))
+    end
+end
+
 ###
 # Internal kernel functions
 ###
@@ -493,6 +506,7 @@ function __synchronize()
     error("@synchronize used outside kernel or not captured")
 end
 
+
 @generated function __print(items...)
     str = ""
     args = []
@@ -515,14 +529,27 @@ end
 __size(args::Tuple) = Tuple{args...}
 __size(i::Int) = Tuple{i}
 
+
+# reduction
+function __reduce(__ctx__, op, val, ::Type{T}) where T
+    error("@reduce used outside kernel or not captured")
+end
+
+function __test(__ctx__, conf)
+    error("@test used outside kernel or not captured")
+end
+
 ###
 # Extras
 # - LoopInfo
 ###
 
+
 include("extras/extras.jl")
 
 include("reflection.jl")
+
+include("reduce.jl")
 
 # CPU backend
 

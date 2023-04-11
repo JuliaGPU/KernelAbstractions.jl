@@ -324,6 +324,7 @@ import KernelAbstractions: CompilerMetadata, DynamicCheck, LinearIndices
 import KernelAbstractions: __index_Local_Linear, __index_Group_Linear, __index_Global_Linear, __index_Local_Cartesian, __index_Group_Cartesian, __index_Global_Cartesian, __validindex, __print
 import KernelAbstractions: mkcontext, expand, __iterspace, __ndrange, __dynamic_checkbounds
 
+
 function mkcontext(kernel::Kernel{<:CUDADevice}, _ndrange, iterspace)
     CompilerMetadata{KernelAbstractions.ndrange(kernel), DynamicCheck}(_ndrange, iterspace)
 end
@@ -398,6 +399,14 @@ end
     CUDA._cuprint(args...)
 end
 
+import KernelAbstractions: __test
+
+@device_override @inline function __test(__ctx__, conf) 
+    KernelAbstractions.@localmem Float64 conf.threads_per_block
+
+    KernelAbstractions.@print("dit werkt")
+end
+
 ###
 # GPU implementation of const memory
 ###
@@ -408,3 +417,4 @@ Adapt.adapt_storage(to::ConstAdaptor, a::CUDA.CuDeviceArray) = Base.Experimental
 KernelAbstractions.argconvert(k::Kernel{<:CUDADevice}, arg) = CUDA.cudaconvert(arg)
 
 end
+
