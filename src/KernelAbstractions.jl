@@ -330,11 +330,15 @@ macro index(locale, args...)
     Expr(:call, GlobalRef(KernelAbstractions, index_function), esc(:__ctx__), map(esc, args)...)
 end
 
-# TODO: Where should we havdle the logic of neutral, adding it to the macro's logic would reduce complexity in terms of using the macro
-# but adding it to the macro may cause some overhead
 macro reduce(op, val, neutral)
     quote
         $__reduce($(esc(:__ctx__)),$(esc(op)), $(esc(val)), $(esc(neutral)), typeof($(esc(val))))
+    end
+end
+
+macro test(conf)
+    quote
+        $__test($(esc(:__ctx__)),$(esc(conf)))
     end
 end
 
@@ -527,8 +531,12 @@ __size(i::Int) = Tuple{i}
 
 
 # reduction
-function __reduce(op, val, ::Type{T}) where T
+function __reduce(__ctx__, op, val, ::Type{T}) where T
     error("@reduce used outside kernel or not captured")
+end
+
+function __test(__ctx__, conf)
+    error("@test used outside kernel or not captured")
 end
 
 ###
@@ -536,9 +544,12 @@ end
 # - LoopInfo
 ###
 
+
 include("extras/extras.jl")
 
 include("reflection.jl")
+
+include("reduce.jl")
 
 # CPU backend
 

@@ -323,7 +323,6 @@ import CUDA: @device_override
 import KernelAbstractions: CompilerMetadata, DynamicCheck, LinearIndices
 import KernelAbstractions: __index_Local_Linear, __index_Group_Linear, __index_Global_Linear, __index_Local_Cartesian, __index_Group_Cartesian, __index_Global_Cartesian, __validindex, __print
 import KernelAbstractions: mkcontext, expand, __iterspace, __ndrange, __dynamic_checkbounds
-import KernelAbstractions: __reduce
 
 
 function mkcontext(kernel::Kernel{<:CUDADevice}, _ndrange, iterspace)
@@ -400,6 +399,14 @@ end
     CUDA._cuprint(args...)
 end
 
+import KernelAbstractions: __test
+
+@device_override @inline function __test(__ctx__, conf) 
+    KernelAbstractions.@localmem Float64 conf.threads_per_block
+
+    KernelAbstractions.@print("dit werkt")
+end
+
 ###
 # GPU implementation of const memory
 ###
@@ -408,41 +415,6 @@ Adapt.adapt_storage(to::ConstAdaptor, a::CUDA.CuDeviceArray) = Base.Experimental
 
 # Argument conversion
 KernelAbstractions.argconvert(k::Kernel{<:CUDADevice}, arg) = CUDA.cudaconvert(arg)
-
-# TODO: make variable block size possible
-# TODO: figure out where to place this
-# reduction functionality for a group
-@device_override @inline function __reduce(__ctx__ , op, val, neutral, ::Type{T}) where T
-    threads = KernelAbstractions.@groupsize()[1]
-    threadIdx = KernelAbstractions.@index(Local)
-
-    # shared mem for a complete reduction
-    shared = KernelAbstractions.@localmem(T, 1024)
-    @inbounds shared[threadIdx] = val
-
-    # perform the reduction
-    d = 1
-    while d < threads
-        KernelAbstractions.@synchronize()
-        index = 2 * d * (threadIdx-1) + 1
-        @inbounds if index <= threads
-            other_val = if index + d <= threads
-                shared[index+d]
-            else
-                neutral
-            end
-            shared[index] = op(shared[index], other_val)
-        end
-        d *= 2
-    end
-
-    # load the final value on the first thread
-    if threadIdx == 1
-        val = @inbounds shared[threadIdx]
-    end
-    # every thread will return the reduced value of the group
-    return val
-end
 
 end
 
