@@ -1,5 +1,6 @@
 import UnsafeAtomicsLLVM
 
+unsafe_free!(::AbstractArray) = return
 synchronize(::CPU) = nothing
 
 allocate(::CPU, ::Type{T}, dims::Tuple) where T = Array{T}(undef, dims)
