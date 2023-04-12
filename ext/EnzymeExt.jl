@@ -26,7 +26,9 @@ module EnzymeExt
 
         # TODO autodiff_deferred on the func.val
         ModifiedBetween = Val((overwritten(config)[1], false, overwritten(config)[2:end]...))
-        forward, reverse = Enzyme.Compiler.thunk(f, #=df=#nothing, Const{Nothing}, tt′,  Val(Enzyme.API.DEM_ReverseModePrimal), Val(width(config)), ModifiedBetween)
+
+        forward, pullback0 = Enzyme.autodiff_thunk(ReverseSplitModified(ReverseSplitWithPrimal, ModifiedBetween), Const{Core.Typeof(f)}, Duplicated,  tt′)
+
         TapeType = first_type(Base._return_type(forward, tt′))
 
         subtape = Array{TapeType}(undef, __groupsize(ctx))
@@ -52,7 +54,7 @@ module EnzymeExt
     end
 
     function EnzymeRules.reverse(::Config, ::Const{<:Kernel}, ::Type{<:EnzymeCore.Annotation}, tape, args...; ndrange=nothing, workgroupsize=nothing)
-        rev_kernel, subtape = tape...
+        rev_kernel, subtape = tape
         rev_kernel(subtape, args...; ndrange, workgroupsize)
         return ()
     end
