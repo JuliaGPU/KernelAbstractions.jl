@@ -1,7 +1,7 @@
 module EnzymeExt
     using EnzymeCore
     using EnzymeCore.EnzymeRules
-    import KernelAbstractions: Kernel, StaticSize, launch_config, __groupsize, __groupindex, blocks, mkcontext
+    import KernelAbstractions: Kernel, StaticSize, launch_config, __groupsize, __groupindex, blocks, mkcontext, CompilerMetadata
 
     EnzymeRules.inactive(::typeof(StaticSize), x...) = nothing
 
@@ -12,50 +12,82 @@ module EnzymeExt
         T.parameters[1]
     end
 
-    function EnzymeRules.augmented_primal(config::Config, func::Const{<:Kernel}, ::Nothing, args...; ndrange = nothing, workgroupsize = nothing)
-        # Pre-allocate tape according to ndrange... * inner_tape
+    function fwd(ctx, forward, f, args...)
+        forward(Const(f), Const(ctx), args...)
+        return nothing
+    end
+
+    function aug_fwd(ctx, forward, f, subtape, args...)
+        subtape[__groupindex(ctx)] = forward(Const(f), Const(ctx), args...)[1]
+        return nothing
+    end
+
+    function rev(ctx, reverse, f, subtape, args...)
+        tp = subtape[__groupindex(ctx)]
+        reverse(Const(f), Const(ctx), args..., tp)
+        return nothing
+    end
+
+    function EnzymeRules.forward(func::Const{<:Kernel}, ::Type{Const{Nothing}}, args...; ndrange=nothing, workgroupsize=nothing)
+        kernel = func.val
+        f = kernel.f
+
+        ndrange, workgroupsize, iterspace, dynamic = launch_config(kernel, ndrange, workgroupsize)
+        # ctxTy = CompilerMetadata{ndrange(kernel), Core.Typeof(dynamic)}
+        block = first(blocks(iterspace))
+        ctx = mkcontext(kernel, block, ndrange, iterspace, dynamic)
+        ctxTy = Core.Typeof(ctx) # CompilerMetadata{ndrange(kernel), Core.Typeof(dynamic)}
+        tt′ = Tuple{Const{ctxTy}, map(Core.Typeof, args)...}
+        FT = Const{Core.Typeof(f)}
+
+        forward = EnzymeCore.autodiff_thunk(Forward, FT, Const, tt′.parameters...)
+        fwd_kernel = similar(kernel, fwd)
+
+        fwd_kernel(forward, f, args...; ndrange, workgroupsize)
+    end
+
+    function EnzymeRules.augmented_primal(config::Config, func::Const{<:Kernel}, ::Type{Const{Nothing}}, args...; ndrange=nothing, workgroupsize=nothing)
         kernel = func.val
         f = kernel.f
 
         ndrange, workgroupsize, iterspace, dynamic = launch_config(kernel, ndrange, workgroupsize)
         block = first(blocks(iterspace))
 
+
         ctx = mkcontext(kernel, block, ndrange, iterspace, dynamic)
-        ctxTy = typeof(ctx) # Base._return_type(mkcontext, Tuple{typeof(kernel), typeof(block), typeof(ndrange), typeof(iterspace), typeof(dynamic)})
-        tt′ = Tuple{Const{ctxTy}, map(Core.typeof, args)...}
+        ctxTy = Core.Typeof(ctx) # CompilerMetadata{ndrange(kernel), Core.Typeof(dynamic)}
+        tt′ = Tuple{Const{ctxTy}, map(Core.Typeof, args)...}
 
         # TODO autodiff_deferred on the func.val
         ModifiedBetween = Val((overwritten(config)[1], false, overwritten(config)[2:end]...))
 
-        forward, pullback0 = Enzyme.autodiff_thunk(ReverseSplitModified(ReverseSplitWithPrimal, ModifiedBetween), Const{Core.Typeof(f)}, Duplicated,  tt′)
+        FT = Const{Core.Typeof(f)}
 
-        TapeType = first_type(Base._return_type(forward, tt′))
+        forward, reverse = EnzymeCore.autodiff_thunk(ReverseSplitModified(ReverseSplitWithPrimal, ModifiedBetween), FT, Const,  tt′.parameters...)
+
+        rt = Core.Compiler.return_type(forward, Tuple{FT, tt′.parameters...})
+        TapeType = first_type(rt)
 
         subtape = Array{TapeType}(undef, __groupsize(ctx))
 
-        function fwd(ctx, subtape, args...)
-            subtape[__groupindex(ctx)] = forward(Const(ctx), args...)[1]
-            return nothing
-        end
+        aug_kernel = similar(kernel, aug_fwd)
 
-        function rev(ctx, subtape, args...)
-            reverse(Const(ctx), args..., subtape[__groupindex(ctx)])
-            return nothing
-        end
+        aug_kernel(forward, f, subtape, args...; ndrange, workgroupsize)
 
-        aug_kernel = similar(kernel, fwd)
-        rev_kernel = similar(kernel, rev)
+        # TODO the fact that ctxTy is type unstable means this is all type unstable.
+        # Since custom rules require a fixed return type, explicitly cast to Any, rather
+        # than returning a AugmentedReturn{Nothing, Nothing, T} where T.
+        tape = (reverse, subtape)::Any
 
-        aug_kernel(subtape, args...; ndrange, workgroupsize)
+        res =  AugmentedReturn{Nothing, Nothing, Tuple{Any, Vector}}(nothing, nothing, tape)
 
-        tape = (; rev_kernel, subtape)
-
-        return AugmentedReturn(nothing, nothing, tape)
+        return res
     end
 
-    function EnzymeRules.reverse(::Config, ::Const{<:Kernel}, ::Type{<:EnzymeCore.Annotation}, tape, args...; ndrange=nothing, workgroupsize=nothing)
-        rev_kernel, subtape = tape
-        rev_kernel(subtape, args...; ndrange, workgroupsize)
+    function EnzymeRules.reverse(::Config, func::Const{<:Kernel}, ::Type{<:EnzymeCore.Annotation}, tape, args...; ndrange=nothing, workgroupsize=nothing)
+        reverse, subtape = tape
+        rev_kernel = similar(func.val, rev)
+        rev_kernel(reverse, func.val.f, subtape, args...; ndrange, workgroupsize)
         return ()
     end
 end
