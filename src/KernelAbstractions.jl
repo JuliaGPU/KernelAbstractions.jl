@@ -7,7 +7,7 @@ export @print
 export Backend, GPU, CPU
 export synchronize, get_backend, allocate
 
-import SnoopPrecompile
+import PrecompileTools
 
 import Atomix: @atomic, @atomicswap, @atomicreplace
 import UnsafeAtomics
@@ -581,7 +581,7 @@ include("reflection.jl")
 include("cpu.jl")
 
 # precompile
-SnoopPrecompile.@precompile_all_calls begin
+PrecompileTools.@compile_workload begin
     @eval begin
         @kernel function precompile_kernel(A, @Const(B))
             i = @index(Global, Linear)
