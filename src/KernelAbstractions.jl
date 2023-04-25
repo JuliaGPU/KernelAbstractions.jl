@@ -353,7 +353,10 @@ constify(arg) = adapt(ConstAdaptor(), arg)
 abstract type Backend end
 abstract type GPU <: Backend end
 
-struct CPU <: Backend end
+struct CPU <: Backend
+    static::Bool
+    CPU(;static::Bool=false) = CPU(static)
+end
 
 isgpu(::GPU) = true
 isgpu(::CPU) = false

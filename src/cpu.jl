@@ -16,7 +16,7 @@ function (obj::Kernel{CPU})(args...; ndrange=nothing, workgroupsize=nothing, )
         return nothing
     end
 
-    __run(obj, ndrange, iterspace, args, dynamic)
+    __run(obj, ndrange, iterspace, args, dynamic, kernel.backend.static)
 end
 
 function launch_config(kernel::Kernel{CPU}, ndrange, workgroupsize)
@@ -40,7 +40,7 @@ function launch_config(kernel::Kernel{CPU}, ndrange, workgroupsize)
 end
 
 # Inference barriers
-function __run(obj, ndrange, iterspace, args, dynamic)
+function __run(obj, ndrange, iterspace, args, dynamic, static_threads)
     N = length(iterspace)
     Nthreads = Threads.nthreads()
     if Nthreads == 1
@@ -56,8 +56,14 @@ function __run(obj, ndrange, iterspace, args, dynamic)
     if Nthreads == 1
         __thread_run(1, len, rem, obj, ndrange, iterspace, args, dynamic)
     else
-        @sync for tid in 1:Nthreads
-            Threads.@spawn __thread_run(tid, len, rem, obj, ndrange, iterspace, args, dynamic)
+        if static_threads
+            Threads.@threads :static for tid in 1:Nthreads
+                __thread_run(tid, len, rem, obj, ndrange, iterspace, args, dynamic)
+            end
+        else
+            @sync for tid in 1:Nthreads
+                Threads.@spawn __thread_run(tid, len, rem, obj, ndrange, iterspace, args, dynamic)
+            end
         end
     end
     return nothing
