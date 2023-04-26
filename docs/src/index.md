@@ -29,7 +29,7 @@ using CUDA
 using KernelAbstractions
 ```
 [`CUDA.jl`](https://github.com/JuliaGPU/CUDA.jl) is currently the most mature way to program for GPUs.
-CUDAThis provides a backend `CUDABackend <: KA.Backend` to
+This provides a backend `CUDABackend <: KA.Backend` to CUDA.
 
 ## Changelog
 
