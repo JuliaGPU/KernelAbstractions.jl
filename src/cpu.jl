@@ -16,7 +16,7 @@ function (obj::Kernel{CPU})(args...; ndrange=nothing, workgroupsize=nothing, )
         return nothing
     end
 
-    __run(obj, ndrange, iterspace, args, dynamic, kernel.backend.static)
+    __run(obj, ndrange, iterspace, args, dynamic, obj.backend.static)
 end
 
 function launch_config(kernel::Kernel{CPU}, ndrange, workgroupsize)

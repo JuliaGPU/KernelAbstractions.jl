@@ -355,7 +355,7 @@ abstract type GPU <: Backend end
 
 struct CPU <: Backend
     static::Bool
-    CPU(;static::Bool=false) = CPU(static)
+    CPU(;static::Bool=false) = new(static)
 end
 
 isgpu(::GPU) = true
