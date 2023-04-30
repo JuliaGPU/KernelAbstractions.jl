@@ -27,7 +27,7 @@ function copyto!(backend::CPU, A, B)
             error("Arrays may not alias")
         end
         kernel = copy_kernel(backend)
-        kernel(A, B, ndrange = length(arr))
+        kernel(A, B, ndrange = length(A))
         return A
     else
         return Base.copyto!(A, B)
