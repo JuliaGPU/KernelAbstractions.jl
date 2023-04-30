@@ -18,7 +18,7 @@ function ones(backend::CPU, ::Type{T}, dims::Tuple) where T
     return arr
 end
 
-function copyto!(backend::CPU, A, B)
+function copyto!(_backend::CPU, A, B)
     if backend(A) == backend(B) && backend(A) isa CPU
         if length(A) != length(B)
             error("Arrays must match in length")
@@ -26,7 +26,7 @@ function copyto!(backend::CPU, A, B)
         if Base.mightalias(A, B)
             error("Arrays may not alias")
         end
-        kernel = copy_kernel(backend)
+        kernel = copy_kernel(_backend)
         kernel(A, B, ndrange = length(arr))
         return A
     else
