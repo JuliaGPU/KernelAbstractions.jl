@@ -9,11 +9,13 @@ function zeros(backend::CPU, ::Type{T}, dims::Tuple) where T
     arr = allocate(backend, T, dims)
     kernel = init_kernel(backend)
     kernel(arr, zero, T,ndrange = length(arr))
+    return arr
 end
 function ones(backend::CPU, ::Type{T}, dims::Tuple) where T
     arr = allocate(backend, T, dims)
     kernel = init_kernel(backend)
     kernel(arr, one, T; ndrange = length(arr))
+    return arr
 end
 
 function copyto!(backend::CPU, A, B)
@@ -26,8 +28,9 @@ function copyto!(backend::CPU, A, B)
         end
         kernel = copy_kernel(backend)
         kernel(A, B, ndrange = length(arr))
+        return A
     else
-        Base.copyto!(A, B)
+        return Base.copyto!(A, B)
     end
 end
 

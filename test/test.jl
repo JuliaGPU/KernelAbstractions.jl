@@ -193,7 +193,7 @@ end
 end
 
 A = KernelAbstractions.zeros(Backend(), Int64, 1024)
-kernel_val!(Backend())(A,Val(3), ndrange=size(A))
+kernel_val!(Backend())(A, Val(3), ndrange=size(A))
 synchronize(Backend())
 @test all((a)->a==3, A)
 
