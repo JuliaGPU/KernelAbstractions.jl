@@ -4,10 +4,32 @@ unsafe_free!(::AbstractArray) = return
 synchronize(::CPU) = nothing
 
 allocate(::CPU, ::Type{T}, dims::Tuple) where T = Array{T}(undef, dims)
-zeros(::CPU, ::Type{T}, dims::Tuple) where T = Base.zeros(T, dims)
-ones(::CPU, ::Type{T}, dims::Tuple) where T = Base.ones(T, dims)
 
-copyto!(::CPU, A, B) = Base.copyto!(A, B)
+function zeros(backend::CPU, ::Type{T}, dims::Tuple) where T
+    arr = allocate(backend, T, dims)
+    kernel = init_kernel(backend)
+    kernel(arr, zero, T,ndrange = length(arr))
+end
+function ones(backend::CPU, ::Type{T}, dims::Tuple) where T
+    arr = allocate(backend, T, dims)
+    kernel = init_kernel(backend)
+    kernel(arr, one, T; ndrange = length(arr))
+end
+
+function copyto!(backend::CPU, A, B)
+    if backend(A) == backend(B) && backend(A) isa CPU
+        if length(A) != length(B)
+            error("Arrays must match in length")
+        end
+        if Base.mightalias(A, B)
+            error("Arrays may not alias")
+        end
+        kernel = copy_kernel(backend)
+        kernel(A, B, ndrange = length(arr))
+    else
+        Base.copyto!(A, B)
+    end
+end
 
 function (obj::Kernel{CPU})(args...; ndrange=nothing, workgroupsize=nothing, )
     ndrange, workgroupsize, iterspace, dynamic = launch_config(obj, ndrange, workgroupsize)
