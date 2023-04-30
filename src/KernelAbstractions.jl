@@ -353,7 +353,19 @@ constify(arg) = adapt(ConstAdaptor(), arg)
 abstract type Backend end
 abstract type GPU <: Backend end
 
-struct CPU <: Backend end
+"""
+    CPU(; static=false)
+
+Instantiate a CPU (multi-threaded) backend.
+
+## Options:
+ - `static`: Uses a static thread assignment, this can be beneficial for NUMA aware code.
+   Defaults to false.
+"""
+struct CPU <: Backend
+    static::Bool
+    CPU(;static::Bool=false) = new(static)
+end
 
 isgpu(::GPU) = true
 isgpu(::CPU) = false
@@ -575,6 +587,18 @@ __size(i::Int) = Tuple{i}
 include("extras/extras.jl")
 
 include("reflection.jl")
+
+# Initialized
+
+@kernel function init_kernel(arr, f::F, ::Type{T}) where {F, T}
+    I = @index(Global)
+    @inbounds arr[I] = f(T)
+end
+
+@kernel function copy_kernel(A, @Const(B))
+    I = @index(Global)
+    @inbounds A[I] = B[I]
+end
 
 # CPU backend
 

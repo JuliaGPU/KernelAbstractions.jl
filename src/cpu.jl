@@ -4,10 +4,35 @@ unsafe_free!(::AbstractArray) = return
 synchronize(::CPU) = nothing
 
 allocate(::CPU, ::Type{T}, dims::Tuple) where T = Array{T}(undef, dims)
-zeros(::CPU, ::Type{T}, dims::Tuple) where T = Base.zeros(T, dims)
-ones(::CPU, ::Type{T}, dims::Tuple) where T = Base.ones(T, dims)
 
-copyto!(::CPU, A, B) = Base.copyto!(A, B)
+function zeros(backend::CPU, ::Type{T}, dims::Tuple) where T
+    arr = allocate(backend, T, dims)
+    kernel = init_kernel(backend)
+    kernel(arr, zero, T,ndrange = length(arr))
+    return arr
+end
+function ones(backend::CPU, ::Type{T}, dims::Tuple) where T
+    arr = allocate(backend, T, dims)
+    kernel = init_kernel(backend)
+    kernel(arr, one, T; ndrange = length(arr))
+    return arr
+end
+
+function copyto!(backend::CPU, A, B)
+    if get_backend(A) == get_backend(B) && get_backend(A) isa CPU
+        if length(A) != length(B)
+            error("Arrays must match in length")
+        end
+        if Base.mightalias(A, B)
+            error("Arrays may not alias")
+        end
+        kernel = copy_kernel(backend)
+        kernel(A, B, ndrange = length(A))
+        return A
+    else
+        return Base.copyto!(A, B)
+    end
+end
 
 function (obj::Kernel{CPU})(args...; ndrange=nothing, workgroupsize=nothing, )
     ndrange, workgroupsize, iterspace, dynamic = launch_config(obj, ndrange, workgroupsize)
@@ -16,7 +41,7 @@ function (obj::Kernel{CPU})(args...; ndrange=nothing, workgroupsize=nothing, )
         return nothing
     end
 
-    __run(obj, ndrange, iterspace, args, dynamic)
+    __run(obj, ndrange, iterspace, args, dynamic, obj.backend.static)
 end
 
 function launch_config(kernel::Kernel{CPU}, ndrange, workgroupsize)
@@ -40,7 +65,7 @@ function launch_config(kernel::Kernel{CPU}, ndrange, workgroupsize)
 end
 
 # Inference barriers
-function __run(obj, ndrange, iterspace, args, dynamic)
+function __run(obj, ndrange, iterspace, args, dynamic, static_threads)
     N = length(iterspace)
     Nthreads = Threads.nthreads()
     if Nthreads == 1
@@ -56,8 +81,14 @@ function __run(obj, ndrange, iterspace, args, dynamic)
     if Nthreads == 1
         __thread_run(1, len, rem, obj, ndrange, iterspace, args, dynamic)
     else
-        @sync for tid in 1:Nthreads
-            Threads.@spawn __thread_run(tid, len, rem, obj, ndrange, iterspace, args, dynamic)
+        if static_threads
+            Threads.@threads :static for tid in 1:Nthreads
+                __thread_run(tid, len, rem, obj, ndrange, iterspace, args, dynamic)
+            end
+        else
+            @sync for tid in 1:Nthreads
+                Threads.@spawn __thread_run(tid, len, rem, obj, ndrange, iterspace, args, dynamic)
+            end
         end
     end
     return nothing
