@@ -19,7 +19,7 @@ function ones(backend::CPU, ::Type{T}, dims::Tuple) where T
 end
 
 function copyto!(backend::CPU, A, B)
-    if get_backend(A) == get_backend(B) && backend(A) isa CPU
+    if get_backend(A) == get_backend(B) && get_backend(A) isa CPU
         if length(A) != length(B)
             error("Arrays must match in length")
         end
