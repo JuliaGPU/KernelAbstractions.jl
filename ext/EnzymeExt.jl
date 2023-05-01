@@ -1,6 +1,11 @@
 module EnzymeExt
-    using EnzymeCore
-    using EnzymeCore.EnzymeRules
+    if isdefined(Base, :get_extension)
+        using EnzymeCore
+        using EnzymeCore.EnzymeRules
+    else
+        using ..EnzymeCore
+        using ..EnzymeCore.EnzymeRules
+    end
     import KernelAbstractions: Kernel, StaticSize, launch_config, __groupsize, __groupindex, blocks, mkcontext, CompilerMetadata, CPU
 
     EnzymeRules.inactive(::typeof(StaticSize), x...) = nothing

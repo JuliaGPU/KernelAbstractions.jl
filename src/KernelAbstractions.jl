@@ -716,8 +716,14 @@ PrecompileTools.@compile_workload begin
     end
 end
 
-# if !isdefined(Base, :get_extension)
-    include("../ext/EnzymeExt.jl")
-# end
+if !isdefined(Base, :get_extension)
+using Requires
+end
+
+@static if !isdefined(Base, :get_extension)
+    function __init__()
+        @require EnzymeCore = "f151be2c-9106-41f4-ab19-57ee4f262869" include("../ext/EnzymeExt.jl")
+    end
+end
 
 end #module
