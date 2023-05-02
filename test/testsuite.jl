@@ -5,7 +5,7 @@ using ..Test
 
 # We can't add test-dependencies withouth breaking backend packages
 const Pkg = Base.require(Base.PkgId(
-                Base.UUID("44cfe95a-1eb2-52ea-b672-e2afdf69b78f"), "Distributed"))
+                Base.UUID("44cfe95a-1eb2-52ea-b672-e2afdf69b78f"), "Pkg"))
 
 macro conditional_testset(name, skip_tests, expr)
     esc(quote
