@@ -10,7 +10,7 @@ function find_return(stmt)
 end
 
 # XXX: Proper errors
-function __kernel(expr)
+function __kernel(expr, generate_cpu=true)
     def = splitdef(expr)
     name = def[:name]
     args = def[:args]
@@ -35,16 +35,17 @@ function __kernel(expr)
     # 2. CPU function with work-group loops inserted
     #
     # Without the deepcopy we might accidentially modify expr shared between CPU and GPU
-    def_cpu = deepcopy(def)
+    cpu_name = Symbol(:cpu_, name)
+    if generate_cpu
+        def_cpu = deepcopy(def)
+        def_cpu[:name] = cpu_name
+        transform_cpu!(def_cpu, constargs)
+        cpu_function = combinedef(def_cpu)
+    end
+
     def_gpu = deepcopy(def)
-
-    def_cpu[:name] = cpu_name = Symbol(:cpu_, name)
     def_gpu[:name] = gpu_name = Symbol(:gpu_, name)
-
-    transform_cpu!(def_cpu, constargs)
     transform_gpu!(def_gpu, constargs)
-
-    cpu_function = combinedef(def_cpu)
     gpu_function = combinedef(def_gpu)
 
     # create constructor functions
@@ -57,13 +58,21 @@ function __kernel(expr)
                 if $isgpu(dev)
                     return $construct(dev, sz, range, $gpu_name)
                 else
-                    return $construct(dev, sz, range, $cpu_name)
+                    if $generate_cpu
+                        return $construct(dev, sz, range, $cpu_name)
+                    else
+                        error("This kernel is unavailable for backend CPU")
+                    end
                 end
             end
         end
     end
 
-    return Expr(:block, esc(cpu_function), esc(gpu_function), esc(constructors))
+    if generate_cpu
+        return Expr(:block, esc(cpu_function), esc(gpu_function), esc(constructors))
+    else
+        return Expr(:block, esc(gpu_function), esc(constructors))
+    end
 end
 
 # The easy case, transform the function for GPU execution

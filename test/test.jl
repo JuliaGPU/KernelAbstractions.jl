@@ -259,4 +259,23 @@ end
     @test_throws ErrorException KernelAbstractions.priority!(Backend(), :default)
 end
 
+function f(KernelAbstractions.@context, a)
+    I = @index(Global, Linear)
+    a[I] = 1
+end
+@kernel cpu=false function context_kernel(a)
+    f(KernelAbstractions.@context, a)
+end
+
+@testset "No CPU kernel" begin
+    if !(Backend() isa CPU)
+        A = KernelAbstractions.zeros(Backend(), Int64, 1024)
+        context_kernel(Backend())(A, ndrange=size(A))
+        synchronize(Backend())
+        @test all((a)->a==1, A)
+    else
+        @test_throws ErrorException("This kernel is unavailable for backend CPU") context_kernel(Backend())
+    end
+end
+
 end

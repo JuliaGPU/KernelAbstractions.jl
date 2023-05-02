@@ -53,7 +53,29 @@ synchronize(backend)
 ```
 """
 macro kernel(expr)
-    __kernel(expr)
+    __kernel(expr, #=generate_cpu=#true)
+end
+
+"""
+    @kernel cpu=false function f(args) end
+
+Disable code-generation of the CPU function. This relaxes semantics such that
+KernelAbstractions primitives can be used in non-kernel functions.
+
+- [`@context`](@ref)
+
+!!! warn
+    This is an experimental feature.
+
+"""
+macro kernel(config, expr)
+    if config isa Expr && config.head == :(=) &&
+        config.args[1] == :cpu && config.args[2] isa Bool
+        generate_cpu = config.args[2]
+    else
+        error("Configuration should be of form `cpu=false` got $config")
+    end
+    __kernel(expr, generate_cpu)
 end
 
 """
@@ -223,6 +245,29 @@ macro synchronize(cond)
     quote
         $(esc(cond)) && $__synchronize()
     end
+end
+
+"""
+    @context()
+
+Access the hidden context object used by KernelAbstractions.
+
+!!! warn
+    Only valid to be used from a kernel with `cpu=false`.
+
+```
+function f(@context, a)
+    I = @index(Global, Linear)
+    a[I]
+end
+
+@kernel cpu=false function my_kernel(a)
+    f(@context, a)
+end
+```
+"""
+macro context()
+    esc(:(__ctx__))
 end
 
 """
