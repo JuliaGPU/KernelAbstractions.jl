@@ -47,7 +47,8 @@ function testsuite(backend, backend_str, backend_mod, AT, DAT; skip_tests = Set{
     end
 
     @conditional_testset "Enzyme" skip_tests begin
-        if VERSION >= v"1.7.0" && haskey(Base.UUID("7da242da-08ed-463a-9acd-ee780be4f1d9"), Pkg.dependencies()) # Enzyme
+        if VERSION >= v"1.7.0" &&
+            haskey(Pkg.dependencies(), Base.UUID("7da242da-08ed-463a-9acd-ee780be4f1d9")) # Enzyme
             enzyme_testsuite(backend, AT)
         end
     end
