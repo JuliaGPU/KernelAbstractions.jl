@@ -3,6 +3,10 @@ module Testsuite
 using ..KernelAbstractions
 using ..Test
 
+# We can't add test-dependencies withouth breaking backend packages
+const Pkg = Base.require(Base.PkgId(
+                Base.UUID("44cfe95a-1eb2-52ea-b672-e2afdf69b78f"), "Distributed"))
+
 macro conditional_testset(name, skip_tests, expr)
     esc(quote
         @testset $name begin
@@ -43,7 +47,9 @@ function testsuite(backend, backend_str, backend_mod, AT, DAT; skip_tests = Set{
     end
 
     @conditional_testset "Enzyme" skip_tests begin
-        enzyme_testsuite(backend, AT)
+        if VERSION >= v"1.7.0" && haskey(Base.UUID("7da242da-08ed-463a-9acd-ee780be4f1d9"), Pkg.dependencies()) # Enzyme
+            enzyme_testsuite(backend, AT)
+        end
     end
 
     @conditional_testset "Private" skip_tests begin
