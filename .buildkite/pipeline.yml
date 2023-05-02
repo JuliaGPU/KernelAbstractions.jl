@@ -54,6 +54,59 @@ steps:
     soft_fail:
       - exit_status: 3
 
+  - label: "oneAPI Julia {{matrix.version}}"
+    matrix:
+      setup:
+        version:
+          - "1.8"
+    plugins:
+      - JuliaCI/julia#v1:
+          version: "{{matrix.version}}"
+      - JuliaCI/julia-coverage#v1:
+          codecov: true
+    command: |
+      julia -e 'println("--- :julia: Instantiating project")
+                using Pkg
+                Pkg.develop(; path=pwd())
+                Pkg.develop(; name="oneAPI")' || exit 3
+
+      julia -e 'println("+++ :julia: Running tests")
+                using Pkg
+                Pkg.test("oneAPI"; coverage=true, test_args=["kernelabstractions"])'
+    agents:
+      queue: "juliagpu"
+      intel: "*"
+    timeout_in_minutes: 120
+    soft_fail:
+      - exit_status: 3
+
+  # - label: "AMDGPU Julia {{matrix.version}}"
+  #   matrix:
+  #     setup:
+  #       version:
+  #         - "1.7"
+  #         - "1.9-"
+  #   plugins:
+  #     - JuliaCI/julia#v1:
+  #         version: "{{matrix.version}}"
+  #     - JuliaCI/julia-coverage#v1:
+  #         codecov: true
+  #   command: |
+  #     julia -e 'println("--- :julia: Instantiating project")
+  #               using Pkg
+  #               Pkg.develop(; path=pwd())
+  #               Pkg.develop(; name="AMDGPU")' || exit 3
+
+  #     julia -e 'println("+++ :julia: Running tests")
+  #               using Pkg
+  #               Pkg.test("AMDGPU"; coverage=true)'
+  #   agents:
+  #     queue: "juliagpu"
+  #     rocm: "*"
+  #   timeout_in_minutes: 120
+  #   soft_fail:
+  #     - exit_status: 3
+
 env:
   JULIA_PKG_SERVER: "" # it often struggles with our large artifacts
   SECRET_CODECOV_TOKEN: "c5pjPUwULD2L8ss0gRtjCPiagRlTQ11TdbZP6gIhTPeA/gN5w5/7JvDCg36UpKER6FXnQDeBGGkQafHiLdBaH/FWQ2B2VKErtBarIBJa2zWvKu8mYs9PJzw/qLGT2sMXI9kcao63H6/HAwbslJcY0a5Mg+SwM3M05XqSHgnrHMnbBXysKP6VzFEIX7uoyEKOnoWDj8rGJKFYLW2DBRtd6Yc23ESfFXPAqbS7sgXxwQHKzz20FMQBJUmbiDIzPlk3k2n2TvgAWQ0VNK0e4/UooMbULL3UjY4oaMOF0XpJAnWlmvGgy8gEnZKSVp3ieXy/Ubu7BWwH/BT59wDy6LuDxA==;U2FsdGVkX18Wil69f7qJYu6yU5iNx+Zq8akUcOp+McU1CR4Jw4QBsrUKIF4W4uK+/752FQo40BwFsfnIC8CJ/Q=="
