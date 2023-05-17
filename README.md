@@ -6,9 +6,9 @@ execution backends. KA is intended to be a minimal and
 performant library that explores ways to write heterogeneous code.
 Currently, the following backends are supported:
 
-* [NVIDIA CUDA](https://github.com/JuliaGPU/CUDA.jl),
-* [AMD ROCm](https://github.com/JuliaGPU/AMDGPU.jl),
-* [Intel oneAPI](https://github.com/JuliaGPU/oneAPI.jl).
+* [NVIDIA CUDA](https://github.com/JuliaGPU/CUDA.jl)
+* [AMD ROCm](https://github.com/JuliaGPU/AMDGPU.jl)
+* [Intel oneAPI](https://github.com/JuliaGPU/oneAPI.jl)
 * [Apple Metal](https://github.com/JuliaGPU/Metal.jl)
 
 [![Documentation (stable)][docs-stable-img]][docs-stable-url]
