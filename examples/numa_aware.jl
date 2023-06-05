@@ -53,6 +53,6 @@ end
 measure_membw(CPU());
 measure_membw(CPU(; static=true));
 
-# The following has siginifcantly worse performance (even on systems with a single memory domain)!
+# The following has significantly worse performance (even on systems with a single memory domain)!
 # measure_membw(CPU(); init=:serial);
 # measure_membw(CPU(; static=true); init=:serial);
