@@ -24,16 +24,12 @@ function measure_membw(backend = CPU(); verbose = true, N = 1024 * 500_000, dtyp
     flops = 2 * N # num flops in SAXY
 
     a = dtype(3.1415)
-    X = allocate(backend, dtype, N)
-    Y = allocate(backend, dtype, N)
-    if init == :parallel && backend isa CPU
-        Threads.@threads :static for i in eachindex(Y)
-            X[i] = rand()
-            Y[i] = rand()
-        end
+    if init == :serial
+        X = rand!(zeros(dtype, N))
+        Y = rand!(zeros(dtype, N))
     else
-        rand!(X)
-        rand!(Y)
+        X = rand!(KernelAbstractions.zeros(backend, dtype, N))
+        Y = rand!(KernelAbstractions.zeros(backend, dtype, N))
     end
     workgroup_size = 1024
 
@@ -53,6 +49,10 @@ function measure_membw(backend = CPU(); verbose = true, N = 1024 * 500_000, dtyp
     return mem_rate, flop_rate
 end
 
+# Static should be much better (on a system with multiple NUMA domains)
 measure_membw(CPU());
-
 measure_membw(CPU(; static=true));
+
+# The following has siginifcantly worse performance (even on systems with a single memory domain)!
+# measure_membw(CPU(); init=:serial);
+# measure_membw(CPU(; static=true); init=:serial);
