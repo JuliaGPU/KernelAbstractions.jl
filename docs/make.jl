@@ -23,6 +23,7 @@ makedocs(;
             "examples/naive_transpose.md",
             "examples/performance.md",
             "examples/matmul.md",
+            "examples/numa_aware.md",
         ], # Examples
         "API" => "api.md",
         "Extras" => [
