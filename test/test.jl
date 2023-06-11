@@ -223,8 +223,7 @@ end
 
 @conditional_testset "Offset iteration space $Backend" skip_tests begin
     a = zeros(7, 9)
-    loop! = index_global_offset!(Backend(), (2, 2), size(a) .- 4, (2, 2))
-    loop!(a)
+    index_global_offset!(Backend(), (2, 2), size(a) .- 4, (2, 2))(a)
     synchronize(Backend())
 
     b = [i + 7 * j for i in 1:7, j in 1:9]
