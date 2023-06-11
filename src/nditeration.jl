@@ -150,8 +150,8 @@ needs to perform dynamic bounds-checking.
         dynamic = Ref(false)
         blocks  = ntuple(Val(length(ndrange))) do I
             Base.@_inline_meta
-            dynamic[] |= mod(worksize(ndrange[I]), workgroupsize[I]) != 0
-            return fld1(worksize(ndrange[I]), workgroupsize[I])
+            dynamic[] |= mod(ndrange[I], workgroupsize[I]) != 0
+            return fld1(ndrange[I], workgroupsize[I])
         end
         return blocks, workgroupsize, dynamic[] ? DynamicCheck() : NoDynamicCheck()
     end
