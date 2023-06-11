@@ -57,8 +57,8 @@ function __kernel(expr, generate_cpu=true)
             Core.@__doc__ $name(dev) = $name(dev, $DynamicSize(), $DynamicSize())
             $name(dev, size) = $name(dev, $StaticSize(size), $DynamicSize())
             $name(dev, size, range) = $name(dev, $StaticSize(size), $StaticSize(range))
-            $name(dev, size, range::NTuple{N}, offset::NTuple{N}) where N = 
-                    $name(dev, $StaticSize(size), $StaticSize($contiguousrange(range, offset)))
+            $name(dev, size, range, ::Nothing) = $name(dev, size, range)
+            $name(dev, size, range, offset) =  $name(dev, $StaticSize(size), $StaticSize($contiguousrange(range, offset)))
             function $name(dev::Dev, sz::S, range::NDRange) where {Dev, S<:$_Size, NDRange<:$_Size}
                 if $isgpu(dev)
                     return $construct(dev, sz, range, $gpu_name)
