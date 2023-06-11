@@ -215,6 +215,26 @@ end
     synchronize(Backend())
 end
 
+@kernel function index_global_offset!(a)
+    i, j = @index(Global, NTuple)
+    n, m = size(a)
+    @inbounds a[i, j] = i + n * j
+end
+
+@conditional_testset "Offset iteration space $Backend" skip_test begin
+    a = zeros(7, 9)
+    loop! = index_global_offset!(Backend(), (2, 2), size(a) .- 4, (2, 2))
+    loop!(a)
+    synchronize(Backend())
+
+    b = [i + 7 * j for i in 1:7, j in 1:9]
+
+    @test a[3:5, 3:7] == b[3:5, 3:7]
+    @test a[1:2, :] == zeros(2, 9)
+    @test a[6:7, :] == zeros(2, 9)
+    @test a[:, 1:2] == zeros(7, 2)
+    @test a[:, 8:9] == zeros(7, 2)
+end
 
 @conditional_testset "return statement" skip_tests begin
     try

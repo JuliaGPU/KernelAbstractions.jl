@@ -64,6 +64,14 @@ struct NDRange{N, Offsets, StaticBlocks, StaticWorkitems, DynamicBlock, DynamicW
     blocks::DynamicBlock
     workitems::DynamicWorkitems
 
+    function NDRange{N, B, W}() where {N, B, W}
+        new{N, nothing, B, W, Nothing, Nothing}(nothing, nothing)
+    end
+
+    function NDRange{N, B, W}(blocks, workitems) where {N, B, W}
+        new{N, nothing, B, W, typeof(blocks), typeof(workitems)}(blocks, workitems)
+    end
+
     function NDRange{N, O, B, W}() where {N, O, B, W}
         new{N, O, B, W, Nothing, Nothing}(nothing, nothing)
     end
