@@ -221,7 +221,7 @@ end
     @inbounds a[i, j] = i + n * j
 end
 
-@conditional_testset "Offset iteration space $Backend" skip_test begin
+@conditional_testset "Offset iteration space $Backend" skip_tests begin
     a = zeros(7, 9)
     loop! = index_global_offset!(Backend(), (2, 2), size(a) .- 4, (2, 2))
     loop!(a)
