@@ -35,13 +35,11 @@ end
 @inline worksize(i::Tuple) = worksize.(i)
 @inline worksize(i::Int) = i
 @inline worksize(i::UnitRange) = length(i)
-@inline worksize(i::StepRange) = length(i)
 
 @inline offsets(i) = offsets.(i)
 @inline offsets(::NTuple{N, Int}) where N = nothing
 @inline offsets(::Int) = nothing
 @inline offsets(i::UnitRange) = i.start - 1
-@inline offsets(i::StepRange) = i.start - 1, i.step
 
 """
     NDRange
@@ -148,7 +146,7 @@ needs to perform dynamic bounds-checking.
     end
     let workgroupsize = workgroupsize
         dynamic = Ref(false)
-        blocks  = ntuple(Val(length(ndrange))) do I
+        blocks = ntuple(Val(length(ndrange))) do I
             Base.@_inline_meta
             dynamic[] |= mod(ndrange[I], workgroupsize[I]) != 0
             return fld1(ndrange[I], workgroupsize[I])
