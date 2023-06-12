@@ -222,17 +222,20 @@ end
 end
 
 @conditional_testset "Offset iteration space $Backend" skip_tests begin
-    a = zeros(7, 9)
+    a = KernelAbstractions.zeros(Backend(), 7, 9)
     index_global_offset!(Backend(), (2, 2), size(a) .- 4, (2, 2))(a)
     synchronize(Backend())
 
-    b = [i + 7 * j for i in 1:7, j in 1:9]
+    b = KernelAbstractions.zeros(CPU(), 7, 9)
+    b .= a
 
-    @test a[3:5, 3:7] == b[3:5, 3:7]
-    @test a[1:2, :] == zeros(2, 9)
-    @test a[6:7, :] == zeros(2, 9)
-    @test a[:, 1:2] == zeros(7, 2)
-    @test a[:, 8:9] == zeros(7, 2)
+    c = [i + 7 * j for i in 1:7, j in 1:9]
+
+    @test b[3:5, 3:7] == c[3:5, 3:7]
+    @test b[1:2, :] == zeros(2, 9)
+    @test b[6:7, :] == zeros(2, 9)
+    @test b[:, 1:2] == zeros(7, 2)
+    @test b[:, 8:9] == zeros(7, 2)
 end
 
 @conditional_testset "return statement" skip_tests begin
