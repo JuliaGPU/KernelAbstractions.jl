@@ -66,7 +66,6 @@ KernelAbstractions primitives can be used in non-kernel functions.
 
 !!! warn
     This is an experimental feature.
-
 """
 macro kernel(config, expr)
     if config isa Expr && config.head == :(=) &&
@@ -97,6 +96,9 @@ macro Const end
     copyto!(::Backend, dest::AbstractArray, src::AbstractArray)
 
 Perform a `copyto!` operation that execution ordered with respect to the backend.
+
+!!! note
+    Backend implementations **must** implement this function.
 """
 function copyto! end
 
@@ -104,6 +106,9 @@ function copyto! end
     synchronize(::Backend)
 
 Synchronize the current backend.
+
+!!! note
+    Backend implementations **must** implement this function.
 """
 function synchronize end
 
@@ -114,12 +119,13 @@ Release the memory of an array for reuse by future allocations
 and reduce pressure on the allocator.
 After releasing the memory of an array, it should no longer be accessed.
 
-This function is optional both to implement and call.
-If not implemented for a particular backend, default action is a no-op.
-Otherwise, it should be defined for backend's array type.
-
 !!! note
     On CPU backend this is always a no-op.
+
+!!! note
+    Backend implementations **may** implement this function.
+    If not implemented for a particular backend, default action is a no-op.
+    Otherwise, it should be defined for backend's array type.
 """
 function unsafe_free! end
 
@@ -393,9 +399,17 @@ constify(arg) = adapt(ConstAdaptor(), arg)
 ###
 
 """
-    Abstract type for all KernelAbstractions backends.
+
+Abstract type for all KernelAbstractions backends.
 """
 abstract type Backend end
+
+"""
+Abstract type for all GPU based KernelAbstractions backends.
+
+!!! note
+    New backend implementations **must** sub-type this abstract type.
+"""
 abstract type GPU <: Backend end
 
 """
@@ -412,6 +426,11 @@ struct CPU <: Backend
     CPU(;static::Bool=false) = new(static)
 end
 
+"""
+    isgpu(::Backend)::Bool
+
+Returns true for all [`GPU`](@ref) backends.
+"""
 isgpu(::GPU) = true
 isgpu(::CPU) = false
 
@@ -420,6 +439,10 @@ isgpu(::CPU) = false
     get_backend(A::AbstractArray)::Backend
 
 Get a [`Backend`](@ref) instance suitable for array `A`.
+
+!!! note
+    Backend implementations **must** provide `get_backend` for their custom array type.
+    It should be the same as the return type of [`allocate`](@ref)
 """
 function get_backend end
 
@@ -438,39 +461,61 @@ get_backend(::Array) = CPU()
 Adapt.adapt_storage(::CPU, a::Array) = a
 
 """
-    allocate(::Backend, Type, dims...)
+    allocate(::Backend, Type, dims...)::AbstractArray
 
 Allocate a storage array appropriate for the computational backend.
-"""
-allocate(backend, T, dims...) = return allocate(backend, T, dims)
 
-zeros(backend, T, dims...) = zeros(backend, T, dims)
-function zeros(backend, ::Type{T}, dims::Tuple) where T
+!!! note
+    Backend implementations **must** implement `allocate(::NewBackend, T, dims::Tuple)`
+"""
+allocate(backend::Backend, T, dims...) = allocate(backend, T, dims)
+allocate(backend::Backend, T, dims::Tuple) = throw(MethodError(allocate, (backend, T, dims)))
+
+"""
+    zeros(::Backend, Type, dims...)::AbstractArray
+
+Allocate a storage array appropriate for the computational backend filled with zeros.
+"""
+zeros(backend::Backend, T, dims...) = zeros(backend, T, dims)
+function zeros(backend::Backend, ::Type{T}, dims::Tuple) where T
     data = allocate(backend, T, dims...)
     fill!(data, zero(T))
     return data
 end
 
-ones(backend, T, dims...) = ones(backend, T, dims)
-function ones(backend, ::Type{T}, dims::Tuple) where T
+"""
+    ones(::Backend, Type, dims...)::AbstractArray
+
+Allocate a storage array appropriate for the computational backend filled with ones.
+"""
+ones(backend::Backend, T, dims...) = ones(backend, T, dims)
+function ones(backend::Backend, ::Type{T}, dims::Tuple) where T
     data = allocate(backend, T, dims)
     fill!(data, one(T))
     return data
 end
 
 """
-    supports_atomics(::Backend)
+    supports_atomics(::Backend)::Bool
 
 Returns whether `@atomic` operations are supported by the backend.
+
+!!! note
+    Backend implementations **must** implement this function,
+    only if they **do not** support atomic operations with Atomix.
 """
-supports_atomics(backend) = true
+supports_atomics(::Backend) = true
 
 """
-    supports_float64(::Backend)
+    supports_float64(::Backend)::Bool
 
 Returns whether `Float64` values are supported by the backend.
+
+!!! note
+    Backend implementations **must** implement this function,
+    only if they **do not** support `Float64`.
 """
-supports_float64(backend) = true
+supports_float64(::Backend) = true
 
 """
     priority!(::Backend, prio::Symbol)
@@ -479,6 +524,9 @@ Set the priority for the backend stream/queue. This is an optional
 feature that backends may or may not implement. If a backend shall
 support priorities it must accept `:high`, `:normal`, `:low`.
 Where `:normal` is the default.
+
+!!! note
+    Backend implementations **may** implement this function.
 """
 function priority!(::Backend, prio::Symbol)
     if !(prio in (:high, :normal, :low))
@@ -501,6 +549,13 @@ import .NDIteration: get
 Kernel closure struct that is used to represent the backend
 kernel on the host. `WorkgroupSize` is the number of workitems
 in a workgroup.
+
+!!! note
+    Backend implementations **must** implement:
+    ```
+    (kernel::Kernel{<:NewBackend})(args...; ndrange=nothing, workgroupsize=nothing)
+    ```
+    As well as the on-device functionality.
 """
 struct Kernel{Backend, WorkgroupSize<:_Size, NDRange<:_Size, Fun}
     backend::Backend
