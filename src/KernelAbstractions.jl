@@ -504,7 +504,7 @@ Returns whether `@atomic` operations are supported by the backend.
     Backend implementations **must** implement this function,
     only if they **do not** support atomic operations with Atomix.
 """
-supports_atomics(backend::Backend) = true
+supports_atomics(::Backend) = true
 
 """
     supports_float64(::Backend)::Bool
@@ -515,7 +515,7 @@ Returns whether `Float64` values are supported by the backend.
     Backend implementations **must** implement this function,
     only if they **do not** support `Float64`.
 """
-supports_float64(backend::Backend) = true
+supports_float64(::Backend) = true
 
 """
     priority!(::Backend, prio::Symbol)
