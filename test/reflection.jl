@@ -16,7 +16,7 @@ end
 end
 
 function test_typed_kernel_dynamic(backend, backend_str, ArrayT)
-    A = ArrayT(ones(1024, 1024))
+    A = ArrayT(ones(Float32, 1024, 1024))
     kernel = mul2(backend())
     res = if backend == CPU
         @ka_code_typed kernel(A, ndrange=size(A), workgroupsize=16)
@@ -32,7 +32,7 @@ function test_typed_kernel_dynamic(backend, backend_str, ArrayT)
 end
 
 function test_typed_kernel_dynamic_no_info(backend, backend_str, ArrayT)
-    A = ArrayT(ones(1024, 1024))
+    A = ArrayT(ones(Float32, 1024, 1024))
     B = similar(A)
     C = similar(A)
     kernel = add3(backend())
@@ -46,7 +46,7 @@ function test_typed_kernel_dynamic_no_info(backend, backend_str, ArrayT)
 end
 
 function test_typed_kernel_static(backend, backend_str, ArrayT)
-    A = ArrayT(ones(1024, 1024))
+    A = ArrayT(ones(Float32, 1024, 1024))
     kernel = if backend == CPU
         mul2(backend(), 16)
     else
@@ -62,7 +62,7 @@ function test_typed_kernel_static(backend, backend_str, ArrayT)
 end
 
 function test_typed_kernel_no_optimize(backend, backend_str, ArrayT)
-    A = ArrayT(ones(1024, 1024))
+    A = ArrayT(ones(Float32, 1024, 1024))
     kernel = if backend == CPU
         mul2(backend(), 16)
     else
@@ -75,7 +75,7 @@ function test_typed_kernel_no_optimize(backend, backend_str, ArrayT)
 end
 
 function test_expr_kernel(backend, backend_str, ArrayT)
-    A = ArrayT(ones(1024, 1024))
+    A = ArrayT(ones(Float32, 1024, 1024))
     C = similar(A)
     kernel = if backend == CPU
         addi(backend())
