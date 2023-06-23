@@ -46,16 +46,17 @@ for block in ndrange
 end
 ```
 """
-struct NDRange{N, StaticBlocks, StaticWorkitems, DynamicBlock, DynamicWorkitems}
+struct NDRange{N, StaticBlocks, StaticWorkitems, DynamicBlock, DynamicWorkitems, Projection}
     blocks::DynamicBlock
     workitems::DynamicWorkitems
+    projection::Projection
 
-    function NDRange{N, B, W}() where {N, B, W}
-        new{N, B, W, Nothing, Nothing}(nothing, nothing)
+    function NDRange{N, B, W}(projection=identity) where {N, B, W}
+        new{N, B, W, Nothing, Nothing, typeof(projection)}(nothing, nothing, projection)
     end
 
-    function NDRange{N, B, W}(blocks, workitems) where {N, B, W}
-        new{N, B, W, typeof(blocks), typeof(workitems)}(blocks, workitems)
+    function NDRange{N, B, W}(blocks, workitems, projection=identity) where {N, B, W}
+        new{N, B, W, typeof(blocks), typeof(workitems), typeof(projection)}(blocks, workitems, projection)
     end
 end
 
@@ -77,7 +78,7 @@ Base.length(range::NDRange) = length(blocks(range))
         gidx = groupidx.I[I]
         (gidx-1)*stride + idx.I[I]
     end
-    CartesianIndex(nI)
+    ndrange.projection(CartesianIndex(nI))
 end
 
 Base.@propagate_inbounds function expand(ndrange::NDRange, groupidx::Integer, idx::Integer)
@@ -124,6 +125,21 @@ needs to perform dynamic bounds-checking.
 
         return blocks, workgroupsize, dynamic[] ? DynamicCheck() : NoDynamicCheck()
     end
+end
+
+abstract type IndexProjection end
+struct Identity <: IndexProjection end
+(::Identity)(idx::CartesianIndex) = idx
+const identity = Identity()
+
+struct Offsets{N} <: IndexProjection
+    offsets::NTuple{N}
+end 
+function (o::Offsets{N})(idx::CartesianIndex{N}) where N
+    nI = ntuple(Val{N}) do i
+        idx.I[i] + o.offsets[i]
+    end
+    CartesianIndex(nI)
 end
 
 end #module
