@@ -20,7 +20,7 @@ UnsafeAtomicsLLVM = "d80eeb9a-aca5-4d75-85e5-170c8b632249"
 [compat]
 Adapt = "0.4, 1.0, 2.0, 3.0"
 Atomix = "0.1"
-EnzymeCore = "0.3"
+EnzymeCore = "0.5"
 MacroTools = "0.5"
 PrecompileTools = "1"
 Requires = "1.3"

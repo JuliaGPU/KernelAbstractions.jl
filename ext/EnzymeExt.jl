@@ -15,14 +15,14 @@ module EnzymeExt
         return nothing
     end
 
-    function aug_fwd(ctx, ::Val{ModifiedBetween}, ::Val{tt}, f::FT, subtape, args...) where {ModifiedBetween, tt, FT}
-        forward, reverse = EnzymeCore.autodiff_deferred_thunk(ReverseSplitModified(ReverseSplitWithPrimal, ModifiedBetween), Const{Core.Typeof(f)}, Const,  tt.parameters...)
+    function aug_fwd(ctx, f::FT, ::Val{ModifiedBetween}, ::Val{tt}, subtape, args...) where {ModifiedBetween, tt, FT}
+        forward, reverse = EnzymeCore.autodiff_deferred_thunk(ReverseSplitModified(ReverseSplitWithPrimal, Val(ModifiedBetween)), Const{Core.Typeof(f)}, Const,  tt.parameters...)
         subtape[__groupindex(ctx)] = forward(Const(f), Const(ctx), args...)[1]
         return nothing
     end
 
-    function rev(ctx, ::Val{ModifiedBetween}, ::Val{tt}, f::FT, subtape, args...) where {ModifiedBetween, tt, FT}
-        forward, reverse = EnzymeCore.autodiff_deferred_thunk(ReverseSplitModified(ReverseSplitWithPrimal, ModifiedBetween), Const{Core.Typeof(f)}, Const,  tt.parameters...)
+    function rev(ctx, f::FT, ::Val{ModifiedBetween}, ::Val{tt}, subtape, args...) where {ModifiedBetween, tt, FT}
+        forward, reverse = EnzymeCore.autodiff_deferred_thunk(ReverseSplitModified(ReverseSplitWithPrimal, Val(ModifiedBetween)), Const{Core.Typeof(f)}, Const,  tt.parameters...)
         tp = subtape[__groupindex(ctx)]
         reverse(Const(f), Const(ctx), args..., tp)
         return nothing
@@ -52,22 +52,21 @@ module EnzymeExt
 
         FT = Const{Core.Typeof(f)}
 
-        # TODO in KA backends like CUDAKernels, etc
-        parent_job = nothing
-        TapeType = EnzymeCore.tape_type(ReverseSplitModified(ReverseSplitWithPrimal, ModifiedBetween), FT, Const,  tt′.parameters...; parent_job)
+        # TODO in KA backends like CUDAKernels, etc have a version with a parent job type
+        TapeType = EnzymeCore.tape_type(ReverseSplitModified(ReverseSplitWithPrimal, ModifiedBetween), FT, Const,  tt′.parameters...)
 
         subtape = Array{TapeType}(undef, __groupsize(ctx))
 
         aug_kernel = similar(kernel, aug_fwd)
 
-        aug_kernel(f, ModifiedBetween, Val(tt′), subtape, args...; ndrange, workgroupsize)
+        vtt = Val(tt′)
+        aug_kernel(f, ModifiedBetween, vtt, subtape, args...; ndrange, workgroupsize)
 
         # TODO the fact that ctxTy is type unstable means this is all type unstable.
         # Since custom rules require a fixed return type, explicitly cast to Any, rather
         # than returning a AugmentedReturn{Nothing, Nothing, T} where T.
-        tape = (reverse, subtape)::Any
 
-        res =  AugmentedReturn{Nothing, Nothing, Tuple{Any, Vector}}(nothing, nothing, tape)
+        res =  AugmentedReturn{Nothing, Nothing, Tuple{Vector, Val{T} where T, Val{T} where T}}(nothing, nothing, (subtape, ModifiedBetween, vtt))
 
         return res
     end
@@ -75,10 +74,10 @@ module EnzymeExt
     function EnzymeRules.reverse(::Config, func::Const{<:Kernel}, ::Type{<:EnzymeCore.Annotation}, tape, args...; ndrange=nothing, workgroupsize=nothing)
         kernel = func.val
         f = kernel.f
+        (subtape, ModifiedBetween, vtt) = tape
 
-        reverse, subtape = tape
         rev_kernel = similar(func.val, rev)
-        rev_kernel(reverse, f, subtape, args...; ndrange, workgroupsize)
-        return (nothing for a in args)
+        rev_kernel(f, ModifiedBetween, vtt, subtape, args...; ndrange, workgroupsize)
+        return ((nothing for a in args)...,)
     end
 end
