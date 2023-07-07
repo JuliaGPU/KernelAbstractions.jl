@@ -19,7 +19,7 @@ steps:
 
       julia -e 'println("+++ :julia: Running tests")
                 using Pkg
-                Pkg.test("CUDA"; coverage=true, test_args=["kernelabstractions"])'
+                Pkg.test("CUDA"; coverage=true, test_args=["base/kernelabstractions"])'
     agents:
       queue: "juliagpu"
       cuda: "*"
