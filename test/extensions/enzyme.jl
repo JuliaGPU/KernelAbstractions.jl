@@ -13,15 +13,17 @@ function caller(A, backend)
     synchronize(backend)
 end
 
-function enzyme_testsuite(backend, ArrayT)
+function enzyme_testsuite(backend, ArrayT, supports_reverse=true)
     @testset "kernels" begin
         A = ArrayT{Float64}(undef, 64)
         A .= (1:1:64)
         dA = ArrayT{Float64}(undef, 64)
         dA .= 1
 
-        Enzyme.autodiff(Reverse, caller, Duplicated(A, dA), Const(backend()))
-        @test all(dA .≈ (2:2:128))
+        if supports_reverse
+            Enzyme.autodiff(Reverse, caller, Duplicated(A, dA), Const(backend()))
+            @test all(dA .≈ (2:2:128))
+        end
 
         A .= (1:1:64)
         dA .= 1
