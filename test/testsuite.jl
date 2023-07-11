@@ -19,15 +19,9 @@ macro conditional_testset(name, skip_tests, expr)
     end)
 end
 
-const Enzyme_AVAILABLE = haskey(
-    Pkg.dependencies(),
-    Base.UUID("7da242da-08ed-463a-9acd-ee780be4f1d9")) # Enzyme
 
 include("test.jl")
 include("localmem.jl")
-if Enzyme_AVAILABLE
-    include("enzyme.jl")
-end
 include("private.jl")
 include("unroll.jl")
 include("nditeration.jl")
@@ -50,12 +44,6 @@ function testsuite(backend, backend_str, backend_mod, AT, DAT; skip_tests = Set{
 
     @conditional_testset "Localmem" skip_tests begin
         localmem_testsuite(backend, AT)
-    end
-
-    @static if VERSION >= v"1.7.0" && Enzyme_AVAILABLE
-        @conditional_testset "Enzyme" skip_tests begin
-                enzyme_testsuite(backend, AT)
-        end
     end
 
     @conditional_testset "Private" skip_tests begin
