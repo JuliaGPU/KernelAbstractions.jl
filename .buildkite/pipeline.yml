@@ -28,6 +28,34 @@ steps:
     soft_fail:
       - exit_status: 3
 
+  - label: "CUDA Enzyme Julia {{matrix.version}}"
+    matrix:
+      setup:
+        version:
+          - "1.8"
+          - "1.9"
+    plugins:
+      - JuliaCI/julia#v1:
+          version: "{{matrix.version}}"
+      - JuliaCI/julia-coverage#v1:
+          codecov: true
+    command: |
+      julia -e 'println("--- :julia: Instantiating project")
+                using Pkg
+                Pkg.develop(; path=pwd())
+                Pkg.add(["CUDA", "Enzyme"])' || exit 3
+
+      julia -e 'println("+++ :julia: Running tests")
+                using CUDA
+                include("test/extensions/enzyme.jl")
+                enzyme_testsuite(CUDABackend, CuArray, false)'
+    agents:
+      queue: "juliagpu"
+      cuda: "*"
+    timeout_in_minutes: 120
+    soft_fail:
+      - exit_status: 3
+
   - label: "Metal Julia {{matrix.version}}"
     matrix:
       setup:

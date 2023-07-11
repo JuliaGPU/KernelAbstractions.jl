@@ -153,7 +153,7 @@ the total size you can use `prod(@groupsize())`.
 macro groupsize()
     quote
         $groupsize($(esc(:__ctx__)))
-    end 
+    end
 end
 
 """
@@ -165,7 +165,7 @@ a tuple corresponding to kernel configuration.
 macro ndrange()
     quote
         $size($ndrange($(esc(:__ctx__))))
-    end 
+    end
 end
 
 """
@@ -563,14 +563,14 @@ struct Kernel{Backend, WorkgroupSize<:_Size, NDRange<:_Size, Fun}
 end
 
 function Base.similar(kernel::Kernel{D, WS, ND}, f::F) where {D, WS, ND, F}
-    Kernel{D, WS, ND, F}(f)
+    Kernel{D, WS, ND, F}(kernel.backend, f)
 end
 
 workgroupsize(::Kernel{D, WorkgroupSize}) where {D, WorkgroupSize} = WorkgroupSize
 ndrange(::Kernel{D, WorkgroupSize, NDRange}) where {D, WorkgroupSize,NDRange} = NDRange
 backend(kernel::Kernel) = kernel.backend
 
-function partition(kernel, ndrange, workgroupsize)
+@inline function partition(kernel, ndrange, workgroupsize)
     static_ndrange = KernelAbstractions.ndrange(kernel)
     static_workgroupsize = KernelAbstractions.workgroupsize(kernel)
 
@@ -713,6 +713,16 @@ PrecompileTools.@compile_workload begin
             pmem = @private Float32 (1,)
             @synchronize
         end
+    end
+end
+
+if !isdefined(Base, :get_extension)
+using Requires
+end
+
+@static if !isdefined(Base, :get_extension)
+    function __init__()
+        @require EnzymeCore = "f151be2c-9106-41f4-ab19-57ee4f262869" include("../ext/EnzymeExt.jl")
     end
 end
 
