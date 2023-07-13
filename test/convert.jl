@@ -44,7 +44,7 @@ using KernelAbstractions, Test
 end
 
 function convert_testsuite(backend, ArrayT)
-    ET = KernelAbstractions.supports_float64(backend) ? Float64 : Float32
+    ET = KernelAbstractions.supports_float64(backend()) ? Float64 : Float32
 
     N = 32
     d_A = ArrayT([rand(ET)*3 for i = 1:N])

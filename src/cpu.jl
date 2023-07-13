@@ -44,7 +44,7 @@ function (obj::Kernel{CPU})(args...; ndrange=nothing, workgroupsize=nothing, )
     __run(obj, ndrange, iterspace, args, dynamic, obj.backend.static)
 end
 
-function launch_config(kernel::Kernel{CPU}, ndrange, workgroupsize)
+@inline function launch_config(kernel::Kernel{CPU}, ndrange, workgroupsize)
     if ndrange isa Integer
         ndrange = (ndrange,)
     end

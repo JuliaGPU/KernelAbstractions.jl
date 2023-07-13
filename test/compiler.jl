@@ -49,20 +49,20 @@ function compiler_testsuite(backend, ArrayT)
         @test !any(check_for_overdub, CI.code)
     end
 
-    A = ArrayT{Float64}(undef, 1)
+    A = ArrayT{Float32}(undef, 1)
     let (CI, rt) = @ka_code_typed square(backend())(A, A, ndrange=1)
         # test that there is no invoke of overdub
         @test !any(check_for_overdub, CI.code)
     end
 
-    A = ArrayT{Float64}(undef, 1)
-    B = ArrayT{Float64}(undef, 1)
+    A = ArrayT{Float32}(undef, 1)
+    B = ArrayT{Float32}(undef, 1)
     let (CI, rt) = @ka_code_typed pow(backend())(A, B, ndrange=1)
         # test that there is no invoke of overdub
         @test !any(check_for_overdub, CI.code)
     end
 
-    A = ArrayT{Float64}(undef, 1)
+    A = ArrayT{Float32}(undef, 1)
     B = ArrayT{Int32}(undef, 1)
     let (CI, rt) = @ka_code_typed pow(backend())(A, B, ndrange=1)
         # test that there is no invoke of overdub
