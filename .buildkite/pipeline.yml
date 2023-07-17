@@ -136,6 +136,8 @@ steps:
     timeout_in_minutes: 120
     soft_fail:
       - exit_status: 3
+    env:
+      JULIA_NUM_THREADS: 4
 
 env:
   JULIA_PKG_SERVER: "" # it often struggles with our large artifacts
