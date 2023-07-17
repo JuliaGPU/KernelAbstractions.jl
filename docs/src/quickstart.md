@@ -46,32 +46,31 @@ The [`synchronize`](@ref) blocks the *host* until the kernel has completed on th
 ## Launching kernel on the backend
 
 To launch the kernel on a backend-supported backend `isa(backend, KA.GPU)` (e.g., `CUDABackend()`, `ROCBackend()`, `oneBackend()`), we generate the kernel
-for this backend provided by `CUDAKernels`, `ROCKernels`, or `oneAPIKernels`.
+for this backend.
 
 First, we initialize the array using the Array constructor of the chosen backend with
 
 ```julia
-using CUDAKernels # Required to access CUDABackend
+using CUDA: CuArray
 A = CuArray(ones(1024, 1024))
 ```
 
 ```julia
-using ROCKernels # Required to access ROCBackend
+using ROCArrays: ROCArray
 A = ROCArray(ones(1024, 1024))
 ```
 
 ```julia
-using oneAPIKernels # Required to access oneBackend
+using oneAPI: oneArray
 A = oneArray(ones(1024, 1024))
 ```
 The kernel generation and execution are then
 ```julia
+backend = get_backend(A)
 mul2_kernel(backend, 64)(A, ndrange=size(A))
 synchronize(backend)
 all(A .== 2.0)
 ```
-
-For simplicity, we stick with the case of `backend=CUDABackend()`.
 
 ## Synchronization
 !!! danger
@@ -82,23 +81,24 @@ The code around KA may heavily rely on
 [`GPUArrays`](https://github.com/JuliaGPU/GPUArrays.jl), for example, to
 intialize variables.
 ```julia
-using CUDAKernels # Required to access CUDABackend
-function mymul(A::CuArray)
+function mymul(A)
     A .= 1.0
-    ev = mul2_kernel(CUDABackend(), 64)(A, ndrange=size(A))
+    backend = get_backend(A)
+    ev = mul2_kernel(backend, 64)(A, ndrange=size(A))
     synchronize(backend)
     all(A .== 2.0)
 end
 ```
 
 ```julia
-using CUDAKernels # Required to access CUDABackend
-function mymul(A::CuArray, B::CuArray)
+function mymul(A, B)
     A .= 1.0
     B .= 3.0
-    mul2_kernel(CUDABackend(), 64)(A, ndrange=size(A))
-    mul2_kernel(CUDABackend(), 64)(A, ndrange=size(A))
-    synchronize(CUDABackend())
+    backend = get_backend(A)
+    @assert get_backend(B) == backend
+    mul2_kernel(backend, 64)(A, ndrange=size(A))
+    mul2_kernel(backend, 64)(B, ndrange=size(B))
+    synchronize(backend)
     all(A .+ B .== 8.0)
 end
 ```
