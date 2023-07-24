@@ -8,7 +8,7 @@ module EnzymeExt
     end
     import KernelAbstractions: Kernel, StaticSize, launch_config, __groupsize, __groupindex, blocks, mkcontext, CompilerMetadata, CPU
 
-    EnzymeRules.inactive(::typeof(StaticSize), x...) = nothing
+    EnzymeRules.inactive(::Type{StaticSize}, x...) = nothing
 
     function fwd(ctx, f, args...)
         EnzymeCore.autodiff_deferred(Forward, Const(f), Const, Const(ctx), args...)
