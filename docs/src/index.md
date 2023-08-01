@@ -25,7 +25,7 @@ backend and depend on
 
 ### CUDA
 ```julia
-using CUDA
+import CUDA
 using KernelAbstractions
 ```
 [`CUDA.jl`](https://github.com/JuliaGPU/CUDA.jl) is currently the most mature way to program for GPUs.
