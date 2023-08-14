@@ -726,4 +726,7 @@ end
     end
 end
 
+# Config 
+include("config.jl")
+
 end #module
