@@ -1,4 +1,10 @@
-export @groupreduce, @subgroupreduce
+export @groupreduce, @warpreduce
+
+macro warpreduce(op, val)
+    quote
+        $__warpreduce($(esc(op)),$(esc(val)))
+    end
+end
 
 """
 
@@ -12,26 +18,12 @@ macro subgroupreduce(op, val)
     end
 end
 
-function __subgroupreduce(op, val)
-    error("@subgroupreduce used outside kernel, not captured, or not supported")
+function __warpreduce(op, val)
+    error("@warpreduce used outside kernel, not captured, or not supported")
 end
 
-"""
 
-@groupreduce(op, val, neutral, use_subgroups)
-
-Reduce values across a block
-- `op`: the operator of the reduction
-- `val`: value that each thread contibutes to the values that need to be reduced
-- `netral`: value of the operator, so that `op(netural, neutral) = neutral``
-- `use_subgroups`: make use of the subgroupreduction of the groupreduction
-"""
-macro groupreduce(op, val, neutral, use_subgroups) 
-    quote
-        $__groupreduce($(esc(:__ctx__)),$(esc(op)), $(esc(val)), $(esc(neutral)), $(esc(typeof(val))), Val(use_subgroups))
-    end
-end
-
+# groupreduction using warp intrinsics
 @inline function __groupreduce(__ctx__, op, val, neutral, ::Type{T}, ::Val{true}) where {T}
     idx_in_group = @index(Local)
     groupsize = @groupsize()[1]
