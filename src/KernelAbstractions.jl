@@ -700,6 +700,7 @@ end
     @inbounds A[I] = B[I]
 end
 
+
 # CPU backend
 
 include("cpu.jl")
@@ -728,5 +729,6 @@ end
 
 # Config 
 include("config.jl")
+include("reduce.jl")
 
 end #module
