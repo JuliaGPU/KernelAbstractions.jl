@@ -142,6 +142,12 @@ function unsafe_free! end
 function groupsize end
 function ndrange end
 
+macro subgroupsize()
+    quote
+        $__subgroupsize()
+    end
+end
+
 """
     @subgroupsize()
 

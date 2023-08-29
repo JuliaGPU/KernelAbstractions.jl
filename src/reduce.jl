@@ -1,8 +1,14 @@
-export @groupreduce, @warpreduce
+export @groupreduce, @subgroupreduce
 
-macro warpreduce(op, val)
+@enum GroupReduceAlgorithm  begin 
+    THREADS
+    WARP_WARP
+    SEQUENTIAL_WARP
+end
+
+macro subgroupreduce(op, val)
     quote
-        $__warpreduce($(esc(op)),$(esc(val)))
+        $__subgroupreduce($(esc(op)),$(esc(val)))
     end
 end
 
