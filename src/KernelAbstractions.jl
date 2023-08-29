@@ -139,9 +139,14 @@ function unsafe_free! end
 # - @groupsize
 # - @ndrange
 ###
-
 function groupsize end
 function ndrange end
+
+macro subgroupsize()
+    quote
+        $__subgroupsize()
+    end
+end
 
 """
     @groupsize()
@@ -655,6 +660,10 @@ function SharedMemory end
 
 function __synchronize()
     error("@synchronize used outside kernel or not captured")
+end
+
+function __subgroupsize()
+    error("@subgroupsize used outside kernel or not captured")
 end
 
 @generated function __print(items...)

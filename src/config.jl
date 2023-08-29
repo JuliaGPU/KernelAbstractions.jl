@@ -1,9 +1,8 @@
-# Kernel config struct
-
 export Config
 
 using KernelAbstractions
 
+# Kernel config struc
 struct Config{
     GROUPSIZE, 
     WARPSIZE,
