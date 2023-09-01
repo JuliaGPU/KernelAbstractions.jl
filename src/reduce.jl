@@ -179,31 +179,31 @@ function mapreducedim!(f::F, op::OP, R, A::Union{AbstractArray,Broadcast.Broadca
     backend = KernelAbstractions.get_backend(A) 
 
     conf = if conf == nothing get_reduce_config(backend, op, eltype(A)) else conf end
+    if length(R) == 1
+        if length(A) <= conf.items_per_workitem * conf.groupsize
 
-    return __devicereduce(f, op, R, A, init, conf, backend, Val(length(R)))
-end
+            reduce_kernel(backend, conf.groupsize)(f, op, init, R, A, conf, ndrange=conf.groupsize)
+            return R
+        else
+            # How many workitems do we want?
+            gridsize = cld(length(A), conf.items_per_workitem)
+            # how many workitems can we have?
+            gridsize = min(gridsize, conf.max_ndrange)
 
-@inline function __devicereduce(f, op, R, A::Union{AbstractArray,Broadcast.Broadcasted},init ,conf, backend, ::Val{1})
-    if length(A) <= conf.items_per_workitem * conf.groupsize
+            groups = cld(gridsize, conf.groupsize)
+            partial = conf.use_atomics==true ? R : similar(R, (size(R)...,groups))
 
-        reduce_kernel(backend, conf.groupsize)(f, op, init, R, A, conf, ndrange=conf.groupsize)
-        return R
-    else
-        # determine the number of workitems
-        gridsize = cld(length(A), conf.items_per_workitem)
-        gridsize = min(gridsize, conf.max_ndrange)
+            reduce_kernel(backend, conf.groupsize)(f, op, init, partial, A, conf, ndrange=gridsize)
+            
+            if !conf.use_atomics
+                __devicereduce(x->x, op, R, partial,init,conf, backend,Val(1))
+                return R
+            end
 
-        groups = cld(gridsize, conf.groupsize)
-        partial = conf.use_atomics==true ? R : similar(R, (size(R)...,groups))
-
-        reduce_kernel(backend, conf.groupsize)(f, op, init, partial, A, conf, ndrange=gridsize)
-        
-        if !conf.use_atomics
-            __devicereduce(x->x, op, R, partial,init,conf, backend,Val(1))
             return R
         end
-
-        return R
+    else
+        # ...
     end
 end
 
