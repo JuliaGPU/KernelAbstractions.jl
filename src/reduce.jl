@@ -1,3 +1,5 @@
+using GPUArrays
+
 export @groupreduce, @subgroupreduce
 
 @enum GroupReduceAlgorithm  begin 
@@ -18,12 +20,8 @@ end
 
 macro groupreduce(op, val, neutral, conf) 
     quote
-        # use heuristic to determine the best algorithm only use groupreduce with only warps
-        # if we groupsize is warpsize * warpsize. This way we don't have to use neutral elements.
-        # This also seams to be faster for CUDA
-        # if else will be optimized away by the compiler because the values are compile time constants
         algo = if $(esc(conf)).use_warps
-            $(esc(conf)).warpsize * $(esc(conf)).warpsize == $(esc(conf)).groupsize ? WARP_WARP : SEQUENTIAL_WARP
+            WARP_WARP
         else 
             THREADS
         end
@@ -165,7 +163,7 @@ end
         end
 end
 
-function mapreducedim!(f::F, op::OP, R, A::Union{AbstractArray,Broadcast.Broadcasted}; init=nothing, conf=nothing) where {F, OP}
+function GPUArray.mapreducedim!(f::F, op::OP, R, A::Union{AbstractArray,Broadcast.Broadcasted}; init=nothing, conf=nothing) where {F, OP}
 
     Base.check_reducedims(R, A)
     length(A) == 0 && return R # isempty(::Broadcasted) iterates
