@@ -1,16 +1,7 @@
+using GPUArrays
+
 export @groupreduce, @subgroupreduce
 
-@enum GroupReduceAlgorithm  begin 
-    THREADS
-    WARP_WARP
-    SEQUENTIAL_WARP
-end
-
-macro subgroupreduce(op, val)
-    quote
-        $__subgroupreduce($(esc(op)),$(esc(val)))
-    end
-end
 
 """
 
