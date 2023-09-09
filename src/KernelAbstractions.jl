@@ -142,6 +142,11 @@ function unsafe_free! end
 function groupsize end
 function ndrange end
 
+"""
+    @subgroupsize()
+
+    returns the GPUs subgroupsize.
+"""
 macro subgroupsize()
     quote
         $__subgroupsize()
