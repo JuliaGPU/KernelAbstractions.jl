@@ -1,121 +1,98 @@
-export groupreduce, warpreduce
+export @groupreduce, @subgroupreduce
 
-macro groupreduce(op, val, neutral, conf) 
+"""
+
+@subgroupreduce(op, val)
+
+reduce values across a subgroup. This operation is only supported if subgroups are supported by the backend.
+"""
+macro subgroupreduce(op, val)
     quote
-        $__groupreduce($(esc(:__ctx__)),$(esc(op)), $(esc(val)), $(esc(neutral)), typeof($(esc(val))), Val($(esc(conf)).use_warps))
+        $__subgroupreduce($(esc(op)),$(esc(val)))
     end
 end
 
-macro warpreduce(op, val)
+function __subgroupreduce(op, val)
+    error("@subgroupreduce used outside kernel, not captured, or not supported")
+end
+
+"""
+
+@groupreduce(op, val, neutral, use_subgroups)
+
+Reduce values across a block
+- `op`: the operator of the reduction
+- `val`: value that each thread contibutes to the values that need to be reduced
+- `netral`: value of the operator, so that `op(netural, neutral) = neutral``
+- `use_subgroups`: make use of the subgroupreduction of the groupreduction
+"""
+macro groupreduce(op, val, neutral, use_subgroups) 
     quote
-        $__warpreduce(esc(op))($(esc(val)))
+        $__groupreduce($(esc(:__ctx__)),$(esc(op)), $(esc(val)), $(esc(neutral)), $(esc(typeof(val))), Val(use_subgroups))
     end
 end
 
-
-@inline _map_getindex(args::Tuple, I) = ((args[1][I]), _map_getindex(Base.tail(args), I)...)
-@inline _map_getindex(args::Tuple{Any}, I) = ((args[1][I]),)
-@inline _map_getindex(args::Tuple{}, I) = ()
-
-
-# groupreduction using warp intrinsics
 @inline function __groupreduce(__ctx__, op, val, neutral, ::Type{T}, ::Val{true}) where {T}
-    threadIdx_local = KernelAbstractions.@index(Local)
-    groupsize = KernelAbstractions.@groupsize()[1]
+    idx_in_group = @index(Local)
+    groupsize = @groupsize()[1]
+    subgroupsize = @subgroupsize()
 
-    shared = KernelAbstractions.@localmem(T, 32)
+    localmem = @localmem(T, subgroupsize)
 
-    warpIdx, warpLane = fldmod1(threadIdx_local, 32)
+    idx_subgroup, idx_in_subgroup = fldmod1(idx_in_group, subgroupsize)
 
-    # each warp performs partial reduction
-    val = KernelAbstractions.@warpreduce(op, val)
+    # first subgroup reduction
+    val = @subgroupreduce(op, val)
 
-    # write reduced value to shared memory
-    if warpLane == 1
-        @inbounds shared[warpIdx] = val
+    # store partial results in local memory
+    if idx_in_subgroup == 1
+        @inbounds localmem[idx_in_subgroup] = val
     end
 
-    # wait for all partial reductions
-    KernelAbstractions.@synchronize()
+    @synchronize()
 
-    # read from shared memory only if that warp existed
-    val = if threadIdx_local <= fld1(groupsize, 32)
-            @inbounds shared[warpLane]
+    val = if idx_in_subgroup <= fld1(groupsize, subgroupsize)
+            @inbounds localmem[idx_in_subgroup]
     else
         neutral
     end
 
-    # final reduce within first warp
-    if warpIdx == 1
-        val =  KernelAbstractions.@warpreduce(op, val)
+    # second subgroup reduction to reduce partial results
+    if idx_in_subgroup == 1
+        val =  @subgroupreduce(op, val)
     end
 
     return val
-
 end
 
-# groupreduction using local memory
 @inline function __groupreduce(__ctx__, op, val, neutral, ::Type{T}, ::Val{false}) where {T}
-    threadIdx_local = KernelAbstractions.@index(Local)
-    groupsize = KernelAbstractions.@groupsize()[1]
+    idx_in_group = @index(Local)
+    groupsize = @groupsize()[1]
     
-    shared = KernelAbstractions.@localmem(T, groupsize)
+    localmem = @localmem(T, groupsize)
 
-    @inbounds shared[threadIdx_local] = val
+    @inbounds localmem[idx_in_group] = val
 
     # perform the reduction
     d = 1
     while d < groupsize
-        KernelAbstractions.@synchronize()
-        index = 2 * d * (threadIdx_local-1) + 1
+        @synchronize()
+        index = 2 * d * (idx_in_group-1) + 1
         @inbounds if index <= groupsize
             other_val = if index + d <= groupsize
-                shared[index+d]
+                localmem[index+d]
             else
                 neutral
             end
-            shared[index] = op(shared[index], other_val)
+            localmem[index] = op(localmem[index], other_val)
         end
         d *= 2
     end
 
     # load the final value on the first thread
-    if threadIdx_local == 1
-        val = @inbounds shared[threadIdx_local]
+    if idx_in_group == 1
+        val = @inbounds localmem[idx_in_group]
     end
     
     return val 
-end
-
-@kernel function reduce_kernel(f, op, neutral, grain, R, A , conf)
-    # values for the kernel
-    threadIdx_local = @index(Local)
-    threadIdx_global = @index(Global)
-    groupIdx = @index(Group)
-    gridsize = @ndrange()[1]
-
-
-    # load neutral value
-    neutral = if neutral === nothing
-        R[1]
-    else
-        neutral
-    end
-    
-    val = op(neutral, neutral)
-
-    # every thread reduces a few values parrallel
-    index = threadIdx_global 
-    while index <= length(A)
-        val = op(val,A[index])
-        index += gridsize
-    end
-
-    # reduce every block to a single value
-    val = @reduce(op, val, neutral, conf)
-
-    # write reduces value to memory
-    if threadIdx_local == 1
-        R[groupIdx] = val
-    end
 end

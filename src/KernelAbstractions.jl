@@ -139,9 +139,19 @@ function unsafe_free! end
 # - @groupsize
 # - @ndrange
 ###
-
 function groupsize end
 function ndrange end
+
+"""
+    @subgroupsize()
+
+    returns the GPUs subgroupsize.
+"""
+macro subgroupsize()
+    quote
+        $__subgroupsize()
+    end
+end
 
 """
     @groupsize()
@@ -384,9 +394,9 @@ function __index_Local_Cartesian end
 function __index_Group_Cartesian end
 function __index_Global_Cartesian end
 
-__index_Local_NTuple(ctx, I...) = Tuple(__index_Local_Cartesian(ctx, I...))
-__index_Group_NTuple(ctx, I...) = Tuple(__index_Group_Cartesian(ctx, I...))
-__index_Global_NTuple(ctx, I...) = Tuple(__index_Global_Cartesian(ctx, I...))
+@inline __index_Local_NTuple(ctx, I...) = Tuple(__index_Local_Cartesian(ctx, I...))
+@inline __index_Group_NTuple(ctx, I...) = Tuple(__index_Group_Cartesian(ctx, I...))
+@inline __index_Global_NTuple(ctx, I...) = Tuple(__index_Global_Cartesian(ctx, I...))
 
 struct ConstAdaptor end
 
@@ -657,6 +667,10 @@ function __synchronize()
     error("@synchronize used outside kernel or not captured")
 end
 
+function __subgroupsize()
+    error("@subgroupsize used outside kernel or not captured")
+end
+
 @generated function __print(items...)
     str = ""
     args = []
@@ -700,6 +714,7 @@ end
     @inbounds A[I] = B[I]
 end
 
+
 # CPU backend
 
 include("cpu.jl")
@@ -726,7 +741,7 @@ end
     end
 end
 
-# Config 
-include("config.jl")
+# group- and subgroupreduce
+include("reduce.jl")
 
 end #module

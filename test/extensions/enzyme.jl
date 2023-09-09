@@ -10,7 +10,7 @@ end
 function caller(A, backend)
     kernel = square!(backend)
     kernel(A, ndrange=size(A))
-    synchronize(backend)
+    KernelAbstractions.synchronize(backend)
 end
 
 function enzyme_testsuite(backend, ArrayT, supports_reverse=true)
