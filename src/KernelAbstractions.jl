@@ -142,27 +142,6 @@ function unsafe_free! end
 function groupsize end
 function ndrange end
 
-"""
-    @subgroupsize()
-
-    returns the GPUs subgroupsize.
-"""
-macro subgroupsize()
-    quote
-        $__subgroupsize()
-    end
-end
-
-"""
-    @subgroupsize()
-
-    returns the GPUs subgroupsize.
-"""
-macro subgroupsize()
-    quote
-        $__subgroupsize()
-    end
-end
 
 """
     @groupsize()
@@ -678,9 +657,6 @@ function __synchronize()
     error("@synchronize used outside kernel or not captured")
 end
 
-function __subgroupsize()
-    error("@subgroupsize used outside kernel or not captured")
-end
 
 @generated function __print(items...)
     str = ""
@@ -752,7 +728,7 @@ end
     end
 end
 
-# group- and subgroupreduce
+# groupreduce
 include("reduce.jl")
 
 end #module

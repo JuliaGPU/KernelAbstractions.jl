@@ -1,24 +1,8 @@
-export @groupreduce, @subgroupreduce
+export @groupreduce
 
 """
 
-@subgroupreduce(op, val)
-
-reduce values across a subgroup. This operation is only supported if subgroups are supported by the backend.
-"""
-macro subgroupreduce(op, val)
-    quote
-        $__subgroupreduce($(esc(op)),$(esc(val)))
-    end
-end
-
-function __subgroupreduce(op, val)
-    error("@subgroupreduce used outside kernel, not captured, or not supported")
-end
-
-"""
-
-@groupreduce(op, val, neutral, use_subgroups)
+    @groupreduce(op, val, neutral, use_subgroups)
 
 Reduce values across a block
 - `op`: the operator of the reduction
@@ -26,46 +10,13 @@ Reduce values across a block
 - `netral`: value of the operator, so that `op(netural, neutral) = neutral``
 - `use_subgroups`: make use of the subgroupreduction of the groupreduction
 """
-macro groupreduce(op, val, neutral, use_subgroups) 
+macro groupreduce(op, val, neutral) 
     quote
-        $__groupreduce($(esc(:__ctx__)),$(esc(op)), $(esc(val)), $(esc(neutral)), $(esc(typeof(val))), Val(use_subgroups))
+        $__groupreduce($(esc(:__ctx__)),$(esc(op)), $(esc(val)), $(esc(neutral)), $(esc(typeof(val))))
     end
 end
 
-@inline function __groupreduce(__ctx__, op, val, neutral, ::Type{T}, ::Val{true}) where {T}
-    idx_in_group = @index(Local)
-    groupsize = @groupsize()[1]
-    subgroupsize = @subgroupsize()
-
-    localmem = @localmem(T, subgroupsize)
-
-    idx_subgroup, idx_in_subgroup = fldmod1(idx_in_group, subgroupsize)
-
-    # first subgroup reduction
-    val = @subgroupreduce(op, val)
-
-    # store partial results in local memory
-    if idx_in_subgroup == 1
-        @inbounds localmem[idx_in_subgroup] = val
-    end
-
-    @synchronize()
-
-    val = if idx_in_subgroup <= fld1(groupsize, subgroupsize)
-            @inbounds localmem[idx_in_subgroup]
-    else
-        neutral
-    end
-
-    # second subgroup reduction to reduce partial results
-    if idx_in_subgroup == 1
-        val =  @subgroupreduce(op, val)
-    end
-
-    return val
-end
-
-@inline function __groupreduce(__ctx__, op, val, neutral, ::Type{T}, ::Val{false}) where {T}
+@inline function __groupreduce(__ctx__, op, val, neutral, ::Type{T}) where {T}
     idx_in_group = @index(Local)
     groupsize = @groupsize()[1]
     

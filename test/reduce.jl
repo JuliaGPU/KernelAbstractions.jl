@@ -8,7 +8,7 @@ using KernelAbstractions, Test
     
     val = a[idx_in_group]
 
-    val = @groupreduce(op, val, netral, false)
+    val = @groupreduce(op, val, netral)
 
     b[1] = val 
 end
