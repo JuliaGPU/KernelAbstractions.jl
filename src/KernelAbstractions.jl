@@ -384,9 +384,9 @@ function __index_Local_Cartesian end
 function __index_Group_Cartesian end
 function __index_Global_Cartesian end
 
-__index_Local_NTuple(ctx, I...) = Tuple(__index_Local_Cartesian(ctx, I...))
-__index_Group_NTuple(ctx, I...) = Tuple(__index_Group_Cartesian(ctx, I...))
-__index_Global_NTuple(ctx, I...) = Tuple(__index_Global_Cartesian(ctx, I...))
+@inline __index_Local_NTuple(ctx, I...) = Tuple(__index_Local_Cartesian(ctx, I...))
+@inline __index_Group_NTuple(ctx, I...) = Tuple(__index_Group_Cartesian(ctx, I...))
+@inline __index_Global_NTuple(ctx, I...) = Tuple(__index_Global_Cartesian(ctx, I...))
 
 struct ConstAdaptor end
 
