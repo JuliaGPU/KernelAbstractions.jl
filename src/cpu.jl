@@ -158,6 +158,8 @@ end
     end
 end
 
+ongpu() = false
+
 ###
 # CPU implementation of shared memory
 ###

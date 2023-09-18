@@ -535,6 +535,14 @@ function priority!(::Backend, prio::Symbol)
     return nothing
 end
 
+
+"""
+    ongpu()
+
+Returns if this kernel is currently executing on a GPU.
+"""
+function ongpu end
+
 include("nditeration.jl")
 using .NDIteration
 import .NDIteration: get
