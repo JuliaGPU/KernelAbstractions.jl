@@ -541,7 +541,7 @@ end
 
 Returns if this kernel is currently executing on a GPU.
 """
-function ongpu end
+function isongpu end
 
 include("nditeration.jl")
 using .NDIteration
