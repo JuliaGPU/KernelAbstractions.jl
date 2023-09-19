@@ -372,6 +372,13 @@ macro index(locale, args...)
     Expr(:call, GlobalRef(KernelAbstractions, index_function), esc(:__ctx__), map(esc, args)...)
 end
 
+"""
+    isongpu()
+
+Returns if this kernel is currently executing on a GPU.
+"""
+function isongpu end
+
 ###
 # Internal kernel functions
 ###

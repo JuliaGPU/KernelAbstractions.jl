@@ -158,6 +158,8 @@ end
     end
 end
 
+isongpu() = false
+
 ###
 # CPU implementation of shared memory
 ###
