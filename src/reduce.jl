@@ -1,13 +1,12 @@
 export @groupreduce
 
 """
-
     @groupreduce(op, val, neutral, use_subgroups)
 
 Reduce values across a block
 - `op`: the operator of the reduction
 - `val`: value that each thread contibutes to the values that need to be reduced
-- `netral`: value of the operator, so that `op(netural, neutral) = neutral``
+- `neutral`: value of the operator, so that `op(neutral, neutral) = neutral`
 - `use_subgroups`: make use of the subgroupreduction of the groupreduction
 """
 macro groupreduce(op, val, neutral) 
@@ -17,8 +16,8 @@ macro groupreduce(op, val, neutral)
 end
 
 @inline function __groupreduce(__ctx__, op, val, neutral, ::Type{T}) where {T}
-    idx_in_group = @index(Local)
-    groupsize = @groupsize()[1]
+    idx_in_group = @index(Local, Linear)
+    groupsize = prod(@groupsize())
     
     localmem = @localmem(T, groupsize)
 
