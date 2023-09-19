@@ -158,7 +158,7 @@ end
     end
 end
 
-ongpu() = false
+isongpu() = false
 
 ###
 # CPU implementation of shared memory
