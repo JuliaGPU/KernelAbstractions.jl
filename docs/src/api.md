@@ -13,13 +13,19 @@
 @uniform
 @groupsize
 @ndrange
+synchronize
 ```
 
-## Host interface
+## Host language
+
+```@docs
+KernelAbstractions.zeros
+```
 
 ## Internal
 
 ```@docs
 KernelAbstractions.Kernel
 KernelAbstractions.partition
+KernelAbstractions.@context
 ```
