@@ -54,6 +54,7 @@ module EnzymeExt
         # TODO in KA backends like CUDAKernels, etc have a version with a parent job type
         TapeType = EnzymeCore.tape_type(ReverseSplitModified(ReverseSplitWithPrimal, ModifiedBetween), FT, Const,  Const{ctxTy}, map(Core.Typeof, args)...)
 
+
         subtape = Array{TapeType}(undef, __groupsize(ctx))
 
         aug_kernel = similar(kernel, aug_fwd)
@@ -64,7 +65,7 @@ module EnzymeExt
         # Since custom rules require a fixed return type, explicitly cast to Any, rather
         # than returning a AugmentedReturn{Nothing, Nothing, T} where T.
 
-        res =  AugmentedReturn{Nothing, Nothing, Vector}(nothing, nothing, subtape)
+        res =  AugmentedReturn{Nothing, Nothing, Array}(nothing, nothing, subtape)
         return res
     end
 
