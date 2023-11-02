@@ -53,28 +53,44 @@ synchronize(backend)
 ```
 """
 macro kernel(expr)
-    __kernel(expr, #=generate_cpu=#true)
+    __kernel(expr, #=generate_cpu=#true, #=force_inbounds=#false)
 end
 
 """
-    @kernel cpu=false function f(args) end
+    @kernel config function f(args) end
 
-Disable code-generation of the CPU function. This relaxes semantics such that
-KernelAbstractions primitives can be used in non-kernel functions.
+This allows for two different configurations:
+
+1. `cpu={true, false}`: Disables code-generation of the CPU function. This relaxes semantics such that KernelAbstractions primitives can be used in non-kernel functions.
+2. `inbounds={false, true}`: Enables a forced `@inbounds` macro around the function definition in the case the user is using too many `@inbounds` already in their kernel. Note that this can lead to incorrect results, crashes, etc and is fundamentally unsafe. Be careful!
 
 - [`@context`](@ref)
 
 !!! warn
     This is an experimental feature.
 """
-macro kernel(config, expr)
-    if config isa Expr && config.head == :(=) &&
-        config.args[1] == :cpu && config.args[2] isa Bool
-        generate_cpu = config.args[2]
+macro kernel(ex...)
+    if length(ex) == 1
+        __kernel(ex[1], true, false)
     else
-        error("Configuration should be of form `cpu=false` got $config")
+        generate_cpu = true
+        force_inbounds = false
+        for i = 1:length(ex)-1
+            if ex[i] isa Expr && ex[i].head == :(=) &&
+                ex[i].args[1] == :cpu && ex[i].args[2] isa Bool
+                generate_cpu = ex[i].args[2]
+            elseif ex[i] isa Expr && ex[i].head == :(=) &&
+                ex[i].args[1] == :inbounds && ex[i].args[2] isa Bool
+                force_inbounds = ex[i].args[2]
+            else
+                error("Configuration should be of form:\n"*
+                      "* `cpu=true`\n"*
+                      "* `inbounds=false`\n"*
+                      "got `", ex[i], "`")
+            end
+        end
+        __kernel(ex[end], generate_cpu, force_inbounds)
     end
-    __kernel(expr, generate_cpu)
 end
 
 """

@@ -10,10 +10,16 @@ function find_return(stmt)
 end
 
 # XXX: Proper errors
-function __kernel(expr, generate_cpu=true)
+function __kernel(expr, generate_cpu=true, force_inbounds=false)
     def = splitdef(expr)
     name = def[:name]
     args = def[:args]
+    if force_inbounds
+        body_qt = quote
+            @inbounds $(def[:body])
+        end
+        def[:body] = body_qt
+    end
 
     find_return(expr) && error("Return statement not permitted in a kernel function $name")
 
