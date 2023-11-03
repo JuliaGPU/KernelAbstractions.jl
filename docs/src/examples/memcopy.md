@@ -1,6 +1,6 @@
 # Memcopy
 
-The first example simple copies memory from `A` to `B`
+The first example simple copies memory from `B` to `A`
 
 ````@eval
 using Markdown
