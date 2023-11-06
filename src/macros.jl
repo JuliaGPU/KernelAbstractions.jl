@@ -14,13 +14,6 @@ function __kernel(expr, generate_cpu=true, force_inbounds=false)
     def = splitdef(expr)
     name = def[:name]
     args = def[:args]
-    if force_inbounds
-        body_qt = quote
-            @inbounds $(def[:body])
-        end
-        def[:body] = body_qt
-    end
-
     find_return(expr) && error("Return statement not permitted in a kernel function $name")
 
     constargs = Array{Bool}(undef, length(args))
@@ -45,13 +38,13 @@ function __kernel(expr, generate_cpu=true, force_inbounds=false)
     if generate_cpu
         def_cpu = deepcopy(def)
         def_cpu[:name] = cpu_name
-        transform_cpu!(def_cpu, constargs)
+        transform_cpu!(def_cpu, constargs, force_inbounds)
         cpu_function = combinedef(def_cpu)
     end
 
     def_gpu = deepcopy(def)
     def_gpu[:name] = gpu_name = Symbol(:gpu_, name)
-    transform_gpu!(def_gpu, constargs)
+    transform_gpu!(def_gpu, constargs, force_inbounds)
     gpu_function = combinedef(def_gpu)
 
     # create constructor functions
@@ -83,7 +76,7 @@ end
 
 # The easy case, transform the function for GPU execution
 # - mark constant arguments by applying `constify`.
-function transform_gpu!(def, constargs)
+function transform_gpu!(def, constargs, force_inbounds)
     let_constargs = Expr[]
     for (i, arg) in enumerate(def[:args])
         if constargs[i]
@@ -91,9 +84,15 @@ function transform_gpu!(def, constargs)
         end
     end
     pushfirst!(def[:args], :__ctx__)
+    body = def[:body]
+    if force_inbounds
+        body = quote
+           @inbounds $(body)
+        end
+    end
     body = quote
         if $__validindex(__ctx__)
-            $(def[:body])
+            $(body)
         end
         return nothing
     end
@@ -110,7 +109,7 @@ end
 #   - handle indicies
 #   - hoist workgroup definitions
 #   - hoist uniform variables
-function transform_cpu!(def, constargs)
+function transform_cpu!(def, constargs, force_inbounds)
     let_constargs = Expr[]
     for (i, arg) in enumerate(def[:args])
         if constargs[i]
@@ -121,7 +120,13 @@ function transform_cpu!(def, constargs)
     new_stmts = Expr[]
     body = MacroTools.flatten(def[:body])
     push!(new_stmts, Expr(:aliasscope))
+    if force_inbounds
+        push!(new_stmts, Expr(:inbounds, true))
+    end
     append!(new_stmts, split(body.args))
+    if force_inbounds
+        push!(new_stmts, Expr(:inbounds, :pop))
+    end
     push!(new_stmts, Expr(:popaliasscope))
     push!(new_stmts, :(return nothing))
     def[:body] = Expr(:let,
