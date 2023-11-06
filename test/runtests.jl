@@ -28,15 +28,17 @@ end
 
 if Base.JLOptions().check_bounds == 0 || Base.JLOptions().check_bounds == 1
     # testing bounds errors
-    @kernel inbounds=false function my_bounded_kernel()
+    @kernel inbounds=false function my_bounded_kernel(a)
         idx = @index(Global, Linear)
+        a[idx] = 0
     end
     @test_throws BoundsError(Int64[],(1,)) my_bounded_kernel(CPU())(Int[], ndrange=1)
 end
 
 if Base.JLOptions().check_bounds == 0 || Base.JLOptions().check_bounds == 2
-    @kernel inbounds=true function my_bounded_kernel()
+    @kernel inbounds=true function my_bounded_kernel(a)
         idx = @index(Global, Linear)
+        a[idx] = 0
     end
     @test nothing == my_inbounds_kernel(CPU())(Int[], ndrange=1)
 end
