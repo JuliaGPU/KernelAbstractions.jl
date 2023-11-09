@@ -651,6 +651,15 @@ function construct(backend::Backend, ::S, ::NDRange, xpu_name::XPUName) where {B
 end
 
 ###
+# Extras
+# - LoopInfo
+###
+
+include("extras/extras.jl")
+
+include("reflection.jl")
+
+###
 # Compiler
 ###
 
@@ -697,15 +706,6 @@ end
 # Utils
 __size(args::Tuple) = Tuple{args...}
 __size(i::Int) = Tuple{i}
-
-###
-# Extras
-# - LoopInfo
-###
-
-include("extras/extras.jl")
-
-include("reflection.jl")
 
 # Initialized
 
