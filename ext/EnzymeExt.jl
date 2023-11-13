@@ -55,7 +55,7 @@ module EnzymeExt
         TapeType = EnzymeCore.tape_type(ReverseSplitModified(ReverseSplitWithPrimal, ModifiedBetween), FT, Const,  Const{ctxTy}, map(Core.Typeof, args)...)
 
 
-        subtape = Array{TapeType}(undef, __groupsize(ctx))
+        subtape = Array{TapeType}(undef, size(blocks(iterspace)))
 
         aug_kernel = similar(kernel, aug_fwd)
 
