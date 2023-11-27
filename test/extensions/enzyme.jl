@@ -16,7 +16,7 @@ end
 
 @kernel function mul!(A, B)
     I = @index(Global, Linear)
-    @inbounds A[I] *= A[I] * B
+    @inbounds A[I] *= B
 end
 
 function mul_caller(A, B, backend)
