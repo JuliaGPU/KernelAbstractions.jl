@@ -7,28 +7,51 @@ using KernelAbstractions
     @inbounds A[I] *= A[I]
 end
 
-function caller(A, backend)
+function square_caller(A, backend)
     kernel = square!(backend)
     kernel(A, ndrange=size(A))
+    KernelAbstractions.synchronize(backend)
+end
+
+
+@kernel function mul!(A, B)
+    I = @index(Global, Linear)
+    @inbounds A[I] *= A[I] * B
+end
+
+function mul_caller(A, B, backend)
+    kernel = mul!(backend)
+    kernel(A, B, ndrange=size(A))
     KernelAbstractions.synchronize(backend)
 end
 
 function enzyme_testsuite(backend, ArrayT, supports_reverse=true)
     @testset "kernels" begin
         A = ArrayT{Float64}(undef, 64)
-        A .= (1:1:64)
         dA = ArrayT{Float64}(undef, 64)
-        dA .= 1
 
         if supports_reverse
-            Enzyme.autodiff(Reverse, caller, Duplicated(A, dA), Const(backend()))
+
+            A .= (1:1:64)
+            dA .= 1
+
+            Enzyme.autodiff(Reverse, square_caller, Duplicated(A, dA), Const(backend()))
             @test all(dA .≈ (2:2:128))
+
+
+            A .= (1:1:64)
+            dA .= 1
+
+            _, dB, _ = Enzyme.autodiff(Reverse, mul_caller, Duplicated(A, dA), Active(1.2), Const(backend()))[1]
+
+            @test all(dA .≈ 1.2)
+            @test dB ≈ sum(1:1:64)
         end
 
         A .= (1:1:64)
         dA .= 1
 
-        Enzyme.autodiff(Forward, caller, Duplicated(A, dA), Const(backend()))
+        Enzyme.autodiff(Forward, square_caller, Duplicated(A, dA), Const(backend()))
         @test all(dA .≈ 2:2:128)
 
     end

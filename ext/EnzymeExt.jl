@@ -36,7 +36,7 @@ module EnzymeExt
         fwd_kernel(f, args...; ndrange, workgroupsize)
     end
 
-    function EnzymeRules.augmented_primal(config::Config, func::Const{<:Kernel{CPU}}, ::Type{Const{Nothing}}, args...; ndrange=nothing, workgroupsize=nothing)
+    function EnzymeRules.augmented_primal(config::Config, func::Const{<:Kernel{CPU}}, ::Type{Const{Nothing}}, args::Vararg{Any, N}; ndrange=nothing, workgroupsize=nothing) where N
         kernel = func.val
         f = kernel.f
 
@@ -51,32 +51,67 @@ module EnzymeExt
 
         FT = Const{Core.Typeof(f)}
 
+        arg_refs = ntuple(Val(N)) do i
+            Base.@_inline_meta
+            if args[i] isa Active
+                Ref(EnzymeCore.make_zero(args[i]))
+            else
+                nothing
+            end
+        end
+        args2 = ntuple(Val(N)) do i
+            Base.@_inline_meta
+            if args[i] isa Active
+                Duplicated(Ref(args[i]), arg_refs[i])
+            else
+                args[i]
+            end
+        end
+
         # TODO in KA backends like CUDAKernels, etc have a version with a parent job type
-        TapeType = EnzymeCore.tape_type(ReverseSplitModified(ReverseSplitWithPrimal, ModifiedBetween), FT, Const,  Const{ctxTy}, map(Core.Typeof, args)...)
+        TapeType = EnzymeCore.tape_type(ReverseSplitModified(ReverseSplitWithPrimal, ModifiedBetween), FT, Const,  Const{ctxTy}, map(Core.Typeof, args2)...)
 
 
         subtape = Array{TapeType}(undef, size(blocks(iterspace)))
 
         aug_kernel = similar(kernel, aug_fwd)
 
-        aug_kernel(f, ModifiedBetween, subtape, args...; ndrange, workgroupsize)
+        aug_kernel(f, ModifiedBetween, subtape, args2...; ndrange, workgroupsize)
 
         # TODO the fact that ctxTy is type unstable means this is all type unstable.
         # Since custom rules require a fixed return type, explicitly cast to Any, rather
         # than returning a AugmentedReturn{Nothing, Nothing, T} where T.
 
-        res =  AugmentedReturn{Nothing, Nothing, Array}(nothing, nothing, subtape)
+        res =  AugmentedReturn{Nothing, Nothing, Tuple{Array, typeo(arg_refs)}}(nothing, nothing, (subtape, arg_refs))
         return res
     end
 
-    function EnzymeRules.reverse(config::Config, func::Const{<:Kernel}, ::Type{<:EnzymeCore.Annotation}, subtape, args...; ndrange=nothing, workgroupsize=nothing)
+    function EnzymeRules.reverse(config::Config, func::Const{<:Kernel}, ::Type{<:EnzymeCore.Annotation}, tape, args::Vararg{Any, N}; ndrange=nothing, workgroupsize=nothing) where N
+        sub_tape, arg_refs = tape
+
+        args2 = ntuple(Val(N)) do i
+            Base.@_inline_meta
+            if args[i] isa Active
+                Duplicated(Ref(args[i]), arg_refs[i])
+            else
+                args[i]
+            end
+        end
+
         kernel = func.val
         f = kernel.f
 
         ModifiedBetween = Val((overwritten(config)[1], false, overwritten(config)[2:end]...))
 
         rev_kernel = similar(func.val, rev)
-        rev_kernel(f, ModifiedBetween, subtape, args...; ndrange, workgroupsize)
-        return ((nothing for a in args)...,)
+        rev_kernel(f, ModifiedBetween, subtape, args2...; ndrange, workgroupsize)
+        return ntuple(Val(N)) do i
+            Base.@_inline_meta
+            if args[i] isa Active
+                arg_refs[i][]
+            else
+                nothing
+            end
+        end
     end
 end
