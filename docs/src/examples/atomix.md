@@ -34,8 +34,9 @@ img[35:45, 35:45] .= 2;
 out = Array(index_fun(CuArray(img), backend=CUDABackend()));
 simshow(out)
 ```
-In principle, this kernel just the values of the pixels along the first dimension. 
-However, the different `out[k, i]` are accessed by each of the kernels multiple times, so racing conditions happen.
+In principle, this kernel just smears the values of the pixels along the first dimension. 
+However, the different `out[k, i]` are accessed by each of the kernels multiple times, so racing conditions happen that some
+kernels access old results or overwrite new results.
 
 The resulting image has artifacts.
 
