@@ -27,6 +27,7 @@ makedocs(;
             "examples/performance.md",
             "examples/matmul.md",
             "examples/numa_aware.md",
+            "examples/atomix.md",
         ], # Examples
         "API" => "api.md",
         "Extras" => [
