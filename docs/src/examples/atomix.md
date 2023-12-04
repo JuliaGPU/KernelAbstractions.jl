@@ -1,6 +1,6 @@
 # Atomic operations with Atomix.jl
 
-In case the different kernels access the same memories, [race conditions](https://en.wikipedia.org/wiki/Race_condition) can occur.
+In case the different kernels access the same memory locations, [race conditions](https://en.wikipedia.org/wiki/Race_condition) can occur.
 KA is compatible with [Atomix.jl](https://github.com/JuliaConcurrent/Atomix.jl) to avoid this.
 
 ## Race conditions
