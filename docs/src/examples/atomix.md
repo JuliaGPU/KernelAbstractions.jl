@@ -5,7 +5,8 @@ KA is compatible with [Atomix.jl](https://github.com/JuliaConcurrent/Atomix.jl) 
 
 ## Race conditions
 
-The following goes wrong:
+The following example demonstrates a common race condition:
+
 ```julia
 using CUDA, KernelAbstractions, CUDA.CUDAKernels, Atomix
 using ImageShow, ImageIO
