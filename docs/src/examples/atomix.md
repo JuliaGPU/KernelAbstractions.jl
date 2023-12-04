@@ -8,7 +8,7 @@ KernelAbstractions uses  [Atomix.jl](https://github.com/JuliaConcurrent/Atomix.j
 The following example demonstrates a common race condition:
 
 ```julia
-using CUDA, KernelAbstractions, CUDA.CUDAKernels, Atomix
+using CUDA, KernelAbstractions, Atomix
 using ImageShow, ImageIO
 
 
