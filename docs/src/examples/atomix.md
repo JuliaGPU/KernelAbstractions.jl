@@ -12,7 +12,7 @@ using CUDA, KernelAbstractions, CUDA.CUDAKernels, Atomix
 using ImageShow, ImageIO
 
 
-function index_fun(arr; backend=CUDABackend())
+function index_fun(arr; backend=get_backend(arr))
 	out = similar(arr)
 	fill!(out, 0)
 	kernel! = my_kernel!(backend)
