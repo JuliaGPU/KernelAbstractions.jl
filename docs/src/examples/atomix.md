@@ -32,7 +32,7 @@ img[10:20, 10:20] .= 1;
 img[35:45, 35:45] .= 2;
 
 
-out = Array(index_fun(CuArray(img), backend=CUDABackend()));
+out = Array(index_fun(CuArray(img)));
 simshow(out)
 ```
 In principle, this kernel just smears the values of the pixels along the first dimension. 
