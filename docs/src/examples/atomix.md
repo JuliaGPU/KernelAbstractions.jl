@@ -35,9 +35,10 @@ img[35:45, 35:45] .= 2;
 out = Array(index_fun(CuArray(img)));
 simshow(out)
 ```
-In principle, this kernel just smears the values of the pixels along the first dimension. 
-However, the different `out[k, i]` are accessed by each of the kernels multiple times, so racing conditions happen that some
-kernels access old results or overwrite new results.
+In principle, this kernel should just smears the values of the pixels along the first dimension. 
+
+However, the different `out[k, i]` are accessed from multiple work-items and thus memory races can occur.
+We need to ensure that the accumulate `+=` occurs atomically.
 
 The resulting image has artifacts.
 
