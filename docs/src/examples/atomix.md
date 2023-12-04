@@ -62,7 +62,7 @@ end
 	end
 end
 
-out_fixed = Array(index_fun_fixed(CuArray(img), backend=CUDABackend()));
+out_fixed = Array(index_fun_fixed(CuArray(img)));
 simshow(out_fixed)
 ```
 This image is free of artifacts.
