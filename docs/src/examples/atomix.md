@@ -48,7 +48,7 @@ The resulting image has artifacts.
 ## Fix with Atomix.jl
 To fix this we need to mark the critical accesses with an `Atomix.@atomic`
 ```julia
-function index_fun_fixed(arr; backend=CUDABackend())
+function index_fun_fixed(arr; backend=get_backend(arr))
 	out = similar(arr)
 	fill!(out, 0)
 	kernel! = my_kernel_fixed!(backend)
