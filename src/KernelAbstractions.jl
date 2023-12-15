@@ -698,6 +698,18 @@ end
 __size(args::Tuple) = Tuple{args...}
 __size(i::Int) = Tuple{i}
 
+"""
+    argconvert(::Kernel, arg)
+
+Convert arguments to the device side representation.
+"""
+argconvert(k::Kernel{T}, arg) where T =
+    error("Don't know how to convert arguments for Kernel{$T}")
+
+# Enzyme support
+supports_enzyme(::Backend) = false
+function __fake_compiler_job end
+
 ###
 # Extras
 # - LoopInfo

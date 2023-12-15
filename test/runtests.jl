@@ -74,5 +74,9 @@ include("extensions/enzyme.jl")
 @static if VERSION >= v"1.7.0"
     @testset "Enzyme" begin
         enzyme_testsuite(CPU, Array)
+        # Requires CUDA
+        # if CUDA.functional() && CUDA.has_cuda_gpu()
+        #     enzyme_testsuite(CUDABackend, CuArray)
+        # end
     end
 end

@@ -38,20 +38,23 @@ function enzyme_testsuite(backend, ArrayT, supports_reverse=true)
             Enzyme.autodiff(Reverse, square_caller, Duplicated(A, dA), Const(backend()))
             @test all(dA .≈ (2:2:128))
 
+            # active arguments not support for GPU kernels
+            if backend == CPU
+                A .= (1:1:64)
+                dA .= 1
 
-            A .= (1:1:64)
-            dA .= 1
+                _, dB, _ = Enzyme.autodiff(Reverse, mul_caller, Duplicated(A, dA), Active(1.2), Const(backend()))[1]
 
-            _, dB, _ = Enzyme.autodiff(Reverse, mul_caller, Duplicated(A, dA), Active(1.2), Const(backend()))[1]
-
-            @test all(dA .≈ 1.2)
-            @test dB ≈ sum(1:1:64)
+                @test all(dA .≈ 1.2)
+                @test dB ≈ sum(1:1:64)
+            end
         end
 
         A .= (1:1:64)
         dA .= 1
 
         Enzyme.autodiff(Forward, square_caller, Duplicated(A, dA), Const(backend()))
+        KernelAbstractions.synchronize(backend())
         @test all(dA .≈ 2:2:128)
 
     end
