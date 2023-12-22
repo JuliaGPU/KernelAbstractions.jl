@@ -218,13 +218,39 @@ end
 
 @conditional_testset "return statement" skip_tests begin
     try
-        @eval @kernel function kernel_return()
-            return
+        @eval @kernel function kernel_return1()
+            return 1
         end
         @test false
     catch e
         @test e.error ==
-            ErrorException("Return statement not permitted in a kernel function kernel_return")
+            ErrorException("Return statement (except `return` or `return nothing`) not permitted in kernel function kernel_return1")
+    end
+    try
+        @eval @kernel function kernel_return2()
+            x = nothing
+            return x
+        end
+        @test false
+    catch e
+        @test e.error ==
+            ErrorException("Return statement (except `return` or `return nothing`) not permitted in kernel function kernel_return2")
+    end
+    try
+        @eval @kernel function kernel_return3()
+            return
+        end
+        @test true
+    catch e
+        @test false
+    end
+    try
+        @eval @kernel function kernel_return4()
+            return nothing
+        end
+        @test true
+    catch e
+        @test false
     end
 end
 

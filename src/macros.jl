@@ -1,9 +1,13 @@
 import MacroTools: splitdef, combinedef, isexpr, postwalk
 
-function find_return(stmt)
+# Check whether there are `return` statements that return something else but `nothing`
+function contains_return_something(stmt)
     result = false
     postwalk(stmt) do expr
-        result |= @capture(expr, return x_)
+        if @capture(expr, return x_)
+            # `nothing` indicates a stand-alone return statement, `:nothing` indicates a `return nothing`
+            result |= x !== nothing && x !== :nothing
+        end
         expr
     end
     result
@@ -14,7 +18,9 @@ function __kernel(expr, generate_cpu=true, force_inbounds=false)
     def = splitdef(expr)
     name = def[:name]
     args = def[:args]
-    find_return(expr) && error("Return statement not permitted in a kernel function $name")
+    if contains_return_something(expr)
+        error("Return statement (except `return` or `return nothing`) not permitted in kernel function $name")
+    end
 
     constargs = Array{Bool}(undef, length(args))
     for (i, arg) in enumerate(args)
