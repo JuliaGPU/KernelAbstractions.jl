@@ -252,6 +252,31 @@ end
     catch e
         @test false
     end
+    try
+        @eval @kernel function kernel_return5()
+            if something()
+                return something2()
+            end
+            something3()
+            return
+        end
+        @test false
+    catch e
+        @test e.error ==
+            ErrorException("Return statement (except `return` or `return nothing`) not permitted in kernel function kernel_return5")
+    end
+    try
+        @eval @kernel function kernel_return6()
+            if something()
+                return
+            end
+            something3()
+            return
+        end
+        @test true
+    catch e
+        @test false
+    end
 end
 
 @conditional_testset "fallback test: callable types" skip_tests begin
