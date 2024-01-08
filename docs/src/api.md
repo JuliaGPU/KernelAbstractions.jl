@@ -14,6 +14,7 @@
 @groupsize
 @ndrange
 synchronize
+allocate
 ```
 
 ## Host language
