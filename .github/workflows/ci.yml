@@ -2,7 +2,7 @@ name: CI-KA
 on:
   push:
     branches:
-      - master
+      - main
       - release-*
     tags: '*'
   pull_request:
