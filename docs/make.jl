@@ -12,7 +12,7 @@ function main()
         repo="https://github.com/JuliaGPU/KernelAbstractions.jl/blob/{commit}{path}#L{line}",
         sitename="KernelAbstractions.jl",
         format=Documenter.HTML(;
-            prettyurls=get(ENV, "CI", "false") == "true",
+            prettyurls=ci,
             canonical="https://juliagpu.github.io/KernelAbstractions.jl",
             assets=String[],
         ),
