@@ -21,6 +21,28 @@ kern_static(CPU(static=true), (1,))(A, ndrange=length(A))
 end
 @test_throws ErrorException("This kernel is unavailable for backend CPU") my_no_cpu_kernel(CPU())
 
+# testing multiple configurations at the same time
+@kernel cpu=false inbounds=false function my_no_cpu_kernel2(a)
+end
+@test_throws ErrorException("This kernel is unavailable for backend CPU") my_no_cpu_kernel2(CPU())
+
+if Base.JLOptions().check_bounds == 0 || Base.JLOptions().check_bounds == 1
+    # testing bounds errors
+    @kernel inbounds=false function my_bounded_kernel(a)
+        idx = @index(Global, Linear)
+        a[idx] = 0
+    end
+    @test_throws BoundsError(Int64[],(1,)) my_bounded_kernel(CPU())(Int[], ndrange=1)
+end
+
+if Base.JLOptions().check_bounds == 0 || Base.JLOptions().check_bounds == 2
+    @kernel inbounds=true function my_bounded_kernel(a)
+        idx = @index(Global, Linear)
+        a[idx] = 0
+    end
+    @test nothing == my_inbounds_kernel(CPU())(Int[], ndrange=1)
+end
+
 struct NewBackend <: KernelAbstractions.GPU end
 @testset "Default host implementation" begin
     backend = NewBackend()

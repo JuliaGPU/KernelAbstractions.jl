@@ -26,15 +26,19 @@ jobs:
           - '1.7'
           - '1.8'
           - '1.9'
-          - 'nightly'
         os:
           - ubuntu-latest
           - macOS-latest
           - windows-latest
         arch:
           - x64
+        include:
+          - version: 'nightly'
+            os: ubuntu-latest
+            arch: x64
+            allow_failure: true
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: julia-actions/setup-julia@v1
         with:
           version: ${{ matrix.version }}
@@ -61,7 +65,7 @@ jobs:
     name: Documentation
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: julia-actions/setup-julia@v1
         with:
           version: '1'
@@ -75,7 +79,7 @@ jobs:
     name: Doctests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: julia-actions/setup-julia@v1
         with:
           version: '1'

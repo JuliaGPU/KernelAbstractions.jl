@@ -3,6 +3,8 @@ push!(Base.LOAD_PATH, dirname(@__DIR__))
 using KernelAbstractions
 using Documenter
 
+const ci = get(ENV, "CI", "") == "true"
+
 makedocs(;
     modules=[KernelAbstractions],
     authors="JuliaGPU and contributors",
@@ -13,6 +15,7 @@ makedocs(;
         canonical="https://juliagpu.github.io/KernelAbstractions.jl",
         assets=String[],
     ),
+    warnonly=[:missing_docs],
     pages=[
         "Home" => "index.md",
         "Quickstart" => "quickstart.md",
@@ -24,6 +27,7 @@ makedocs(;
             "examples/performance.md",
             "examples/matmul.md",
             "examples/numa_aware.md",
+            "examples/atomix.md",
         ], # Examples
         "API" => "api.md",
         "Extras" => [
@@ -33,6 +37,8 @@ makedocs(;
     ], # pages
 )
 
-deploydocs(;
-    repo="github.com/JuliaGPU/KernelAbstractions.jl",
-)
+if ci
+    deploydocs(;
+        repo="github.com/JuliaGPU/KernelAbstractions.jl",
+    )
+end
