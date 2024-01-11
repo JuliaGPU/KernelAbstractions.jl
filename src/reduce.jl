@@ -7,30 +7,35 @@ export @groupreduce
 Reduce values across a block
 - `op`: the operator of the reduction
 - `val`: value that each thread contibutes to the values that need to be reduced
-- `netral`: value of the operator, so that `op(netural, neutral) = neutral``
-- `use_subgroups`: make use of the subgroupreduction of the groupreduction
+- `neutral`: value of the operator, so that `op(netural, neutral) = neutral``
+- `groupsize` (optional): specify the groupszie. If not specified @groupsize is used but this is generally slower.
 """
 macro groupreduce(op, val, neutral) 
+  quote
+      $__groupreduce($(esc(:__ctx__)),$(esc(op)), $(esc(val)), $(esc(neutral)), Val(prod(groupsize($(esc(:__ctx__))))))
+  end
+end
+
+macro groupreduce(op, val, neutral, groupsize) 
     quote
-        $__groupreduce($(esc(:__ctx__)),$(esc(op)), $(esc(val)), $(esc(neutral)), $(esc(typeof(val))))
+        $__groupreduce($(esc(:__ctx__)),$(esc(op)), $(esc(val)), $(esc(neutral)), $(esc(groupsize)))
     end
 end
 
-@inline function __groupreduce(__ctx__, op, val, neutral, ::Type{T}) where {T}
+@inline function __groupreduce(__ctx__, op, val::T, neutral, ::Val{GROUPSIZE}) where {T,GROUPSIZE}
     idx_in_group = @index(Local)
-    groupsize = @groupsize()[1]
     
-    localmem = @localmem(T, groupsize)
+    localmem = @localmem(T, GROUPSIZE)
 
     @inbounds localmem[idx_in_group] = val
 
     # perform the reduction
     d = 1
-    while d < groupsize
+    while d < GROUPSIZE
         @synchronize()
         index = 2 * d * (idx_in_group-1) + 1
-        @inbounds if index <= groupsize
-            other_val = if index + d <= groupsize
+        @inbounds if index <= GROUPSIZE
+            other_val = if index + d <= GROUPSIZE
                 localmem[index+d]
             else
                 neutral
