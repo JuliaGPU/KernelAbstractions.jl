@@ -1,7 +1,6 @@
 export @groupreduce
 
 """
-
     @groupreduce(op, val, neutral, use_subgroups)
 
 Reduce values across a block
@@ -22,7 +21,7 @@ macro groupreduce(op, val, neutral, groupsize)
     end
 end
 
-@inline function __groupreduce(__ctx__, op, val::T, neutral, ::Val{GROUPSIZE}) where {T,GROUPSIZE}
+@inline function __groupreduce(__ctx__, op, val::T, neutral, ::Val{GROUPSIZE}) where {T, GROUPSIZE}
     idx_in_group = @index(Local)
     
     localmem = @localmem(T, GROUPSIZE)
