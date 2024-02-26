@@ -137,7 +137,8 @@ function transform_cpu!(def, constargs, force_inbounds)
     push!(new_stmts, :(return nothing))
     def[:body] = Expr(:let,
         Expr(:block, let_constargs...),
-        Expr(:block, new_stmts...)
+        Expr(:block, new_stmts...),
+        :(return nothing)
     )
 end
 
@@ -231,6 +232,10 @@ function split(stmts,
                 push!(private, lhs)
                 continue
             end
+        elseif @capture(stmt, return x_)
+            # remove return statement from for loop
+            @assert x === nothing || x === :nothing
+            continue
         end
 
         push!(current, stmt)
