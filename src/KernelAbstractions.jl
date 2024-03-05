@@ -553,7 +553,7 @@ end
 
 include("nditeration.jl")
 using .NDIteration
-import .NDIteration: get
+import .NDIteration: get, getrange
 
 ###
 # Kernel closure struct
@@ -609,11 +609,13 @@ Partition a kernel for the given ndrange and workgroupsize.
         error(errmsg)
     end
 
+    offsets = nothing
+
     if static_ndrange <: StaticSize
         if ndrange !== nothing && ndrange != get(static_ndrange)
             error("Static NDRange ($static_ndrange) and launch NDRange ($ndrange) differ")
         end
-        ndrange = get(static_ndrange)
+        ndrange, offsets = getrange(static_ndrange)
     end
 
     if static_workgroupsize <: StaticSize
@@ -642,7 +644,7 @@ Partition a kernel for the given ndrange and workgroupsize.
         workgroupsize = CartesianIndices(workgroupsize)
     end
 
-    iterspace = NDRange{length(ndrange), static_blocks, static_workgroupsize}(blocks, workgroupsize)
+    iterspace = NDRange{length(ndrange), offsets, static_blocks, static_workgroupsize}(blocks, workgroupsize)
     return iterspace, dynamic
 end
 
