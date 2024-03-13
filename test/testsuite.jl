@@ -32,6 +32,7 @@ include("reflection.jl")
 include("examples.jl")
 include("convert.jl")
 include("specialfunctions.jl")
+include("reduce.jl")
 
 function testsuite(backend, backend_str, backend_mod, AT, DAT; skip_tests = Set{String}())
     @conditional_testset "Unittests" skip_tests begin
@@ -76,6 +77,10 @@ function testsuite(backend, backend_str, backend_mod, AT, DAT; skip_tests = Set{
 
     @conditional_testset "Convert" skip_tests begin
         convert_testsuite(backend, AT)
+    end
+
+    @conditional_testset "Reduce" skip_tests begin
+        reduce_testsuite(backend, AT)
     end
 
     @conditional_testset "Examples" skip_tests begin
