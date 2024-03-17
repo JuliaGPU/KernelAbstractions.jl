@@ -6,7 +6,11 @@ module EnzymeExt
         using ..EnzymeCore
         using ..EnzymeCore.EnzymeRules
     end
-    import KernelAbstractions: Kernel, StaticSize, launch_config, __groupsize, __groupindex, blocks, mkcontext, CompilerMetadata, CPU
+    import KernelAbstractions: Kernel, StaticSize, launch_config, __groupsize, __groupindex, blocks, mkcontext, CompilerMetadata, CPU, Backend
+
+    function EnzymeCore.compiler_job_from_backend(b::Backend, @nospecialize(F::Type), @nospecialize(TT::Type))
+        error("EnzymeCore.compiler_job_from_backend is not yet implemented for $(typeof(b)), please file an issue.")
+    end
 
     EnzymeRules.inactive(::Type{StaticSize}, x...) = nothing
 
