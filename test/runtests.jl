@@ -1,3 +1,4 @@
+using CUDA
 using KernelAbstractions
 using Test
 
@@ -74,5 +75,8 @@ include("extensions/enzyme.jl")
 @static if VERSION >= v"1.7.0"
     @testset "Enzyme" begin
         enzyme_testsuite(CPU, Array)
+        if CUDA.functional() && CUDA.has_cuda_gpu()
+            enzyme_testsuite(CUDABackend, CuArray)
+        end
     end
 end

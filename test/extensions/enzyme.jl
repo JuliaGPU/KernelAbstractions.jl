@@ -10,7 +10,6 @@ end
 function square_caller(A, backend)
     kernel = square!(backend)
     kernel(A, ndrange=size(A))
-    KernelAbstractions.synchronize(backend)
 end
 
 
@@ -22,7 +21,6 @@ end
 function mul_caller(A, B, backend)
     kernel = mul!(backend)
     kernel(A, B, ndrange=size(A))
-    KernelAbstractions.synchronize(backend)
 end
 
 function enzyme_testsuite(backend, ArrayT, supports_reverse=true)
@@ -36,6 +34,7 @@ function enzyme_testsuite(backend, ArrayT, supports_reverse=true)
             dA .= 1
 
             Enzyme.autodiff(Reverse, square_caller, Duplicated(A, dA), Const(backend()))
+            KernelAbstractions.synchronize(backend())
             @test all(dA .≈ (2:2:128))
 
 
@@ -43,6 +42,7 @@ function enzyme_testsuite(backend, ArrayT, supports_reverse=true)
             dA .= 1
 
             _, dB, _ = Enzyme.autodiff(Reverse, mul_caller, Duplicated(A, dA), Active(1.2), Const(backend()))[1]
+            KernelAbstractions.synchronize(backend())
 
             @test all(dA .≈ 1.2)
             @test dB ≈ sum(1:1:64)
@@ -52,6 +52,7 @@ function enzyme_testsuite(backend, ArrayT, supports_reverse=true)
         dA .= 1
 
         Enzyme.autodiff(Forward, square_caller, Duplicated(A, dA), Const(backend()))
+        KernelAbstractions.synchronize(backend())
         @test all(dA .≈ 2:2:128)
 
     end
