@@ -7,6 +7,7 @@ module EnzymeExt
         using ..EnzymeCore.EnzymeRules
     end
     using KernelAbstractions
+    const KA = KernelAbstractions
     import KernelAbstractions: Kernel, StaticSize, launch_config, allocate,
                                blocks, mkcontext, CompilerMetadata, CPU, GPU, argconvert,
                                supports_enzyme, __fake_compiler_job, backend,
@@ -152,6 +153,7 @@ module EnzymeExt
                 nothing
             end
         end
+        KernelAbstractions.synchronize(backend(kernel))
         return res
     end
 
@@ -256,6 +258,27 @@ module EnzymeExt
         f(ctx, args3...)
     end
     return inact
+end
+
+# Synchronize rules
+# TODO: Right now we do the synchronization as part of the kernel launch in the augmented primal
+#       and reverse rules. This is not ideal, as we would want to launch the kernel in the reverse
+#       synchronize rule and then synchronize where the launch was. However, with the current
+#       kernel semantics this ensures correctness for now.
+function EnzymeRules.augmented_primal(
+    config::Config,
+    func::Const{typeof(KA.synchronize)},
+    ::Type{Const{Nothing}},
+    backend::T
+) where T <: EnzymeCore.Annotation
+    println("rule")
+    return AugmentedReturn{Nothing, Nothing, Any}(
+        nothing, nothing, (nothing)
+    )
+end
+
+function EnzymeRules.reverse(config::Config, func::Const{typeof(KA.synchronize)}, ::Type{Const{Nothing}}, tape, backend)
+    return (nothing,)
 end
 
 end
