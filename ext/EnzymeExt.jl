@@ -282,7 +282,8 @@ function EnzymeRules.augmented_primal(
     backend::T
 ) where T <: EnzymeCore.Annotation
     KernelAbstractions.synchronize(backend.val)
-    # Was there a kernel launched before on this backend
+    # Was there a kernel launched before synchronization on this backend.
+    # Launch that one in reverse.
     tape = (nothing)
     if haskey(lastkernel, backend.val)
         tape = lastkernel[backend.val]
@@ -295,6 +296,11 @@ end
 
 function EnzymeRules.reverse(config::Config, func::Const{typeof(KA.synchronize)}, ::Type{Const{Nothing}}, tape, backend)
     # noop for now
+    # Was there a kernel launch before the synchronize in the forward pass?
+    if tape !== nothing
+
+    (substape, arg_refs, tape_type) = tape
+
     return (nothing,)
 end
 
