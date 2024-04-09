@@ -12,7 +12,8 @@ module EnzymeExt
                                blocks, mkcontext, CompilerMetadata, CPU, GPU, argconvert,
                                supports_enzyme, __fake_compiler_job, backend,
                                __index_Group_Cartesian, __index_Global_Linear
-
+    # Last launched kernel per backend for synchronization
+    const lastkernel = Dict()
     EnzymeRules.inactive(::Type{StaticSize}, x...) = nothing
 
     function fwd(ctx, f, args...)
@@ -43,9 +44,19 @@ module EnzymeExt
         )
     end
 
-    function _augmented_return(::Kernel{<:GPU}, subtape, arg_refs, tape_type)
+    function _augmented_return(kernel::Kernel{<:GPU}, subtape, arg_refs, tape_type)
+        # Was there a kernel launch before on this backend?
+        # Put this on the tape for the reverse (implicit sync rule)
+        # Nothing to put on the tape if no kernel was launched before.
+        # Only needs an explicit sync in reverse.
+        tape = (nothing)
+        if haskey(lastkernel, backend(kernel))
+            tape = lastkernel[backend(kernel)]
+            pop!(lastkernel, backend(kernel))
+            kernelsyncs[backend(kernel)] = (subtape, arg_refs, tape_type)
+        end
         return AugmentedReturn{Nothing, Nothing, Any}(
-            nothing, nothing, (subtape, arg_refs, tape_type)
+            nothing, nothing, tape
         )
     end
 
@@ -271,8 +282,14 @@ function EnzymeRules.augmented_primal(
     backend::T
 ) where T <: EnzymeCore.Annotation
     KernelAbstractions.synchronize(backend.val)
+    # Was there a kernel launched before on this backend
+    tape = (nothing)
+    if haskey(lastkernel, backend.val)
+        tape = lastkernel[backend.val]
+        pop!(lastkernel, backend.val)
+    end
     return AugmentedReturn{Nothing, Nothing, Any}(
-        nothing, nothing, (nothing)
+        nothing, nothing, tape
     )
 end
 
