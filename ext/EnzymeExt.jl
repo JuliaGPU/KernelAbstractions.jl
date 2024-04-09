@@ -234,7 +234,6 @@ module EnzymeExt
             kernel, ModifiedBetween, FT, ctxTy, ndrange, iterspace, args2...
         )
         aug_kernel(f, ModifiedBetween, subtape, Val(TapeType), args2...; ndrange, workgroupsize)
-        KernelAbstractions.synchronize(backend(kernel))
 
         # TODO the fact that ctxTy is type unstable means this is all type unstable.
         # Since custom rules require a fixed return type, explicitly cast to Any, rather
@@ -271,13 +270,14 @@ function EnzymeRules.augmented_primal(
     ::Type{Const{Nothing}},
     backend::T
 ) where T <: EnzymeCore.Annotation
-    println("rule")
+    KernelAbstractions.synchronize(backend.val)
     return AugmentedReturn{Nothing, Nothing, Any}(
         nothing, nothing, (nothing)
     )
 end
 
 function EnzymeRules.reverse(config::Config, func::Const{typeof(KA.synchronize)}, ::Type{Const{Nothing}}, tape, backend)
+    # noop for now
     return (nothing,)
 end
 
