@@ -22,7 +22,7 @@ function matmul!(output, a, b)
     end
     backend = KernelAbstractions.get_backend(a)
     kernel! = matmul_kernel!(backend)
-    kernel!(output, a, b, ndrange=size(c)) 
+    kernel!(output, a, b, ndrange=size(output)) 
 end
 
 a = rand!(allocate(backend, Float32, 256, 123))
