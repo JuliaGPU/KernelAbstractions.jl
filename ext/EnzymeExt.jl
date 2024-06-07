@@ -14,6 +14,8 @@ module EnzymeExt
 
     EnzymeRules.inactive(::Type{StaticSize}, x...) = nothing
 
+    # https://github.com/EnzymeAD/Enzyme.jl/issues/1516
+    # On the CPU `autodiff_deferred` can deadlock.
     function fwd(ctx, f, args...)
         EnzymeCore.autodiff_deferred(Forward, Const(f), Const{Nothing}, Const(ctx), args...)
         return nothing
@@ -21,14 +23,32 @@ module EnzymeExt
 
     function aug_fwd(ctx, f::FT, ::Val{ModifiedBetween}, subtape, args...) where {ModifiedBetween, FT}
         TapeType = EnzymeCore.tape_type(ReverseSplitModified(ReverseSplitWithPrimal, Val(ModifiedBetween)), Const{Core.Typeof(f)}, Const{Nothing}, Const{Core.Typeof(ctx)}, map(Core.Typeof, args)...)
-        forward, reverse = EnzymeCore.autodiff_deferred_thunk(ReverseSplitModified(ReverseSplitWithPrimal, Val(ModifiedBetween)), TapeType, Const{Core.Typeof(f)}, Const{Nothing}, Const{Core.Typeof(ctx)}, map(Core.Typeof, args)...)
+        forward, _ = EnzymeCore.autodiff_deferred_thunk(ReverseSplitModified(ReverseSplitWithPrimal, Val(ModifiedBetween)), TapeType, Const{Core.Typeof(f)}, Const{Nothing}, Const{Core.Typeof(ctx)}, map(Core.Typeof, args)...)
         subtape[__groupindex(ctx)] = forward(Const(f), Const(ctx), args...)[1]
         return nothing
     end
 
     function rev(ctx, f::FT, ::Val{ModifiedBetween}, subtape, args...) where {ModifiedBetween, FT}
         TapeType = EnzymeCore.tape_type(ReverseSplitModified(ReverseSplitWithPrimal, Val(ModifiedBetween)), Const{Core.Typeof(f)}, Const{Nothing}, Const{Core.Typeof(ctx)}, map(Core.Typeof, args)...)
-        forward, reverse = EnzymeCore.autodiff_deferred_thunk(ReverseSplitModified(ReverseSplitWithPrimal, Val(ModifiedBetween)), TapeType, Const{Core.Typeof(f)}, Const{Nothing}, Const{Core.Typeof(ctx)}, map(Core.Typeof, args)...)
+        _, reverse = EnzymeCore.autodiff_deferred_thunk(ReverseSplitModified(ReverseSplitWithPrimal, Val(ModifiedBetween)), TapeType, Const{Core.Typeof(f)}, Const{Nothing}, Const{Core.Typeof(ctx)}, map(Core.Typeof, args)...)
+        tp = subtape[__groupindex(ctx)]
+        reverse(Const(f), Const(ctx), args..., tp)
+        return nothing
+    end
+
+    function fwd_cpu(ctx, f, args...)
+        EnzymeCore.autodiff(Forward, Const(f), Const{Nothing}, Const(ctx), args...)
+        return nothing
+    end
+
+    function aug_fwd_cpu(ctx, f::FT, ::Val{ModifiedBetween}, subtape, args...) where {ModifiedBetween, FT}
+        forward, _ = EnzymeCore.autodiff_thunk(ReverseSplitModified(ReverseSplitWithPrimal, Val(ModifiedBetween)), Const{Core.Typeof(f)}, Const{Nothing}, Const{Core.Typeof(ctx)}, map(Core.Typeof, args)...)
+        subtape[__groupindex(ctx)] = forward(Const(f), Const(ctx), args...)[1]
+        return nothing
+    end
+
+    function rev_cpu(ctx, f::FT, ::Val{ModifiedBetween}, subtape, args...) where {ModifiedBetween, FT}
+        _, reverse = EnzymeCore.autodiff_thunk(ReverseSplitModified(ReverseSplitWithPrimal, Val(ModifiedBetween)), Const{Core.Typeof(f)}, Const{Nothing}, Const{Core.Typeof(ctx)}, map(Core.Typeof, args)...)
         tp = subtape[__groupindex(ctx)]
         reverse(Const(f), Const(ctx), args..., tp)
         return nothing
@@ -41,6 +61,15 @@ module EnzymeExt
 
         fwd_kernel(f, args...; ndrange, workgroupsize)
     end
+
+    function EnzymeRules.forward(func::Const{<:Kernel{CPU}}, ::Type{Const{Nothing}}, args...; ndrange=nothing, workgroupsize=nothing)
+        kernel = func.val
+        f = kernel.f
+        fwd_kernel = similar(kernel, fwd_cpu)
+
+        fwd_kernel(f, args...; ndrange, workgroupsize)
+    end
+
 
     @inline function make_active_byref(f::F, ::Val{ActiveTys}) where {F, ActiveTys}
         if !any(ActiveTys)
@@ -103,7 +132,7 @@ module EnzymeExt
 
         subtape = Array{TapeType}(undef, size(blocks(iterspace)))
 
-        aug_kernel = similar(kernel, aug_fwd)
+        aug_kernel = similar(kernel, aug_fwd_cpu)
 
         aug_kernel(f, ModifiedBetween, subtape, args2...; ndrange, workgroupsize)
 
@@ -115,7 +144,7 @@ module EnzymeExt
         return res
     end
 
-    function EnzymeRules.reverse(config::Config, func::Const{<:Kernel}, ::Type{<:EnzymeCore.Annotation}, tape, args::Vararg{Any, N}; ndrange=nothing, workgroupsize=nothing) where N
+    function EnzymeRules.reverse(config::Config, func::Const{<:Kernel{CPU}}, ::Type{<:EnzymeCore.Annotation}, tape, args::Vararg{Any, N}; ndrange=nothing, workgroupsize=nothing) where N
         subtape, arg_refs = tape
 
         args2 = ntuple(Val(N)) do i
@@ -138,7 +167,7 @@ module EnzymeExt
 
         ModifiedBetween = Val((overwritten(config)[1], false, overwritten(config)[2:end]...))
 
-        rev_kernel = similar(func.val, rev)
+        rev_kernel = similar(func.val, rev_cpu)
         rev_kernel(f, ModifiedBetween, subtape, args2...; ndrange, workgroupsize)
         return ntuple(Val(N)) do i
             Base.@_inline_meta
