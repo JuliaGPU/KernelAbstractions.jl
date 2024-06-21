@@ -70,25 +70,6 @@ module EnzymeExt
         fwd_kernel(f, args...; ndrange, workgroupsize)
     end
 
-
-    @inline function make_active_byref(f::F, ::Val{ActiveTys}) where {F, ActiveTys}
-        if !any(ActiveTys)
-            return f
-        end
-        function inact(ctx, args2::Vararg{Any, N}) where N
-            args3 = ntuple(Val(N)) do i
-                Base.@_inline_meta
-                if ActiveTys[i]
-                    args2[i][]
-                else
-                    args2[i]
-                end
-            end
-            f(ctx, args3...)
-        end
-        return inact
-    end
-
     function EnzymeRules.augmented_primal(config::Config, func::Const{<:Kernel{CPU}}, ::Type{Const{Nothing}}, args::Vararg{Any, N}; ndrange=nothing, workgroupsize=nothing) where N
         kernel = func.val
         f = kernel.f
@@ -102,11 +83,6 @@ module EnzymeExt
         # TODO autodiff_deferred on the func.val
         ModifiedBetween = Val((overwritten(config)[1], false, overwritten(config)[2:end]...))
 
-        tup = Val(ntuple(Val(N)) do i
-            Base.@_inline_meta
-            args[i] isa Active
-        end)
-        f = make_active_byref(f, tup)
         FT = Const{Core.Typeof(f)}
 
         arg_refs = ntuple(Val(N)) do i
@@ -120,7 +96,7 @@ module EnzymeExt
         args2 = ntuple(Val(N)) do i
             Base.@_inline_meta
             if args[i] isa Active
-                Duplicated(Ref(args[i].val), arg_refs[i])
+                EnzymeCore.MixedDuplicated(args[i].val, arg_refs[i])
             else
                 args[i]
             end
@@ -150,7 +126,7 @@ module EnzymeExt
         args2 = ntuple(Val(N)) do i
             Base.@_inline_meta
             if args[i] isa Active
-                Duplicated(Ref(args[i].val), arg_refs[i])
+                EnzymeCore.MixedDuplicated(args[i].val, arg_refs[i])
             else
                 args[i]
             end
@@ -158,12 +134,6 @@ module EnzymeExt
 
         kernel = func.val
         f = kernel.f
-
-        tup = Val(ntuple(Val(N)) do i
-            Base.@_inline_meta
-            args[i] isa Active
-        end)
-        f = make_active_byref(f, tup)
 
         ModifiedBetween = Val((overwritten(config)[1], false, overwritten(config)[2:end]...))
 
