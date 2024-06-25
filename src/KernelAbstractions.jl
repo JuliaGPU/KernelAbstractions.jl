@@ -155,9 +155,9 @@ function unsafe_free! end
 # - @groupsize
 # - @ndrange
 ###
-
 function groupsize end
 function ndrange end
+
 
 """
     @groupsize()
@@ -676,6 +676,7 @@ function __synchronize()
     error("@synchronize used outside kernel or not captured")
 end
 
+
 @generated function __print(items...)
     str = ""
     args = []
@@ -719,6 +720,7 @@ end
     @inbounds A[I] = B[I]
 end
 
+
 # CPU backend
 
 include("cpu.jl")
@@ -744,5 +746,8 @@ end
         @require EnzymeCore = "f151be2c-9106-41f4-ab19-57ee4f262869" include("../ext/EnzymeExt.jl")
     end
 end
+
+# groupreduce
+include("reduce.jl")
 
 end #module
