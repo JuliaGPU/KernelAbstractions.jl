@@ -34,6 +34,8 @@ function copyto!(backend::CPU, A, B)
     end
 end
 
+functional(::CPU) = true
+
 function (obj::Kernel{CPU})(args...; ndrange=nothing, workgroupsize=nothing, )
     ndrange, workgroupsize, iterspace, dynamic = launch_config(obj, ndrange, workgroupsize)
 

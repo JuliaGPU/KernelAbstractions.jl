@@ -278,4 +278,8 @@ end
     end
 end
 
+@testset "functional" begin
+    @test KernelAbstractions.functional(Backend()) isa Union{Missing, Bool}
+end
+
 end
