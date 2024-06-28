@@ -66,6 +66,8 @@ struct NewBackend <: KernelAbstractions.GPU end
 
     @test_throws ErrorException KernelAbstractions.priority!(backend, :middle)
 
+    @test KernelAbstractions.functional(backend) === missing
+
     kernel = my_no_cpu_kernel(backend)
     @test_throws MethodError kernel()
 end
