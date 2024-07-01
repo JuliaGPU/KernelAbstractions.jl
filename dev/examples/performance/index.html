@@ -69,7 +69,7 @@ end
 
 @kernel function simple_transpose_kernel!(output, @Const(input))
     I, J = @index(Global, NTuple)
-    @inbounds output[I, J] = input[I, J]
+    @inbounds output[J, I] = input[I, J]
 end
 
 # Local memory variants
@@ -189,8 +189,10 @@ for block_dims in ((TILE_DIM, TILE_DIM), (TILE_DIM*TILE_DIM, 1), (1, TILE_DIM*TI
             output = similar(input)
 
             # compile kernel
-            kernel(input, output, ndrange=size(output))
+            kernel(output, input, ndrange=size(output))
             for rep in 1:nreps
+                kernel(output, input, ndrange=size(output))
+            end
             KernelAbstractions.synchronize(backend)
         end
     end
@@ -207,9 +209,9 @@ for (name, kernel) in (
             output = similar(input)
 
             # compile kernel
-            kernel(input, output, Val(Int(bank)), ndrange=size(output))
+            kernel(output, input, Val(Int(bank)), ndrange=size(output))
             for rep in 1:nreps
-                kernel(input, output, Val(Int(bank)), ndrange=size(output))
+                kernel(output, input, Val(Int(bank)), ndrange=size(output))
             end
             KernelAbstractions.synchronize(backend)
         end
@@ -233,12 +235,12 @@ for (name, kernel) in (
             ndrange = (N, div(N, block_factor))
 
             # compile kernel
-            kernel(input, output, Val(Int(bank)), ndrange=ndrange)
+            kernel(output, input, Val(Int(bank)), ndrange=ndrange)
             for rep in 1:nreps
-                kernel(input, output, Val(Int(bank)), ndrange=ndrange)
+                kernel(output, input, Val(Int(bank)), ndrange=ndrange)
             end
             KernelAbstractions.synchronize(backend)
         end
     end
 end
-</code></pre></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../naive_transpose/">« Naive Transpose</a><a class="docs-footer-nextpage" href="../matmul/">Matmul »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.5.0 on <span class="colophon-date" title="Friday 28 June 2024 14:15">Friday 28 June 2024</span>. Using Julia version 1.10.4.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+</code></pre></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../naive_transpose/">« Naive Transpose</a><a class="docs-footer-nextpage" href="../matmul/">Matmul »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.5.0 on <span class="colophon-date" title="Monday 1 July 2024 00:48">Monday 1 July 2024</span>. Using Julia version 1.10.4.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
