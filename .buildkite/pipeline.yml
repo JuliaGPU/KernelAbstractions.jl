@@ -50,7 +50,7 @@ steps:
       julia -e 'println("+++ :julia: Running tests")
                 using CUDA
                 include("test/extensions/enzyme.jl")
-                enzyme_testsuite(CUDABackend, CuArray, false)'
+                enzyme_testsuite(CUDABackend, CuArray, true)'
     agents:
       queue: "juliagpu"
       cuda: "*"

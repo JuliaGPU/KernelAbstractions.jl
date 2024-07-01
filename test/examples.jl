@@ -20,6 +20,7 @@ function examples_testsuite(backend_str)
 
     @testset "$(basename(example))" for example in examples
         @eval module $(gensym())
+            backend_str = $backend_str
             include($example)
         end
         @test true
