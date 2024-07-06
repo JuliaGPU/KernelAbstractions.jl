@@ -193,4 +193,6 @@ end
 end
 
 # Argument conversion
-KernelAbstractions.argconvert(k::Kernel{CPU}, arg) = arg
+argconvert(k::Kernel{CPU}, arg) = arg
+
+supports_enzyme(::CPU) = true
