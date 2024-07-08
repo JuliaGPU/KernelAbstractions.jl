@@ -8,6 +8,7 @@ steps:
           - "1.8"
           - "1.9"
           - "1.10"
+          - "1.11-nightly"
     plugins:
       - JuliaCI/julia#v1:
           version: "{{matrix.version}}"
@@ -36,6 +37,7 @@ steps:
           - "1.8"
           - "1.9"
           - "1.10"
+          - "1.11-nightly"
     plugins:
       - JuliaCI/julia#v1:
           version: "{{matrix.version}}"
@@ -65,6 +67,7 @@ steps:
           - "1.8"
           - "1.9"
           - "1.10"
+          - "1.11-nightly"
     plugins:
       - JuliaCI/julia#v1:
           version: "{{matrix.version}}"
@@ -94,6 +97,7 @@ steps:
           - "1.8"
           - "1.9"
           - "1.10"
+          - "1.11-nightly"
     plugins:
       - JuliaCI/julia#v1:
           version: "{{matrix.version}}"
@@ -149,6 +153,7 @@ steps:
       setup:
         version:
           - "1.10"
+          - "1.11-nightly"
     plugins:
       - JuliaCI/julia#v1:
           version: "{{matrix.version}}"
