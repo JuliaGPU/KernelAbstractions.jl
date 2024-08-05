@@ -282,4 +282,14 @@ end
     @test KernelAbstractions.functional(Backend()) isa Union{Missing, Bool}
 end
 
+@testset "CPU default workgroupsize" begin
+    @test KernelAbstractions.default_cpu_workgroupsize((64,)) == (64,)
+    @test KernelAbstractions.default_cpu_workgroupsize((1024,)) == (1024,)
+    @test KernelAbstractions.default_cpu_workgroupsize((2056,)) == (1024,)
+    @test KernelAbstractions.default_cpu_workgroupsize((64, 64,)) == (64,16)
+    @test KernelAbstractions.default_cpu_workgroupsize((64, 64, 64,4)) == (64,16,1,1)
+    @test KernelAbstractions.default_cpu_workgroupsize((64,15)) == (64,15)
+    @test KernelAbstractions.default_cpu_workgroupsize((5,7,13,17)) == (5,7,13,2)
+end
+
 end

@@ -46,6 +46,29 @@ function (obj::Kernel{CPU})(args...; ndrange=nothing, workgroupsize=nothing, )
     __run(obj, ndrange, iterspace, args, dynamic, obj.backend.static)
 end
 
+const CPU_GRAINSIZE = 1024 # Vectorization, 4x unrolling, minimal grain size
+function default_cpu_workgroupsize(ndrange)
+    # if the total kernel is small, don't launch multiple tasks
+    if prod(ndrange) <= CPU_GRAINSIZE
+        return ndrange
+    else
+        available = Ref(CPU_GRAINSIZE)
+        return ntuple(length(ndrange)) do i
+            dim = ndrange[i]
+            remaining = available[]
+            if remaining == 0
+                return 1
+            elseif remaining <= dim
+                available[] = 0
+                return remaining
+            else
+                available[] = remaining ÷ dim
+                return dim
+            end
+        end
+    end
+end
+
 @inline function launch_config(kernel::Kernel{CPU}, ndrange, workgroupsize)
     if ndrange isa Integer
         ndrange = (ndrange,)
@@ -55,7 +78,7 @@ end
     end
 
     if KernelAbstractions.workgroupsize(kernel) <: DynamicSize && workgroupsize === nothing
-        workgroupsize = (1024,) # Vectorization, 4x unrolling, minimal grain size
+        workgroupsize = default_cpu_workgroupsize(ndrange)
     end
     iterspace, dynamic = partition(kernel, ndrange, workgroupsize)
     # partition checked that the ndrange's agreed
