@@ -1,5 +1,8 @@
 import MacroTools: splitdef, combinedef, isexpr, postwalk
 
+@inline contiguousrange(range::NTuple{N, Int}, offset::NTuple{N, Int}) where N = 
+            Tuple(1+o:r+o for (r, o) in zip(range, offset))
+
 function find_return(stmt)
     result = false
     postwalk(stmt) do expr
@@ -53,6 +56,8 @@ function __kernel(expr, generate_cpu=true, force_inbounds=false)
             Core.@__doc__ $name(dev) = $name(dev, $DynamicSize(), $DynamicSize())
             $name(dev, size) = $name(dev, $StaticSize(size), $DynamicSize())
             $name(dev, size, range) = $name(dev, $StaticSize(size), $StaticSize(range))
+            $name(dev, size, range, ::Nothing) = $name(dev, size, range)
+            $name(dev, size, range, offset) =  $name(dev, $StaticSize(size), $StaticSize($contiguousrange(range, offset)))
             function $name(dev::Dev, sz::S, range::NDRange) where {Dev, S<:$_Size, NDRange<:$_Size}
                 if $isgpu(dev)
                     return $construct(dev, sz, range, $gpu_name)
