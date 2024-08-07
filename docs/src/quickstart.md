@@ -56,7 +56,7 @@ A = CuArray(ones(1024, 1024))
 ```
 
 ```julia
-using ROCArrays: ROCArray
+using AMDGPU: ROCArray
 A = ROCArray(ones(1024, 1024))
 ```
 
@@ -75,7 +75,7 @@ all(A .== 2.0)
 ## Synchronization
 !!! danger
     All kernel launches are asynchronous, use [`synchronize(backend)`](@ref)
-    to wait on a series of kernel launches. 
+    to wait on a series of kernel launches.
 
 The code around KA may heavily rely on
 [`GPUArrays`](https://github.com/JuliaGPU/GPUArrays.jl), for example, to

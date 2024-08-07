@@ -1,0 +1,16 @@
+# This CITATION.cff file was generated with cffinit.
+# Visit https://bit.ly/cffinit to generate yours today!
+
+cff-version: 1.2.0
+title: KernelAbstractions.jl
+message: 'If you use this software, please cite it as below.'
+type: software
+authors:
+  - family-names: Churavy
+    given-names: Valentin
+    orcid: 'https://orcid.org/0000-0002-9033-165X'
+identifiers:
+  - type: doi
+    value: 10.5281/zenodo.4021259
+repository-code: 'https://github.com/JuliaGPU/KernelAbstractions.jl'
+license: MIT

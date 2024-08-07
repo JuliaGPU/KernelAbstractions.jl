@@ -21,7 +21,7 @@ end
 
 @kernel function simple_transpose_kernel!(output, @Const(input))
     I, J = @index(Global, NTuple)
-    @inbounds output[I, J] = input[I, J]
+    @inbounds output[J, I] = input[I, J]
 end
 
 # Local memory variants
@@ -141,8 +141,10 @@ for block_dims in ((TILE_DIM, TILE_DIM), (TILE_DIM*TILE_DIM, 1), (1, TILE_DIM*TI
             output = similar(input)
 
             # compile kernel
-            kernel(input, output, ndrange=size(output))
+            kernel(output, input, ndrange=size(output))
             for rep in 1:nreps
+                kernel(output, input, ndrange=size(output))
+            end
             KernelAbstractions.synchronize(backend)
         end
     end
@@ -159,9 +161,9 @@ for (name, kernel) in (
             output = similar(input)
 
             # compile kernel
-            kernel(input, output, Val(Int(bank)), ndrange=size(output))
+            kernel(output, input, Val(Int(bank)), ndrange=size(output))
             for rep in 1:nreps
-                kernel(input, output, Val(Int(bank)), ndrange=size(output))
+                kernel(output, input, Val(Int(bank)), ndrange=size(output))
             end
             KernelAbstractions.synchronize(backend)
         end
@@ -185,9 +187,9 @@ for (name, kernel) in (
             ndrange = (N, div(N, block_factor))
 
             # compile kernel
-            kernel(input, output, Val(Int(bank)), ndrange=ndrange)
+            kernel(output, input, Val(Int(bank)), ndrange=ndrange)
             for rep in 1:nreps
-                kernel(input, output, Val(Int(bank)), ndrange=ndrange)
+                kernel(output, input, Val(Int(bank)), ndrange=ndrange)
             end
             KernelAbstractions.synchronize(backend)
         end

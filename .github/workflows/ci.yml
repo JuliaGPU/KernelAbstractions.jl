@@ -2,7 +2,7 @@ name: CI-KA
 on:
   push:
     branches:
-      - master
+      - main
       - release-*
     tags: '*'
   pull_request:
@@ -26,6 +26,8 @@ jobs:
           - '1.7'
           - '1.8'
           - '1.9'
+          - '1.10'
+          - '~1.11.0-0'
         os:
           - ubuntu-latest
           - macOS-latest
@@ -39,11 +41,12 @@ jobs:
             allow_failure: true
     steps:
       - uses: actions/checkout@v4
-      - uses: julia-actions/setup-julia@v1
+      - uses: julia-actions/setup-julia@v2
         with:
           version: ${{ matrix.version }}
           arch: ${{ matrix.arch }}
-      - uses: actions/cache@v3
+          show-versioninfo: true
+      - uses: actions/cache@v4
         env:
           cache-name: cache-artifacts
         with:

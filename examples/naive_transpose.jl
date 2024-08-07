@@ -3,7 +3,7 @@ include(joinpath(dirname(pathof(KernelAbstractions)), "../examples/utils.jl")) #
 
 @kernel function naive_transpose_kernel!(a, b)
     i, j = @index(Global, NTuple)
-    @inbounds b[i, j] = a[j, i]
+    @inbounds a[i, j] = b[j, i]
 end
 
 # create wrapper function to check inputs
@@ -24,8 +24,8 @@ end
 res = 1024
 
 # creating initial arrays
-a = rand!(allocate(backend, Float32, res, res))
-b = KernelAbstractions.zeros(backend, Float32, res, res)
+b = rand!(allocate(backend, Float32, res, res))
+a = KernelAbstractions.zeros(backend, Float32, res, res)
 
 naive_transpose!(a,b)
 KernelAbstractions.synchronize(backend)

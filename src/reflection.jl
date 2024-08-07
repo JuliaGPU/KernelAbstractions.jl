@@ -1,9 +1,6 @@
 import InteractiveUtils
 export @ka_code_typed, @ka_code_llvm
 
-argconvert(k::Kernel{T}, arg) where T =
-    error("Don't know how to convert arguments for Kernel{$T}")
-
 using UUIDs
 const Cthulhu = Base.PkgId(UUID("f68482b8-f384-11e8-15f7-abe071a5a75f"), "Cthulhu")
 

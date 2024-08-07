@@ -551,6 +551,22 @@ function priority!(::Backend, prio::Symbol)
     return nothing
 end
 
+"""
+    functional(::Backend)
+
+Queries if the provided backend is functional. This may mean different
+things for different backends, but generally should mean that the
+necessary drivers and a compute device are available.
+
+This function should return a `Bool` or `missing` if not implemented.
+
+!!! compat "KernelAbstractions v0.9.22"
+    This function was added in KernelAbstractions v0.9.22
+"""
+function functional(::Backend)
+    return missing
+end
+
 include("nditeration.jl")
 using .NDIteration
 import .NDIteration: get
@@ -649,6 +665,18 @@ end
 function construct(backend::Backend, ::S, ::NDRange, xpu_name::XPUName) where {Backend<:Union{CPU,GPU}, S<:_Size, NDRange<:_Size, XPUName}
     return Kernel{Backend, S, NDRange, XPUName}(backend, xpu_name)
 end
+       
+"""
+    argconvert(::Kernel, arg)
+
+Convert arguments to the device side representation.
+"""
+argconvert(k::Kernel{T}, arg) where T =
+    error("Don't know how to convert arguments for Kernel{$T}")
+
+# Enzyme support
+supports_enzyme(::Backend) = false
+function __fake_compiler_job end
 
 ###
 # Extras

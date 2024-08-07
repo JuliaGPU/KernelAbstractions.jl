@@ -34,6 +34,8 @@ function copyto!(backend::CPU, A, B)
     end
 end
 
+functional(::CPU) = true
+
 function (obj::Kernel{CPU})(args...; ndrange=nothing, workgroupsize=nothing, )
     ndrange, workgroupsize, iterspace, dynamic = launch_config(obj, ndrange, workgroupsize)
 
@@ -191,4 +193,6 @@ end
 end
 
 # Argument conversion
-KernelAbstractions.argconvert(k::Kernel{CPU}, arg) = arg
+argconvert(k::Kernel{CPU}, arg) = arg
+
+supports_enzyme(::CPU) = true
