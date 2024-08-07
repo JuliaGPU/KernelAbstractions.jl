@@ -238,6 +238,8 @@ function split(stmts,
     return new_stmts
 end
 
+import .Extras: LoopInfo
+
 function emit(loop)
     idx = gensym(:I)
     for stmt in loop.indicies
@@ -285,6 +287,7 @@ function emit(loop)
                 $__validindex(__ctx__, $idx) || continue
                 $(loop.indicies...)
                 $(unblock(body))
+                $(Expr(:loopinfo, LoopInfo.MD.simd(), LoopInfo.MD.ivdep()))
             end
         end
         push!(stmts, loopexpr)

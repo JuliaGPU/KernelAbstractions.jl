@@ -665,6 +665,27 @@ end
 function construct(backend::Backend, ::S, ::NDRange, xpu_name::XPUName) where {Backend<:Union{CPU,GPU}, S<:_Size, NDRange<:_Size, XPUName}
     return Kernel{Backend, S, NDRange, XPUName}(backend, xpu_name)
 end
+       
+"""
+    argconvert(::Kernel, arg)
+
+Convert arguments to the device side representation.
+"""
+argconvert(k::Kernel{T}, arg) where T =
+    error("Don't know how to convert arguments for Kernel{$T}")
+
+# Enzyme support
+supports_enzyme(::Backend) = false
+function __fake_compiler_job end
+
+###
+# Extras
+# - LoopInfo
+###
+
+include("extras/extras.jl")
+
+include("reflection.jl")
 
 ###
 # Compiler
@@ -713,27 +734,6 @@ end
 # Utils
 __size(args::Tuple) = Tuple{args...}
 __size(i::Int) = Tuple{i}
-
-"""
-    argconvert(::Kernel, arg)
-
-Convert arguments to the device side representation.
-"""
-argconvert(k::Kernel{T}, arg) where T =
-    error("Don't know how to convert arguments for Kernel{$T}")
-
-# Enzyme support
-supports_enzyme(::Backend) = false
-function __fake_compiler_job end
-
-###
-# Extras
-# - LoopInfo
-###
-
-include("extras/extras.jl")
-
-include("reflection.jl")
 
 # Initialized
 

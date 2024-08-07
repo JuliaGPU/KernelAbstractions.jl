@@ -17,6 +17,8 @@ module MD
     unroll_disable() = (Symbol("llvm.loop.unroll.disable"), 1)
     unroll_enable() = (Symbol("llvm.loop.unroll.enable"), 1)
     unroll_full() = (Symbol("llvm.loop.unroll.full"), 1)
+    simd() = Symbol("julia.simdloop")
+    ivdep() = Symbol("julia.ivdep")
 end
 
 function loopinfo(expr, nodes...)
