@@ -17,7 +17,7 @@ function naive_transpose!(a, b)
     @assert get_backend(b) == backend
     groupsize = KernelAbstractions.isgpu(backend) ? 256 : 1024
     kernel! = naive_transpose_kernel!(backend, groupsize)
-    kernel!(a, b, ndrange=size(a))
+    kernel!(a, b, ndrange = size(a))
 end
 
 # resolution of grid will be res*res
@@ -27,7 +27,6 @@ res = 1024
 b = rand!(allocate(backend, Float32, res, res))
 a = KernelAbstractions.zeros(backend, Float32, res, res)
 
-naive_transpose!(a,b)
+naive_transpose!(a, b)
 KernelAbstractions.synchronize(backend)
 @test a == transpose(b)
-

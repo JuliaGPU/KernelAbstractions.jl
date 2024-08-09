@@ -44,33 +44,33 @@ function compiler_testsuite(backend, ArrayT)
     @test KernelAbstractions.__index_Global_NTuple(ctx, CartesianIndex(1)) == (1,)
 
     A = ArrayT{Int}(undef, 1)
-    let (CI, rt) = @ka_code_typed literal_pow(backend())(A, ndrange=1)
+    let (CI, rt) = @ka_code_typed literal_pow(backend())(A, ndrange = 1)
         # test that there is no invoke of overdub
         @test !any(check_for_overdub, CI.code)
     end
 
     A = ArrayT{Float32}(undef, 1)
-    let (CI, rt) = @ka_code_typed square(backend())(A, A, ndrange=1)
+    let (CI, rt) = @ka_code_typed square(backend())(A, A, ndrange = 1)
         # test that there is no invoke of overdub
         @test !any(check_for_overdub, CI.code)
     end
 
     A = ArrayT{Float32}(undef, 1)
     B = ArrayT{Float32}(undef, 1)
-    let (CI, rt) = @ka_code_typed pow(backend())(A, B, ndrange=1)
+    let (CI, rt) = @ka_code_typed pow(backend())(A, B, ndrange = 1)
         # test that there is no invoke of overdub
         @test !any(check_for_overdub, CI.code)
     end
 
     A = ArrayT{Float32}(undef, 1)
     B = ArrayT{Int32}(undef, 1)
-    let (CI, rt) = @ka_code_typed pow(backend())(A, B, ndrange=1)
+    let (CI, rt) = @ka_code_typed pow(backend())(A, B, ndrange = 1)
         # test that there is no invoke of overdub
         @test !any(check_for_overdub, CI.code)
     end
 
     A = ArrayT{Int}(undef, 1)
-    let (CI, rt) = @ka_code_typed checked(backend())(A, 1, 2, ndrange=1)
+    let (CI, rt) = @ka_code_typed checked(backend())(A, 1, 2, ndrange = 1)
         # test that there is no invoke of overdub
         @test !any(check_for_overdub, CI.code)
     end

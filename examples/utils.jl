@@ -7,4 +7,3 @@ if Base.find_package("CUDA") !== nothing
 else
     const backend = CPU()
 end
-

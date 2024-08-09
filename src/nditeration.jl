@@ -12,13 +12,13 @@ struct NoDynamicCheck end
 abstract type _Size end
 struct DynamicSize <: _Size end
 struct StaticSize{S} <: _Size
-    function StaticSize{S}() where S
+    function StaticSize{S}() where {S}
         new{S::Tuple{Vararg{Int}}}()
     end
 end
 
-@pure StaticSize(s::Tuple{Vararg{Int}}) = StaticSize{s}() 
-@pure StaticSize(s::Int...) = StaticSize{s}() 
+@pure StaticSize(s::Tuple{Vararg{Int}}) = StaticSize{s}()
+@pure StaticSize(s::Int...) = StaticSize{s}()
 @pure StaticSize(s::Type{<:Tuple}) = StaticSize{tuple(s.parameters...)}()
 
 # Some @pure convenience functions for `StaticSize`
@@ -59,10 +59,10 @@ struct NDRange{N, StaticBlocks, StaticWorkitems, DynamicBlock, DynamicWorkitems}
     end
 end
 
-@inline workitems(range::NDRange{N, B, W}) where {N,B,W<:DynamicSize} = range.workitems::CartesianIndices{N}
-@inline workitems(range::NDRange{N, B, W}) where {N,B,W<:StaticSize} = CartesianIndices(get(W))::CartesianIndices{N}
-@inline blocks(range::NDRange{N, B}) where {N,B<:DynamicSize} = range.blocks::CartesianIndices{N}
-@inline blocks(range::NDRange{N, B}) where {N,B<:StaticSize} = CartesianIndices(get(B))::CartesianIndices{N}
+@inline workitems(range::NDRange{N, B, W}) where {N, B, W <: DynamicSize} = range.workitems::CartesianIndices{N}
+@inline workitems(range::NDRange{N, B, W}) where {N, B, W <: StaticSize} = CartesianIndices(get(W))::CartesianIndices{N}
+@inline blocks(range::NDRange{N, B}) where {N, B <: DynamicSize} = range.blocks::CartesianIndices{N}
+@inline blocks(range::NDRange{N, B}) where {N, B <: StaticSize} = CartesianIndices(get(B))::CartesianIndices{N}
 
 import Base.iterate
 @inline iterate(range::NDRange) = iterate(blocks(range))
@@ -70,12 +70,12 @@ import Base.iterate
 
 Base.length(range::NDRange) = length(blocks(range))
 
-@inline function expand(ndrange::NDRange{N}, groupidx::CartesianIndex{N}, idx::CartesianIndex{N}) where N
+@inline function expand(ndrange::NDRange{N}, groupidx::CartesianIndex{N}, idx::CartesianIndex{N}) where {N}
     nI = ntuple(Val(N)) do I
         Base.@_inline_meta
         stride = size(workitems(ndrange), I)
         gidx = groupidx.I[I]
-        (gidx-1)*stride + idx.I[I]
+        (gidx - 1) * stride + idx.I[I]
     end
     CartesianIndex(nI)
 end
@@ -84,11 +84,11 @@ Base.@propagate_inbounds function expand(ndrange::NDRange, groupidx::Integer, id
     expand(ndrange, blocks(ndrange)[groupidx], workitems(ndrange)[idx])
 end
 
-Base.@propagate_inbounds function expand(ndrange::NDRange{N}, groupidx::CartesianIndex{N}, idx::Integer) where N
+Base.@propagate_inbounds function expand(ndrange::NDRange{N}, groupidx::CartesianIndex{N}, idx::Integer) where {N}
     expand(ndrange, groupidx, workitems(ndrange)[idx])
 end
 
-Base.@propagate_inbounds function expand(ndrange::NDRange{N}, groupidx::Integer, idx::CartesianIndex{N}) where N
+Base.@propagate_inbounds function expand(ndrange::NDRange{N}, groupidx::Integer, idx::CartesianIndex{N}) where {N}
     expand(ndrange, blocks(ndrange)[groupidx], idx)
 end
 

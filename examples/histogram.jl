@@ -30,7 +30,7 @@ end
     # possible to get a value of 312, then we will have 2 separate shmem blocks,
     # one from 1->256, and another from 256->512
     @uniform max_element = 1
-    for min_element = 1:gs:N
+    for min_element in 1:gs:N
 
         # Setting shared_histogram to 0
         @inbounds shared_histogram[lid] = 0
@@ -38,20 +38,20 @@ end
 
         max_element = min_element + gs
         if max_element > N
-            max_element = N+1
+            max_element = N + 1
         end
 
         # Defining bin on shared memory and writing to it if possible
         bin = input[tid]
         if bin >= min_element && bin < max_element
-            bin -= min_element-1
+            bin -= min_element - 1
             @atomic shared_histogram[bin] += 1
         end
 
         @synchronize()
 
-        if ((lid+min_element-1) <= N)
-            @atomic histogram_output[lid+min_element-1] += shared_histogram[lid]
+        if ((lid + min_element - 1) <= N)
+            @atomic histogram_output[lid + min_element - 1] += shared_histogram[lid]
         end
 
     end
@@ -62,7 +62,7 @@ function histogram!(histogram_output, input)
     backend = get_backend(histogram_output)
     # Need static block size
     kernel! = histogram_kernel!(backend, (256,))
-    kernel!(histogram_output, input, ndrange=size(input))
+    kernel!(histogram_output, input, ndrange = size(input))
 end
 
 function move(backend, input)
@@ -75,9 +75,9 @@ end
     if Base.VERSION < v"1.7.0" && !KernelAbstractions.isgpu(backend)
         @test_skip false
     else
-        rand_input = [rand(1:128) for i = 1:1000]
-        linear_input = [i for i = 1:1024]
-        all_two = [2 for i = 1:512]
+        rand_input = [rand(1:128) for i in 1:1000]
+        linear_input = [i for i in 1:1024]
+        all_two = [2 for i in 1:512]
 
         histogram_rand_baseline = create_histogram(rand_input)
         histogram_linear_baseline = create_histogram(linear_input)

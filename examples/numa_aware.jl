@@ -18,8 +18,10 @@ end
 Estimate the memory bandwidth (GB/s) by performing a time measurement of a
 SAXPY kernel. Returns the memory bandwidth (GB/s) and the compute (GFLOP/s).
 """
-function measure_membw(backend = CPU(); verbose = true, N = 1024 * 500_000, dtype = Float32,
-                       init = :parallel)
+function measure_membw(
+        backend = CPU(); verbose = true, N = 1024 * 500_000, dtype = Float32,
+        init = :parallel,
+    )
     bytes = 3 * sizeof(dtype) * N # num bytes transferred in SAXPY
     flops = 2 * N # num flops in SAXY
 
@@ -37,10 +39,10 @@ function measure_membw(backend = CPU(); verbose = true, N = 1024 * 500_000, dtyp
         kernel = saxpy_kernel($backend, $workgroup_size, $(size(Y)))
         kernel($a, $X, $Y, ndrange = $(size(Y)))
         KernelAbstractions.synchronize($backend)
-    end evals=2 samples=10
+    end evals = 2 samples = 10
 
-    mem_rate = bytes * 1e-9 / t # GB/s
-    flop_rate = flops * 1e-9 / t # GFLOP/s
+    mem_rate = bytes * 1.0e-9 / t # GB/s
+    flop_rate = flops * 1.0e-9 / t # GFLOP/s
 
     if verbose
         println("\tMemory Bandwidth (GB/s): ", round(mem_rate; digits = 2))
@@ -51,7 +53,7 @@ end
 
 # Static should be much better (on a system with multiple NUMA domains)
 measure_membw(CPU());
-measure_membw(CPU(; static=true));
+measure_membw(CPU(; static = true));
 
 # The following has significantly worse performance (even on systems with a single memory domain)!
 # measure_membw(CPU(); init=:serial);

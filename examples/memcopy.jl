@@ -12,7 +12,7 @@ function mycopy!(A, B)
     @assert get_backend(B) == backend
 
     kernel = copy_kernel!(backend)
-    kernel(A, B, ndrange=length(A))
+    kernel(A, B, ndrange = length(A))
 end
 
 A = KernelAbstractions.zeros(backend, Float64, 128, 128)

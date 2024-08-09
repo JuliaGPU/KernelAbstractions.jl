@@ -29,10 +29,10 @@ import KernelAbstractions:
     synchronize
 
 function EnzymeCore.compiler_job_from_backend(
-    b::Backend,
-    @nospecialize(F::Type),
-    @nospecialize(TT::Type)
-)
+        b::Backend,
+        @nospecialize(F::Type),
+        @nospecialize(TT::Type),
+    )
     error(
         "EnzymeCore.compiler_job_from_backend is not yet implemented for $(typeof(b)), please file an issue.",
     )
@@ -54,12 +54,12 @@ function gpu_fwd(ctx, f, args...)
 end
 
 function EnzymeRules.forward(
-    func::Const{<:Kernel{CPU}},
-    ::Type{Const{Nothing}},
-    args...;
-    ndrange = nothing,
-    workgroupsize = nothing,
-)
+        func::Const{<:Kernel{CPU}},
+        ::Type{Const{Nothing}},
+        args...;
+        ndrange = nothing,
+        workgroupsize = nothing,
+    )
     kernel = func.val
     f = kernel.f
     fwd_kernel = similar(kernel, cpu_fwd)
@@ -68,12 +68,12 @@ function EnzymeRules.forward(
 end
 
 function EnzymeRules.forward(
-    func::Const{<:Kernel{<:GPU}},
-    ::Type{Const{Nothing}},
-    args...;
-    ndrange = nothing,
-    workgroupsize = nothing,
-)
+        func::Const{<:Kernel{<:GPU}},
+        ::Type{Const{Nothing}},
+        args...;
+        ndrange = nothing,
+        workgroupsize = nothing,
+    )
     kernel = func.val
     f = kernel.f
     fwd_kernel = similar(kernel, gpu_fwd)
@@ -87,23 +87,23 @@ _enzyme_mkcontext(kernel::Kernel{<:GPU}, ndrange, iterspace, dynamic) =
     mkcontext(kernel, ndrange, iterspace)
 
 _augmented_return(::Kernel{CPU}, subtape, arg_refs, tape_type) =
-    AugmentedReturn{Nothing,Nothing,Tuple{Array,typeof(arg_refs),typeof(tape_type)}}(
-        nothing,
-        nothing,
-        (subtape, arg_refs, tape_type),
-    )
+    AugmentedReturn{Nothing, Nothing, Tuple{Array, typeof(arg_refs), typeof(tape_type)}}(
+    nothing,
+    nothing,
+    (subtape, arg_refs, tape_type),
+)
 _augmented_return(::Kernel{<:GPU}, subtape, arg_refs, tape_type) =
-    AugmentedReturn{Nothing,Nothing,Any}(nothing, nothing, (subtape, arg_refs, tape_type))
+    AugmentedReturn{Nothing, Nothing, Any}(nothing, nothing, (subtape, arg_refs, tape_type))
 
 function _create_tape_kernel(
-    kernel::Kernel{CPU},
-    ModifiedBetween,
-    FT,
-    ctxTy,
-    ndrange,
-    iterspace,
-    args2...,
-)
+        kernel::Kernel{CPU},
+        ModifiedBetween,
+        FT,
+        ctxTy,
+        ndrange,
+        iterspace,
+        args2...,
+    )
     TapeType = EnzymeCore.tape_type(
         ReverseSplitModified(ReverseSplitWithPrimal, ModifiedBetween),
         FT,
@@ -117,14 +117,14 @@ function _create_tape_kernel(
 end
 
 function _create_tape_kernel(
-    kernel::Kernel{<:GPU},
-    ModifiedBetween,
-    FT,
-    ctxTy,
-    ndrange,
-    iterspace,
-    args2...,
-)
+        kernel::Kernel{<:GPU},
+        ModifiedBetween,
+        FT,
+        ctxTy,
+        ndrange,
+        iterspace,
+        args2...,
+    )
     # For peeking at the TapeType we need to first construct a correct compilation job
     # this requires the use of the device side representation of arguments.
     # So we convert the arguments here, this is a bit wasteful since the `aug_kernel` call
@@ -154,13 +154,13 @@ _create_rev_kernel(kernel::Kernel{CPU}) = similar(kernel, cpu_rev)
 _create_rev_kernel(kernel::Kernel{<:GPU}) = similar(kernel, gpu_rev)
 
 function cpu_aug_fwd(
-    ctx,
-    f::FT,
-    ::Val{ModifiedBetween},
-    subtape,
-    ::Val{TapeType},
-    args...,
-) where {ModifiedBetween,FT,TapeType}
+        ctx,
+        f::FT,
+        ::Val{ModifiedBetween},
+        subtape,
+        ::Val{TapeType},
+        args...,
+    ) where {ModifiedBetween, FT, TapeType}
     # A2 = Const{Nothing} -- since f->Nothing
     forward, _ = EnzymeCore.autodiff_thunk(
         ReverseSplitModified(ReverseSplitWithPrimal, Val(ModifiedBetween)),
@@ -178,13 +178,13 @@ function cpu_aug_fwd(
 end
 
 function cpu_rev(
-    ctx,
-    f::FT,
-    ::Val{ModifiedBetween},
-    subtape,
-    ::Val{TapeType},
-    args...,
-) where {ModifiedBetween,FT,TapeType}
+        ctx,
+        f::FT,
+        ::Val{ModifiedBetween},
+        subtape,
+        ::Val{TapeType},
+        args...,
+    ) where {ModifiedBetween, FT, TapeType}
     _, reverse = EnzymeCore.autodiff_thunk(
         ReverseSplitModified(ReverseSplitWithPrimal, Val(ModifiedBetween)),
         Const{Core.Typeof(f)},
@@ -200,13 +200,13 @@ end
 
 # GPU support
 function gpu_aug_fwd(
-    ctx,
-    f::FT,
-    ::Val{ModifiedBetween},
-    subtape,
-    ::Val{TapeType},
-    args...,
-) where {ModifiedBetween,FT,TapeType}
+        ctx,
+        f::FT,
+        ::Val{ModifiedBetween},
+        subtape,
+        ::Val{TapeType},
+        args...,
+    ) where {ModifiedBetween, FT, TapeType}
     # A2 = Const{Nothing} -- since f->Nothing
     forward, _ = EnzymeCore.autodiff_deferred_thunk(
         ReverseSplitModified(ReverseSplitWithPrimal, Val(ModifiedBetween)),
@@ -225,13 +225,13 @@ function gpu_aug_fwd(
 end
 
 function gpu_rev(
-    ctx,
-    f::FT,
-    ::Val{ModifiedBetween},
-    subtape,
-    ::Val{TapeType},
-    args...,
-) where {ModifiedBetween,FT,TapeType}
+        ctx,
+        f::FT,
+        ::Val{ModifiedBetween},
+        subtape,
+        ::Val{TapeType},
+        args...,
+    ) where {ModifiedBetween, FT, TapeType}
     # XXX: TapeType and A2 as args to autodiff_deferred_thunk
     _, reverse = EnzymeCore.autodiff_deferred_thunk(
         ReverseSplitModified(ReverseSplitWithPrimal, Val(ModifiedBetween)),
@@ -248,13 +248,13 @@ function gpu_rev(
 end
 
 function EnzymeRules.augmented_primal(
-    config::Config,
-    func::Const{<:Kernel},
-    ::Type{Const{Nothing}},
-    args::Vararg{Any,N};
-    ndrange = nothing,
-    workgroupsize = nothing,
-) where {N}
+        config::Config,
+        func::Const{<:Kernel},
+        ::Type{Const{Nothing}},
+        args::Vararg{Any, N};
+        ndrange = nothing,
+        workgroupsize = nothing,
+    ) where {N}
     kernel = func.val
     f = kernel.f
 
@@ -306,14 +306,14 @@ function EnzymeRules.augmented_primal(
 end
 
 function EnzymeRules.reverse(
-    config::Config,
-    func::Const{<:Kernel},
-    ::Type{<:EnzymeCore.Annotation},
-    tape,
-    args::Vararg{Any,N};
-    ndrange = nothing,
-    workgroupsize = nothing,
-) where {N}
+        config::Config,
+        func::Const{<:Kernel},
+        ::Type{<:EnzymeCore.Annotation},
+        tape,
+        args::Vararg{Any, N};
+        ndrange = nothing,
+        workgroupsize = nothing,
+    ) where {N}
     subtape, arg_refs, tape_type = tape
 
     args2 = ntuple(Val(N)) do i
@@ -359,22 +359,22 @@ end
 #       synchronize rule and then synchronize where the launch was. However, with the current
 #       kernel semantics this ensures correctness for now.
 function EnzymeRules.augmented_primal(
-    config::Config,
-    func::Const{typeof(synchronize)},
-    ::Type{Const{Nothing}},
-    backend::T,
-) where {T<:EnzymeCore.Annotation}
+        config::Config,
+        func::Const{typeof(synchronize)},
+        ::Type{Const{Nothing}},
+        backend::T,
+    ) where {T <: EnzymeCore.Annotation}
     synchronize(backend.val)
     return AugmentedReturn(nothing, nothing, nothing)
 end
 
 function EnzymeRules.reverse(
-    config::Config,
-    func::Const{typeof(synchronize)},
-    ::Type{Const{Nothing}},
-    tape,
-    backend,
-)
+        config::Config,
+        func::Const{typeof(synchronize)},
+        ::Type{Const{Nothing}},
+        tape,
+        backend,
+    )
     # noop for now
     return (nothing,)
 end

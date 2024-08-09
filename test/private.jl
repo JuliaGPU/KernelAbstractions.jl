@@ -11,7 +11,7 @@ end
     priv = @private eltype(A) (1,)
     I = @index(Global, Linear)
     @inbounds begin
-      B[I] = eltype(priv) === eltype(A)
+        B[I] = eltype(priv) === eltype(A)
     end
 end
 
@@ -28,7 +28,7 @@ end
 end
 
 # This is horrible don't write code like this
-@kernel function forloop(A, ::Val{N}) where N
+@kernel function forloop(A, ::Val{N}) where {N}
     I = @index(Global, Linear)
     i = @index(Local, Linear)
     priv = @private Int (N,)
@@ -50,20 +50,20 @@ end
 
     priv = @private eltype(A) (1,)
     @inbounds begin
-      priv[1] = zero(eltype(A))
-      for k in 1:size(A, ndims(A))
-        priv[1] += A[I..., k]
-      end
-      out[I...] = priv[1]
+        priv[1] = zero(eltype(A))
+        for k in 1:size(A, ndims(A))
+            priv[1] += A[I..., k]
+        end
+        out[I...] = priv[1]
     end
 end
 
 function private_testsuite(backend, ArrayT)
     @testset "kernels" begin
-        stmt_form(backend(), 16)(ndrange=16)
+        stmt_form(backend(), 16)(ndrange = 16)
         synchronize(backend())
         A = ArrayT{Int}(undef, 64)
-        private(backend(), 16)(A, ndrange=size(A))
+        private(backend(), 16)(A, ndrange = size(A))
         synchronize(backend())
         @test all(A[1:16] .== 16:-1:1)
         @test all(A[17:32] .== 16:-1:1)
@@ -72,28 +72,30 @@ function private_testsuite(backend, ArrayT)
 
         A = ArrayT{Int}(undef, 64, 64)
         A .= 1
-        forloop(backend())(A, Val(size(A, 2)), ndrange=size(A,1), workgroupsize=size(A,1))
+        forloop(backend())(A, Val(size(A, 2)), ndrange = size(A, 1), workgroupsize = size(A, 1))
         synchronize(backend())
         @test all(A[:, 1] .== 64)
         @test all(A[:, 2:end] .== 1)
 
         B = ArrayT{Bool}(undef, size(A)...)
-        typetest(backend(), 16)(A, B, ndrange=size(A))
+        typetest(backend(), 16)(A, B, ndrange = size(A))
         synchronize(backend())
         @test all(B)
 
-        A = ArrayT{Float32}(ones(64,3));
+        A = ArrayT{Float32}(ones(64, 3));
         out = ArrayT{Float32}(undef, 64)
-        reduce_private(backend(), 8)(out, A, ndrange=size(out))
+        reduce_private(backend(), 8)(out, A, ndrange = size(out))
         synchronize(backend())
-        @test all(out .== 3f0)
+        @test all(out .== 3.0f0)
     end
 
     if backend == CPU
         @testset "codegen" begin
             IR = sprint() do io
-                KernelAbstractions.ka_code_llvm(io, reduce_private(backend(), (8,)), Tuple{ArrayT{Float64,1}, ArrayT{Float64,2}},
-                                                optimize=true, ndrange=(64,))
+                KernelAbstractions.ka_code_llvm(
+                    io, reduce_private(backend(), (8,)), Tuple{ArrayT{Float64, 1}, ArrayT{Float64, 2}},
+                    optimize = true, ndrange = (64,),
+                )
             end
             @test !occursin("gcframe", IR)
         end

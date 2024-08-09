@@ -4,7 +4,7 @@ export @ka_code_typed, @ka_code_llvm
 using UUIDs
 const Cthulhu = Base.PkgId(UUID("f68482b8-f384-11e8-15f7-abe071a5a75f"), "Cthulhu")
 
-function ka_code_typed(kernel, argtypes; ndrange=nothing, workgroupsize=nothing, interactive=false, kwargs...)
+function ka_code_typed(kernel, argtypes; ndrange = nothing, workgroupsize = nothing, interactive = false, kwargs...)
     # get the iterspace and dynamic of a kernel
     ndrange, workgroupsize, iterspace, dynamic = KernelAbstractions.launch_config(kernel, ndrange, workgroupsize)
 
@@ -24,7 +24,7 @@ function ka_code_typed(kernel, argtypes; ndrange=nothing, workgroupsize=nothing,
     if interactive
         # call Cthulhu without introducing a dependency on Cthulhu
         mod = Base.get(Base.loaded_modules, Cthulhu, nothing)
-        mod===nothing && error("Interactive code reflection requires Cthulhu; please install and load this package first.")
+        mod === nothing && error("Interactive code reflection requires Cthulhu; please install and load this package first.")
         descend_code_typed = getfield(mod, :descend_code_typed)
         return descend_code_typed(typeof(kernel.f), (typeof(ctx), argtypes...); kwargs...)
     else
@@ -33,11 +33,11 @@ function ka_code_typed(kernel, argtypes; ndrange=nothing, workgroupsize=nothing,
 end
 
 
-function ka_code_llvm(kernel, argtypes; ndrange=nothing, workgroupsize=nothing, kwargs...)
-    ka_code_llvm(stdout, kernel, argtypes;  ndrange=ndrange, workgroupsize=nothing, kwargs...)
+function ka_code_llvm(kernel, argtypes; ndrange = nothing, workgroupsize = nothing, kwargs...)
+    ka_code_llvm(stdout, kernel, argtypes; ndrange = ndrange, workgroupsize = nothing, kwargs...)
 end
 
-function ka_code_llvm(io::IO, kernel, argtypes; ndrange=nothing, workgroupsize=nothing, kwargs...)
+function ka_code_llvm(io::IO, kernel, argtypes; ndrange = nothing, workgroupsize = nothing, kwargs...)
     # get the iterspace and dynamic of a kernel
     ndrange, workgroupsize, iterspace, dynamic = KernelAbstractions.launch_config(kernel, ndrange, workgroupsize)
 
@@ -60,7 +60,7 @@ function format_ex(ex0)
     args = gensym(:args)
     old_args = nothing
     kern = nothing
-    for i = 1:length(ex0)
+    for i in 1:length(ex0)
         if ex0[i].head == :call
             # inside kernel() expr
             while length(ex0[i].args) > 2
@@ -122,7 +122,7 @@ macro ka_code_typed(ex0...)
     quote
         local $(esc(args)) = $(old_args)
         # e.g. translate CuArray to CuBackendArray
-        $(esc(args)) = map(x->argconvert($kern, x), $(esc(args)))
+        $(esc(args)) = map(x -> argconvert($kern, x), $(esc(args)))
 
         local results = $thecall
         if results !== nothing
@@ -155,7 +155,7 @@ macro ka_code_llvm(ex0...)
     quote
         local $(esc(args)) = $(old_args)
 
-        if isa($kern, Kernel{G} where {G<:GPU})
+        if isa($kern, Kernel{G} where {G <: GPU})
             # does not support GPU kernels
             error("@ka_code_llvm does not support GPU kernels")
         end

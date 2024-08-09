@@ -47,20 +47,20 @@ function convert_testsuite(backend, ArrayT)
     ET = KernelAbstractions.supports_float64(backend()) ? Float64 : Float32
 
     N = 32
-    d_A = ArrayT([rand(ET)*3 for i = 1:N])
+    d_A = ArrayT([rand(ET) * 3 for i in 1:N])
 
     # 30 because we have 10 integer types and we have 3 operations
     d_B = ArrayT(zeros(ET, N, 30))
 
     @testset "convert test" begin
         kernel = convert_kernel!(backend(), 4)
-        kernel(d_A, d_B, ndrange=(N),)
+        kernel(d_A, d_B, ndrange = (N))
         synchronize(backend())
 
-        for i = 1:10
-            @test d_B[:,i] == ceil.(d_A)
-            @test d_B[:,i+10] == floor.(d_A)
-            @test d_B[:,i+20] == round.(d_A)
+        for i in 1:10
+            @test d_B[:, i] == ceil.(d_A)
+            @test d_B[:, i + 10] == floor.(d_A)
+            @test d_B[:, i + 20] == round.(d_A)
         end
     end
 end

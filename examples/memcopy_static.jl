@@ -12,7 +12,7 @@ function mycopy_static!(A, B)
     @assert get_backend(B) == backend
 
     kernel = copy_kernel!(backend, 32, size(A)) # if size(A) varies this will cause recompilation
-    kernel(A, B, ndrange=size(A))
+    kernel(A, B, ndrange = size(A))
 end
 
 A = KernelAbstractions.zeros(backend, Float64, 128, 128)

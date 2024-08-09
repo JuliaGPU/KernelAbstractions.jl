@@ -36,11 +36,12 @@ let static = BenchmarkGroup()
         for N in (64, 256, 512, 1024, 2048, 4096, 16384, 32768, 65536, 262144, 1048576)
             dtype[N] = @benchmarkable begin
                 kernel = saxpy_kernel!($BACKEND, 1024)
-                kernel(Z, convert($T, 2.0), X, Y, ndrange=size(Z))
-            end setup=(
+                kernel(Z, convert($T, 2.0), X, Y, ndrange = size(Z))
+            end setup = (
                 X = rand!(KernelAbstractions.zeros($BACKEND, $T, $N));
                 Y = rand!(KernelAbstractions.zeros($BACKEND, $T, $N));
-                Z = KernelAbstractions.zeros($BACKEND, $T, $N))
+                Z = KernelAbstractions.zeros($BACKEND, $T, $N)
+            )
         end
         static["$T"] = dtype
     end
@@ -53,11 +54,12 @@ let default = BenchmarkGroup()
         for N in (64, 256, 512, 1024, 2048, 4096, 16384, 32768, 65536, 262144, 1048576)
             dtype[N] = @benchmarkable begin
                 kernel = saxpy_kernel!($BACKEND)
-                kernel(Z, convert($T, 2.0), X, Y, ndrange=size(Z))
-            end setup=(
+                kernel(Z, convert($T, 2.0), X, Y, ndrange = size(Z))
+            end setup = (
                 X = rand!(KernelAbstractions.zeros($BACKEND, $T, $N));
                 Y = rand!(KernelAbstractions.zeros($BACKEND, $T, $N));
-                Z = KernelAbstractions.zeros($BACKEND, $T, $N))
+                Z = KernelAbstractions.zeros($BACKEND, $T, $N)
+            )
         end
         default["$T"] = dtype
     end

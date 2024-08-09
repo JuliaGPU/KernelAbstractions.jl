@@ -43,8 +43,8 @@ function main(backend)
     comm = MPI.COMM_WORLD
     MPI.Barrier(comm)
 
-    dst_rank = mod(MPI.Comm_rank(comm)+1, MPI.Comm_size(comm))
-    src_rank = mod(MPI.Comm_rank(comm)-1, MPI.Comm_size(comm))
+    dst_rank = mod(MPI.Comm_rank(comm) + 1, MPI.Comm_size(comm))
+    src_rank = mod(MPI.Comm_rank(comm) - 1, MPI.Comm_size(comm))
 
     T = Int64
     M = 10
@@ -59,8 +59,10 @@ function main(backend)
 
     KernelAbstractions.synchronize(backend)
 
-    recv_task, send_task = exchange!(h_send_buf, d_recv_buf, h_recv_buf,
-                                       src_rank, dst_rank, comm)
+    recv_task, send_task = exchange!(
+        h_send_buf, d_recv_buf, h_recv_buf,
+        src_rank, dst_rank, comm,
+    )
 
     cooperative_wait(recv_task)
     cooperative_wait(send_task)
