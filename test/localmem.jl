@@ -38,7 +38,7 @@ function localmem_testsuite(backend, ArrayT)
     @testset "kernels" begin
         @testset for kernel! in (localmem(backend(), 16), localmem2(backend(), 16))
             A = ArrayT{Int}(undef, 64)
-            kernel!(A, ndrange=size(A))
+            kernel!(A, ndrange = size(A))
             synchronize(backend())
             @test all(A[1:16] .== 16:-1:1)
             @test all(A[17:32] .== 16:-1:1)

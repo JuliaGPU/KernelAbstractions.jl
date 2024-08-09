@@ -7,17 +7,17 @@ function main()
     ci = get(ENV, "CI", "") == "true"
 
     makedocs(;
-        modules=[KernelAbstractions],
-        authors="JuliaGPU and contributors",
-        repo="https://github.com/JuliaGPU/KernelAbstractions.jl/blob/{commit}{path}#L{line}",
-        sitename="KernelAbstractions.jl",
-        format=Documenter.HTML(;
-            prettyurls=ci,
-            canonical="https://juliagpu.github.io/KernelAbstractions.jl",
-            assets=String[],
+        modules = [KernelAbstractions],
+        authors = "JuliaGPU and contributors",
+        repo = "https://github.com/JuliaGPU/KernelAbstractions.jl/blob/{commit}{path}#L{line}",
+        sitename = "KernelAbstractions.jl",
+        format = Documenter.HTML(;
+            prettyurls = ci,
+            canonical = "https://juliagpu.github.io/KernelAbstractions.jl",
+            assets = String[],
         ),
-        warnonly=[:missing_docs],
-        pages=[
+        warnonly = [:missing_docs],
+        pages = [
             "Home" => "index.md",
             "Quickstart" => "quickstart.md",
             "Writing kernels" => "kernels.md",
@@ -34,13 +34,13 @@ function main()
             "Extras" => [
                 "extras/unrolling.md",
             ], # Extras
-            "Notes for implementations" => "implementations.md"
+            "Notes for implementations" => "implementations.md",
         ], # pages
     )
 
     if ci
         deploydocs(;
-            repo="github.com/JuliaGPU/KernelAbstractions.jl",
+            repo = "github.com/JuliaGPU/KernelAbstractions.jl",
             push_preview = true,
         )
     end

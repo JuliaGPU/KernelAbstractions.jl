@@ -3,15 +3,15 @@ import UnsafeAtomicsLLVM
 unsafe_free!(::AbstractArray) = return
 synchronize(::CPU) = nothing
 
-allocate(::CPU, ::Type{T}, dims::Tuple) where T = Array{T}(undef, dims)
+allocate(::CPU, ::Type{T}, dims::Tuple) where {T} = Array{T}(undef, dims)
 
-function zeros(backend::CPU, ::Type{T}, dims::Tuple) where T
+function zeros(backend::CPU, ::Type{T}, dims::Tuple) where {T}
     arr = allocate(backend, T, dims)
     kernel = init_kernel(backend)
-    kernel(arr, zero, T,ndrange = length(arr))
+    kernel(arr, zero, T, ndrange = length(arr))
     return arr
 end
-function ones(backend::CPU, ::Type{T}, dims::Tuple) where T
+function ones(backend::CPU, ::Type{T}, dims::Tuple) where {T}
     arr = allocate(backend, T, dims)
     kernel = init_kernel(backend)
     kernel(arr, one, T; ndrange = length(arr))
@@ -36,7 +36,7 @@ end
 
 functional(::CPU) = true
 
-function (obj::Kernel{CPU})(args...; ndrange=nothing, workgroupsize=nothing, )
+function (obj::Kernel{CPU})(args...; ndrange = nothing, workgroupsize = nothing)
     ndrange, workgroupsize, iterspace, dynamic = launch_config(obj, ndrange, workgroupsize)
 
     if length(blocks(iterspace)) == 0
@@ -74,7 +74,7 @@ end
         ndrange = (ndrange,)
     end
     if workgroupsize isa Integer
-        workgroupsize = (workgroupsize, )
+        workgroupsize = (workgroupsize,)
     end
 
     if KernelAbstractions.workgroupsize(kernel) <: DynamicSize && workgroupsize === nothing
@@ -121,12 +121,12 @@ end
 
 function __thread_run(tid, len, rem, obj, ndrange, iterspace, args, dynamic)
     # compute this thread's iterations
-    f = 1 + ((tid-1) * len)
+    f = 1 + ((tid - 1) * len)
     l = f + len - 1
     # distribute remaining iterations evenly
     if rem > 0
         if tid <= rem
-            f = f + (tid-1)
+            f = f + (tid - 1)
             l = l + tid
         else
             f = f + rem
@@ -134,7 +134,7 @@ function __thread_run(tid, len, rem, obj, ndrange, iterspace, args, dynamic)
         end
     end
     # run this thread's iterations
-    for i = f:l
+    for i in f:l
         block = @inbounds blocks(iterspace)[i]
         ctx = mkcontext(obj, block, ndrange, iterspace, dynamic)
         obj.f(ctx, args...)
@@ -142,7 +142,7 @@ function __thread_run(tid, len, rem, obj, ndrange, iterspace, args, dynamic)
     return nothing
 end
 
-function mkcontext(kernel::Kernel{CPU}, I, _ndrange, iterspace, ::Dynamic) where Dynamic
+function mkcontext(kernel::Kernel{CPU}, I, _ndrange, iterspace, ::Dynamic) where {Dynamic}
     return CompilerMetadata{ndrange(kernel), Dynamic}(I, _ndrange, iterspace)
 end
 
@@ -206,13 +206,13 @@ end
 
 # Base.view creates a boundscheck which captures A
 # https://github.com/JuliaLang/julia/issues/39308
-@inline function aview(A, I::Vararg{Any, N}) where N
-     J = Base.to_indices(A, I)
-     Base.unsafe_view(Base._maybe_reshape_parent(A, Base.index_ndims(J...)), J...)
+@inline function aview(A, I::Vararg{Any, N}) where {N}
+    J = Base.to_indices(A, I)
+    Base.unsafe_view(Base._maybe_reshape_parent(A, Base.index_ndims(J...)), J...)
 end
 
-@inline function Base.getindex(A::ScratchArray{N}, idx) where N
-    return @inbounds aview(A.data, ntuple(_->:, Val(N))..., idx)
+@inline function Base.getindex(A::ScratchArray{N}, idx) where {N}
+    return @inbounds aview(A.data, ntuple(_ -> :, Val(N))..., idx)
 end
 
 # Argument conversion

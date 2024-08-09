@@ -20,12 +20,12 @@ struct CompilerMetadata{StaticNDRange, CheckBounds, I, NDRange, Iterspace}
     end
 end
 
-@inline __iterspace(cm::CompilerMetadata)  = cm.iterspace
+@inline __iterspace(cm::CompilerMetadata) = cm.iterspace
 @inline __groupindex(cm::CompilerMetadata) = cm.groupindex
 @inline __groupsize(cm::CompilerMetadata) = size(workitems(__iterspace(cm)))
 @inline __dynamic_checkbounds(::CompilerMetadata{NDRange, CB}) where {NDRange, CB} = CB <: DynamicCheck
-@inline __ndrange(::CompilerMetadata{NDRange}) where {NDRange<:StaticSize}  = CartesianIndices(get(NDRange))
-@inline __ndrange(cm::CompilerMetadata{NDRange}) where {NDRange<:DynamicSize} = cm.ndrange
+@inline __ndrange(::CompilerMetadata{NDRange}) where {NDRange <: StaticSize} = CartesianIndices(get(NDRange))
+@inline __ndrange(cm::CompilerMetadata{NDRange}) where {NDRange <: DynamicSize} = cm.ndrange
 @inline __workitems_iterspace(ctx) = workitems(__iterspace(ctx))
 
 @inline groupsize(ctx) = __groupsize(ctx)

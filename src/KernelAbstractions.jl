@@ -53,7 +53,7 @@ synchronize(backend)
 ```
 """
 macro kernel(expr)
-    __kernel(expr, #=generate_cpu=#true, #=force_inbounds=#false)
+    __kernel(expr, #=generate_cpu=# true, #=force_inbounds=# false)
 end
 
 """
@@ -75,18 +75,20 @@ macro kernel(ex...)
     else
         generate_cpu = true
         force_inbounds = false
-        for i = 1:length(ex)-1
+        for i in 1:(length(ex) - 1)
             if ex[i] isa Expr && ex[i].head == :(=) &&
-                ex[i].args[1] == :cpu && ex[i].args[2] isa Bool
+                    ex[i].args[1] == :cpu && ex[i].args[2] isa Bool
                 generate_cpu = ex[i].args[2]
             elseif ex[i] isa Expr && ex[i].head == :(=) &&
-                ex[i].args[1] == :inbounds && ex[i].args[2] isa Bool
+                    ex[i].args[1] == :inbounds && ex[i].args[2] isa Bool
                 force_inbounds = ex[i].args[2]
             else
-                error("Configuration should be of form:\n"*
-                      "* `cpu=true`\n"*
-                      "* `inbounds=false`\n"*
-                      "got `", ex[i], "`")
+                error(
+                    "Configuration should be of form:\n" *
+                        "* `cpu=true`\n" *
+                        "* `inbounds=false`\n" *
+                        "got `", ex[i], "`",
+                )
             end
         end
         __kernel(ex[end], generate_cpu, force_inbounds)
@@ -303,7 +305,7 @@ This is a unified print statement.
 """
 macro print(items...)
 
-    args = Union{Val,Expr,Symbol}[]
+    args = Union{Val, Expr, Symbol}[]
 
     items = [items...]
     while true
@@ -330,7 +332,7 @@ macro print(items...)
     end
 
     quote
-        $__print($(map(esc,args)...))
+        $__print($(map(esc, args)...))
     end
 end
 
@@ -373,8 +375,8 @@ macro index(locale, args...)
 
     if length(args) >= 1
         if args[1] === :Cartesian ||
-           args[1] === :Linear ||
-           args[1] === :NTuple
+                args[1] === :Linear ||
+                args[1] === :NTuple
             indexkind = args[1]
             args = args[2:end]
         else
@@ -439,7 +441,7 @@ Instantiate a CPU (multi-threaded) backend.
 """
 struct CPU <: Backend
     static::Bool
-    CPU(;static::Bool=false) = new(static)
+    CPU(; static::Bool = false) = new(static)
 end
 
 """
@@ -493,7 +495,7 @@ allocate(backend::Backend, T, dims::Tuple) = throw(MethodError(allocate, (backen
 Allocate a storage array appropriate for the computational backend filled with zeros.
 """
 zeros(backend::Backend, T, dims...) = zeros(backend, T, dims)
-function zeros(backend::Backend, ::Type{T}, dims::Tuple) where T
+function zeros(backend::Backend, ::Type{T}, dims::Tuple) where {T}
     data = allocate(backend, T, dims...)
     fill!(data, zero(T))
     return data
@@ -505,7 +507,7 @@ end
 Allocate a storage array appropriate for the computational backend filled with ones.
 """
 ones(backend::Backend, T, dims...) = ones(backend, T, dims)
-function ones(backend::Backend, ::Type{T}, dims::Tuple) where T
+function ones(backend::Backend, ::Type{T}, dims::Tuple) where {T}
     data = allocate(backend, T, dims)
     fill!(data, one(T))
     return data
@@ -589,7 +591,7 @@ in a workgroup.
     ```
     As well as the on-device functionality.
 """
-struct Kernel{Backend, WorkgroupSize<:_Size, NDRange<:_Size, Fun}
+struct Kernel{Backend, WorkgroupSize <: _Size, NDRange <: _Size, Fun}
     backend::Backend
     f::Fun
 end
@@ -599,7 +601,7 @@ function Base.similar(kernel::Kernel{D, WS, ND}, f::F) where {D, WS, ND, F}
 end
 
 workgroupsize(::Kernel{D, WorkgroupSize}) where {D, WorkgroupSize} = WorkgroupSize
-ndrange(::Kernel{D, WorkgroupSize, NDRange}) where {D, WorkgroupSize,NDRange} = NDRange
+ndrange(::Kernel{D, WorkgroupSize, NDRange}) where {D, WorkgroupSize, NDRange} = NDRange
 backend(kernel::Kernel) = kernel.backend
 
 """
@@ -610,7 +612,7 @@ Partition a kernel for the given ndrange and workgroupsize.
     static_workgroupsize = KernelAbstractions.workgroupsize(kernel)
 
     if ndrange === nothing && static_ndrange <: DynamicSize ||
-       workgroupsize === nothing && static_workgroupsize <: DynamicSize
+            workgroupsize === nothing && static_workgroupsize <: DynamicSize
         errmsg = """
             Can not partition kernel!
 
@@ -662,7 +664,7 @@ Partition a kernel for the given ndrange and workgroupsize.
     return iterspace, dynamic
 end
 
-function construct(backend::Backend, ::S, ::NDRange, xpu_name::XPUName) where {Backend<:Union{CPU,GPU}, S<:_Size, NDRange<:_Size, XPUName}
+function construct(backend::Backend, ::S, ::NDRange, xpu_name::XPUName) where {Backend <: Union{CPU, GPU}, S <: _Size, NDRange <: _Size, XPUName}
     return Kernel{Backend, S, NDRange, XPUName}(backend, xpu_name)
 end
 
@@ -719,7 +721,7 @@ __size(i::Int) = Tuple{i}
 
 Convert arguments to the device side representation.
 """
-argconvert(k::Kernel{T}, arg) where T =
+argconvert(k::Kernel{T}, arg) where {T} =
     error("Don't know how to convert arguments for Kernel{$T}")
 
 # Enzyme support
@@ -764,7 +766,7 @@ PrecompileTools.@compile_workload begin
 end
 
 if !isdefined(Base, :get_extension)
-using Requires
+    using Requires
 end
 
 @static if !isdefined(Base, :get_extension)

@@ -4,7 +4,7 @@ using Test
 include("testsuite.jl")
 
 @testset "CPU back-end" begin
-    struct CPUBackendArray{T,N,A} end # Fake and unused
+    struct CPUBackendArray{T, N, A} end # Fake and unused
     Testsuite.testsuite(CPU, "CPU", Base, Array, CPUBackendArray)
 end
 
@@ -14,33 +14,33 @@ end
 end
 
 A = zeros(Int, Threads.nthreads())
-kern_static(CPU(static=true), (1,))(A, ndrange=length(A))
+kern_static(CPU(static = true), (1,))(A, ndrange = length(A))
 @test A == 1:Threads.nthreads()
 
-@kernel cpu=false function my_no_cpu_kernel(a)
+@kernel cpu = false function my_no_cpu_kernel(a)
 end
 @test_throws ErrorException("This kernel is unavailable for backend CPU") my_no_cpu_kernel(CPU())
 
 # testing multiple configurations at the same time
-@kernel cpu=false inbounds=false function my_no_cpu_kernel2(a)
+@kernel cpu = false inbounds = false function my_no_cpu_kernel2(a)
 end
 @test_throws ErrorException("This kernel is unavailable for backend CPU") my_no_cpu_kernel2(CPU())
 
 if Base.JLOptions().check_bounds == 0 || Base.JLOptions().check_bounds == 1
     # testing bounds errors
-    @kernel inbounds=false function my_bounded_kernel(a)
+    @kernel inbounds = false function my_bounded_kernel(a)
         idx = @index(Global, Linear)
         a[idx] = 0
     end
-    @test_throws BoundsError(Int64[],(1,)) my_bounded_kernel(CPU())(Int[], ndrange=1)
+    @test_throws BoundsError(Int64[], (1,)) my_bounded_kernel(CPU())(Int[], ndrange = 1)
 end
 
 if Base.JLOptions().check_bounds == 0 || Base.JLOptions().check_bounds == 2
-    @kernel inbounds=true function my_bounded_kernel(a)
+    @kernel inbounds = true function my_bounded_kernel(a)
         idx = @index(Global, Linear)
         a[idx] = 0
     end
-    @test nothing == my_inbounds_kernel(CPU())(Int[], ndrange=1)
+    @test nothing == my_inbounds_kernel(CPU())(Int[], ndrange = 1)
 end
 
 struct NewBackend <: KernelAbstractions.GPU end

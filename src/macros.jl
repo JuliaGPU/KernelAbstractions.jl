@@ -10,7 +10,7 @@ function find_return(stmt)
 end
 
 # XXX: Proper errors
-function __kernel(expr, generate_cpu=true, force_inbounds=false)
+function __kernel(expr, generate_cpu = true, force_inbounds = false)
     def = splitdef(expr)
     name = def[:name]
     args = def[:args]
@@ -53,7 +53,7 @@ function __kernel(expr, generate_cpu=true, force_inbounds=false)
             Core.@__doc__ $name(dev) = $name(dev, $DynamicSize(), $DynamicSize())
             $name(dev, size) = $name(dev, $StaticSize(size), $DynamicSize())
             $name(dev, size, range) = $name(dev, $StaticSize(size), $StaticSize(range))
-            function $name(dev::Dev, sz::S, range::NDRange) where {Dev, S<:$_Size, NDRange<:$_Size}
+            function $name(dev::Dev, sz::S, range::NDRange) where {Dev, S <: $_Size, NDRange <: $_Size}
                 if $isgpu(dev)
                     return $construct(dev, sz, range, $gpu_name)
                 else
@@ -87,7 +87,7 @@ function transform_gpu!(def, constargs, force_inbounds)
     body = def[:body]
     if force_inbounds
         body = quote
-           @inbounds $(body)
+            @inbounds $(body)
         end
     end
     body = quote
@@ -96,7 +96,8 @@ function transform_gpu!(def, constargs, force_inbounds)
         end
         return nothing
     end
-    def[:body] = Expr(:let,
+    def[:body] = Expr(
+        :let,
         Expr(:block, let_constargs...),
         body,
     )
@@ -129,18 +130,19 @@ function transform_cpu!(def, constargs, force_inbounds)
     end
     push!(new_stmts, Expr(:popaliasscope))
     push!(new_stmts, :(return nothing))
-    def[:body] = Expr(:let,
+    def[:body] = Expr(
+        :let,
         Expr(:block, let_constargs...),
-        Expr(:block, new_stmts...)
+        Expr(:block, new_stmts...),
     )
 end
 
 struct WorkgroupLoop
-    indicies :: Vector{Any}
-    stmts :: Vector{Any}
-    allocations :: Vector{Any}
-    private_allocations :: Vector{Any}
-    private :: Set{Symbol}
+    indicies::Vector{Any}
+    stmts::Vector{Any}
+    allocations::Vector{Any}
+    private_allocations::Vector{Any}
+    private::Set{Symbol}
 end
 
 is_sync(expr) = @capture(expr, @synchronize() | @synchronize(a_))
@@ -160,17 +162,19 @@ function find_sync(stmt)
 end
 
 # TODO proper handling of LineInfo
-function split(stmts,
-               indicies = Any[], private = Set{Symbol}())
+function split(
+        stmts,
+        indicies = Any[], private = Set{Symbol}(),
+    )
     # 1. Split the code into blocks separated by `@synchronize`
     # 2. Aggregate `@index` expressions
     # 3. Hoist allocations
     # 4. Hoist uniforms
 
-    current     = Any[]
+    current = Any[]
     allocations = Any[]
     private_allocations = Any[]
-    new_stmts   = Any[]
+    new_stmts = Any[]
     for stmt in stmts
         has_sync = find_sync(stmt)
         if has_sync
@@ -178,7 +182,7 @@ function split(stmts,
             push!(new_stmts, emit(loop))
             allocations = Any[]
             private_allocations = Any[]
-            current     = Any[]
+            current = Any[]
             is_sync(stmt) && continue
 
             # Recurse into scope constructs
@@ -210,7 +214,7 @@ function split(stmts,
             if @capture(rhs, @index(args__))
                 push!(indicies, stmt)
                 continue
-            elseif @capture(rhs, @localmem(args__) | @uniform(args__) )
+            elseif @capture(rhs, @localmem(args__) | @uniform(args__))
                 push!(allocations, stmt)
                 continue
             elseif @capture(rhs, @private(T_, dims_))
@@ -255,14 +259,14 @@ function emit(loop)
 
     for stmt in loop.private_allocations
         if @capture(stmt, lhs_ = rhs_)
-            push!(stmts, :($lhs = ntuple(_->$rhs, $N)))
+            push!(stmts, :($lhs = ntuple(_ -> $rhs, $N)))
         else
             error("@private $stmt not an assignment")
         end
     end
 
     # don't emit empty loops
-    if !(isempty(loop.stmts) || all(s->s isa LineNumberNode, loop.stmts))
+    if !(isempty(loop.stmts) || all(s -> s isa LineNumberNode, loop.stmts))
         body = Expr(:block, loop.stmts...)
         body = postwalk(body) do expr
             if @capture(expr, lhs_ = rhs_)

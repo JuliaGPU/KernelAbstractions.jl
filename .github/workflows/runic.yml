@@ -1,0 +1,25 @@
+name: Runic formatting
+on:
+  push:
+    branches:
+      - 'master'
+      - 'release-'
+    tags:
+      - '*'
+  pull_request:
+jobs:
+  runic:
+    name: Runic
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: "nightly" # Only nightly have the -m flag currently
+      - uses: julia-actions/cache@v2
+      - name: Install Runic
+        run: |
+          julia --color=yes --project=@runic -e 'using Pkg; Pkg.add(url = "https://github.com/fredrikekre/Runic.jl")'
+      - name: Run Runic
+        run: |
+          git ls-files -z -- '*.jl' | xargs -0 julia --project=@runic -m Runic --check --diff
