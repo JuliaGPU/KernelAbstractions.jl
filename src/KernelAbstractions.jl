@@ -12,9 +12,7 @@ import PrecompileTools
 import Atomix: @atomic, @atomicswap, @atomicreplace
 import UnsafeAtomics
 
-using LinearAlgebra
 using MacroTools
-using SparseArrays
 using StaticArrays
 using Adapt
 
@@ -466,10 +464,6 @@ function get_backend end
 
 # Should cover SubArray, ReshapedArray, ReinterpretArray, Hermitian, AbstractTriangular, etc.:
 get_backend(A::AbstractArray) = get_backend(parent(A))
-
-get_backend(A::AbstractSparseArray) = get_backend(rowvals(A))
-get_backend(A::Diagonal) = get_backend(A.diag)
-get_backend(A::Tridiagonal) = get_backend(A.d)
 
 get_backend(::Array) = CPU()
 
