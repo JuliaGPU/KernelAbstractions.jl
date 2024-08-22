@@ -769,4 +769,9 @@ end
     end
 end
 
+if !isdefined(Base, :Base.get_extension)
+    include("../ext/LinearAlgebraExt.jl")
+    include("../ext/SparseArraysExt.jl")
+end
+
 end #module
