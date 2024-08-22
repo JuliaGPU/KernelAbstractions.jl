@@ -19,7 +19,7 @@ jobs:
       - uses: julia-actions/cache@v2
       - name: Install Runic
         run: |
-          julia --color=yes --project=@runic -e 'using Pkg; Pkg.add(url = "https://github.com/fredrikekre/Runic.jl")'
+          julia --color=yes --project=@runic -e 'using Pkg; Pkg.add(url = "https://github.com/fredrikekre/Runic.jl", rev = "e128bc9b77ea44b8fe23a0c3afe741a19c71a7b2")'
       - name: Run Runic
         run: |
           git ls-files -z -- '*.jl' | xargs -0 julia --project=@runic -m Runic --check --diff
