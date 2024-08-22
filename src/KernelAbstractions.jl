@@ -769,7 +769,7 @@ end
     end
 end
 
-if !isdefined(Base, :Base.get_extension)
+if !isdefined(Base, :get_extension)
     include("../ext/LinearAlgebraExt.jl")
     include("../ext/SparseArraysExt.jl")
 end
