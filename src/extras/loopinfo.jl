@@ -20,7 +20,12 @@ module MD
 end
 
 function loopinfo(expr, nodes...)
-    if @capture(expr, for i_ in iter_ body__ end)
+    if @capture(
+            expr,
+            for i_ in iter_
+                body__
+            end,
+        )
         return quote
             for $i in $iter
                 $(body...)
