@@ -31,18 +31,27 @@ jobs:
             - name: Build AirspeedVelocity
               env:
                 JULIA_NUM_THREADS: 2
+                JULIA_PKG_PRECOMPILE_AUTO: false
               run: |
                 # Lightweight build step, as sometimes the runner runs out of memory:
-                julia -e 'ENV["JULIA_PKG_PRECOMPILE_AUTO"]=0; import Pkg; Pkg.add("AirspeedVelocity")'
-                julia -e 'ENV["JULIA_PKG_PRECOMPILE_AUTO"]=0; import Pkg; Pkg.build("AirspeedVelocity")'
+                julia -e 'import Pkg; Pkg.add("AirspeedVelocity")'
+                julia -e 'import Pkg; Pkg.build("AirspeedVelocity")'
+            - name: Install ValgrindBenchmarkTools
+              env:
+                JULIA_PKG_PRECOMPILE_AUTO: false
+              run: |
+                julia -e 'import Pkg; Pkg.add(url="https://github.com/JuliaPerf/Valgrind.jl", rev="vc/bt")'
+                julia -e 'import Pkg; Pkg.add(url="https://github.com/JuliaPerf/Valgrind.jl", rev="vc/bt", subdir="lib/ValgrindBenchmarkTools")'
             - name: Add ~/.julia/bin to PATH
               run: |
                 echo "$HOME/.julia/bin" >> $GITHUB_PATH
             - name: Run benchmarks
               uses: CodSpeedHQ/action@v3
+              env:
+                ENABLE_JITPROFILING: 1
               with:
                 token: ${{ secrets.CODSPEED_TOKEN }}
-                run: ""
+                run: 'benchpkg --rev="dirty"'
 
             # - name: Run benchmarks
             #   run: |

@@ -3,7 +3,7 @@
 # result = benchmarkpkg(KernelAbstractions, BenchmarkConfig(env=Dict("KA_BACKEND"=>"CPU", "JULIA_NUM_THREADS"=>"auto")))
 # export_markdown("perf.md", result)
 
-using BenchmarkTools
+using ValgrindBenchmarkTools
 using KernelAbstractions
 using Random
 
