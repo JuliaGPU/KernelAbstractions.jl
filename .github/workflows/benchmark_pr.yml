@@ -28,7 +28,6 @@ jobs:
                 JULIA_PKG_PRECOMPILE_AUTO: false
               run: |
                 julia -e 'import Pkg; Pkg.add(url="https://github.com/JuliaCI/BenchmarkTools.jl", rev="vc/extendable")'
-                julia -e 'import Pkg; Pkg.add("PkgBenchmark")'
                 julia -e 'import Pkg; Pkg.add(url="https://github.com/JuliaPerf/Valgrind.jl", rev="vc/bt")'
                 julia -e 'import Pkg; Pkg.add(url="https://github.com/JuliaPerf/Valgrind.jl", rev="vc/bt", subdir="lib/ValgrindBenchmarkTools")'
             - name: Precompile
@@ -46,4 +45,4 @@ jobs:
                 ENABLE_JITPROFILING: 1
               with:
                 token: ${{ secrets.CODSPEED_TOKEN }}
-                run: 'julia --project=. -e "using PkgBenchmark, KernelAbstractions; benchmarkpkg(KernelAbstractions)"'
+                run: 'julia --project=. -L benchmarks/benchmark.jl -e "run(SUITE)"'
