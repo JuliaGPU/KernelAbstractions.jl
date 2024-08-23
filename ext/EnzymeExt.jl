@@ -25,6 +25,7 @@ import KernelAbstractions:
     __index_Global_Linear,
     __groupsize,
     __groupindex,
+    __validindex,
     Backend,
     synchronize
 
