@@ -45,4 +45,4 @@ jobs:
                 ENABLE_JITPROFILING: 1
               with:
                 token: ${{ secrets.CODSPEED_TOKEN }}
-                run: 'julia --project=. -L benchmark/benchmarks.jl -e "run(SUITE)"'
+                run: 'julia --project=. -L benchmark/benchmarks.jl -e "run(SUITE, "")"'
