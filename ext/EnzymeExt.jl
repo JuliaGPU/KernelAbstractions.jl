@@ -25,6 +25,7 @@ import KernelAbstractions:
     __index_Global_Linear,
     __groupsize,
     __groupindex,
+    __validindex,
     Backend,
     synchronize
 
@@ -219,8 +220,10 @@ function gpu_aug_fwd(
 
     # On the GPU: F is a per thread function
     # On the GPU: subtape::Vector
-    I = __index_Global_Linear(ctx)
-    subtape[I] = forward(Const(f), Const(ctx), args...)[1]
+    if __validindex(ctx)
+        I = __index_Global_Linear(ctx)
+        subtape[I] = forward(Const(f), Const(ctx), args...)[1]
+    end
     return nothing
 end
 
@@ -241,9 +244,11 @@ function gpu_rev(
         Const{Core.Typeof(ctx)},
         map(Core.Typeof, args)...,
     )
-    I = __index_Global_Linear(ctx)
-    tp = subtape[I]
-    reverse(Const(f), Const(ctx), args..., tp)
+    if __validindex(ctx)
+        I = __index_Global_Linear(ctx)
+        tp = subtape[I]
+        reverse(Const(f), Const(ctx), args..., tp)
+    end
     return nothing
 end
 
