@@ -46,4 +46,5 @@ function localmem_testsuite(backend, ArrayT)
             @test all(A[49:64] .== 16:-1:1)
         end
     end
+    return
 end

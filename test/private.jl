@@ -82,7 +82,7 @@ function private_testsuite(backend, ArrayT)
         synchronize(backend())
         @test all(B)
 
-        A = ArrayT{Float32}(ones(64, 3));
+        A = ArrayT{Float32}(ones(64, 3))
         out = ArrayT{Float32}(undef, 64)
         reduce_private(backend(), 8)(out, A, ndrange = size(out))
         synchronize(backend())
@@ -100,4 +100,5 @@ function private_testsuite(backend, ArrayT)
             @test !occursin("gcframe", IR)
         end
     end
+    return
 end

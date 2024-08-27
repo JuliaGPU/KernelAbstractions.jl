@@ -23,4 +23,5 @@ function printing_testsuite(backend)
         end
         @test true
     end
+    return
 end
