@@ -49,7 +49,10 @@ end
 const CPU_GRAINSIZE = 1024 # Vectorization, 4x unrolling, minimal grain size
 function default_cpu_workgroupsize(ndrange)
     # if the total kernel is small, don't launch multiple tasks
-    if prod(ndrange) <= CPU_GRAINSIZE
+    n = prod(ndrange)
+    if iszero(n)
+        return map(one, ndrange)
+    elseif n <= CPU_GRAINSIZE
         return ndrange
     else
         available = Ref(CPU_GRAINSIZE)
