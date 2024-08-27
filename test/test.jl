@@ -296,4 +296,14 @@ function unittest_testsuite(Backend, backend_str, backend_mod, BackendArrayT; sk
         @test KernelAbstractions.default_cpu_workgroupsize((5, 7, 13, 17)) == (5, 7, 13, 2)
     end
 
+    @testset "empty arrays" begin
+        backend = Backend()
+        @test size(allocate(backend, Float32, 0)) == (0,)
+        @test size(allocate(backend, Float32, 3, 0)) == (3, 0)
+        @test size(allocate(backend, Float32, 0, 9)) == (0, 9)
+        @test size(KernelAbstractions.zeros(backend, Float32, 0)) == (0,)
+        @test size(KernelAbstractions.zeros(backend, Float32, 3, 0)) == (3, 0)
+        @test size(KernelAbstractions.zeros(backend, Float32, 0, 9)) == (0, 9)
+    end
+
 end
