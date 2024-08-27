@@ -51,6 +51,7 @@ function default_cpu_workgroupsize(ndrange)
     # if the total kernel is small, don't launch multiple tasks
     n = prod(ndrange)
     if iszero(n)
+        # If the ndrange is zero return a workgroupsize of (1, 1,...)
         return map(one, ndrange)
     elseif n <= CPU_GRAINSIZE
         return ndrange
