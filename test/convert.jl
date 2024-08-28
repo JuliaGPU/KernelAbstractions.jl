@@ -63,4 +63,5 @@ function convert_testsuite(backend, ArrayT)
             @test d_B[:, i + 20] == round.(d_A)
         end
     end
+    return
 end

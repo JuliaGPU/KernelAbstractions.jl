@@ -62,13 +62,13 @@ function histogram!(histogram_output, input)
     backend = get_backend(histogram_output)
     # Need static block size
     kernel! = histogram_kernel!(backend, (256,))
-    kernel!(histogram_output, input, ndrange = size(input))
+    return kernel!(histogram_output, input, ndrange = size(input))
 end
 
 function move(backend, input)
     # TODO replace with adapt(backend, input)
     out = KernelAbstractions.allocate(backend, eltype(input), size(input))
-    KernelAbstractions.copyto!(backend, out, input)
+    return KernelAbstractions.copyto!(backend, out, input)
 end
 
 @testset "histogram tests" begin

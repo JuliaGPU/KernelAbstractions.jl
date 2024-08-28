@@ -65,7 +65,7 @@ function EnzymeRules.forward(
     f = kernel.f
     fwd_kernel = similar(kernel, cpu_fwd)
 
-    fwd_kernel(f, args...; ndrange, workgroupsize)
+    return fwd_kernel(f, args...; ndrange, workgroupsize)
 end
 
 function EnzymeRules.forward(
@@ -79,7 +79,7 @@ function EnzymeRules.forward(
     f = kernel.f
     fwd_kernel = similar(kernel, gpu_fwd)
 
-    fwd_kernel(f, args...; ndrange, workgroupsize)
+    return fwd_kernel(f, args...; ndrange, workgroupsize)
 end
 
 _enzyme_mkcontext(kernel::Kernel{CPU}, ndrange, iterspace, dynamic) =
@@ -278,18 +278,18 @@ function EnzymeRules.augmented_primal(
             if func.val isa Kernel{<:GPU}
                 error("Active kernel arguments not supported on GPU")
             else
-                Ref(EnzymeCore.make_zero(args[i].val))
+                return Ref(EnzymeCore.make_zero(args[i].val))
             end
         else
-            nothing
+            return nothing
         end
     end
     args2 = ntuple(Val(N)) do i
         Base.@_inline_meta
         if args[i] isa Active
-            MixedDuplicated(args[i].val, arg_refs[i])
+            return MixedDuplicated(args[i].val, arg_refs[i])
         else
-            args[i]
+            return args[i]
         end
     end
 
@@ -324,9 +324,9 @@ function EnzymeRules.reverse(
     args2 = ntuple(Val(N)) do i
         Base.@_inline_meta
         if args[i] isa Active
-            MixedDuplicated(args[i].val, arg_refs[i])
+            return MixedDuplicated(args[i].val, arg_refs[i])
         else
-            args[i]
+            return args[i]
         end
     end
 
@@ -348,9 +348,9 @@ function EnzymeRules.reverse(
     res = ntuple(Val(N)) do i
         Base.@_inline_meta
         if args[i] isa Active
-            arg_refs[i][]
+            return arg_refs[i][]
         else
-            nothing
+            return nothing
         end
     end
     # Reverse synchronization right after the kernel launch
