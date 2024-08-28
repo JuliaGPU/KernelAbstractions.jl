@@ -4,7 +4,9 @@ on:
   pull_request:
 
 permissions:
-  pull-requests: write
+  # pull-requests: write
+  contents: write
+  deployments: write
 
 jobs:
     generate_plots:
@@ -36,41 +38,18 @@ jobs:
                 echo $PATH
                 ls -l ~/.julia/bin
                 mkdir results
-                benchpkg ${{ steps.extract-package-name.outputs.package_name }} --rev="${{github.event.repository.default_branch}},${{github.event.pull_request.head.sha}}" --url=${{ github.event.repository.clone_url }} --bench-on="${{github.event.repository.default_branch}}" --output-dir=results/ --tune
-            - name: Create plots from benchmarks
-              run: |
-                mkdir -p plots
-                benchpkgplot ${{ steps.extract-package-name.outputs.package_name }} --rev="${{github.event.repository.default_branch}},${{github.event.pull_request.head.sha}}" --npart=10 --format=png --input-dir=results/ --output-dir=plots/
-            - name: Upload plot as artifact
-              uses: actions/upload-artifact@v2
+                benchpkg ${{ steps.extract-package-name.outputs.package_name }} --rev="${{github.event.pull_request.head.sha}}" --url=${{ github.event.repository.clone_url }} --bench-on="${{github.event.repository.default_branch}}" --output-dir=results/ --tune
+            - name: Store benchmark result
+              uses: benchmark-action/github-action-benchmark@v1
               with:
-                name: plots
-                path: plots
-            - name: Create markdown table from benchmarks
-              run: |
-                benchpkgtable ${{ steps.extract-package-name.outputs.package_name }} --rev="${{github.event.repository.default_branch}},${{github.event.pull_request.head.sha}}" --input-dir=results/ --ratio > table.md
-                echo '### Benchmark Results' > body.md
-                echo '' >> body.md
-                echo '' >> body.md
-                cat table.md >> body.md
-                echo '' >> body.md
-                echo '' >> body.md
-                echo '### Benchmark Plots' >> body.md
-                echo 'A plot of the benchmark results have been uploaded as an artifact to the workflow run for this PR.' >> body.md
-                echo 'Go to "Actions"->"Benchmark a pull request"->[the most recent run]->"Artifacts" (at the bottom).' >> body.md
-
-            - name: Find Comment
-              uses: peter-evans/find-comment@v2
-              id: fcbenchmark
-              with:
-                issue-number: ${{ github.event.pull_request.number }}
-                comment-author: 'github-actions[bot]'
-                body-includes: Benchmark Results
-
-            - name: Comment on PR
-              uses: peter-evans/create-or-update-comment@v3
-              with:
-                comment-id: ${{ steps.fcbenchmark.outputs.comment-id }}
-                issue-number: ${{ github.event.pull_request.number }}
-                body-path: body.md
-                edit-mode: replace
+                name: Julia benchmark result
+                tool: 'julia'
+                output-file-path: results/results_${{ steps.extract-package-name.outputs.package_name }}@${{github.event.pull_request.head.sha}}.json
+                # Use personal access token instead of GITHUB_TOKEN due to https://github.community/t/github-action-not-triggering-gh-pages-upon-push/16096
+                github-token: ${{ secrets.GITHUB_TOKEN }}
+                auto-push: true
+                # Show alert with commit comment on detecting possible performance regression
+                alert-threshold: '150%'
+                comment-on-alert: true
+                fail-on-alert: true
+                alert-comment-cc-users: '@vchuravy'
