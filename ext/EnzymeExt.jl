@@ -44,17 +44,18 @@ EnzymeRules.inactive(::Type{StaticSize}, x...) = nothing
 # https://github.com/EnzymeAD/Enzyme.jl/issues/1516
 # On the CPU `autodiff_deferred` can deadlock.
 # Hence a specialized CPU version
-function cpu_fwd(ctx, f, args...)
-    EnzymeCore.autodiff(Forward, Const(f), Const{Nothing}, Const(ctx), args...)
+function cpu_fwd(config, ctx, f, args...)
+    EnzymeCore.autodiff(EnzymeCore.set_runtime_activity(Forward, config), Const(f), Const{Nothing}, Const(ctx), args...)
     return nothing
 end
 
 function gpu_fwd(ctx, f, args...)
-    EnzymeCore.autodiff_deferred(Forward, Const(f), Const{Nothing}, Const(ctx), args...)
+    EnzymeCore.autodiff_deferred(EnzymeCore.set_runtime_activity(Forward, config), Const(f), Const{Nothing}, Const(ctx), args...)
     return nothing
 end
 
 function EnzymeRules.forward(
+	config,
         func::Const{<:Kernel{CPU}},
         ::Type{Const{Nothing}},
         args...;
@@ -63,12 +64,13 @@ function EnzymeRules.forward(
     )
     kernel = func.val
     f = kernel.f
-    fwd_kernel = similar(kernel, cpu_fwd)
+    fwd_kernel = similar(config, kernel, cpu_fwd)
 
     fwd_kernel(f, args...; ndrange, workgroupsize)
 end
 
 function EnzymeRules.forward(
+	config,
         func::Const{<:Kernel{<:GPU}},
         ::Type{Const{Nothing}},
         args...;
@@ -77,7 +79,7 @@ function EnzymeRules.forward(
     )
     kernel = func.val
     f = kernel.f
-    fwd_kernel = similar(kernel, gpu_fwd)
+    fwd_kernel = similar(config, kernel, gpu_fwd)
 
     fwd_kernel(f, args...; ndrange, workgroupsize)
 end
