@@ -83,7 +83,7 @@ function private_testsuite(backend, ArrayT)
         synchronize(backend())
         @test all(Array(B))
 
-        A = ArrayT{Float32}(ones(64, 3));
+        A = ArrayT(ones(Float32, 64, 3))
         out = ArrayT{Float32}(undef, 64)
         reduce_private(backend(), 8)(out, A, ndrange = size(out))
         synchronize(backend())
