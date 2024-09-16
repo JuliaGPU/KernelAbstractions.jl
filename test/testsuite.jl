@@ -64,7 +64,7 @@ function testsuite(backend, backend_str, backend_mod, AT, DAT; skip_tests = Set{
     end
 
     @conditional_testset "copyto!" skip_tests begin
-        copyto_testsuite(backend)
+        copyto_testsuite(backend, AT)
     end
 
     @conditional_testset "Printing" skip_tests begin

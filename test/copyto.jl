@@ -2,13 +2,13 @@ using KernelAbstractions, Test
 import KernelAbstractions: allocate, copyto!
 using Random
 
-function copyto_testsuite(Backend)
+function copyto_testsuite(Backend, ArrayT)
     M = 1024
     backend = Backend()
     ET = KernelAbstractions.supports_float64(backend) ? Float64 : Float32
 
-    A = rand!(allocate(backend, ET, M))
-    B = rand!(allocate(backend, ET, M))
+    A = ArrayT(rand(ET, M))
+    B = ArrayT(rand(ET, M))
 
     a = Array{ET}(undef, M)
     copyto!(backend, a, B)
