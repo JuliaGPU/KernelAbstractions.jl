@@ -255,7 +255,7 @@ function gpu_rev(
 end
 
 function EnzymeRules.augmented_primal(
-        config::Config,
+        config::RevConfig,
         func::Const{<:Kernel},
         ::Type{Const{Nothing}},
         args::Vararg{Any, N};
@@ -313,7 +313,7 @@ function EnzymeRules.augmented_primal(
 end
 
 function EnzymeRules.reverse(
-        config::Config,
+        config::RevConfig,
         func::Const{<:Kernel},
         ::Type{<:EnzymeCore.Annotation},
         tape,
@@ -366,7 +366,7 @@ end
 #       synchronize rule and then synchronize where the launch was. However, with the current
 #       kernel semantics this ensures correctness for now.
 function EnzymeRules.augmented_primal(
-        config::Config,
+        config::RevConfig,
         func::Const{typeof(synchronize)},
         ::Type{Const{Nothing}},
         backend::T,
@@ -376,7 +376,7 @@ function EnzymeRules.augmented_primal(
 end
 
 function EnzymeRules.reverse(
-        config::Config,
+        config::RevConfig,
         func::Const{typeof(synchronize)},
         ::Type{Const{Nothing}},
         tape,
