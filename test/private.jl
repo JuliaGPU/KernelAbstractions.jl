@@ -97,7 +97,12 @@ function private_testsuite(backend, ArrayT)
                     optimize = true, ndrange = (64,),
                 )
             end
-            @test !occursin("gcframe", IR)
+            if VERSION >= v"1.11-" && Base.JLOptions().check_bounds > 0
+                # JuliaGPU/KernelAbstractions.jl#528
+                @test_broken !occursin("gcframe", IR)
+            else
+                @test !occursin("gcframe", IR)
+            end
         end
     end
 end
