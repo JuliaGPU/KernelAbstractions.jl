@@ -65,28 +65,29 @@ function private_testsuite(backend, ArrayT)
         A = ArrayT{Int}(undef, 64)
         private(backend(), 16)(A, ndrange = size(A))
         synchronize(backend())
-        @test all(A[1:16] .== 16:-1:1)
-        @test all(A[17:32] .== 16:-1:1)
-        @test all(A[33:48] .== 16:-1:1)
-        @test all(A[49:64] .== 16:-1:1)
+        B = Array(A)
+        @test all(B[1:16] .== 16:-1:1)
+        @test all(B[17:32] .== 16:-1:1)
+        @test all(B[33:48] .== 16:-1:1)
+        @test all(B[49:64] .== 16:-1:1)
 
         A = ArrayT{Int}(undef, 64, 64)
         A .= 1
         forloop(backend())(A, Val(size(A, 2)), ndrange = size(A, 1), workgroupsize = size(A, 1))
         synchronize(backend())
-        @test all(A[:, 1] .== 64)
-        @test all(A[:, 2:end] .== 1)
+        @test all(Array(A)[:, 1] .== 64)
+        @test all(Array(A)[:, 2:end] .== 1)
 
         B = ArrayT{Bool}(undef, size(A)...)
         typetest(backend(), 16)(A, B, ndrange = size(A))
         synchronize(backend())
-        @test all(B)
+        @test all(Array(B))
 
-        A = ArrayT{Float32}(ones(64, 3));
+        A = ArrayT(ones(Float32, 64, 3))
         out = ArrayT{Float32}(undef, 64)
         reduce_private(backend(), 8)(out, A, ndrange = size(out))
         synchronize(backend())
-        @test all(out .== 3.0f0)
+        @test all(Array(out) .== 3.0f0)
     end
 
     if backend == CPU

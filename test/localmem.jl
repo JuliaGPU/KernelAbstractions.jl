@@ -40,10 +40,11 @@ function localmem_testsuite(backend, ArrayT)
             A = ArrayT{Int}(undef, 64)
             kernel!(A, ndrange = size(A))
             synchronize(backend())
-            @test all(A[1:16] .== 16:-1:1)
-            @test all(A[17:32] .== 16:-1:1)
-            @test all(A[33:48] .== 16:-1:1)
-            @test all(A[49:64] .== 16:-1:1)
+            B = Array(A)
+            @test all(B[1:16] .== 16:-1:1)
+            @test all(B[17:32] .== 16:-1:1)
+            @test all(B[33:48] .== 16:-1:1)
+            @test all(B[49:64] .== 16:-1:1)
         end
     end
 end

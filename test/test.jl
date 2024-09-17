@@ -105,45 +105,45 @@ function unittest_testsuite(Backend, backend_str, backend_mod, BackendArrayT; sk
         A = allocate(backend, Int, 16, 16)
         index_linear_global(backend, 8)(A, ndrange = length(A))
         synchronize(backend)
-        @test all(A .== LinearIndices(A))
+        @test all(Array(A) .== LinearIndices(A))
 
         A = allocate(backend, Int, 8)
         index_linear_local(backend, 8)(A, ndrange = length(A))
         synchronize(backend)
-        @test all(A .== 1:8)
+        @test all(Array(A) .== 1:8)
 
         A = allocate(backend, Int, 16)
         index_linear_local(backend, 8)(A, ndrange = length(A))
         synchronize(backend)
-        @test all(A[1:8] .== 1:8)
-        @test all(A[9:16] .== 1:8)
+        @test all(Array(A)[1:8] .== 1:8)
+        @test all(Array(A)[9:16] .== 1:8)
 
         A = allocate(backend, Int, 8, 2)
         index_linear_local(backend, 8)(A, ndrange = length(A))
         synchronize(backend)
-        @test all(A[1:8] .== 1:8)
-        @test all(A[9:16] .== 1:8)
+        @test all(Array(A)[1:8] .== 1:8)
+        @test all(Array(A)[9:16] .== 1:8)
 
         A = allocate(backend, CartesianIndex{2}, 16, 16)
         index_cartesian_global(backend, 8)(A, ndrange = size(A))
         synchronize(backend)
-        @test all(A .== CartesianIndices(A))
+        @test all(Array(A) .== CartesianIndices(A))
 
         A = allocate(backend, CartesianIndex{1}, 16, 16)
         index_cartesian_global(backend, 8)(A, ndrange = length(A))
         synchronize(backend)
-        @test all(A[:] .== CartesianIndices((length(A),)))
+        @test all(Array(A)[:] .== CartesianIndices((length(A),)))
 
         # Non-multiplies of the workgroupsize
         A = allocate(backend, Int, 7, 7)
         index_linear_global(backend, 8)(A, ndrange = length(A))
         synchronize(backend)
-        @test all(A .== LinearIndices(A))
+        @test all(Array(A) .== LinearIndices(A))
 
         A = allocate(backend, Int, 5)
         index_linear_local(backend, 8)(A, ndrange = length(A))
         synchronize(backend)
-        @test all(A .== 1:5)
+        @test all(Array(A) .== 1:5)
     end
 
     @kernel function constarg(A, @Const(B))
@@ -199,7 +199,7 @@ function unittest_testsuite(Backend, backend_str, backend_mod, BackendArrayT; sk
     A = KernelAbstractions.zeros(Backend(), Int64, 1024)
     kernel_val!(Backend())(A, Val(3), ndrange = size(A))
     synchronize(Backend())
-    @test all((a) -> a == 3, A)
+    @test all((a) -> a == 3, Array(A))
 
     @kernel function kernel_empty()
         nothing
@@ -276,7 +276,7 @@ function unittest_testsuite(Backend, backend_str, backend_mod, BackendArrayT; sk
             A = KernelAbstractions.zeros(Backend(), Int64, 1024)
             context_kernel(Backend())(A, ndrange = size(A))
             synchronize(Backend())
-            @test all((a) -> a == 1, A)
+            @test all((a) -> a == 1, Array(A))
         else
             @test_throws ErrorException("This kernel is unavailable for backend CPU") context_kernel(Backend())
         end
