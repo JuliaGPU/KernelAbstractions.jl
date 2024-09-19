@@ -1,7 +1,7 @@
 name = "KernelAbstractions"
 uuid = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
 authors = ["Valentin Churavy <v.churavy@gmail.com> and contributors"]
-version = "0.9.26"
+version = "0.9.27"
 
 [deps]
 Adapt = "79e6a3ab-5dfb-504d-930d-738a2a938a0e"
@@ -21,7 +21,7 @@ UnsafeAtomicsLLVM = "d80eeb9a-aca5-4d75-85e5-170c8b632249"
 [compat]
 Adapt = "0.4, 1.0, 2.0, 3.0, 4"
 Atomix = "0.1"
-EnzymeCore = "0.8"
+EnzymeCore = "0.8.1"
 InteractiveUtils = "1.6"
 LinearAlgebra = "1.6"
 MacroTools = "0.5"
