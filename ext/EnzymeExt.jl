@@ -44,17 +44,18 @@ EnzymeRules.inactive(::Type{StaticSize}, x...) = nothing
 # https://github.com/EnzymeAD/Enzyme.jl/issues/1516
 # On the CPU `autodiff_deferred` can deadlock.
 # Hence a specialized CPU version
-function cpu_fwd(ctx, f, args...)
-    EnzymeCore.autodiff(Forward, Const(f), Const{Nothing}, Const(ctx), args...)
+function cpu_fwd(ctx, config, f, args...)
+    EnzymeCore.autodiff(EnzymeCore.set_runtime_activity(Forward, config), Const(f), Const{Nothing}, Const(ctx), args...)
     return nothing
 end
 
-function gpu_fwd(ctx, f, args...)
-    EnzymeCore.autodiff_deferred(Forward, Const(f), Const{Nothing}, Const(ctx), args...)
+function gpu_fwd(ctx, config, f, args...)
+    EnzymeCore.autodiff_deferred(EnzymeCore.set_runtime_activity(Forward, config), Const(f), Const{Nothing}, Const(ctx), args...)
     return nothing
 end
 
 function EnzymeRules.forward(
+	config,
         func::Const{<:Kernel{CPU}},
         ::Type{Const{Nothing}},
         args...;
@@ -65,10 +66,11 @@ function EnzymeRules.forward(
     f = kernel.f
     fwd_kernel = similar(kernel, cpu_fwd)
 
-    fwd_kernel(f, args...; ndrange, workgroupsize)
+    fwd_kernel(config, f, args...; ndrange, workgroupsize)
 end
 
 function EnzymeRules.forward(
+	config,
         func::Const{<:Kernel{<:GPU}},
         ::Type{Const{Nothing}},
         args...;
@@ -79,7 +81,7 @@ function EnzymeRules.forward(
     f = kernel.f
     fwd_kernel = similar(kernel, gpu_fwd)
 
-    fwd_kernel(f, args...; ndrange, workgroupsize)
+    fwd_kernel(config, f, args...; ndrange, workgroupsize)
 end
 
 _enzyme_mkcontext(kernel::Kernel{CPU}, ndrange, iterspace, dynamic) =
@@ -253,7 +255,7 @@ function gpu_rev(
 end
 
 function EnzymeRules.augmented_primal(
-        config::Config,
+        config::RevConfig,
         func::Const{<:Kernel},
         ::Type{Const{Nothing}},
         args::Vararg{Any, N};
@@ -311,7 +313,7 @@ function EnzymeRules.augmented_primal(
 end
 
 function EnzymeRules.reverse(
-        config::Config,
+        config::RevConfig,
         func::Const{<:Kernel},
         ::Type{<:EnzymeCore.Annotation},
         tape,
@@ -364,7 +366,7 @@ end
 #       synchronize rule and then synchronize where the launch was. However, with the current
 #       kernel semantics this ensures correctness for now.
 function EnzymeRules.augmented_primal(
-        config::Config,
+        config::RevConfig,
         func::Const{typeof(synchronize)},
         ::Type{Const{Nothing}},
         backend::T,
@@ -374,7 +376,7 @@ function EnzymeRules.augmented_primal(
 end
 
 function EnzymeRules.reverse(
-        config::Config,
+        config::RevConfig,
         func::Const{typeof(synchronize)},
         ::Type{Const{Nothing}},
         tape,
