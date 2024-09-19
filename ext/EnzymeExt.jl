@@ -64,7 +64,7 @@ function EnzymeRules.forward(
     )
     kernel = func.val
     f = kernel.f
-    fwd_kernel = similar(config, kernel, cpu_fwd)
+    fwd_kernel = similar(kernel, cpu_fwd)
 
     fwd_kernel(config, f, args...; ndrange, workgroupsize)
 end
@@ -79,7 +79,7 @@ function EnzymeRules.forward(
     )
     kernel = func.val
     f = kernel.f
-    fwd_kernel = similar(config, kernel, gpu_fwd)
+    fwd_kernel = similar(kernel, gpu_fwd)
 
     fwd_kernel(config, f, args...; ndrange, workgroupsize)
 end
