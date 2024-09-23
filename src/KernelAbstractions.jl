@@ -561,7 +561,7 @@ Partition a kernel for the given ndrange and workgroupsize.
     return iterspace, dynamic
 end
 
-function construct(backend::Backend, ::S, ::NDRange, xpu_name::XPUName) where {Backend <: Union{CPU, GPU}, S <: _Size, NDRange <: _Size, XPUName}
+function construct(backend::Backend, ::S, ::NDRange, xpu_name::XPUName) where {Backend, S <: _Size, NDRange <: _Size, XPUName}
     return Kernel{Backend, S, NDRange, XPUName}(backend, xpu_name)
 end
 
