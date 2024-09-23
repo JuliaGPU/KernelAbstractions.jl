@@ -41,15 +41,7 @@ function __kernel(expr, force_inbounds = false)
             $name(dev, size) = $name(dev, $StaticSize(size), $DynamicSize())
             $name(dev, size, range) = $name(dev, $StaticSize(size), $StaticSize(range))
             function $name(dev::Dev, sz::S, range::NDRange) where {Dev, S <: $_Size, NDRange <: $_Size}
-                if $isgpu(dev)
-                    return $construct(dev, sz, range, $gpu_name)
-                else
-                    if $generate_cpu
-                        return $construct(dev, sz, range, $cpu_name)
-                    else
-                        error("This kernel is unavailable for backend CPU")
-                    end
-                end
+                return $construct(dev, sz, range, $gpu_name)
             end
         end
     end
