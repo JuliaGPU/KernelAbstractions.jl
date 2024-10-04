@@ -53,7 +53,7 @@ end
 #       synchronize rule and then synchronize where the launch was. However, with the current
 #       kernel semantics this ensures correctness for now.
 function EnzymeRules.augmented_primal(
-        config::Config,
+        config,
         func::Const{typeof(synchronize)},
         ::Type{Const{Nothing}},
         backend::T,
@@ -63,7 +63,7 @@ function EnzymeRules.augmented_primal(
 end
 
 function EnzymeRules.reverse(
-        config::Config,
+        config,
         func::Const{typeof(synchronize)},
         ::Type{Const{Nothing}},
         tape,
