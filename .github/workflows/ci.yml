@@ -47,6 +47,26 @@ jobs:
           arch: ${{ matrix.arch }}
           show-versioninfo: true
       - uses: julia-actions/cache@v2
+      - run: | 
+          julia -e '@static if VERSION >= v"1.10"
+            using Pkg
+            withenv("JULIA_PKG_PRECOMPILE_AUTO" => 0) do
+              Pkg.activate("test")
+              Pkg.add(["Enzyme", "EnzymeCore"])
+
+              # to check compatibility, also add Enzyme to the main environment
+              # (or Pkg.test, which merges both environments, could fail)
+              Pkg.activate(".")
+              # Try to co-develop Enzyme and KA
+              try
+                Pkg.develop([PackageSpec("Enzyme"), PackageSpec("EnzymeCore")])
+              catch err
+                @error "Could not install Enzyme" exception=(err,catch_backtrace())
+                exit(3)
+              end
+            end
+          end
+          '
       - uses: julia-actions/julia-buildpkg@v1
       - uses: julia-actions/julia-runtest@v1
         with:

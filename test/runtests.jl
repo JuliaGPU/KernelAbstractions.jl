@@ -72,8 +72,8 @@ struct NewBackend <: KernelAbstractions.GPU end
     @test_throws MethodError kernel()
 end
 
-include("extensions/enzyme.jl")
-@static if VERSION >= v"1.7.0"
+@static if VERSION >= v"1.10.0"
+    include("extensions/enzyme.jl")
     @testset "Enzyme" begin
         enzyme_testsuite(CPU, Array)
     end
