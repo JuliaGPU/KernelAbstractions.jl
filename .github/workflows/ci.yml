@@ -48,7 +48,7 @@ jobs:
           show-versioninfo: true
       - uses: julia-actions/cache@v2
       - run: | 
-          julia -e '@static if VERSION >= v"1.10"
+          julia -e '
             using Pkg
             withenv("JULIA_PKG_PRECOMPILE_AUTO" => 0) do
               Pkg.activate("test")
@@ -61,11 +61,8 @@ jobs:
               try
                 Pkg.develop([PackageSpec("Enzyme"), PackageSpec("EnzymeCore")])
               catch err
-                @error "Could not install Enzyme" exception=(err,catch_backtrace())
-                exit(3)
               end
             end
-          end
           '
       - uses: julia-actions/julia-buildpkg@v1
       - uses: julia-actions/julia-runtest@v1
