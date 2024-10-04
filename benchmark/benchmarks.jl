@@ -8,11 +8,11 @@ using KernelAbstractions
 using Random
 
 if !haskey(ENV, "KA_BACKEND")
-    const BACKEND = CPU()
+    const BACKEND = OpenCLBackend()
 else
     backend = ENV["KA_BACKEND"]
     if backend == "CPU"
-        const BACKEND = CPU()
+        const BACKEND = OpenCLBackend()
     elseif backend == "CUDA"
         using CUDA
         const BACKEND = CUDABackend()

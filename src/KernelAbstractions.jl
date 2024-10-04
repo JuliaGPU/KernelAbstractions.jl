@@ -35,6 +35,7 @@ and then invoked on the arguments.
 - [`@uniform`](@ref)
 - [`@synchronize`](@ref)
 - [`@print`](@ref)
+- [`@context`](@ref)
 
 # Example:
 
@@ -51,45 +52,33 @@ synchronize(backend)
 ```
 """
 macro kernel(expr)
-    __kernel(expr, #=generate_cpu=# true, #=force_inbounds=# false)
+    __kernel(expr, #=force_inbounds=# false)
 end
 
 """
-    @kernel config function f(args) end
-
-This allows for two different configurations:
-
-1. `cpu={true, false}`: Disables code-generation of the CPU function. This relaxes semantics such that KernelAbstractions primitives can be used in non-kernel functions.
-2. `inbounds={false, true}`: Enables a forced `@inbounds` macro around the function definition in the case the user is using too many `@inbounds` already in their kernel. Note that this can lead to incorrect results, crashes, etc and is fundamentally unsafe. Be careful!
-
-- [`@context`](@ref)
+    @kernel inbounds={false, true} function f(args) end
 
 !!! warn
     This is an experimental feature.
 """
 macro kernel(ex...)
     if length(ex) == 1
-        __kernel(ex[1], true, false)
+        __kernel(ex[1], false)
     else
-        generate_cpu = true
         force_inbounds = false
         for i in 1:(length(ex) - 1)
             if ex[i] isa Expr && ex[i].head == :(=) &&
-                    ex[i].args[1] == :cpu && ex[i].args[2] isa Bool
-                generate_cpu = ex[i].args[2]
-            elseif ex[i] isa Expr && ex[i].head == :(=) &&
                     ex[i].args[1] == :inbounds && ex[i].args[2] isa Bool
                 force_inbounds = ex[i].args[2]
             else
                 error(
                     "Configuration should be of form:\n" *
-                        "* `cpu=true`\n" *
                         "* `inbounds=false`\n" *
                         "got `", ex[i], "`",
                 )
             end
         end
-        __kernel(ex[end], generate_cpu, force_inbounds)
+        __kernel(ex[end], force_inbounds)
     end
 end
 
@@ -199,47 +188,6 @@ macro localmem(T, dims)
 end
 
 """
-    @private T dims
-
-Declare storage that is local to each item in the workgroup. This can be safely used
-across [`@synchronize`](@ref) statements. On a CPU, this will allocate additional implicit
-dimensions to ensure correct localization.
-
-For storage that only persists between `@synchronize` statements, an `MArray` can be used
-instead.
-
-See also [`@uniform`](@ref).
-"""
-macro private(T, dims)
-    if dims isa Integer
-        dims = (dims,)
-    end
-    quote
-        $Scratchpad($(esc(:__ctx__)), $(esc(T)), Val($(esc(dims))))
-    end
-end
-
-"""
-    @private mem = 1
-
-Creates a private local of `mem` per item in the workgroup. This can be safely used
-across [`@synchronize`](@ref) statements.
-"""
-macro private(expr)
-    esc(expr)
-end
-
-"""
-    @uniform expr
-
-`expr` is evaluated outside the workitem scope. This is useful for variable declarations
-that span workitems, or are reused across `@synchronize` statements.
-"""
-macro uniform(value)
-    esc(value)
-end
-
-"""
     @synchronize()
 
 After a `@synchronize` statement all read and writes to global and local memory
@@ -258,10 +206,6 @@ end
 After a `@synchronize` statement all read and writes to global and local memory
 from each thread in the workgroup are visible in from all other threads in the
 workgroup. `cond` is not allowed to have any visible sideffects.
-
-# Platform differences
-  - `GPU`: This synchronization will only occur if the `cond` evaluates.
-  - `CPU`: This synchronization will always occur.
 """
 macro synchronize(cond)
     quote
@@ -274,16 +218,13 @@ end
 
 Access the hidden context object used by KernelAbstractions.
 
-!!! warn
-    Only valid to be used from a kernel with `cpu=false`.
-
 ```
 function f(@context, a)
     I = @index(Global, Linear)
     a[I]
 end
 
-@kernel cpu=false function my_kernel(a)
+@kernel function my_kernel(a)
     f(@context, a)
 end
 ```
@@ -296,10 +237,6 @@ end
     @print(items...)
 
 This is a unified print statement.
-
-# Platform differences
-  - `GPU`: This will reorganize the items to print via `@cuprintf`
-  - `CPU`: This will call `print(items...)`
 """
 macro print(items...)
 
@@ -421,37 +358,6 @@ Abstract type for all KernelAbstractions backends.
 abstract type Backend end
 
 """
-Abstract type for all GPU based KernelAbstractions backends.
-
-!!! note
-    New backend implementations **must** sub-type this abstract type.
-"""
-abstract type GPU <: Backend end
-
-"""
-    CPU(; static=false)
-
-Instantiate a CPU (multi-threaded) backend.
-
-## Options:
- - `static`: Uses a static thread assignment, this can be beneficial for NUMA aware code.
-   Defaults to false.
-"""
-struct CPU <: Backend
-    static::Bool
-    CPU(; static::Bool = false) = new(static)
-end
-
-"""
-    isgpu(::Backend)::Bool
-
-Returns true for all [`GPU`](@ref) backends.
-"""
-isgpu(::GPU) = true
-isgpu(::CPU) = false
-
-
-"""
     get_backend(A::AbstractArray)::Backend
 
 Get a [`Backend`](@ref) instance suitable for array `A`.
@@ -465,12 +371,9 @@ function get_backend end
 # Should cover SubArray, ReshapedArray, ReinterpretArray, Hermitian, AbstractTriangular, etc.:
 get_backend(A::AbstractArray) = get_backend(parent(A))
 
-get_backend(::Array) = CPU()
-
 # Define:
 #   adapt_storage(::Backend, a::Array) = adapt(BackendArray, a)
 #   adapt_storage(::Backend, a::BackendArray) = a
-Adapt.adapt_storage(::CPU, a::Array) = a
 
 """
     allocate(::Backend, Type, dims...)::AbstractArray
@@ -658,7 +561,7 @@ Partition a kernel for the given ndrange and workgroupsize.
     return iterspace, dynamic
 end
 
-function construct(backend::Backend, ::S, ::NDRange, xpu_name::XPUName) where {Backend <: Union{CPU, GPU}, S <: _Size, NDRange <: _Size, XPUName}
+function construct(backend::Backend, ::S, ::NDRange, xpu_name::XPUName) where {Backend, S <: _Size, NDRange <: _Size, XPUName}
     return Kernel{Backend, S, NDRange, XPUName}(backend, xpu_name)
 end
 

@@ -27,13 +27,13 @@ end
 ## Launching kernel on the host
 
 You can construct a kernel for a specific backend by calling the kernel with
-`mul2_kernel(CPU(), 16)`. The first argument is a backend of type `KA.Backend`,
+`mul2_kernel(OpenCLBackend(), 16)`. The first argument is a backend of type `KA.Backend`,
 the second argument being the workgroup size. This returns a generated kernel
 executable that is then executed with the input argument `A` and the additional
 argument being a static `ndrange`.
 
 ```julia
-dev = CPU()
+dev = OpenCLBackend()
 A = ones(1024, 1024)
 ev = mul2_kernel(dev, 64)(A, ndrange=size(A))
 synchronize(dev)

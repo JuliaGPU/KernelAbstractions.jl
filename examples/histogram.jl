@@ -94,7 +94,7 @@ end
         histogram!(rand_histogram, rand_input)
         histogram!(linear_histogram, linear_input)
         histogram!(two_histogram, all_two)
-        KernelAbstractions.synchronize(CPU())
+        KernelAbstractions.synchronize(backend)
 
         @test isapprox(Array(rand_histogram), histogram_rand_baseline)
         @test isapprox(Array(linear_histogram), histogram_linear_baseline)
