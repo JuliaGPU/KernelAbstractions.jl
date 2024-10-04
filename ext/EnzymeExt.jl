@@ -42,9 +42,9 @@ end
 EnzymeRules.inactive(::Type{StaticSize}, x...) = nothing
 
 @static if isdefined(EnzymeCore, :set_runtime_activity)
-    include("Enzyme013Ext.jl")
+    include("EnzymeCore08Ext.jl")
 else
-    include("Enzyme012Ext.jl")
+    include("EnzymeCore07Ext.jl")
 end
 
 # Synchronize rules
