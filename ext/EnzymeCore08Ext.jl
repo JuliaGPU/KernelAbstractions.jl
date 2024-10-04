@@ -12,7 +12,7 @@ function gpu_fwd(ctx, config, f, args...)
 end
 
 function EnzymeRules.forward(
-	config,
+        config,
         func::Const{<:Kernel{CPU}},
         ::Type{Const{Nothing}},
         args...;
@@ -27,7 +27,7 @@ function EnzymeRules.forward(
 end
 
 function EnzymeRules.forward(
-	config,
+        config,
         func::Const{<:Kernel{<:GPU}},
         ::Type{Const{Nothing}},
         args...;
