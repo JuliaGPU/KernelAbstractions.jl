@@ -8,7 +8,7 @@ using Test
     end
     I = @index(Global, Linear)
     i = @index(Local, Linear)
-    lmem = @localmem Int (N,) # Ok iff groupsize is static 
+    lmem = @localmem Int (N,) # Ok iff groupsize is static
     @inbounds begin
         lmem[i] = i
         @synchronize
@@ -23,7 +23,7 @@ end
     end
     I = @index(Global, Linear)
     i = @index(Local, Linear)
-    lmem = @localmem Int (N,) # Ok iff groupsize is static 
+    lmem = @localmem Int (N,) # Ok iff groupsize is static
     @inbounds begin
         lmem[i] = i + 3
         for j in 1:2
