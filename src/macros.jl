@@ -14,7 +14,9 @@ function __kernel(expr, generate_cpu = true, force_inbounds = false)
     def = splitdef(expr)
     name = def[:name]
     args = def[:args]
-    find_return(expr) && error("Return statement not permitted in a kernel function $name")
+    generate_cpu && find_return(expr) && error(
+        "Return statement not permitted in a kernel function $name",
+    )
 
     constargs = Array{Bool}(undef, length(args))
     for (i, arg) in enumerate(args)
