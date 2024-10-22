@@ -6,7 +6,7 @@ function find_sources(path::String, sources = String[])
     elseif endswith(path, ".jl")
         push!(sources, path)
     end
-    sources
+    return sources
 end
 
 function examples_testsuite(backend_str)
@@ -27,4 +27,5 @@ function examples_testsuite(backend_str)
         end
 
     end
+    return
 end

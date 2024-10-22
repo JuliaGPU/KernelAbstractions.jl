@@ -15,11 +15,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: julia-actions/setup-julia@v2
         with:
-          version: "nightly" # Only nightly have the -m flag currently
+          version: "1"
       - uses: julia-actions/cache@v2
-      - name: Install Runic
-        run: |
-          julia --color=yes --project=@runic -e 'using Pkg; Pkg.add(url = "https://github.com/fredrikekre/Runic.jl", rev = "e128bc9b77ea44b8fe23a0c3afe741a19c71a7b2")'
-      - name: Run Runic
-        run: |
-          git ls-files -z -- '*.jl' | xargs -0 julia --project=@runic -m Runic --check --diff
+      - uses: fredrikekre/runic-action@v1
+        with:
+          version: "797a1ba83a9c421b4b65845bcb9a6242a6474f24" # Likely to be Runic@1.0.0

@@ -51,7 +51,7 @@ synchronize(backend)
 ```
 """
 macro kernel(expr)
-    __kernel(expr, #=generate_cpu=# true, #=force_inbounds=# false)
+    return __kernel(expr, #=generate_cpu=# true, #=force_inbounds=# false)
 end
 
 """
@@ -69,7 +69,7 @@ This allows for two different configurations:
 """
 macro kernel(ex...)
     if length(ex) == 1
-        __kernel(ex[1], true, false)
+        return __kernel(ex[1], true, false)
     else
         generate_cpu = true
         force_inbounds = false
@@ -89,7 +89,7 @@ macro kernel(ex...)
                 )
             end
         end
-        __kernel(ex[end], generate_cpu, force_inbounds)
+        return __kernel(ex[end], generate_cpu, force_inbounds)
     end
 end
 
@@ -167,7 +167,7 @@ a tuple corresponding to kernel configuration. In order to get
 the total size you can use `prod(@groupsize())`.
 """
 macro groupsize()
-    quote
+    return quote
         $groupsize($(esc(:__ctx__)))
     end
 end
@@ -179,7 +179,7 @@ Query the ndrange on the backend. This function returns
 a tuple corresponding to kernel configuration.
 """
 macro ndrange()
-    quote
+    return quote
         $size($ndrange($(esc(:__ctx__))))
     end
 end
@@ -193,7 +193,7 @@ macro localmem(T, dims)
     # Stay in sync with CUDAnative
     id = gensym("static_shmem")
 
-    quote
+    return quote
         $SharedMemory($(esc(T)), Val($(esc(dims))), Val($(QuoteNode(id))))
     end
 end
@@ -214,7 +214,7 @@ macro private(T, dims)
     if dims isa Integer
         dims = (dims,)
     end
-    quote
+    return quote
         $Scratchpad($(esc(:__ctx__)), $(esc(T)), Val($(esc(dims))))
     end
 end
@@ -226,7 +226,7 @@ Creates a private local of `mem` per item in the workgroup. This can be safely u
 across [`@synchronize`](@ref) statements.
 """
 macro private(expr)
-    esc(expr)
+    return esc(expr)
 end
 
 """
@@ -236,7 +236,7 @@ end
 that span workitems, or are reused across `@synchronize` statements.
 """
 macro uniform(value)
-    esc(value)
+    return esc(value)
 end
 
 """
@@ -247,7 +247,7 @@ from each thread in the workgroup are visible in from all other threads in the
 workgroup.
 """
 macro synchronize()
-    quote
+    return quote
         $__synchronize()
     end
 end
@@ -264,7 +264,7 @@ workgroup. `cond` is not allowed to have any visible sideffects.
   - `CPU`: This synchronization will always occur.
 """
 macro synchronize(cond)
-    quote
+    return quote
         $(esc(cond)) && $__synchronize()
     end
 end
@@ -289,7 +289,7 @@ end
 ```
 """
 macro context()
-    esc(:(__ctx__))
+    return esc(:(__ctx__))
 end
 
 """
@@ -329,7 +329,7 @@ macro print(items...)
         end
     end
 
-    quote
+    return quote
         $__print($(map(esc, args)...))
     end
 end
@@ -385,7 +385,7 @@ macro index(locale, args...)
     end
 
     index_function = Symbol(:__index_, locale, :_, indexkind)
-    Expr(:call, GlobalRef(KernelAbstractions, index_function), esc(:__ctx__), map(esc, args)...)
+    return Expr(:call, GlobalRef(KernelAbstractions, index_function), esc(:__ctx__), map(esc, args)...)
 end
 
 ###
@@ -591,7 +591,7 @@ struct Kernel{Backend, WorkgroupSize <: _Size, NDRange <: _Size, Fun}
 end
 
 function Base.similar(kernel::Kernel{D, WS, ND}, f::F) where {D, WS, ND, F}
-    Kernel{D, WS, ND, F}(kernel.backend, f)
+    return Kernel{D, WS, ND, F}(kernel.backend, f)
 end
 
 workgroupsize(::Kernel{D, WorkgroupSize}) where {D, WorkgroupSize} = WorkgroupSize
@@ -701,7 +701,7 @@ end
         push!(args, item)
     end
 
-    quote
+    return quote
         print($(args...))
     end
 end

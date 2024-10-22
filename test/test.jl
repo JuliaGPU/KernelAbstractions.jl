@@ -154,7 +154,7 @@ function unittest_testsuite(Backend, backend_str, backend_mod, BackendArrayT; sk
     @conditional_testset "Const" skip_tests begin
         let kernel = constarg(Backend(), 8, (1024,))
             # this is poking at internals
-            iterspace = NDRange{1, StaticSize{(128,)}, StaticSize{(8,)}}();
+            iterspace = NDRange{1, StaticSize{(128,)}, StaticSize{(8,)}}()
             ctx = if Backend == CPU
                 KernelAbstractions.mkcontext(kernel, 1, nothing, iterspace, Val(NoDynamicCheck()))
             else
@@ -266,6 +266,7 @@ function unittest_testsuite(Backend, backend_str, backend_mod, BackendArrayT; sk
     function f(KernelAbstractions.@context, a)
         I = @index(Global, Linear)
         a[I] = 1
+        return
     end
     @kernel cpu = false function context_kernel(a)
         f(KernelAbstractions.@context, a)
@@ -306,4 +307,5 @@ function unittest_testsuite(Backend, backend_str, backend_mod, BackendArrayT; sk
         @test size(KernelAbstractions.zeros(backend, Float32, 0, 9)) == (0, 9)
     end
 
+    return
 end
