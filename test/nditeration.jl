@@ -28,7 +28,7 @@ function nditeration_testsuite()
 
     function check(idx, offset, offset_x, offset_y, Dim_x, Dim_y)
         N = Dim_x * Dim_y
-        all(p -> p[1] == p[2], zip(idx[(offset * N .+ 1):N], CartesianIndices(((offset_x * Dim_x .+ 1):Dim_x, (offset_y * Dim_y .+ 1):Dim_y))))
+        return all(p -> p[1] == p[2], zip(idx[(offset * N .+ 1):N], CartesianIndices(((offset_x * Dim_x .+ 1):Dim_x, (offset_y * Dim_y .+ 1):Dim_y))))
     end
 
     @testset "linear_iteration" begin
@@ -85,4 +85,5 @@ function nditeration_testsuite()
             end
         end
     end
+    return
 end

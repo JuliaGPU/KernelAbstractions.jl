@@ -13,7 +13,7 @@ abstract type _Size end
 struct DynamicSize <: _Size end
 struct StaticSize{S} <: _Size
     function StaticSize{S}() where {S}
-        new{S::Tuple{Vararg{Int}}}()
+        return new{S::Tuple{Vararg{Int}}}()
     end
 end
 
@@ -51,11 +51,11 @@ struct NDRange{N, StaticBlocks, StaticWorkitems, DynamicBlock, DynamicWorkitems}
     workitems::DynamicWorkitems
 
     function NDRange{N, B, W}() where {N, B, W}
-        new{N, B, W, Nothing, Nothing}(nothing, nothing)
+        return new{N, B, W, Nothing, Nothing}(nothing, nothing)
     end
 
     function NDRange{N, B, W}(blocks, workitems) where {N, B, W}
-        new{N, B, W, typeof(blocks), typeof(workitems)}(blocks, workitems)
+        return new{N, B, W, typeof(blocks), typeof(workitems)}(blocks, workitems)
     end
 end
 
@@ -77,19 +77,19 @@ Base.length(range::NDRange) = length(blocks(range))
         gidx = groupidx.I[I]
         (gidx - 1) * stride + idx.I[I]
     end
-    CartesianIndex(nI)
+    return CartesianIndex(nI)
 end
 
 Base.@propagate_inbounds function expand(ndrange::NDRange, groupidx::Integer, idx::Integer)
-    expand(ndrange, blocks(ndrange)[groupidx], workitems(ndrange)[idx])
+    return expand(ndrange, blocks(ndrange)[groupidx], workitems(ndrange)[idx])
 end
 
 Base.@propagate_inbounds function expand(ndrange::NDRange{N}, groupidx::CartesianIndex{N}, idx::Integer) where {N}
-    expand(ndrange, groupidx, workitems(ndrange)[idx])
+    return expand(ndrange, groupidx, workitems(ndrange)[idx])
 end
 
 Base.@propagate_inbounds function expand(ndrange::NDRange{N}, groupidx::Integer, idx::CartesianIndex{N}) where {N}
-    expand(ndrange, blocks(ndrange)[groupidx], idx)
+    return expand(ndrange, blocks(ndrange)[groupidx], idx)
 end
 
 """

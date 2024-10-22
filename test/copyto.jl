@@ -17,4 +17,5 @@ function copyto_testsuite(Backend, ArrayT)
 
     @test isapprox(a, Array(A))
     @test isapprox(a, Array(B))
+    return
 end

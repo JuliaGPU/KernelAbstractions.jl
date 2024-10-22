@@ -13,6 +13,7 @@ function mycopy_static!(A, B)
 
     kernel = copy_kernel!(backend, 32, size(A)) # if size(A) varies this will cause recompilation
     kernel(A, B, ndrange = size(A))
+    return
 end
 
 A = KernelAbstractions.zeros(backend, Float64, 128, 128)

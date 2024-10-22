@@ -11,7 +11,7 @@ const Pkg = Base.require(
 )
 
 macro conditional_testset(name, skip_tests, expr)
-    esc(
+    return esc(
         quote
             @testset $name begin
                 if $name ∉ $skip_tests
@@ -86,6 +86,8 @@ function testsuite(backend, backend_str, backend_mod, AT, DAT; skip_tests = Set{
     @conditional_testset "Examples" skip_tests begin
         examples_testsuite(backend_str)
     end
+
+    return
 end
 
 end

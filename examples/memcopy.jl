@@ -13,6 +13,7 @@ function mycopy!(A, B)
 
     kernel = copy_kernel!(backend)
     kernel(A, B, ndrange = length(A))
+    return
 end
 
 A = KernelAbstractions.zeros(backend, Float64, 128, 128)

@@ -43,7 +43,7 @@ function (obj::Kernel{CPU})(args...; ndrange = nothing, workgroupsize = nothing)
         return nothing
     end
 
-    __run(obj, ndrange, iterspace, args, dynamic, obj.backend.static)
+    return __run(obj, ndrange, iterspace, args, dynamic, obj.backend.static)
 end
 
 const CPU_GRAINSIZE = 1024 # Vectorization, 4x unrolling, minimal grain size
@@ -162,7 +162,7 @@ end
 
 @inline function __index_Global_Linear(ctx, idx::CartesianIndex)
     I = @inbounds expand(__iterspace(ctx), __groupindex(ctx), idx)
-    @inbounds LinearIndices(__ndrange(ctx))[I]
+    return @inbounds LinearIndices(__ndrange(ctx))[I]
 end
 
 @inline function __index_Local_Cartesian(_, idx::CartesianIndex)
@@ -170,7 +170,7 @@ end
 end
 
 @inline function __index_Group_Cartesian(ctx, ::CartesianIndex)
-    __groupindex(ctx)
+    return __groupindex(ctx)
 end
 
 @inline function __index_Global_Cartesian(ctx, idx::CartesianIndex)
@@ -191,7 +191,7 @@ end
 # CPU implementation of shared memory
 ###
 @inline function SharedMemory(::Type{T}, ::Val{Dims}, ::Val) where {T, Dims}
-    MArray{__size(Dims), T}(undef)
+    return MArray{__size(Dims), T}(undef)
 end
 
 ###
@@ -212,7 +212,7 @@ end
 # https://github.com/JuliaLang/julia/issues/39308
 @inline function aview(A, I::Vararg{Any, N}) where {N}
     J = Base.to_indices(A, I)
-    Base.unsafe_view(Base._maybe_reshape_parent(A, Base.index_ndims(J...)), J...)
+    return Base.unsafe_view(Base._maybe_reshape_parent(A, Base.index_ndims(J...)), J...)
 end
 
 @inline function Base.getindex(A::ScratchArray{N}, idx) where {N}
