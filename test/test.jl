@@ -306,4 +306,22 @@ function unittest_testsuite(Backend, backend_str, backend_mod, BackendArrayT; sk
         @test size(KernelAbstractions.zeros(backend, Float32, 0, 9)) == (0, 9)
     end
 
+    @kernel cpu = false function gpu_return_kernel!(x)
+        i = @index(Global)
+        if i ≤ (length(x) ÷ 2)
+            x[i] = 1
+            return
+        end
+    end
+    @testset "GPU kernel return statement" begin
+        if !(Backend() isa CPU)
+            A = KernelAbstractions.zeros(Backend(), Int64, 1024)
+            gpu_return_kernel!(Backend())(A; ndrange = length(A))
+            synchronize(Backend())
+            Ah = Array(A)
+            @test all(a -> a == 1, @view(Ah[1:(length(A) ÷ 2)]))
+            @test all(a -> a == 0, @view(Ah[(length(A) ÷ 2 + 1):end]))
+        end
+    end
+
 end
