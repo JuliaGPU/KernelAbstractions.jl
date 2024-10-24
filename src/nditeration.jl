@@ -29,7 +29,7 @@ end
 @inline function Base.getindex(iter::FastCartesianIndices{N}, I::Vararg{Int, N}) where {N}
     @boundscheck checkbounds(iter, I...)
     index = map(iter.inverses, I) do inv, i
-        @inbounds getindex(Base.OneTo(inv.divisor), i%Int32)
+        @inbounds getindex(Base.OneTo(inv.divisor), i % Int32)
     end
     CartesianIndex(index)
 end
@@ -201,19 +201,22 @@ needs to perform dynamic bounds-checking.
 end
 
 
-
 """
     assume(cond::Bool)
 Assume that the condition `cond` is true. This is a hint to the compiler, possibly enabling
 it to optimize more aggressively.
 """
-@inline assume(cond::Bool) = Base.llvmcall(("""
+@inline assume(cond::Bool) = Base.llvmcall(
+    (
+        """
         declare void @llvm.assume(i1)
         define void @entry(i8) #0 {
             %cond = icmp eq i8 %0, 1
             call void @llvm.assume(i1 %cond)
             ret void
         }
-        attributes #0 = { alwaysinline }""", "entry"),
-    Nothing, Tuple{Bool}, cond)
+        attributes #0 = { alwaysinline }""", "entry",
+    ),
+    Nothing, Tuple{Bool}, cond
+)
 end #module
