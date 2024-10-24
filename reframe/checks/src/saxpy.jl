@@ -37,10 +37,10 @@ end setup = (
 )
 
 bytes_saxpy = 3 * sizeof(T) * N # num bytes transferred in SAXPY
-bytes_copy  = 2 * sizeof(T) * N # num bytes transferred in copy
+bytes_copy = 2 * sizeof(T) * N # num bytes transferred in copy
 time_saxpy = minimum(res_saxpy).time
-time_copy  = minimum(res_copy).time
+time_copy = minimum(res_copy).time
 
-println("Copy: ",  bytes_copy/time_copy)
-println("Saxpy: ", bytes_saxpy/time_saxpy)
+println("Copy: ", bytes_copy / time_copy)
+println("Saxpy: ", bytes_saxpy / time_saxpy)
 println("Solution Validates")
