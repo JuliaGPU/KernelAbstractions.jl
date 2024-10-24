@@ -4,6 +4,7 @@ stages:
 
 generate-pipeline:
   stage: generate
+  image: julia:1.10
   script:
     - pip install reframe-hpc
     - reframe --ci-generate=${CI_PROJECT_DIR}/pipeline.yml -c ${CI_PROJECT_DIR}/reframe/checks
