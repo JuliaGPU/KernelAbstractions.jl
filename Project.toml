@@ -20,7 +20,7 @@ UnsafeAtomicsLLVM = "d80eeb9a-aca5-4d75-85e5-170c8b632249"
 
 [compat]
 Adapt = "0.4, 1.0, 2.0, 3.0, 4"
-Atomix = "0.1"
+Atomix = "0.1, 1"
 EnzymeCore = "0.7, 0.8.1"
 InteractiveUtils = "1.6"
 LinearAlgebra = "1.6"
