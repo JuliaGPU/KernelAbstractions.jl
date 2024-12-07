@@ -19,7 +19,7 @@ Estimate the memory bandwidth (GB/s) by performing a time measurement of a
 SAXPY kernel. Returns the memory bandwidth (GB/s) and the compute (GFLOP/s).
 """
 function measure_membw(
-        backend = CPU(); verbose = true, N = 1024 * 500_000, dtype = Float32,
+        backend = OpenCLBackend(); verbose = true, N = 1024 * 500_000, dtype = Float32,
         init = :parallel,
     )
     bytes = 3 * sizeof(dtype) * N # num bytes transferred in SAXPY
@@ -52,8 +52,8 @@ function measure_membw(
 end
 
 # Static should be much better (on a system with multiple NUMA domains)
-measure_membw(CPU());
-measure_membw(CPU(; static = true));
+measure_membw(OpenCLBackend());
+# measure_membw(OpenCLBackend(; static = true));
 
 # The following has significantly worse performance (even on systems with a single memory domain)!
 # measure_membw(CPU(); init=:serial);
