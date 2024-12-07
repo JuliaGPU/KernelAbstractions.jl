@@ -11,6 +11,7 @@ function square_caller(A, backend)
     kernel = square!(backend)
     kernel(A, ndrange = size(A))
     KernelAbstractions.synchronize(backend)
+    return
 end
 
 
@@ -23,6 +24,7 @@ function mul_caller(A, B, backend)
     kernel = mul!(backend)
     kernel(A, B, ndrange = size(A))
     KernelAbstractions.synchronize(backend)
+    return
 end
 
 function enzyme_testsuite(backend, ArrayT, supports_reverse = true)
@@ -58,4 +60,5 @@ function enzyme_testsuite(backend, ArrayT, supports_reverse = true)
         @test all(dA .≈ 2:2:128)
 
     end
+    return
 end

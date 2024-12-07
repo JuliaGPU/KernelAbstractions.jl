@@ -9,6 +9,7 @@ function cooperative_test!(req)
         done, _ = MPI.Test(req, MPI.Status)
         yield()
     end
+    return
 end
 
 function cooperative_wait(task::Task)
@@ -17,6 +18,7 @@ function cooperative_wait(task::Task)
         yield()
     end
     wait(task)
+    return
 end
 
 function exchange!(h_send_buf, d_recv_buf, h_recv_buf, src_rank, dst_rank, comm)
@@ -68,6 +70,7 @@ function main(backend)
     cooperative_wait(send_task)
 
     @test all(d_recv_buf .== src_rank)
+    return
 end
 
 main(backend)
