@@ -1,5 +1,3 @@
-import UnsafeAtomicsLLVM
-
 unsafe_free!(::AbstractArray) = return
 synchronize(::CPU) = nothing
 
