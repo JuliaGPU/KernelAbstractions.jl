@@ -10,7 +10,6 @@ export synchronize, get_backend, allocate
 import PrecompileTools
 
 import Atomix: @atomic, @atomicswap, @atomicreplace
-import UnsafeAtomics
 
 using MacroTools
 using StaticArrays
