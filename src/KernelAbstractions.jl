@@ -50,7 +50,7 @@ synchronize(backend)
 ```
 """
 macro kernel(expr)
-    __kernel(expr, #=generate_cpu=# true, #=force_inbounds=# false)
+    __kernel(expr, #=generate_cpu=# true, #=force_inbounds=# false, #=force_fastmath=# false)
 end
 
 """
@@ -60,6 +60,7 @@ This allows for two different configurations:
 
 1. `cpu={true, false}`: Disables code-generation of the CPU function. This relaxes semantics such that KernelAbstractions primitives can be used in non-kernel functions.
 2. `inbounds={false, true}`: Enables a forced `@inbounds` macro around the function definition in the case the user is using too many `@inbounds` already in their kernel. Note that this can lead to incorrect results, crashes, etc and is fundamentally unsafe. Be careful!
+3. `fastmath={false, true}`: Enables a forced `@fastmath` macro around the function definition. This will use less precise square roots and flush denormals.
 
 - [`@context`](@ref)
 
@@ -72,6 +73,7 @@ macro kernel(ex...)
     else
         generate_cpu = true
         force_inbounds = false
+        force_fastmath = false
         for i in 1:(length(ex) - 1)
             if ex[i] isa Expr && ex[i].head == :(=) &&
                     ex[i].args[1] == :cpu && ex[i].args[2] isa Bool
@@ -79,16 +81,20 @@ macro kernel(ex...)
             elseif ex[i] isa Expr && ex[i].head == :(=) &&
                     ex[i].args[1] == :inbounds && ex[i].args[2] isa Bool
                 force_inbounds = ex[i].args[2]
+            elseif ex[i] isa Expr && ex[i].head == :(=) &&
+                    ex[i].args[1] == :fastmath && ex[i].args[2] isa Bool
+                force_fastmath = ex[i].args[2]
             else
                 error(
                     "Configuration should be of form:\n" *
                         "* `cpu=true`\n" *
                         "* `inbounds=false`\n" *
+                        "* `fastmath=false`\n" *
                         "got `", ex[i], "`",
                 )
             end
         end
-        __kernel(ex[end], generate_cpu, force_inbounds)
+        __kernel(ex[end], generate_cpu, force_inbounds, force_fastmath)
     end
 end
 

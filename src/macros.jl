@@ -10,7 +10,7 @@ function find_return(stmt)
 end
 
 # XXX: Proper errors
-function __kernel(expr, generate_cpu = true, force_inbounds = false)
+function __kernel(expr, generate_cpu = true, force_inbounds = false, force_fastmath = false)
     def = splitdef(expr)
     name = def[:name]
     args = def[:args]
@@ -40,13 +40,13 @@ function __kernel(expr, generate_cpu = true, force_inbounds = false)
     if generate_cpu
         def_cpu = deepcopy(def)
         def_cpu[:name] = cpu_name
-        transform_cpu!(def_cpu, constargs, force_inbounds)
+        transform_cpu!(def_cpu, constargs, force_inbounds, force_fastmath)
         cpu_function = combinedef(def_cpu)
     end
 
     def_gpu = deepcopy(def)
     def_gpu[:name] = gpu_name = Symbol(:gpu_, name)
-    transform_gpu!(def_gpu, constargs, force_inbounds)
+    transform_gpu!(def_gpu, constargs, force_inbounds, force_fastmath)
     gpu_function = combinedef(def_gpu)
 
     # create constructor functions
@@ -78,7 +78,7 @@ end
 
 # The easy case, transform the function for GPU execution
 # - mark constant arguments by applying `constify`.
-function transform_gpu!(def, constargs, force_inbounds)
+function transform_gpu!(def, constargs, force_inbounds, force_fastmath)
     let_constargs = Expr[]
     for (i, arg) in enumerate(def[:args])
         if constargs[i]
@@ -90,6 +90,11 @@ function transform_gpu!(def, constargs, force_inbounds)
     if force_inbounds
         body = quote
             @inbounds $(body)
+        end
+    end
+    if force_fastmath
+        body = quote
+            @fastmath $(body)
         end
     end
     body = quote
@@ -112,7 +117,7 @@ end
 #   - handle indicies
 #   - hoist workgroup definitions
 #   - hoist uniform variables
-function transform_cpu!(def, constargs, force_inbounds)
+function transform_cpu!(def, constargs, force_inbounds, force_fastmath)
     let_constargs = Expr[]
     for (i, arg) in enumerate(def[:args])
         if constargs[i]
@@ -130,6 +135,7 @@ function transform_cpu!(def, constargs, force_inbounds)
     if force_inbounds
         push!(new_stmts, Expr(:inbounds, :pop))
     end
+
     push!(new_stmts, Expr(:popaliasscope))
     push!(new_stmts, :(return nothing))
     def[:body] = Expr(
