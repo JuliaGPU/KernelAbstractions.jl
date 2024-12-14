@@ -39,7 +39,7 @@ end
 
 function compiler_testsuite(backend, ArrayT)
     kernel = index(CPU(), DynamicSize(), DynamicSize())
-    iterspace = NDRange{1, StaticSize{(128,)}, StaticSize{(8,)}}();
+    iterspace = NDRange{1, StaticSize{(128,)}, StaticSize{(8,)}}()
     ctx = KernelAbstractions.mkcontext(kernel, 1, nothing, iterspace, Val(KernelAbstractions.NoDynamicCheck()))
     @test KernelAbstractions.__index_Global_NTuple(ctx, CartesianIndex(1)) == (1,)
 
@@ -74,4 +74,5 @@ function compiler_testsuite(backend, ArrayT)
         # test that there is no invoke of overdub
         @test !any(check_for_overdub, CI.code)
     end
+    return
 end

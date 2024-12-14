@@ -34,7 +34,7 @@ end
 
 
 function ka_code_llvm(kernel, argtypes; ndrange = nothing, workgroupsize = nothing, kwargs...)
-    ka_code_llvm(stdout, kernel, argtypes; ndrange = ndrange, workgroupsize = nothing, kwargs...)
+    return ka_code_llvm(stdout, kernel, argtypes; ndrange = ndrange, workgroupsize = nothing, kwargs...)
 end
 
 function ka_code_llvm(io::IO, kernel, argtypes; ndrange = nothing, workgroupsize = nothing, kwargs...)
@@ -119,7 +119,7 @@ macro ka_code_typed(ex0...)
 
     thecall = InteractiveUtils.gen_call_with_extracted_types_and_kwargs(__module__, :ka_code_typed, ex)
 
-    quote
+    return quote
         local $(esc(args)) = $(old_args)
         # e.g. translate CuArray to CuBackendArray
         $(esc(args)) = map(x -> argconvert($kern, x), $(esc(args)))
@@ -152,7 +152,7 @@ macro ka_code_llvm(ex0...)
 
     thecall = InteractiveUtils.gen_call_with_extracted_types_and_kwargs(__module__, :ka_code_llvm, ex)
 
-    quote
+    return quote
         local $(esc(args)) = $(old_args)
 
         if isa($kern, Kernel{G} where {G <: GPU})
