@@ -22,7 +22,7 @@ end
 @test_throws ErrorException("This kernel is unavailable for backend CPU") my_no_cpu_kernel(CPU())
 
 # testing multiple configurations at the same time
-@kernel cpu = false inbounds = false function my_no_cpu_kernel2(a)
+@kernel cpu = false inbounds = false fastmath = false function my_no_cpu_kernel2(a)
 end
 @test_throws ErrorException("This kernel is unavailable for backend CPU") my_no_cpu_kernel2(CPU())
 
@@ -41,6 +41,16 @@ if Base.JLOptions().check_bounds == 0 || Base.JLOptions().check_bounds == 2
         a[idx] = 0
     end
     @test nothing == my_inbounds_kernel(CPU())(Int[], ndrange = 1)
+end
+
+if Base.JLOptions().fast_math == 0
+    @kernel fastmath = true function my_fastmath_kernel(a)
+        idx = @index(Global, Linear)
+        a[idx] = sqrt(10)
+    end
+    A = [0.0]
+    my_fastmath_kernel(CPU())(A, ndrange = 1)
+    @test A[1] == @fastmath sqrt(10)
 end
 
 struct NewBackend <: KernelAbstractions.GPU end
