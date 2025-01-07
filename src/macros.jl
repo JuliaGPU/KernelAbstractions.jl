@@ -10,7 +10,7 @@ function find_return(stmt)
 end
 
 # XXX: Proper errors
-function __kernel(expr, generate_cpu = true, force_inbounds = false)
+function __kernel(N, expr, generate_cpu = true, force_inbounds = false)
     def = splitdef(expr)
     name = def[:name]
     args = def[:args]
@@ -57,10 +57,10 @@ function __kernel(expr, generate_cpu = true, force_inbounds = false)
             $name(dev, size, range) = $name(dev, $StaticSize(size), $StaticSize(range))
             function $name(dev::Dev, sz::S, range::NDRange) where {Dev, S <: $_Size, NDRange <: $_Size}
                 if $isgpu(dev)
-                    return $construct(dev, sz, range, $gpu_name)
+                    return $construct(dev, $(N), sz, range, $gpu_name)
                 else
                     if $generate_cpu
-                        return $construct(dev, sz, range, $cpu_name)
+                        return $construct(dev, $(N), sz, range, $cpu_name)
                     else
                         error("This kernel is unavailable for backend CPU")
                     end
