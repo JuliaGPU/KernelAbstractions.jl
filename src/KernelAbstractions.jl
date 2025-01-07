@@ -82,6 +82,8 @@ macro kernel(ex...)
             elseif ex[i] isa Expr && ex[i].head == :(=) &&
                     ex[i].args[1] == :inbounds && ex[i].args[2] isa Bool
                 force_inbounds = ex[i].args[2]
+            elseif ex[i] isa Int
+                N = StaticSize(ex[i])
             else
                 error(
                     "Configuration should be of form:\n" *
@@ -659,7 +661,10 @@ Partition a kernel for the given ndrange and workgroupsize.
     end
 
     if static_ndims <: StaticSize
-        @assert get(static_ndims) == length(ndrange)
+        N = only(get(static_ndims))
+        if N !== length(ndrange)
+            error("Mismatch between static kernel dimension (N=$N) and ndrange=$ndrange")
+        end
     end
 
     # TODO: Add static_ndims
