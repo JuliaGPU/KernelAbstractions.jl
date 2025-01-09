@@ -63,7 +63,7 @@ end
 @inline workitems(range::NDRange{N, B, W}) where {N, B, W <: StaticSize} = CartesianIndices(get(W))::CartesianIndices{N}
 @inline blocks(range::NDRange{N, B}) where {N, B <: DynamicSize} = range.blocks::CartesianIndices{N}
 @inline blocks(range::NDRange{N, B}) where {N, B <: StaticSize} = CartesianIndices(get(B))::CartesianIndices{N}
-@inline Base.ndims(::NDRange{N}) where N = N
+@inline Base.ndims(::NDRange{N}) where {N} = N
 
 import Base.iterate
 @inline iterate(range::NDRange) = iterate(blocks(range))
