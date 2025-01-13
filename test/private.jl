@@ -73,7 +73,7 @@ function private_testsuite(backend, ArrayT)
 
         A = ArrayT{Int}(undef, 64, 64)
         A .= 1
-        forloop(backend())(A, Val(size(A, 2)), ndrange = size(A, 1), workgroupsize = size(A, 1))
+        forloop(backend(), size(A, 1))(A, Val(size(A, 2)), ndrange = size(A, 1), workgroupsize = size(A, 1))
         synchronize(backend())
         @test all(Array(A)[:, 1] .== 64)
         @test all(Array(A)[:, 2:end] .== 1)
