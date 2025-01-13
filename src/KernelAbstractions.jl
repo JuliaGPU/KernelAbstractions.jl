@@ -110,12 +110,44 @@ macro Const end
 """
     copyto!(::Backend, dest::AbstractArray, src::AbstractArray)
 
-Perform a `copyto!` operation that execution ordered with respect to the backend.
+Perform a `copyto!` operation that is execution ordered with respect to the backend.
+
+!!! note
+    On some backends it may be necessary to first call [`pagelock!`](@ref) on host memory,
+    to enable fully asynchronous behaviour w.r.t to the host.
+
+!!! warning
+    While this function is always asynchronous w.r.t. to the device, it may be synchronous w.r.t to the host.
+    Additionally if the function is asynchronous w.r.t to the host, the user is required to gurantuee, the lifetime
+    of the host buffer. Otherwise the user may cause a use-after-free, because the GC was able to prove that the host
+    buffer can be freed.
+
+    ```julia
+    arr = zeros(64)
+    GC.@preserve arr begin
+        copyto!(backend, arr, ...)
+        # other operations
+        synchronize(backend)
+    end
+    ```
 
 !!! note
     Backend implementations **must** implement this function.
 """
 function copyto! end
+
+"""
+    pagelock!(::Backend, dest::AbstractArray)
+
+Pagelock (pin) a host memory buffer for a backend device. This may be necessary for [`copyto!`](@ref)
+to perform asynchronously w.r.t to the host/
+
+!!! note
+    Backends **may** implement this function.
+"""
+function pagelock!(::Backend, x)
+    return nothing
+end
 
 """
     synchronize(::Backend)
