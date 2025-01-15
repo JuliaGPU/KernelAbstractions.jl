@@ -219,19 +219,6 @@ function unittest_testsuite(Backend, backend_str, backend_mod, BackendArrayT; sk
         synchronize(Backend())
     end
 
-
-    @conditional_testset "return statement" skip_tests begin
-        try
-            @eval @kernel function kernel_return()
-                return
-            end
-            @test false
-        catch e
-            @test e.error ==
-                ErrorException("Return statement not permitted in a kernel function kernel_return")
-        end
-    end
-
     @conditional_testset "fallback test: callable types" skip_tests begin
         @eval begin
             function f end
@@ -273,28 +260,14 @@ function unittest_testsuite(Backend, backend_str, backend_mod, BackendArrayT; sk
     end
 
     @testset "No CPU kernel" begin
-        if !(Backend() isa CPU)
-            A = KernelAbstractions.zeros(Backend(), Int64, 1024)
-            context_kernel(Backend())(A, ndrange = size(A))
-            synchronize(Backend())
-            @test all((a) -> a == 1, Array(A))
-        else
-            @test_throws ErrorException("This kernel is unavailable for backend CPU") context_kernel(Backend())
-        end
+        A = KernelAbstractions.zeros(Backend(), Int64, 1024)
+        context_kernel(Backend())(A, ndrange = size(A))
+        synchronize(Backend())
+        @test all((a) -> a == 1, Array(A))
     end
 
     @testset "functional" begin
         @test KernelAbstractions.functional(Backend()) isa Union{Missing, Bool}
-    end
-
-    @testset "CPU default workgroupsize" begin
-        @test KernelAbstractions.default_cpu_workgroupsize((64,)) == (64,)
-        @test KernelAbstractions.default_cpu_workgroupsize((1024,)) == (1024,)
-        @test KernelAbstractions.default_cpu_workgroupsize((2056,)) == (1024,)
-        @test KernelAbstractions.default_cpu_workgroupsize((64, 64)) == (64, 16)
-        @test KernelAbstractions.default_cpu_workgroupsize((64, 64, 64, 4)) == (64, 16, 1, 1)
-        @test KernelAbstractions.default_cpu_workgroupsize((64, 15)) == (64, 15)
-        @test KernelAbstractions.default_cpu_workgroupsize((5, 7, 13, 17)) == (5, 7, 13, 2)
     end
 
     @testset "empty arrays" begin
@@ -315,14 +288,12 @@ function unittest_testsuite(Backend, backend_str, backend_mod, BackendArrayT; sk
         end
     end
     @testset "GPU kernel return statement" begin
-        if !(Backend() isa CPU)
-            A = KernelAbstractions.zeros(Backend(), Int64, 1024)
-            gpu_return_kernel!(Backend())(A; ndrange = length(A))
-            synchronize(Backend())
-            Ah = Array(A)
-            @test all(a -> a == 1, @view(Ah[1:(length(A) ÷ 2)]))
-            @test all(a -> a == 0, @view(Ah[(length(A) ÷ 2 + 1):end]))
-        end
+        A = KernelAbstractions.zeros(Backend(), Int64, 1024)
+        gpu_return_kernel!(Backend())(A; ndrange = length(A))
+        synchronize(Backend())
+        Ah = Array(A)
+        @test all(a -> a == 1, @view(Ah[1:(length(A) ÷ 2)]))
+        @test all(a -> a == 0, @view(Ah[(length(A) ÷ 2 + 1):end]))
     end
 
     return

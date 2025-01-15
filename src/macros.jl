@@ -10,13 +10,10 @@ function find_return(stmt)
 end
 
 # XXX: Proper errors
-function __kernel(expr, generate_cpu = true, force_inbounds = false, unsafe_indices = false)
+function __kernel(expr, force_inbounds = false, unsafe_indices = false)
     def = splitdef(expr)
     name = def[:name]
     args = def[:args]
-    generate_cpu && find_return(expr) && error(
-        "Return statement not permitted in a kernel function $name",
-    )
 
     constargs = Array{Bool}(undef, length(args))
     for (i, arg) in enumerate(args)
@@ -31,19 +28,6 @@ function __kernel(expr, generate_cpu = true, force_inbounds = false, unsafe_indi
         constargs[i] = false
     end
 
-    # create two functions
-    # 1. GPU function
-    # 2. CPU function with work-group loops inserted
-    #
-    # Without the deepcopy we might accidentially modify expr shared between CPU and GPU
-    cpu_name = Symbol(:cpu_, name)
-    if generate_cpu
-        def_cpu = deepcopy(def)
-        def_cpu[:name] = cpu_name
-        transform_cpu!(def_cpu, constargs, force_inbounds)
-        cpu_function = combinedef(def_cpu)
-    end
-
     def_gpu = deepcopy(def)
     def_gpu[:name] = gpu_name = Symbol(:gpu_, name)
     transform_gpu!(def_gpu, constargs, force_inbounds, unsafe_indices)
@@ -56,24 +40,12 @@ function __kernel(expr, generate_cpu = true, force_inbounds = false, unsafe_indi
             $name(dev, size) = $name(dev, $StaticSize(size), $DynamicSize())
             $name(dev, size, range) = $name(dev, $StaticSize(size), $StaticSize(range))
             function $name(dev::Dev, sz::S, range::NDRange) where {Dev, S <: $_Size, NDRange <: $_Size}
-                if $isgpu(dev)
-                    return $construct(dev, sz, range, $gpu_name)
-                else
-                    if $generate_cpu
-                        return $construct(dev, sz, range, $cpu_name)
-                    else
-                        error("This kernel is unavailable for backend CPU")
-                    end
-                end
+                return $construct(dev, sz, range, $gpu_name)
             end
         end
     end
 
-    if generate_cpu
-        return Expr(:block, esc(cpu_function), esc(gpu_function), esc(constructors))
-    else
-        return Expr(:block, esc(gpu_function), esc(constructors))
-    end
+    return Expr(:block, esc(gpu_function), esc(constructors))
 end
 
 # The easy case, transform the function for GPU execution
@@ -96,45 +68,10 @@ function transform_gpu!(def, constargs, force_inbounds, unsafe_indices)
         push!(new_stmts, Expr(:inbounds, true))
     end
     if !unsafe_indices
-        append!(new_stmts, split(emit_gpu, body.args))
+        append!(new_stmts, split(body.args))
     else
         push!(new_stmts, body)
     end
-    if force_inbounds
-        push!(new_stmts, Expr(:inbounds, :pop))
-    end
-    push!(new_stmts, Expr(:popaliasscope))
-    push!(new_stmts, :(return nothing))
-    def[:body] = Expr(
-        :let,
-        Expr(:block, let_constargs...),
-        Expr(:block, new_stmts...),
-    )
-    return
-end
-
-# The hard case, transform the function for CPU execution
-# - mark constant arguments by applying `constify`.
-# - insert aliasscope markers
-# - insert implied loop bodys
-#   - handle indices
-#   - hoist workgroup definitions
-#   - hoist uniform variables
-function transform_cpu!(def, constargs, force_inbounds)
-    let_constargs = Expr[]
-    for (i, arg) in enumerate(def[:args])
-        if constargs[i]
-            push!(let_constargs, :($arg = $constify($arg)))
-        end
-    end
-    pushfirst!(def[:args], :__ctx__)
-    new_stmts = Expr[]
-    body = MacroTools.flatten(def[:body])
-    push!(new_stmts, Expr(:aliasscope))
-    if force_inbounds
-        push!(new_stmts, Expr(:inbounds, true))
-    end
-    append!(new_stmts, split(emit_cpu, body.args))
     if force_inbounds
         push!(new_stmts, Expr(:inbounds, :pop))
     end
@@ -175,7 +112,6 @@ end
 
 # TODO proper handling of LineInfo
 function split(
-        emit,
         stmts,
         indices = Any[], private = Set{Symbol}(),
     )
@@ -206,7 +142,7 @@ function split(
             function recurse(expr::Expr)
                 expr = unblock(expr)
                 if is_scope_construct(expr) && any(find_sync, expr.args)
-                    new_args = unblock(split(emit, expr.args, deepcopy(indices), deepcopy(private)))
+                    new_args = unblock(split(expr.args, deepcopy(indices), deepcopy(private)))
                     return Expr(expr.head, new_args...)
                 else
                     return Expr(expr.head, map(recurse, expr.args)...)
@@ -255,62 +191,7 @@ function split(
     return new_stmts
 end
 
-function emit_cpu(loop)
-    idx = gensym(:I)
-    for stmt in loop.indices
-        # splice index into the i = @index(Cartesian, $idx)
-        @assert stmt.head === :(=)
-        rhs = stmt.args[2]
-        push!(rhs.args, idx)
-    end
-    stmts = Any[]
-    append!(stmts, loop.allocations)
-
-    # private_allocations turn into lhs = ntuple(i->rhs, length(__workitems_iterspace()))
-    N = gensym(:N)
-    push!(stmts, :($N = length($__workitems_iterspace(__ctx__))))
-
-    for stmt in loop.private_allocations
-        if @capture(stmt, lhs_ = rhs_)
-            push!(stmts, :($lhs = ntuple(_ -> $rhs, $N)))
-        else
-            error("@private $stmt not an assignment")
-        end
-    end
-
-    # don't emit empty loops
-    if !(isempty(loop.stmts) || all(s -> s isa LineNumberNode, loop.stmts))
-        body = Expr(:block, loop.stmts...)
-        body = postwalk(body) do expr
-            if @capture(expr, lhs_ = rhs_)
-                if lhs in loop.private
-                    error("Can't assign to variables marked private")
-                end
-            elseif @capture(expr, A_[i__])
-                if A in loop.private
-                    return :($A[$__index_Local_Linear(__ctx__, $(idx))][$(i...)])
-                end
-            elseif expr isa Symbol
-                if expr in loop.private
-                    return :($expr[$__index_Local_Linear(__ctx__, $(idx))])
-                end
-            end
-            return expr
-        end
-        loopexpr = quote
-            for $idx in $__workitems_iterspace(__ctx__)
-                $__validindex(__ctx__, $idx) || continue
-                $(loop.indices...)
-                $(unblock(body))
-            end
-        end
-        push!(stmts, loopexpr)
-    end
-
-    return unblock(Expr(:block, stmts...))
-end
-
-function emit_gpu(loop)
+function emit(loop)
     stmts = Any[]
 
     body = Expr(:block, loop.stmts...)

@@ -1,20 +1,32 @@
 name = "KernelAbstractions"
 uuid = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
 authors = ["Valentin Churavy <v.churavy@gmail.com> and contributors"]
-version = "0.9.34"
+version = "0.10.0-dev"
 
 [deps]
 Adapt = "79e6a3ab-5dfb-504d-930d-738a2a938a0e"
 Atomix = "a9b6321e-bd34-4604-b9c9-b65b8de01458"
-EnzymeCore = "f151be2c-9106-41f4-ab19-57ee4f262869"
+GPUCompiler = "61eb1bfa-7361-4325-ad38-22787b887f55"
 InteractiveUtils = "b77e0a4c-d291-57a0-90e8-8db25a27a240"
-LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+LLVM = "929cbde3-209d-540e-8aea-75f648917ca0"
 MacroTools = "1914dd2f-81c6-5fcd-8719-6d5c9610ff09"
+OpenCL_jll = "6cb37087-e8b6-5417-8430-1f242f1e46e4"
 PrecompileTools = "aea7be01-6a6a-4083-8856-8a6e6704d82a"
-Requires = "ae029012-a4dd-5104-9daa-d747884805df"
-SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
+Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
+SPIRVIntrinsics = "71d1d633-e7e8-4a92-83a1-de8814b09ba8"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 UUIDs = "cf7118a7-6976-5b1a-9a39-7adc72f591a4"
+pocl_jll = "627d6b7a-bbe6-5189-83e7-98cc0a5aeadd"
+
+[weakdeps]
+EnzymeCore = "f151be2c-9106-41f4-ab19-57ee4f262869"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
+
+[extensions]
+EnzymeExt = "EnzymeCore"
+LinearAlgebraExt = "LinearAlgebra"
+SparseArraysExt = "SparseArrays"
 
 [compat]
 Adapt = "0.4, 1.0, 2.0, 3.0, 4"
@@ -24,23 +36,12 @@ InteractiveUtils = "1.6"
 LinearAlgebra = "1.6"
 MacroTools = "0.5"
 PrecompileTools = "1"
-Requires = "1.3"
 SparseArrays = "<0.0.1, 1.6"
 StaticArrays = "0.12, 1.0"
 UUIDs = "<0.0.1, 1.6"
-julia = "1.6"
-
-[extensions]
-EnzymeExt = "EnzymeCore"
-LinearAlgebraExt = "LinearAlgebra"
-SparseArraysExt = "SparseArrays"
+julia = "1.10"
 
 [extras]
-EnzymeCore = "f151be2c-9106-41f4-ab19-57ee4f262869"
-LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
-SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
-
-[weakdeps]
 EnzymeCore = "f151be2c-9106-41f4-ab19-57ee4f262869"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"

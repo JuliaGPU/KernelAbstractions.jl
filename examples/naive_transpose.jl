@@ -15,8 +15,7 @@ function naive_transpose!(a, b)
     end
     backend = get_backend(a)
     @assert get_backend(b) == backend
-    groupsize = KernelAbstractions.isgpu(backend) ? 256 : 1024
-    kernel! = naive_transpose_kernel!(backend, groupsize)
+    kernel! = naive_transpose_kernel!(backend, 256)
     kernel!(a, b, ndrange = size(a))
     return
 end

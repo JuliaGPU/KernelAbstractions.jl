@@ -74,32 +74,28 @@ function move(backend, input)
 end
 
 @testset "histogram tests" begin
-    if Base.VERSION < v"1.7.0" && !KernelAbstractions.isgpu(backend)
-        @test_skip false
-    else
-        rand_input = [rand(1:128) for i in 1:1000]
-        linear_input = [i for i in 1:1024]
-        all_two = [2 for i in 1:512]
+    rand_input = [rand(1:128) for i in 1:1000]
+    linear_input = [i for i in 1:1024]
+    all_two = [2 for i in 1:512]
 
-        histogram_rand_baseline = create_histogram(rand_input)
-        histogram_linear_baseline = create_histogram(linear_input)
-        histogram_two_baseline = create_histogram(all_two)
+    histogram_rand_baseline = create_histogram(rand_input)
+    histogram_linear_baseline = create_histogram(linear_input)
+    histogram_two_baseline = create_histogram(all_two)
 
-        rand_input = move(backend, rand_input)
-        linear_input = move(backend, linear_input)
-        all_two = move(backend, all_two)
+    rand_input = move(backend, rand_input)
+    linear_input = move(backend, linear_input)
+    all_two = move(backend, all_two)
 
-        rand_histogram = KernelAbstractions.zeros(backend, Int, 128)
-        linear_histogram = KernelAbstractions.zeros(backend, Int, 1024)
-        two_histogram = KernelAbstractions.zeros(backend, Int, 2)
+    rand_histogram = KernelAbstractions.zeros(backend, Int, 128)
+    linear_histogram = KernelAbstractions.zeros(backend, Int, 1024)
+    two_histogram = KernelAbstractions.zeros(backend, Int, 2)
 
-        histogram!(rand_histogram, rand_input)
-        histogram!(linear_histogram, linear_input)
-        histogram!(two_histogram, all_two)
-        KernelAbstractions.synchronize(CPU())
+    histogram!(rand_histogram, rand_input)
+    histogram!(linear_histogram, linear_input)
+    histogram!(two_histogram, all_two)
+    KernelAbstractions.synchronize(CPU())
 
-        @test isapprox(Array(rand_histogram), histogram_rand_baseline)
-        @test isapprox(Array(linear_histogram), histogram_linear_baseline)
-        @test isapprox(Array(two_histogram), histogram_two_baseline)
-    end
+    @test isapprox(Array(rand_histogram), histogram_rand_baseline)
+    @test isapprox(Array(linear_histogram), histogram_linear_baseline)
+    @test isapprox(Array(two_histogram), histogram_two_baseline)
 end

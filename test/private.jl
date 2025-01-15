@@ -90,21 +90,5 @@ function private_testsuite(backend, ArrayT)
         @test all(Array(out) .== 3.0f0)
     end
 
-    if backend == CPU
-        @testset "codegen" begin
-            IR = sprint() do io
-                KernelAbstractions.ka_code_llvm(
-                    io, reduce_private(backend(), (8,)), Tuple{ArrayT{Float64, 1}, ArrayT{Float64, 2}},
-                    optimize = true, ndrange = (64,),
-                )
-            end
-            if VERSION >= v"1.11-" && Base.JLOptions().check_bounds > 0
-                # JuliaGPU/KernelAbstractions.jl#528
-                @test_broken !occursin("gcframe", IR)
-            else
-                @test !occursin("gcframe", IR)
-            end
-        end
-    end
     return
 end

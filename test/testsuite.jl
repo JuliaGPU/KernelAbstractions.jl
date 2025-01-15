@@ -33,7 +33,6 @@ include("nditeration.jl")
 include("copyto.jl")
 include("devices.jl")
 include("print_test.jl")
-include("compiler.jl")
 include("reflection.jl")
 include("examples.jl")
 include("convert.jl")
@@ -74,10 +73,6 @@ function testsuite(backend, backend_str, backend_mod, AT, DAT; skip_tests = Set{
 
     @conditional_testset "Printing" skip_tests begin
         printing_testsuite(backend)
-    end
-
-    @conditional_testset "Compiler" skip_tests begin
-        compiler_testsuite(backend, AT)
     end
 
     @conditional_testset "Reflection" skip_tests begin

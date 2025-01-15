@@ -138,18 +138,14 @@ needs to perform dynamic bounds-checking.
 """
 @inline function partition(ndrange, __workgroupsize)
     @assert length(__workgroupsize) <= length(ndrange)
-    if length(__workgroupsize) < length(ndrange)
-        # pad workgroupsize with ones
-        workgroupsize = ntuple(Val(length(ndrange))) do I
-            Base.@_inline_meta
-            if I > length(__workgroupsize)
-                return 1
-            else
-                return __workgroupsize[I]
-            end
+    # pad workgroupsize with ones
+    workgroupsize = ntuple(Val(length(ndrange))) do I
+        Base.@_inline_meta
+        if I > length(__workgroupsize) || __workgroupsize[I] == 0
+            return 1
+        else
+            return __workgroupsize[I]
         end
-    else
-        workgroupsize = __workgroupsize
     end
     let workgroupsize = workgroupsize
         dynamic = Ref(false)
