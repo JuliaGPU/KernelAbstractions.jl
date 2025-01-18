@@ -10,7 +10,7 @@ identity(x) = x
 function unittest_testsuite(Backend, backend_str, backend_mod, BackendArrayT; skip_tests = Set{String}())
     @conditional_testset "partition" skip_tests begin
         backend = Backend()
-        let kernel = KernelAbstractions.Kernel{typeof(backend), StaticSize{(64,)}, DynamicSize, typeof(identity)}(backend, identity)
+        let kernel = KernelAbstractions.Kernel{typeof(backend), DynamicSize, StaticSize{(64,)}, DynamicSize, typeof(identity)}(backend, identity)
             iterspace, dynamic = KernelAbstractions.partition(kernel, (128,), nothing)
             @test length(blocks(iterspace)) == 2
             @test dynamic isa NoDynamicCheck
@@ -26,7 +26,7 @@ function unittest_testsuite(Backend, backend_str, backend_mod, BackendArrayT; sk
             @test_throws ErrorException KernelAbstractions.partition(kernel, (129,), (65,))
             @test KernelAbstractions.backend(kernel) == backend
         end
-        let kernel = KernelAbstractions.Kernel{typeof(backend), StaticSize{(64,)}, StaticSize{(128,)}, typeof(identity)}(backend, identity)
+        let kernel = KernelAbstractions.Kernel{typeof(backend), DynamicSize, StaticSize{(64,)}, StaticSize{(128,)}, typeof(identity)}(backend, identity)
             iterspace, dynamic = KernelAbstractions.partition(kernel, (128,), nothing)
             @test length(blocks(iterspace)) == 2
             @test dynamic isa NoDynamicCheck

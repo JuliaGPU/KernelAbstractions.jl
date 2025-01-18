@@ -16,12 +16,14 @@ using StaticArrays
 using Adapt
 
 """
-    @kernel function f(args) end
+    @kernel [N] function f(args) end
 
 Takes a function definition and generates a [`Kernel`](@ref) constructor from it.
 The enclosed function is allowed to contain kernel language constructs.
 In order to call it the kernel has first to be specialized on the backend
 and then invoked on the arguments.
+
+The optional `N` parameter can be used to fix the number of dimensions used for the ndrange.
 
 # Kernel language
 
@@ -50,11 +52,11 @@ synchronize(backend)
 ```
 """
 macro kernel(expr)
-    __kernel(expr, #=generate_cpu=# true, #=force_inbounds=# false)
+    __kernel(DynamicSize(), expr, #=generate_cpu=# true, #=force_inbounds=# false)
 end
 
 """
-    @kernel config function f(args) end
+    @kernel [N] config function f(args) end
 
 This allows for two different configurations:
 
@@ -68,10 +70,11 @@ This allows for two different configurations:
 """
 macro kernel(ex...)
     if length(ex) == 1
-        __kernel(ex[1], true, false)
+        __kernel(DynamicSize(), ex[1], true, false)
     else
         generate_cpu = true
         force_inbounds = false
+        N = DynamicSize() # TODO parse N
         for i in 1:(length(ex) - 1)
             if ex[i] isa Expr && ex[i].head == :(=) &&
                     ex[i].args[1] == :cpu && ex[i].args[2] isa Bool
@@ -79,6 +82,8 @@ macro kernel(ex...)
             elseif ex[i] isa Expr && ex[i].head == :(=) &&
                     ex[i].args[1] == :inbounds && ex[i].args[2] isa Bool
                 force_inbounds = ex[i].args[2]
+            elseif ex[i] isa Int
+                N = StaticSize(ex[i])
             else
                 error(
                     "Configuration should be of form:\n" *
@@ -88,7 +93,7 @@ macro kernel(ex...)
                 )
             end
         end
-        __kernel(ex[end], generate_cpu, force_inbounds)
+        __kernel(N, ex[end], generate_cpu, force_inbounds)
     end
 end
 
@@ -584,17 +589,18 @@ in a workgroup.
     ```
     As well as the on-device functionality.
 """
-struct Kernel{Backend, WorkgroupSize <: _Size, NDRange <: _Size, Fun}
+struct Kernel{Backend, N <: _Size, WorkgroupSize <: _Size, NDRange <: _Size, Fun}
     backend::Backend
     f::Fun
 end
 
-function Base.similar(kernel::Kernel{D, WS, ND}, f::F) where {D, WS, ND, F}
-    Kernel{D, WS, ND, F}(kernel.backend, f)
+function Base.similar(kernel::Kernel{D, N, WS, ND}, f::F) where {D, N, WS, ND, F}
+    Kernel{D, N, WS, ND, F}(kernel.backend, f)
 end
 
-workgroupsize(::Kernel{D, WorkgroupSize}) where {D, WorkgroupSize} = WorkgroupSize
-ndrange(::Kernel{D, WorkgroupSize, NDRange}) where {D, WorkgroupSize, NDRange} = NDRange
+workgroupsize(::Kernel{D, N, WorkgroupSize}) where {D, N, WorkgroupSize} = WorkgroupSize
+ndrange(::Kernel{D, N, WorkgroupSize, NDRange}) where {D, N, WorkgroupSize, NDRange} = NDRange
+ndims(::Kernel{D, N}) where {D, N} = N
 backend(kernel::Kernel) = kernel.backend
 
 """
@@ -603,6 +609,7 @@ Partition a kernel for the given ndrange and workgroupsize.
 @inline function partition(kernel, ndrange, workgroupsize)
     static_ndrange = KernelAbstractions.ndrange(kernel)
     static_workgroupsize = KernelAbstractions.workgroupsize(kernel)
+    static_ndims = KernelAbstractions.ndims(kernel)
 
     if ndrange === nothing && static_ndrange <: DynamicSize ||
             workgroupsize === nothing && static_workgroupsize <: DynamicSize
@@ -653,12 +660,20 @@ Partition a kernel for the given ndrange and workgroupsize.
         workgroupsize = CartesianIndices(workgroupsize)
     end
 
+    if static_ndims <: StaticSize
+        N = only(get(static_ndims))
+        if N !== length(ndrange)
+            error("Mismatch between static kernel dimension (N=$N) and ndrange=$ndrange")
+        end
+    end
+
+    # TODO: Add static_ndims
     iterspace = NDRange{length(ndrange), static_blocks, static_workgroupsize}(blocks, workgroupsize)
     return iterspace, dynamic
 end
 
-function construct(backend::Backend, ::S, ::NDRange, xpu_name::XPUName) where {Backend <: Union{CPU, GPU}, S <: _Size, NDRange <: _Size, XPUName}
-    return Kernel{Backend, S, NDRange, XPUName}(backend, xpu_name)
+function construct(backend::Backend, ::N, ::S, ::NDRange, xpu_name::XPUName) where {Backend <: Union{CPU, GPU}, N <: _Size, S <: _Size, NDRange <: _Size, XPUName}
+    return Kernel{Backend, N, S, NDRange, XPUName}(backend, xpu_name)
 end
 
 ###

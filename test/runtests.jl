@@ -21,6 +21,17 @@ kern_static(CPU(static = true), (1,))(A, ndrange = length(A))
 end
 @test_throws ErrorException("This kernel is unavailable for backend CPU") my_no_cpu_kernel(CPU())
 
+@kernel 1 function OneD()
+end
+
+@kernel 2 function TwoD()
+end
+
+@test OneD(CPU())(ndrange=1024) === nothing
+@test_throws ErrorException("Mismatch between static kernel dimension (N=1) and ndrange=(1024, 1)") OneD(CPU())(ndrange=(1024, 1))
+@test_throws ErrorException("Mismatch between static kernel dimension (N=2) and ndrange=(1024, 1)") TwoD(CPU())(ndrange=1024)
+@test TwoD(CPU())(ndrange=(1024,1)) === nothing
+
 # testing multiple configurations at the same time
 @kernel cpu = false inbounds = false function my_no_cpu_kernel2(a)
 end
