@@ -149,12 +149,13 @@ function copyto! end
 Pagelock (pin) a host memory buffer for a backend device. This may be necessary for [`copyto!`](@ref)
 to perform asynchronously w.r.t to the host/
 
+This function should return `nothing`; or `missing` if not implemented.
+
+
 !!! note
     Backends **may** implement this function.
 """
-function pagelock!(::Backend, x)
-    return nothing
-end
+function pagelock! end
 
 """
     synchronize(::Backend)
@@ -598,6 +599,10 @@ This function should return a `Bool` or `missing` if not implemented.
     This function was added in KernelAbstractions v0.9.22
 """
 function functional(::Backend)
+    return missing
+end
+
+function pagelock!(::Backend, x)
     return missing
 end
 

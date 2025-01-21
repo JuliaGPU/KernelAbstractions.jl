@@ -33,6 +33,7 @@ function copyto!(backend::CPU, A, B)
 end
 
 functional(::CPU) = true
+pagelock!(::CPU, x) = nothing
 
 function (obj::Kernel{CPU})(args...; ndrange = nothing, workgroupsize = nothing)
     ndrange, workgroupsize, iterspace, dynamic = launch_config(obj, ndrange, workgroupsize)
