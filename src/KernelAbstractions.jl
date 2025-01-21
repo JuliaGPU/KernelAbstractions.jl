@@ -587,6 +587,34 @@ function priority!(::Backend, prio::Symbol)
 end
 
 """
+    device(::Backend)::Int
+
+Returns the ordinal number of the currently active device starting at one.
+"""
+function device(::Backend)
+    return 1
+end
+
+"""
+    ndevices(::Backend)::Int
+
+Returns the number of devices the backend supports.
+"""
+function ndevices(::Backend)
+    return 1
+end
+
+"""
+    device!(::Backend, id::Int)
+"""
+function device!(backend::Backend, id::Int)
+    if !(0 < id <= ndevices(backend))
+        throw(ArgumentError("Device id $id out of bounds."))
+    end
+    return nothing
+end
+
+"""
     functional(::Backend)
 
 Queries if the provided backend is functional. This may mean different

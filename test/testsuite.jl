@@ -31,6 +31,7 @@ include("private.jl")
 include("unroll.jl")
 include("nditeration.jl")
 include("copyto.jl")
+include("devices.jl")
 include("print_test.jl")
 include("compiler.jl")
 include("reflection.jl")
@@ -65,6 +66,10 @@ function testsuite(backend, backend_str, backend_mod, AT, DAT; skip_tests = Set{
 
     @conditional_testset "copyto!" skip_tests begin
         copyto_testsuite(backend, AT)
+    end
+
+    @conditional_testset "Devices" skip_tests begin
+        devices_testsuite(backend)
     end
 
     @conditional_testset "Printing" skip_tests begin
