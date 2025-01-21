@@ -8,7 +8,7 @@ function devices_testsuite(Backend)
     end
 
     @test_throws ArgumentError KernelAbstractions.device!(backend, 0)
-    @test_throws ArgumentError KernelAbstractions.device!(backend, KernelAbstractions.ndevices(backend)+1)
-
+    @test_throws ArgumentError KernelAbstractions.device!(backend, KernelAbstractions.ndevices(backend) + 1)
+    return KernelAbstractions.device!(backend, current_device)
     KernelAbstractions.device!(backend, current_device)
 end
