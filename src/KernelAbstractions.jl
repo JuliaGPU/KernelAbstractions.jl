@@ -608,7 +608,7 @@ end
     device!(::Backend, id::Int)
 """
 function device!(backend::Backend, id::Int)
-    if 0 < id <= ndevices(backend)
+    if !(0 < id <= ndevices(backend))
         throw(ArgumentError("Device id $id out of bounds."))
     end
     return nothing
