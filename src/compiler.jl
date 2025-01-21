@@ -30,3 +30,4 @@ end
 
 @inline groupsize(ctx) = __groupsize(ctx)
 @inline ndrange(ctx) = __ndrange(ctx)
+@inline Base.ndims(ctx) = ndims(__iterspace(ctx))

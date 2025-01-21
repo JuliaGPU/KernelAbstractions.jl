@@ -7,10 +7,12 @@ function nditeration_testsuite()
         let ndrange = NDRange{2, DynamicSize, DynamicSize}(CartesianIndices((256, 256)), CartesianIndices((32, 32)))
             @test length(ndrange) == 256 * 256
             @test all(p -> p[1] == p[2], zip(ndrange, CartesianIndices((256, 256))))
+            @test ndims(ndrange) == 2
         end
         let ndrange = NDRange{2, StaticSize{(256, 256)}, DynamicSize}(nothing, CartesianIndices((32, 32)))
             @test length(ndrange) == 256 * 256
             @test all(p -> p[1] == p[2], zip(ndrange, CartesianIndices((256, 256))))
+            @test ndims(ndrange) == 2
         end
     end
 
@@ -40,6 +42,7 @@ function nditeration_testsuite()
                 I = Tuple(I)
                 @test check(idx, i - 1, ntuple(i -> I[i] - 1, length(I))..., Dim_x, Dim_y)
             end
+            @test ndims(ndrange) == 2
         end
         let ndrange = NDRange{2, DynamicSize, DynamicSize}(CartesianIndices((4, 4)), CartesianIndices((Dim_x, Dim_y)))
             idx = linear_iteration(ndrange)
@@ -47,6 +50,7 @@ function nditeration_testsuite()
                 I = Tuple(I)
                 @test check(idx, i - 1, ntuple(i -> I[i] - 1, length(I))..., Dim_x, Dim_y)
             end
+            @test ndims(ndrange) == 2
         end
 
         Dim_x = 32
@@ -58,6 +62,7 @@ function nditeration_testsuite()
                 I = Tuple(I)
                 @test check(idx, i - 1, ntuple(i -> I[i] - 1, length(I))..., Dim_x, Dim_y)
             end
+            @test ndims(ndrange) == 2
         end
         let ndrange = NDRange{2, DynamicSize, DynamicSize}(CartesianIndices((4, 4 * 32)), CartesianIndices((Dim_x, Dim_y)))
             idx = linear_iteration(ndrange)
@@ -65,6 +70,7 @@ function nditeration_testsuite()
                 I = Tuple(I)
                 @test check(idx, i - 1, ntuple(i -> I[i] - 1, length(I))..., Dim_x, Dim_y)
             end
+            @test ndims(ndrange) == 2
         end
 
         Dim_x = 1
@@ -76,6 +82,7 @@ function nditeration_testsuite()
                 I = Tuple(I)
                 @test check(idx, i - 1, ntuple(i -> I[i] - 1, length(I))..., Dim_x, Dim_y)
             end
+            @test ndims(ndrange) == 2
         end
         let ndrange = NDRange{2, DynamicSize, DynamicSize}(CartesianIndices((4 * 32, 4)), CartesianIndices((Dim_x, Dim_y)))
             idx = linear_iteration(ndrange)
@@ -83,6 +90,7 @@ function nditeration_testsuite()
                 I = Tuple(I)
                 @test check(idx, i - 1, ntuple(i -> I[i] - 1, length(I))..., Dim_x, Dim_y)
             end
+            @test ndims(ndrange) == 2
         end
     end
     return

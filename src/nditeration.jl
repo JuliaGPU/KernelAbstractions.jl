@@ -63,6 +63,7 @@ end
 @inline workitems(range::NDRange{N, B, W}) where {N, B, W <: StaticSize} = CartesianIndices(get(W))::CartesianIndices{N}
 @inline blocks(range::NDRange{N, B}) where {N, B <: DynamicSize} = range.blocks::CartesianIndices{N}
 @inline blocks(range::NDRange{N, B}) where {N, B <: StaticSize} = CartesianIndices(get(B))::CartesianIndices{N}
+@inline Base.ndims(::NDRange{N}) where {N} = N
 
 import Base.iterate
 @inline iterate(range::NDRange) = iterate(blocks(range))
@@ -80,8 +81,44 @@ Base.length(range::NDRange) = length(blocks(range))
     return CartesianIndex(nI)
 end
 
+
+"""
+    assume(cond::Bool)
+
+Assume that the condition `cond` is true. This is a hint to the compiler, possibly enabling
+it to optimize more aggressively.
+"""
+@inline assume(cond::Bool) = Base.llvmcall(
+    (
+        """
+        declare void @llvm.assume(i1)
+
+        define void @entry(i8) #0 {
+            %cond = icmp eq i8 %0, 1
+            call void @llvm.assume(i1 %cond)
+            ret void
+        }
+
+        attributes #0 = { alwaysinline }""", "entry",
+    ),
+    Nothing, Tuple{Bool}, cond
+)
+
+@inline function assume_nonzero(CI::CartesianIndices)
+    return ntuple(Val(ndims(CI))) do I
+        Base.@_inline_meta
+        indices = CI.indices[I]
+        assume(indices.stop > 0)
+    end
+end
+
 Base.@propagate_inbounds function expand(ndrange::NDRange, groupidx::Integer, idx::Integer)
-    return expand(ndrange, blocks(ndrange)[groupidx], workitems(ndrange)[idx])
+    # this causes a exception branch and a div
+    B = blocks(ndrange)
+    W = workitems(ndrange)
+    assume_nonzero(B)
+    assume_nonzero(W)
+    return expand(ndrange, B[groupidx], workitems(ndrange)[idx])
 end
 
 Base.@propagate_inbounds function expand(ndrange::NDRange{N}, groupidx::CartesianIndex{N}, idx::Integer) where {N}

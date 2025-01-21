@@ -45,7 +45,7 @@ The [`synchronize`](@ref) blocks the *host* until the kernel has completed on th
 
 ## Launching kernel on the backend
 
-To launch the kernel on a backend-supported backend `isa(backend, KA.GPU)` (e.g., `CUDABackend()`, `ROCBackend()`, `oneBackend()`), we generate the kernel
+To launch the kernel on a backend-supported backend `isa(backend, KA.GPU)` (e.g., `CUDABackend()`, `ROCBackend()`, `oneAPIBackend()`), we generate the kernel
 for this backend.
 
 First, we initialize the array using the Array constructor of the chosen backend with

@@ -1,5 +1,3 @@
-import UnsafeAtomicsLLVM
-
 unsafe_free!(::AbstractArray) = return
 synchronize(::CPU) = nothing
 
@@ -35,6 +33,7 @@ function copyto!(backend::CPU, A, B)
 end
 
 functional(::CPU) = true
+pagelock!(::CPU, x) = nothing
 
 function (obj::Kernel{CPU})(args...; ndrange = nothing, workgroupsize = nothing)
     ndrange, workgroupsize, iterspace, dynamic = launch_config(obj, ndrange, workgroupsize)
@@ -43,7 +42,8 @@ function (obj::Kernel{CPU})(args...; ndrange = nothing, workgroupsize = nothing)
         return nothing
     end
 
-    return __run(obj, ndrange, iterspace, args, dynamic, obj.backend.static)
+    __run(obj, ndrange, iterspace, args, dynamic, obj.backend.static)
+    return nothing
 end
 
 const CPU_GRAINSIZE = 1024 # Vectorization, 4x unrolling, minimal grain size
