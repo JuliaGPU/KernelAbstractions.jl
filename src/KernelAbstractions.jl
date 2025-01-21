@@ -110,17 +110,19 @@ macro Const end
 """
     copyto!(::Backend, dest::AbstractArray, src::AbstractArray)
 
-Perform a `copyto!` operation that is execution ordered with respect to the backend.
-For most uses `Base.copyto!` provides a fully synchronous interface.
+Perform an asynchronous `copyto!` operation that is execution ordered with respect to the back-end.
 
-!!! note
-    On some backends it may be necessary to first call [`pagelock!`](@ref) on host memory,
-    to enable fully asynchronous behaviour w.r.t to the host.
+For most users, `Base.copyto!` should suffice, performance a simple, synchronous copy.
+Only when you know you need asynchronicity w.r.t. the host, you should consider using
+this asynchronous version, which requires additional lifetime guarantees as documented below.
 
 !!! warning
-    If the function is asynchronous w.r.t to the host, the user is required to gurantuee, the lifetime
-    of the host buffer. Otherwise the user may cause a use-after-free, because the GC was able to prove that the host
-    buffer can be freed.
+
+    Because of the asynchronous nature of this operation, the user is required to guarantee that the lifetime
+    of the source extends past the *completion* of the copy operation as to avoid a use-after-free. It is not
+    sufficient to simply use `GC.@preserve` around the call to `copyto!`, because that only extends the
+    lifetime past the operation getting queued. Instead, it may be required to `synchronize()`,
+    or otherwise guarantee that the source will still be around when the copy is executed:
 
     ```julia
     arr = zeros(64)
@@ -130,6 +132,11 @@ For most uses `Base.copyto!` provides a fully synchronous interface.
         synchronize(backend)
     end
     ```
+
+!!! note
+
+    On some back-ends it may be necessary to first call [`pagelock!`](@ref) on host memory
+    to enable fully asynchronous behavior w.r.t to the host.
 
 !!! note
     Backend implementations **must** implement this function.
