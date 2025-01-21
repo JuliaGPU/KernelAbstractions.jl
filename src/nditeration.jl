@@ -13,7 +13,7 @@ abstract type _Size end
 struct DynamicSize <: _Size end
 struct StaticSize{S} <: _Size
     function StaticSize{S}() where {S}
-        new{S::Tuple{Vararg{Int}}}()
+        return new{S::Tuple{Vararg{Int}}}()
     end
 end
 
@@ -51,11 +51,11 @@ struct NDRange{N, StaticBlocks, StaticWorkitems, DynamicBlock, DynamicWorkitems}
     workitems::DynamicWorkitems
 
     function NDRange{N, B, W}() where {N, B, W}
-        new{N, B, W, Nothing, Nothing}(nothing, nothing)
+        return new{N, B, W, Nothing, Nothing}(nothing, nothing)
     end
 
     function NDRange{N, B, W}(blocks, workitems) where {N, B, W}
-        new{N, B, W, typeof(blocks), typeof(workitems)}(blocks, workitems)
+        return new{N, B, W, typeof(blocks), typeof(workitems)}(blocks, workitems)
     end
 end
 
@@ -78,7 +78,7 @@ Base.length(range::NDRange) = length(blocks(range))
         gidx = groupidx.I[I]
         (gidx - 1) * stride + idx.I[I]
     end
-    CartesianIndex(nI)
+    return CartesianIndex(nI)
 end
 
 
@@ -88,7 +88,9 @@ end
 Assume that the condition `cond` is true. This is a hint to the compiler, possibly enabling
 it to optimize more aggressively.
 """
-@inline assume(cond::Bool) = Base.llvmcall(("""
+@inline assume(cond::Bool) = Base.llvmcall(
+    (
+        """
         declare void @llvm.assume(i1)
 
         define void @entry(i8) #0 {
@@ -97,11 +99,13 @@ it to optimize more aggressively.
             ret void
         }
 
-        attributes #0 = { alwaysinline }""", "entry"),
-    Nothing, Tuple{Bool}, cond)
+        attributes #0 = { alwaysinline }""", "entry",
+    ),
+    Nothing, Tuple{Bool}, cond
+)
 
 @inline function assume_nonzero(CI::CartesianIndices)
-    ntuple(Val(ndims(CI))) do I
+    return ntuple(Val(ndims(CI))) do I
         Base.@_inline_meta
         indices = CI.indices[I]
         assume(indices.stop > 0)
@@ -114,15 +118,15 @@ Base.@propagate_inbounds function expand(ndrange::NDRange, groupidx::Integer, id
     W = workitems(ndrange)
     assume_nonzero(B)
     assume_nonzero(W)
-    expand(ndrange, B[groupidx], workitems(ndrange)[idx])
+    return expand(ndrange, B[groupidx], workitems(ndrange)[idx])
 end
 
 Base.@propagate_inbounds function expand(ndrange::NDRange{N}, groupidx::CartesianIndex{N}, idx::Integer) where {N}
-    expand(ndrange, groupidx, workitems(ndrange)[idx])
+    return expand(ndrange, groupidx, workitems(ndrange)[idx])
 end
 
 Base.@propagate_inbounds function expand(ndrange::NDRange{N}, groupidx::Integer, idx::CartesianIndex{N}) where {N}
-    expand(ndrange, blocks(ndrange)[groupidx], idx)
+    return expand(ndrange, blocks(ndrange)[groupidx], idx)
 end
 
 """

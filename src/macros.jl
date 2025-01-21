@@ -6,7 +6,7 @@ function find_return(stmt)
         result |= @capture(expr, return x_)
         expr
     end
-    result
+    return result
 end
 
 # XXX: Proper errors
@@ -103,6 +103,7 @@ function transform_gpu!(def, constargs, force_inbounds)
         Expr(:block, let_constargs...),
         body,
     )
+    return nothing
 end
 
 # The hard case, transform the function for CPU execution
@@ -137,6 +138,7 @@ function transform_cpu!(def, constargs, force_inbounds)
         Expr(:block, let_constargs...),
         Expr(:block, new_stmts...),
     )
+    return nothing
 end
 
 struct WorkgroupLoop
@@ -150,7 +152,7 @@ end
 is_sync(expr) = @capture(expr, @synchronize() | @synchronize(a_))
 
 function is_scope_construct(expr::Expr)
-    expr.head === :block # ||
+    return expr.head === :block # ||
     # expr.head === :let
 end
 
@@ -160,7 +162,7 @@ function find_sync(stmt)
         result |= is_sync(expr)
         expr
     end
-    result
+    return result
 end
 
 # TODO proper handling of LineInfo
