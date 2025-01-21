@@ -587,7 +587,7 @@ function priority!(::Backend, prio::Symbol)
 end
 
 """
-    device(::Backend)
+    device(::Backend)::Int
 
 Returns the ordinal number of the currently active device starting at one.
 """
@@ -596,7 +596,7 @@ function device(::Backend)
 end
 
 """
-    ndevices(::Backend)
+    ndevices(::Backend)::Int
 
 Returns the number of devices the backend supports.
 """
