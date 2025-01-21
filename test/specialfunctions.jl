@@ -53,4 +53,5 @@ function specialfunctions_testsuite(Backend)
         synchronize(backend)
         @test Array(cy) ≈ SpecialFunctions.erfc.(x)
     end
+    return
 end

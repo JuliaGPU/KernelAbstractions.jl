@@ -18,6 +18,7 @@ function naive_transpose!(a, b)
     groupsize = KernelAbstractions.isgpu(backend) ? 256 : 1024
     kernel! = naive_transpose_kernel!(backend, groupsize)
     kernel!(a, b, ndrange = size(a))
+    return
 end
 
 # resolution of grid will be res*res

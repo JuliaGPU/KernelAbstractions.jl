@@ -103,7 +103,7 @@ function transform_gpu!(def, constargs, force_inbounds)
         Expr(:block, let_constargs...),
         body,
     )
-    return nothing
+    return
 end
 
 # The hard case, transform the function for CPU execution
@@ -138,7 +138,7 @@ function transform_cpu!(def, constargs, force_inbounds)
         Expr(:block, let_constargs...),
         Expr(:block, new_stmts...),
     )
-    return nothing
+    return
 end
 
 struct WorkgroupLoop

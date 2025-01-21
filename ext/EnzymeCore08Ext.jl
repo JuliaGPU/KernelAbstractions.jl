@@ -23,7 +23,7 @@ function EnzymeRules.forward(
     f = kernel.f
     fwd_kernel = similar(kernel, cpu_fwd)
 
-    fwd_kernel(config, f, args...; ndrange, workgroupsize)
+    return fwd_kernel(config, f, args...; ndrange, workgroupsize)
 end
 
 function EnzymeRules.forward(
@@ -38,7 +38,7 @@ function EnzymeRules.forward(
     f = kernel.f
     fwd_kernel = similar(kernel, gpu_fwd)
 
-    fwd_kernel(config, f, args...; ndrange, workgroupsize)
+    return fwd_kernel(config, f, args...; ndrange, workgroupsize)
 end
 
 _enzyme_mkcontext(kernel::Kernel{CPU}, ndrange, iterspace, dynamic) =

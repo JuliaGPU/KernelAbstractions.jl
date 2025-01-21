@@ -44,4 +44,5 @@ function unroll_testsuite(backend, ArrayT)
     kernel2! = kernel_unroll2!(backend(), 1, 1)
     kernel2!(a)
     synchronize(backend())
+    return
 end

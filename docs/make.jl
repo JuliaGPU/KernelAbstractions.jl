@@ -44,6 +44,7 @@ function main()
             push_preview = true,
         )
     end
+    return
 end
 
 isinteractive() || main()
