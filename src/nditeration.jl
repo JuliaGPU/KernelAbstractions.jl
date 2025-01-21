@@ -88,9 +88,7 @@ end
 Assume that the condition `cond` is true. This is a hint to the compiler, possibly enabling
 it to optimize more aggressively.
 """
-@inline assume(cond::Bool) = Base.llvmcall(
-    (
-        """
+@inline assume(cond::Bool) = Base.llvmcall(("""
         declare void @llvm.assume(i1)
 
         define void @entry(i8) #0 {
@@ -99,11 +97,9 @@ it to optimize more aggressively.
             ret void
         }
 
-        attributes #0 = { alwaysinline }""", "entry",
-    ),
-    Nothing, Tuple{Bool}, cond
-)
-    return ntuple(Val(ndims(CI))) do I
+        attributes #0 = { alwaysinline }""", "entry"),
+    Nothing, Tuple{Bool}, cond)
+
 @inline function assume_nonzero(CI::CartesianIndices)
     ntuple(Val(ndims(CI))) do I
         Base.@_inline_meta
