@@ -139,7 +139,7 @@ this asynchronous version, which requires additional lifetime guarantees as docu
     to enable fully asynchronous behavior w.r.t to the host.
 
 !!! note
-    Backend implementations **must** implement this function.
+    Backends **must** implement this function.
 """
 function copyto! end
 
