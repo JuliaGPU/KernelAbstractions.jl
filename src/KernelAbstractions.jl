@@ -110,12 +110,52 @@ macro Const end
 """
     copyto!(::Backend, dest::AbstractArray, src::AbstractArray)
 
-Perform a `copyto!` operation that execution ordered with respect to the backend.
+Perform an asynchronous `copyto!` operation that is execution ordered with respect to the back-end.
+
+For most users, `Base.copyto!` should suffice, performance a simple, synchronous copy.
+Only when you know you need asynchronicity w.r.t. the host, you should consider using
+this asynchronous version, which requires additional lifetime guarantees as documented below.
+
+!!! warning
+
+    Because of the asynchronous nature of this operation, the user is required to guarantee that the lifetime
+    of the source extends past the *completion* of the copy operation as to avoid a use-after-free. It is not
+    sufficient to simply use `GC.@preserve` around the call to `copyto!`, because that only extends the
+    lifetime past the operation getting queued. Instead, it may be required to `synchronize()`,
+    or otherwise guarantee that the source will still be around when the copy is executed:
+
+    ```julia
+    arr = zeros(64)
+    GC.@preserve arr begin
+        copyto!(backend, arr, ...)
+        # other operations
+        synchronize(backend)
+    end
+    ```
 
 !!! note
-    Backend implementations **must** implement this function.
+
+    On some back-ends it may be necessary to first call [`pagelock!`](@ref) on host memory
+    to enable fully asynchronous behavior w.r.t to the host.
+
+!!! note
+    Backends **must** implement this function.
 """
 function copyto! end
+
+"""
+    pagelock!(::Backend, dest::AbstractArray)
+
+Pagelock (pin) a host memory buffer for a backend device. This may be necessary for [`copyto!`](@ref)
+to perform asynchronously w.r.t to the host/
+
+This function should return `nothing`; or `missing` if not implemented.
+
+
+!!! note
+    Backends **may** implement this function.
+"""
+function pagelock! end
 
 """
     synchronize(::Backend)
@@ -559,6 +599,10 @@ This function should return a `Bool` or `missing` if not implemented.
     This function was added in KernelAbstractions v0.9.22
 """
 function functional(::Backend)
+    return missing
+end
+
+function pagelock!(::Backend, x)
     return missing
 end
 
