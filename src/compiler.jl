@@ -26,8 +26,8 @@ end
 @inline __dynamic_checkbounds(::CompilerMetadata{NDRange, CB}) where {NDRange, CB} = CB <: DynamicCheck
 @inline __ndrange(::CompilerMetadata{NDRange}) where {NDRange <: StaticSize} = CartesianIndices(get(NDRange))
 @inline __ndrange(cm::CompilerMetadata{NDRange}) where {NDRange <: DynamicSize} = cm.ndrange
-@inline __workitems_iterspace(ctx) = workitems(__iterspace(ctx))
+@inline __workitems_iterspace(ctx::CompilerMetadata) = workitems(__iterspace(ctx))
 
-@inline groupsize(ctx) = __groupsize(ctx)
-@inline ndrange(ctx) = __ndrange(ctx)
-@inline Base.ndims(ctx) = ndims(__iterspace(ctx))
+@inline groupsize(ctx::CompilerMetadata) = __groupsize(ctx)
+@inline ndrange(ctx::CompilerMetadata) = __ndrange(ctx)
+@inline Base.ndims(ctx::CompilerMetadata) = ndims(__iterspace(ctx))
