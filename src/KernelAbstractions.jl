@@ -284,6 +284,9 @@ end
 After a `@synchronize` statement all read and writes to global and local memory
 from each thread in the workgroup are visible in from all other threads in the
 workgroup.
+
+!!! note
+    `@synchronize()` must be encountered by all workitems of a work-group executing the kernel or by none at all.
 """
 macro synchronize()
     return quote
@@ -301,10 +304,15 @@ workgroup. `cond` is not allowed to have any visible sideffects.
 # Platform differences
   - `GPU`: This synchronization will only occur if the `cond` evaluates.
   - `CPU`: This synchronization will always occur.
+
+!!! warn
+    This variant of the `@synchronize` macro violates the requirement that `@synchronize` must be encountered
+    by all workitems of a work-group executing the kernel or by none at all.
+    Since v`0.9.34` this version of the macro is deprecated and lowers to `@synchronize()`
 """
 macro synchronize(cond)
     return quote
-        $(esc(cond)) && $__synchronize()
+        $__synchronize()
     end
 end
 
