@@ -798,6 +798,8 @@ function __fake_compiler_job end
 # - LoopInfo
 ###
 
+include("reduce.jl")
+
 include("extras/extras.jl")
 
 include("reflection.jl")
