@@ -34,7 +34,7 @@ Perform group reduction of `val` using `op`.
 Result of the reduction.
 """
 macro groupreduce(op, val, neutral, algo)
-    quote
+    return quote
         __groupreduce(
             $(esc(:__ctx__)),
             $(esc(op)),
@@ -47,7 +47,7 @@ macro groupreduce(op, val, neutral, algo)
 end
 
 macro groupreduce(op, val, neutral, algo, groupsize)
-    quote
+    return quote
         __groupreduce(
             $(esc(:__ctx__)),
             $(esc(op)),
@@ -66,19 +66,19 @@ function __groupreduce(__ctx__, op, val::T, neutral::T, ::Val{groupsize}, ::Val{
     @inbounds local_idx ≤ groupsize && (storage[local_idx] = val)
     @synchronize()
 
-    s::UInt64 = groupsize ÷ 0x2
-    while s > 0x0
-        if (local_idx - 0x1) < s
+    s::UInt64 = groupsize ÷ 0x02
+    while s > 0x00
+        if (local_idx - 0x01) < s
             other_idx = local_idx + s
             if other_idx ≤ groupsize
                 @inbounds storage[local_idx] = op(storage[local_idx], storage[other_idx])
             end
         end
         @synchronize()
-        s >>= 0x1
+        s >>= 0x01
     end
 
-    if local_idx == 0x1
+    if local_idx == 0x01
         @inbounds val = storage[local_idx]
     end
     return val
@@ -87,7 +87,7 @@ end
 # Warp groupreduce.
 
 macro shfl_down(val, offset)
-    quote
+    return quote
         $__shfl_down($(esc(val)), $(esc(offset)))
     end
 end
@@ -97,10 +97,10 @@ function __shfl_down end
 supports_warp_reduction(::CPU) = false
 
 @inline function __warp_reduce(val, op)
-    offset::UInt32 = UInt32(32) ÷ 0x2
-    while offset > 0x0
+    offset::UInt32 = UInt32(32) ÷ 0x02
+    while offset > 0x00
         val = op(val, @shfl_down(val, offset))
-        offset >>= 0x1
+        offset >>= 0x01
     end
     return val
 end
@@ -114,17 +114,17 @@ function __groupreduce(__ctx__, op, val::T, neutral::T, ::Val{groupsize}, ::Val{
     storage = @localmem T __warp_bins
 
     local_idx = @index(Local)
-    lane = (local_idx - 0x1) % __warpsize + 0x1
-    warp_id = (local_idx - 0x1) ÷ __warpsize + 0x1
+    lane = (local_idx - 0x01) % __warpsize + 0x01
+    warp_id = (local_idx - 0x01) ÷ __warpsize + 0x01
 
     # Each warp performs a reduction and writes results into its own bin in `storage`.
     val = __warp_reduce(val, op)
-    @inbounds lane == 0x1 && (storage[warp_id] = val)
+    @inbounds lane == 0x01 && (storage[warp_id] = val)
     @synchronize()
 
     # Final reduction of the `storage` on the first warp.
-    within_storage = (local_idx - 0x1) < groupsize ÷ __warpsize
+    within_storage = (local_idx - 0x01) < groupsize ÷ __warpsize
     @inbounds val = within_storage ? storage[lane] : neutral
-    warp_id == 0x1 && (val = __warp_reduce(val, op))
+    warp_id == 0x01 && (val = __warp_reduce(val, op))
     return val
 end

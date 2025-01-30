@@ -18,13 +18,13 @@ function groupreduce_testsuite(backend, AT)
             x = AT(ones(T, n))
             y = AT(zeros(T, 1))
 
-            groupreduce_1!(backend(), n)(y, x, +, zero(T), Reduction.thread; ndrange=n)
+            groupreduce_1!(backend(), n)(y, x, +, zero(T), Reduction.thread; ndrange = n)
             @test Array(y)[1] == n
 
-            groupreduce_2!(backend())(y, x, +, zero(T), Reduction.thread, Val(128); ndrange=n)
+            groupreduce_2!(backend())(y, x, +, zero(T), Reduction.thread, Val(128); ndrange = n)
             @test Array(y)[1] == 128
 
-            groupreduce_2!(backend())(y, x, +, zero(T), Reduction.thread, Val(64); ndrange=n)
+            groupreduce_2!(backend())(y, x, +, zero(T), Reduction.thread, Val(64); ndrange = n)
             @test Array(y)[1] == 64
         end
 
@@ -34,13 +34,13 @@ function groupreduce_testsuite(backend, AT)
 
                 x = AT(ones(T, n))
                 y = AT(zeros(T, 1))
-                groupreduce_1!(backend(), n)(y, x, +, zero(T), Reduction.warp; ndrange=n)
+                groupreduce_1!(backend(), n)(y, x, +, zero(T), Reduction.warp; ndrange = n)
                 @test Array(y)[1] == n
 
-                groupreduce_2!(backend())(y, x, +, zero(T), Reduction.warp, Val(128); ndrange=n)
+                groupreduce_2!(backend())(y, x, +, zero(T), Reduction.warp, Val(128); ndrange = n)
                 @test Array(y)[1] == 128
 
-                groupreduce_2!(backend())(y, x, +, zero(T), Reduction.warp, Val(64); ndrange=n)
+                groupreduce_2!(backend())(y, x, +, zero(T), Reduction.warp, Val(64); ndrange = n)
                 @test Array(y)[1] == 64
             end
         end
