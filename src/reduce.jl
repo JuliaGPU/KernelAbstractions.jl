@@ -94,21 +94,21 @@ end
 
 # Backends should implement these two.
 function __shfl_down end
-supports_warp_reduction(::CPU) = false
+supports_warp_reduction(::Backend) = false
+
+# Assume warp is 32 lanes.
+const __warpsize::UInt32 = 32
+# Maximum number of warps (for a groupsize = 1024).
+const __warp_bins::UInt32 = 32
 
 @inline function __warp_reduce(val, op)
-    offset::UInt32 = UInt32(32) ÷ 0x02
+    offset::UInt32 = __warpsize ÷ 0x02
     while offset > 0x00
         val = op(val, @shfl_down(val, offset))
         offset >>= 0x01
     end
     return val
 end
-
-# Assume warp is 32 lanes.
-const __warpsize::UInt32 = 32
-# Maximum number of warps (for a groupsize = 1024).
-const __warp_bins::UInt32 = 32
 
 function __groupreduce(__ctx__, op, val::T, neutral::T, ::Val{groupsize}, ::Val{:warp}) where {T, groupsize}
     storage = @localmem T __warp_bins
