@@ -1,18 +1,28 @@
+export @groupreduce, Reduction
+
+module Reduction
+    const thread = Val(:thread)
+    const warp = Val(:warp)
+end
+
 """
-    @groupreduce algo op val neutral [groupsize]
+    @groupreduce op val neutral algo [groupsize]
 
 Perform group reduction of `val` using `op`.
 
 # Arguments
 
 - `algo` specifies which reduction algorithm to use:
-    - `:thread`:
+    - `Reduction.thread`:
         Perform thread group reduction (requires `groupsize * sizeof(T)` bytes of shared memory).
         Available accross all backends.
-    - `:warp`:
+    - `Reduction.warp`:
         Perform warp group reduction (requires `32 * sizeof(T)` bytes of shared memory).
+        Potentially faster, since requires fewer writes to shared memory.
+        To query if backend supports warp reduction, use `supports_warp_reduction(backend)`.
 
 - `neutral` should be a neutral w.r.t. `op`, such that `op(neutral, x) == x`.
+
 - `groupsize` specifies size of the workgroup.
     If a kernel does not specifies `groupsize` statically, then it is required to
     provide `groupsize`.
@@ -23,53 +33,37 @@ Perform group reduction of `val` using `op`.
 
 Result of the reduction.
 """
-macro groupreduce(algo, op, val, neutral)
-    f = if algo.value == :thread
-        __groupreduce
-    elseif algo.value == :warp
-        __warp_groupreduce
-    else
-        error(
-            "@groupreduce supports only :thread or :warp as a reduction algorithm, " *
-            "but $(algo.value) was specified.")
-    end
+macro groupreduce(op, val, neutral, algo)
     quote
-        $f(
+        __groupreduce(
             $(esc(:__ctx__)),
             $(esc(op)),
             $(esc(val)),
             $(esc(neutral)),
             Val(prod($groupsize($(esc(:__ctx__))))),
+            $(esc(algo)),
         )
     end
 end
 
-macro groupreduce(algo, op, val, neutral, groupsize)
-    f = if algo.value == :thread
-        __groupreduce
-    elseif algo.value == :warp
-        __warp_groupreduce
-    else
-        error(
-            "@groupreduce supports only :thread or :warp as a reduction algorithm, " *
-            "but $(algo.value) was specified.")
-    end
+macro groupreduce(op, val, neutral, algo, groupsize)
     quote
-        $f(
+        __groupreduce(
             $(esc(:__ctx__)),
             $(esc(op)),
             $(esc(val)),
             $(esc(neutral)),
             Val($(esc(groupsize))),
+            $(esc(algo)),
         )
     end
 end
 
-function __groupreduce(__ctx__, op, val::T, neutral::T, ::Val{groupsize}) where {T, groupsize}
+function __groupreduce(__ctx__, op, val::T, neutral::T, ::Val{groupsize}, ::Val{:thread}) where {T, groupsize}
     storage = @localmem T groupsize
 
     local_idx = @index(Local)
-    local_idx ≤ groupsize && (storage[local_idx] = val)
+    @inbounds local_idx ≤ groupsize && (storage[local_idx] = val)
     @synchronize()
 
     s::UInt64 = groupsize ÷ 0x2
@@ -77,7 +71,7 @@ function __groupreduce(__ctx__, op, val::T, neutral::T, ::Val{groupsize}) where 
         if (local_idx - 0x1) < s
             other_idx = local_idx + s
             if other_idx ≤ groupsize
-                storage[local_idx] = op(storage[local_idx], storage[other_idx])
+                @inbounds storage[local_idx] = op(storage[local_idx], storage[other_idx])
             end
         end
         @synchronize()
@@ -85,7 +79,7 @@ function __groupreduce(__ctx__, op, val::T, neutral::T, ::Val{groupsize}) where 
     end
 
     if local_idx == 0x1
-        val = storage[local_idx]
+        @inbounds val = storage[local_idx]
     end
     return val
 end
@@ -98,8 +92,9 @@ macro shfl_down(val, offset)
     end
 end
 
-# Backends should implement this.
+# Backends should implement these two.
 function __shfl_down end
+supports_warp_reduction(::CPU) = false
 
 @inline function __warp_reduce(val, op)
     offset::UInt32 = UInt32(32) ÷ 0x2
@@ -115,7 +110,7 @@ const __warpsize::UInt32 = 32
 # Maximum number of warps (for a groupsize = 1024).
 const __warp_bins::UInt32 = 32
 
-function __warp_groupreduce(__ctx__, op, val::T, neutral::T, ::Val{groupsize}) where {T, groupsize}
+function __groupreduce(__ctx__, op, val::T, neutral::T, ::Val{groupsize}, ::Val{:warp}) where {T, groupsize}
     storage = @localmem T __warp_bins
 
     local_idx = @index(Local)
@@ -124,12 +119,12 @@ function __warp_groupreduce(__ctx__, op, val::T, neutral::T, ::Val{groupsize}) w
 
     # Each warp performs a reduction and writes results into its own bin in `storage`.
     val = __warp_reduce(val, op)
-    lane == 0x1 && (storage[warp_id] = val)
+    @inbounds lane == 0x1 && (storage[warp_id] = val)
     @synchronize()
 
     # Final reduction of the `storage` on the first warp.
     within_storage = (local_idx - 0x1) < groupsize ÷ __warpsize
-    val = within_storage ? storage[lane] : neutral
+    @inbounds val = within_storage ? storage[lane] : neutral
     warp_id == 0x1 && (val = __warp_reduce(val, op))
     return val
 end

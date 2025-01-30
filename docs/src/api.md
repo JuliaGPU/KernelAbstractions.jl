@@ -13,13 +13,14 @@
 @uniform
 @groupsize
 @ndrange
-synchronize
-allocate
+@groupreduce
 ```
 
 ## Host language
 
 ```@docs
+synchronize
+allocate
 KernelAbstractions.zeros
 ```
 
