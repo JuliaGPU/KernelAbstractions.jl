@@ -13,8 +13,12 @@ end
 end
 
 function groupreduce_testsuite(backend, AT)
+    # TODO should be better way of querying max groupsize
+    groupsizes = "$backend" == "oneAPIBackend" ?
+        (256,) :
+        (256, 512, 1024)
     @testset "@groupreduce" begin
-        @testset "thread reduction T=$T, n=$n" for T in (Float16, Float32, Int32, Int64), n in (256, 512, 1024)
+        @testset "thread reduction T=$T, n=$n" for T in (Float16, Float32, Int32, Int64), n in groupsizes
             x = AT(ones(T, n))
             y = AT(zeros(T, 1))
 
@@ -30,8 +34,7 @@ function groupreduce_testsuite(backend, AT)
 
         warp_reduction = KernelAbstractions.supports_warp_reduction(backend())
         if warp_reduction
-            @testset "warp reduction T=$T, n=$n" for T in (Float16, Float32, Int32, Int64), n in (256, 512, 1024)
-
+            @testset "warp reduction T=$T, n=$n" for T in (Float16, Float32, Int32, Int64), n in groupsizes
                 x = AT(ones(T, n))
                 y = AT(zeros(T, 1))
                 groupreduce_1!(backend(), n)(y, x, +, zero(T), Reduction.warp; ndrange = n)
