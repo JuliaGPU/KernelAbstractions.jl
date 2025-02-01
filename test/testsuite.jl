@@ -93,8 +93,11 @@ function testsuite(backend, backend_str, backend_mod, AT, DAT; skip_tests = Set{
         examples_testsuite(backend_str)
     end
 
-    @conditional_testset "@groupreduce" skip_tests begin
-        groupreduce_testsuite(backend, AT)
+    # TODO @index(Local) only works as a top-level expression on CPU.
+    if backend != CPU
+        @conditional_testset "@groupreduce" skip_tests begin
+            groupreduce_testsuite(backend, AT)
+        end
     end
 
     return
