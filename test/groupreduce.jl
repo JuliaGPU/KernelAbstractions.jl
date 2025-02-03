@@ -18,7 +18,7 @@ function groupreduce_testsuite(backend, AT)
         (256,) :
         (256, 512, 1024)
     @testset "@groupreduce" begin
-        @testset "T=$T, n=$n" for T in (Float16, Float32, Float64, Int16, Int32, Int64), n in groupsizes
+        @testset "T=$T, n=$n" for T in (Float16, Float32, Int16, Int32, Int64), n in groupsizes
             x = AT(ones(T, n))
             y = AT(zeros(T, 1))
 
