@@ -1,4 +1,4 @@
-export @groupreduce, Reduction
+export @groupreduce
 
 module Reduction
     const thread = Val(:thread)
@@ -6,20 +6,12 @@ module Reduction
 end
 
 """
-    @groupreduce op val neutral algo [groupsize]
+    @groupreduce op val neutral [groupsize]
 
 Perform group reduction of `val` using `op`.
+If backend supports warp reduction, it will use it instead of thread reduction.
 
 # Arguments
-
-- `algo` specifies which reduction algorithm to use:
-    - `Reduction.thread`:
-        Perform thread group reduction (requires `groupsize * sizeof(T)` bytes of shared memory).
-        Available accross all backends.
-    - `Reduction.warp`:
-        Perform warp group reduction (requires `32 * sizeof(T)` bytes of shared memory).
-        Potentially faster, since requires fewer writes to shared memory.
-        To query if backend supports warp reduction, use `supports_warp_reduction(backend)`.
 
 - `neutral` should be a neutral w.r.t. `op`, such that `op(neutral, x) == x`.
 
@@ -33,29 +25,51 @@ Perform group reduction of `val` using `op`.
 
 Result of the reduction.
 """
-macro groupreduce(op, val, neutral, algo)
+macro groupreduce(op, val, neutral)
     return quote
-        __groupreduce(
-            $(esc(:__ctx__)),
-            $(esc(op)),
-            $(esc(val)),
-            $(esc(neutral)),
-            Val(prod($groupsize($(esc(:__ctx__))))),
-            $(esc(algo)),
-        )
+        if __supports_warp_reduction()
+            __groupreduce(
+                $(esc(:__ctx__)),
+                $(esc(op)),
+                $(esc(val)),
+                $(esc(neutral)),
+                Val(prod($groupsize($(esc(:__ctx__))))),
+                $(esc(Reduction.warp)),
+            )
+        else
+            __groupreduce(
+                $(esc(:__ctx__)),
+                $(esc(op)),
+                $(esc(val)),
+                $(esc(neutral)),
+                Val(prod($groupsize($(esc(:__ctx__))))),
+                $(esc(Reduction.thread)),
+            )
+        end
     end
 end
 
-macro groupreduce(op, val, neutral, algo, groupsize)
+macro groupreduce(op, val, neutral, groupsize)
     return quote
-        __groupreduce(
-            $(esc(:__ctx__)),
-            $(esc(op)),
-            $(esc(val)),
-            $(esc(neutral)),
-            Val($(esc(groupsize))),
-            $(esc(algo)),
-        )
+        if __supports_warp_reduction()
+            __groupreduce(
+                $(esc(:__ctx__)),
+                $(esc(op)),
+                $(esc(val)),
+                $(esc(neutral)),
+                Val($(esc(groupsize))),
+                $(esc(Reduction.warp)),
+            )
+        else
+            __groupreduce(
+                $(esc(:__ctx__)),
+                $(esc(op)),
+                $(esc(val)),
+                $(esc(neutral)),
+                Val($(esc(groupsize))),
+                $(esc(Reduction.thread)),
+            )
+        end
     end
 end
 
@@ -86,15 +100,9 @@ end
 
 # Warp groupreduce.
 
-macro shfl_down(val, offset)
-    return quote
-        $__shfl_down($(esc(val)), $(esc(offset)))
-    end
-end
-
-# Backends should implement these two.
+# NOTE: Backends should implement these two device functions (with `@device_override`).
 function __shfl_down end
-supports_warp_reduction(::Backend) = false
+function __supports_warp_reduction() end
 
 # Assume warp is 32 lanes.
 const __warpsize = UInt32(32)
@@ -104,7 +112,7 @@ const __warp_bins = UInt32(32)
 @inline function __warp_reduce(val, op)
     offset::UInt32 = __warpsize ÷ 0x02
     while offset > 0x00
-        val = op(val, @shfl_down(val, offset))
+        val = op(val, __shfl_down(val, offset))
         offset >>= 0x01
     end
     return val
