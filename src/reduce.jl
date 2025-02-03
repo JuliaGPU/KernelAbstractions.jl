@@ -102,7 +102,9 @@ end
 
 # NOTE: Backends should implement these two device functions (with `@device_override`).
 function __shfl_down end
-function __supports_warp_reduction() end
+function __supports_warp_reduction()
+    return false
+end
 
 # Assume warp is 32 lanes.
 const __warpsize = UInt32(32)
