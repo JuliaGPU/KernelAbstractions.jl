@@ -140,29 +140,18 @@ end
 
 
 ## Indexing Functions
+const KI = KA.KernelIntrinsics
 
-@device_override @inline function KA.__index_Local_Linear(ctx)
-    return get_local_id(1)
+@device_override @inline function KI.get_local_id()
+    return (; x = get_local_id(1), y = get_local_id(2), z = get_local_id(3))
 end
 
-@device_override @inline function KA.__index_Group_Linear(ctx)
-    return get_group_id(1)
+@device_override @inline function KI.get_group_id()
+    return (; x = get_group_id(1), y = get_group_id(2), z = get_group_id(3))
 end
 
-@device_override @inline function KA.__index_Global_Linear(ctx)
-    return get_global_id(1)
-end
-
-@device_override @inline function KA.__index_Local_Cartesian(ctx)
-    @inbounds KA.workitems(KA.__iterspace(ctx))[get_local_id(1)]
-end
-
-@device_override @inline function KA.__index_Group_Cartesian(ctx)
-    @inbounds KA.blocks(KA.__iterspace(ctx))[get_group_id(1)]
-end
-
-@device_override @inline function KA.__index_Global_Cartesian(ctx)
-    return @inbounds KA.expand(KA.__iterspace(ctx), get_group_id(1), get_local_id(1))
+@device_override @inline function KI.get_global_id()
+    return (; x = get_global_id(1), y = get_global_id(2), z = get_global_id(3))
 end
 
 @device_override @inline function KA.__validindex(ctx)
