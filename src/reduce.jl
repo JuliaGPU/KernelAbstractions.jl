@@ -1,9 +1,4 @@
-export @groupreduce
-
-module Reduction
-    const thread = Val(:thread)
-    const warp = Val(:warp)
-end
+export @groupreduce, @warp_groupreduce
 
 """
     @groupreduce op val neutral [groupsize]
@@ -25,55 +20,21 @@ If backend supports warp reduction, it will use it instead of thread reduction.
 
 Result of the reduction.
 """
-macro groupreduce(op, val, neutral)
-    return quote
-        if __supports_warp_reduction()
-            __groupreduce(
-                $(esc(:__ctx__)),
-                $(esc(op)),
-                $(esc(val)),
-                $(esc(neutral)),
-                Val(prod($groupsize($(esc(:__ctx__))))),
-                $(esc(Reduction.warp)),
-            )
-        else
-            __groupreduce(
-                $(esc(:__ctx__)),
-                $(esc(op)),
-                $(esc(val)),
-                $(esc(neutral)),
-                Val(prod($groupsize($(esc(:__ctx__))))),
-                $(esc(Reduction.thread)),
-            )
-        end
-    end
+macro groupreduce(op, val)
+    :(__thread_groupreduce($(esc(:__ctx__)), $(esc(op)), $(esc(val)), Val(prod($groupsize($(esc(:__ctx__)))))))
+end
+macro groupreduce(op, val, groupsize)
+    :(__thread_groupreduce($(esc(:__ctx__)), $(esc(op)), $(esc(val)), Val($(esc(groupsize)))))
 end
 
-macro groupreduce(op, val, neutral, groupsize)
-    return quote
-        if __supports_warp_reduction()
-            __groupreduce(
-                $(esc(:__ctx__)),
-                $(esc(op)),
-                $(esc(val)),
-                $(esc(neutral)),
-                Val($(esc(groupsize))),
-                $(esc(Reduction.warp)),
-            )
-        else
-            __groupreduce(
-                $(esc(:__ctx__)),
-                $(esc(op)),
-                $(esc(val)),
-                $(esc(neutral)),
-                Val($(esc(groupsize))),
-                $(esc(Reduction.thread)),
-            )
-        end
-    end
+macro warp_groupreduce(op, val, neutral)
+    :(__warp_groupreduce($(esc(:__ctx__)), $(esc(op)), $(esc(val)), $(esc(neutral)), Val(prod($groupsize($(esc(:__ctx__)))))))
+end
+macro warp_groupreduce(op, val, neutral, groupsize)
+    :(__warp_groupreduce($(esc(:__ctx__)), $(esc(op)), $(esc(val)), $(esc(neutral)), Val($(esc(groupsize)))))
 end
 
-function __groupreduce(__ctx__, op, val::T, neutral::T, ::Val{groupsize}, ::Val{:thread}) where {T, groupsize}
+function __thread_groupreduce(__ctx__, op, val::T, ::Val{groupsize}) where {T, groupsize}
     storage = @localmem T groupsize
 
     local_idx = @index(Local)
@@ -120,7 +81,7 @@ const __warp_bins = UInt32(32)
     return val
 end
 
-function __groupreduce(__ctx__, op, val::T, neutral::T, ::Val{groupsize}, ::Val{:warp}) where {T, groupsize}
+function __warp_groupreduce(__ctx__, op, val::T, neutral::T, ::Val{groupsize}) where {T, groupsize}
     storage = @localmem T __warp_bins
 
     local_idx = @index(Local)
