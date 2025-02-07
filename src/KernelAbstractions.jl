@@ -50,7 +50,7 @@ synchronize(backend)
 ```
 """
 macro kernel(expr)
-    return __kernel(expr, #=generate_cpu=# true, #=force_inbounds=# false)
+    return __kernel(expr, #=generate_cpu=# true, #=force_inbounds=# false, #=unsafe_indicies=# false)
 end
 
 """
@@ -60,6 +60,7 @@ This allows for two different configurations:
 
 1. `cpu={true, false}`: Disables code-generation of the CPU function. This relaxes semantics such that KernelAbstractions primitives can be used in non-kernel functions.
 2. `inbounds={false, true}`: Enables a forced `@inbounds` macro around the function definition in the case the user is using too many `@inbounds` already in their kernel. Note that this can lead to incorrect results, crashes, etc and is fundamentally unsafe. Be careful!
+3. `unsafe_indicies={false, true}`: Disables the implicit validation of indicies, users must avoid `@index(Global)`.
 
 - [`@context`](@ref)
 
@@ -68,9 +69,10 @@ This allows for two different configurations:
 """
 macro kernel(ex...)
     if length(ex) == 1
-        return __kernel(ex[1], true, false)
+        return __kernel(ex[1], true, false, false)
     else
         generate_cpu = true
+        unsafe_indicies = false
         force_inbounds = false
         for i in 1:(length(ex) - 1)
             if ex[i] isa Expr && ex[i].head == :(=) &&
@@ -79,16 +81,20 @@ macro kernel(ex...)
             elseif ex[i] isa Expr && ex[i].head == :(=) &&
                     ex[i].args[1] == :inbounds && ex[i].args[2] isa Bool
                 force_inbounds = ex[i].args[2]
+            elseif ex[i] isa Expr && ex[i].head == :(=) &&
+                    ex[i].args[1] == :unsafe_indicies && ex[i].args[2] isa Bool
+                unsafe_indicies = ex[i].args[2]
             else
                 error(
                     "Configuration should be of form:\n" *
                         "* `cpu=true`\n" *
                         "* `inbounds=false`\n" *
+                        "* `unsafe_indicies=false`\n" *
                         "got `", ex[i], "`",
                 )
             end
         end
-        return __kernel(ex[end], generate_cpu, force_inbounds)
+        return __kernel(ex[end], generate_cpu, force_inbounds, unsafe_indicies)
     end
 end
 

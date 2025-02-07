@@ -38,6 +38,87 @@ Major refactor of KernelAbstractions. In particular:
 - Removal of the event system. Kernel are now implicitly ordered.
 - Removal of backend packages, backends are now directly provided by CUDA.jl and similar
 
+#### 0.9.33
+Restricts the semantics of `@synchronize` to require convergent execution.
+The OpenCL backend had several miss-compilations due to divergent execution of `@synchronize`.
+The `CPU` backend always had this limitation and upon investigation the CUDA backend similarly requires convergent execution,
+but allows for a wider set of valid kernels.
+
+This highlighted a design flaw in KernelAbstractions. Most GPU implementations execute KernelAbstraction workgroups on static blocks
+This means a kernel with `ndrange=(32, 30)` might be executed on a static block of `(32,32)`. In order to block these extra indicies,
+KernelAbstraction would insert a dynamic boundscheck.
+
+Prior to v0.9.33 a kernel like
+
+```julia
+@kernel function localmem(A)
+    N = @uniform prod(@groupsize())
+    I = @index(Global, Linear)
+    i = @index(Local, Linear)
+    lmem = @localmem Int (N,) # Ok iff groupsize is static
+    lmem[i] = i
+    @synchronize
+    A[I] = lmem[N - i + 1]
+end
+```
+
+was lowered to GPU backends like this:
+
+```julia
+function localmem_gpu(A)
+    if __validindex(__ctx__)
+        N = @uniform prod(@groupsize())
+        I = @index(Global, Linear)
+        i = @index(Local, Linear)
+        lmem = @localmem Int (N,) # Ok iff groupsize is static
+        lmem[i] = i
+        @synchronize
+        A[I] = lmem[N - i + 1]
+    end
+end
+```
+
+This would cause an implicit divergent execution of `@synchronize`. 
+
+With this release the lowering has been changed to:
+
+```julia
+function localmem_gpu(A)
+    __valid_lane__ __validindex(__ctx__)
+    N = @uniform prod(@groupsize())
+    lmem = @localmem Int (N,) # Ok iff groupsize is static
+    if __valid_lane__
+        I = @index(Global, Linear)
+        i = @index(Local, Linear)
+        lmem[i] = i
+    end
+    @synchronize
+    if __valid_lane__
+        A[I] = lmem[N - i + 1]
+    end
+end
+```
+
+Note that this follow the CPU lowering with respect to `@uniform`, `@private`, `@localmem` and `@synchronize`.
+
+Since this transformation can be disruptive, user can now opt out of the implicit bounds-check,
+but users must avoid the use of `@index(Global)` and instead use their own derivation based on `@index(Group)` and `@index(Local)`.
+
+```julia
+@kernel unsafe_indicies=false function localmem(A)
+    N = @uniform prod(@groupsize())
+    gI = @index(Group, Linear)
+    i = @index(Local, Linear)
+    lmem = @localmem Int (N,) # Ok iff groupsize is static
+    lmem[i] = i
+    @synchronize
+    I = (gI - 1) * N + i
+    if i <= N && I <= length(A)
+        A[I] = lmem[N - i + 1]
+    end
+end
+```
+
 ## Semantic differences
 
 ### To CUDA.jl/AMDGPU.jl

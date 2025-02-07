@@ -34,9 +34,22 @@ end
     end
 end
 
+@kernel unsafe_indicies = false function localmem_unsafe_indicies(A)
+    N = @uniform prod(@groupsize())
+    gI = @index(Group, Linear)
+    i = @index(Local, Linear)
+    lmem = @localmem Int (N,) # Ok iff groupsize is static
+    lmem[i] = i
+    @synchronize
+    I = (gI - 1) * N + i
+    if I <= length(A)
+        A[I] = lmem[N - i + 1]
+    end
+end
+
 function localmem_testsuite(backend, ArrayT)
     @testset "kernels" begin
-        @testset for kernel! in (localmem(backend(), 16), localmem2(backend(), 16))
+        @testset for kernel! in (localmem(backend(), 16), localmem2(backend(), 16), localmem_unsafe_indicies(backend(), 16))
             A = ArrayT{Int}(undef, 64)
             kernel!(A, ndrange = size(A))
             synchronize(backend())
