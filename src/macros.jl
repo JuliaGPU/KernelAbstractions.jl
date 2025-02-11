@@ -86,22 +86,24 @@ function transform_gpu!(def, constargs, force_inbounds)
         end
     end
     pushfirst!(def[:args], :__ctx__)
-    body = def[:body]
+    new_stmts = Expr[]
+    body = MacroTools.flatten(def[:body])
+    stmts = body.args
+    push!(new_stmts, Expr(:aliasscope))
+    push!(new_stmts, :(__active_lane__ = $__validindex(__ctx__)))
     if force_inbounds
-        body = quote
-            @inbounds $(body)
-        end
+        push!(new_stmts, Expr(:inbounds, true))
     end
-    body = quote
-        if $__validindex(__ctx__)
-            $(body)
-        end
-        return nothing
+    append!(new_stmts, split(emit_gpu, body.args))
+    if force_inbounds
+        push!(new_stmts, Expr(:inbounds, :pop))
     end
+    push!(new_stmts, Expr(:popaliasscope))
+    push!(new_stmts, :(return nothing))
     def[:body] = Expr(
         :let,
         Expr(:block, let_constargs...),
-        body,
+        Expr(:block, new_stmts...),
     )
     return
 end
@@ -127,7 +129,7 @@ function transform_cpu!(def, constargs, force_inbounds)
     if force_inbounds
         push!(new_stmts, Expr(:inbounds, true))
     end
-    append!(new_stmts, split(body.args))
+    append!(new_stmts, split(emit_cpu, body.args))
     if force_inbounds
         push!(new_stmts, Expr(:inbounds, :pop))
     end
@@ -147,6 +149,7 @@ struct WorkgroupLoop
     allocations::Vector{Any}
     private_allocations::Vector{Any}
     private::Set{Symbol}
+    terminated_in_sync::Bool
 end
 
 is_sync(expr) = @capture(expr, @synchronize() | @synchronize(a_))
@@ -167,6 +170,7 @@ end
 
 # TODO proper handling of LineInfo
 function split(
+        emit,
         stmts,
         indicies = Any[], private = Set{Symbol}(),
     )
@@ -182,7 +186,7 @@ function split(
     for stmt in stmts
         has_sync = find_sync(stmt)
         if has_sync
-            loop = WorkgroupLoop(deepcopy(indicies), current, allocations, private_allocations, deepcopy(private))
+            loop = WorkgroupLoop(deepcopy(indicies), current, allocations, private_allocations, deepcopy(private), is_sync(stmt))
             push!(new_stmts, emit(loop))
             allocations = Any[]
             private_allocations = Any[]
@@ -197,7 +201,7 @@ function split(
             function recurse(expr::Expr)
                 expr = unblock(expr)
                 if is_scope_construct(expr) && any(find_sync, expr.args)
-                    new_args = unblock(split(expr.args, deepcopy(indicies), deepcopy(private)))
+                    new_args = unblock(split(emit, expr.args, deepcopy(indicies), deepcopy(private)))
                     return Expr(expr.head, new_args...)
                 else
                     return Expr(expr.head, map(recurse, expr.args)...)
@@ -240,13 +244,13 @@ function split(
 
     # everything since the last `@synchronize`
     if !isempty(current)
-        loop = WorkgroupLoop(deepcopy(indicies), current, allocations, private_allocations, deepcopy(private))
+        loop = WorkgroupLoop(deepcopy(indicies), current, allocations, private_allocations, deepcopy(private), false)
         push!(new_stmts, emit(loop))
     end
     return new_stmts
 end
 
-function emit(loop)
+function emit_cpu(loop)
     idx = gensym(:I)
     for stmt in loop.indicies
         # splice index into the i = @index(Cartesian, $idx)
@@ -296,6 +300,26 @@ function emit(loop)
             end
         end
         push!(stmts, loopexpr)
+    end
+
+    return unblock(Expr(:block, stmts...))
+end
+
+function emit_gpu(loop)
+    stmts = Any[]
+
+    body = Expr(:block, loop.stmts...)
+    loopexpr = quote
+        $(loop.allocations...)
+        $(loop.private_allocations...)
+        if __active_lane__
+            $(loop.indicies...)
+            $(unblock(body))
+        end
+    end
+    push!(stmts, loopexpr)
+    if loop.terminated_in_sync
+        push!(stmts, :($__synchronize()))
     end
 
     return unblock(Expr(:block, stmts...))
