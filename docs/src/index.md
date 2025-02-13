@@ -51,7 +51,7 @@ Major refactor of KernelAbstractions. In particular:
 - clarifies the semantics of `KA.copyto!` and adds `KA.pagelock!`
 - adds support for multiple devices per backend
 
-#### 0.9.33
+#### 0.9.34
 Restricts the semantics of `@synchronize` to require convergent execution.
 The OpenCL backend had several miss-compilations due to divergent execution of `@synchronize`.
 The `CPU` backend always had this limitation and upon investigation the CUDA backend similarly requires convergent execution,
@@ -61,7 +61,7 @@ This highlighted a design flaw in KernelAbstractions. Most GPU implementations e
 This means a kernel with `ndrange=(32, 30)` might be executed on a static block of `(32,32)`. In order to block these extra indicies,
 KernelAbstraction would insert a dynamic boundscheck.
 
-Prior to v0.9.33 a kernel like
+Prior to v0.9.34 a kernel like
 
 ```julia
 @kernel function localmem(A)
