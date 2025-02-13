@@ -10,7 +10,7 @@ function find_return(stmt)
 end
 
 # XXX: Proper errors
-function __kernel(expr, generate_cpu = true, force_inbounds = false)
+function __kernel(expr, generate_cpu = true, force_inbounds = false, unsafe_indicies = true)
     def = splitdef(expr)
     name = def[:name]
     args = def[:args]
@@ -46,7 +46,7 @@ function __kernel(expr, generate_cpu = true, force_inbounds = false)
 
     def_gpu = deepcopy(def)
     def_gpu[:name] = gpu_name = Symbol(:gpu_, name)
-    transform_gpu!(def_gpu, constargs, force_inbounds)
+    transform_gpu!(def_gpu, constargs, force_inbounds, unsafe_indicies)
     gpu_function = combinedef(def_gpu)
 
     # create constructor functions
@@ -78,7 +78,7 @@ end
 
 # The easy case, transform the function for GPU execution
 # - mark constant arguments by applying `constify`.
-function transform_gpu!(def, constargs, force_inbounds)
+function transform_gpu!(def, constargs, force_inbounds, unsafe_indicies)
     let_constargs = Expr[]
     for (i, arg) in enumerate(def[:args])
         if constargs[i]
@@ -94,7 +94,11 @@ function transform_gpu!(def, constargs, force_inbounds)
     if force_inbounds
         push!(new_stmts, Expr(:inbounds, true))
     end
-    append!(new_stmts, split(emit_gpu, body.args))
+    if !unsafe_indicies
+        append!(new_stmts, split(emit_gpu, body.args))
+    else
+        push!(new_stmts, body)
+    end
     if force_inbounds
         push!(new_stmts, Expr(:inbounds, :pop))
     end
