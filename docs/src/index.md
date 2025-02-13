@@ -38,6 +38,19 @@ Major refactor of KernelAbstractions. In particular:
 - Removal of the event system. Kernel are now implicitly ordered.
 - Removal of backend packages, backends are now directly provided by CUDA.jl and similar
 
+#### 0.9.5
+- adds `@kernel cpu=false` 
+
+#### 0.9.11
+- adds `@kernel inbounds=true`
+
+#### 0.9.22
+- adds `KA.functional(::Backend)`
+
+#### 0.9.32
+- clarifies the semantics of `KA.copyto!` and adds `KA.pagelock!`
+- adds support for multiple devices per backend
+
 #### 0.9.33
 Restricts the semantics of `@synchronize` to require convergent execution.
 The OpenCL backend had several miss-compilations due to divergent execution of `@synchronize`.
