@@ -58,7 +58,7 @@ The `CPU` backend always had this limitation and upon investigation the CUDA bac
 but allows for a wider set of valid kernels.
 
 This highlighted a design flaw in KernelAbstractions. Most GPU implementations execute KernelAbstraction workgroups on static blocks
-This means a kernel with `ndrange=(32, 30)` might be executed on a static block of `(32,32)`. In order to block these extra indicies,
+This means a kernel with `ndrange=(32, 30)` might be executed on a static block of `(32,32)`. In order to block these extra indices,
 KernelAbstraction would insert a dynamic boundscheck.
 
 Prior to v0.9.34 a kernel like
@@ -118,7 +118,7 @@ Since this transformation can be disruptive, user can now opt out of the implici
 but users must avoid the use of `@index(Global)` and instead use their own derivation based on `@index(Group)` and `@index(Local)`.
 
 ```julia
-@kernel unsafe_indicies=true function localmem(A)
+@kernel unsafe_indices=true function localmem(A)
     N = @uniform prod(@groupsize())
     gI = @index(Group, Linear)
     i = @index(Local, Linear)

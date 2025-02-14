@@ -10,7 +10,7 @@ function find_return(stmt)
 end
 
 # XXX: Proper errors
-function __kernel(expr, generate_cpu = true, force_inbounds = false, unsafe_indicies = false)
+function __kernel(expr, generate_cpu = true, force_inbounds = false, unsafe_indices = false)
     def = splitdef(expr)
     name = def[:name]
     args = def[:args]
@@ -46,7 +46,7 @@ function __kernel(expr, generate_cpu = true, force_inbounds = false, unsafe_indi
 
     def_gpu = deepcopy(def)
     def_gpu[:name] = gpu_name = Symbol(:gpu_, name)
-    transform_gpu!(def_gpu, constargs, force_inbounds, unsafe_indicies)
+    transform_gpu!(def_gpu, constargs, force_inbounds, unsafe_indices)
     gpu_function = combinedef(def_gpu)
 
     # create constructor functions
@@ -78,7 +78,7 @@ end
 
 # The easy case, transform the function for GPU execution
 # - mark constant arguments by applying `constify`.
-function transform_gpu!(def, constargs, force_inbounds, unsafe_indicies)
+function transform_gpu!(def, constargs, force_inbounds, unsafe_indices)
     let_constargs = Expr[]
     for (i, arg) in enumerate(def[:args])
         if constargs[i]
@@ -89,13 +89,13 @@ function transform_gpu!(def, constargs, force_inbounds, unsafe_indicies)
     new_stmts = Expr[]
     body = MacroTools.flatten(def[:body])
     push!(new_stmts, Expr(:aliasscope))
-    if !unsafe_indicies
+    if !unsafe_indices
         push!(new_stmts, :(__active_lane__ = $__validindex(__ctx__)))
     end
     if force_inbounds
         push!(new_stmts, Expr(:inbounds, true))
     end
-    if !unsafe_indicies
+    if !unsafe_indices
         append!(new_stmts, split(emit_gpu, body.args))
     else
         push!(new_stmts, body)
@@ -117,7 +117,7 @@ end
 # - mark constant arguments by applying `constify`.
 # - insert aliasscope markers
 # - insert implied loop bodys
-#   - handle indicies
+#   - handle indices
 #   - hoist workgroup definitions
 #   - hoist uniform variables
 function transform_cpu!(def, constargs, force_inbounds)
@@ -149,7 +149,7 @@ function transform_cpu!(def, constargs, force_inbounds)
 end
 
 struct WorkgroupLoop
-    indicies::Vector{Any}
+    indices::Vector{Any}
     stmts::Vector{Any}
     allocations::Vector{Any}
     private_allocations::Vector{Any}
@@ -177,7 +177,7 @@ end
 function split(
         emit,
         stmts,
-        indicies = Any[], private = Set{Symbol}(),
+        indices = Any[], private = Set{Symbol}(),
     )
     # 1. Split the code into blocks separated by `@synchronize`
     # 2. Aggregate `@index` expressions
@@ -191,7 +191,7 @@ function split(
     for stmt in stmts
         has_sync = find_sync(stmt)
         if has_sync
-            loop = WorkgroupLoop(deepcopy(indicies), current, allocations, private_allocations, deepcopy(private), is_sync(stmt))
+            loop = WorkgroupLoop(deepcopy(indices), current, allocations, private_allocations, deepcopy(private), is_sync(stmt))
             push!(new_stmts, emit(loop))
             allocations = Any[]
             private_allocations = Any[]
@@ -206,7 +206,7 @@ function split(
             function recurse(expr::Expr)
                 expr = unblock(expr)
                 if is_scope_construct(expr) && any(find_sync, expr.args)
-                    new_args = unblock(split(emit, expr.args, deepcopy(indicies), deepcopy(private)))
+                    new_args = unblock(split(emit, expr.args, deepcopy(indices), deepcopy(private)))
                     return Expr(expr.head, new_args...)
                 else
                     return Expr(expr.head, map(recurse, expr.args)...)
@@ -225,7 +225,7 @@ function split(
             continue
         elseif @capture(stmt, lhs_ = rhs_ | (vs__, lhs_ = rhs_))
             if @capture(rhs, @index(args__))
-                push!(indicies, stmt)
+                push!(indices, stmt)
                 continue
             elseif @capture(rhs, @localmem(args__) | @uniform(args__))
                 push!(allocations, stmt)
@@ -249,7 +249,7 @@ function split(
 
     # everything since the last `@synchronize`
     if !isempty(current)
-        loop = WorkgroupLoop(deepcopy(indicies), current, allocations, private_allocations, deepcopy(private), false)
+        loop = WorkgroupLoop(deepcopy(indices), current, allocations, private_allocations, deepcopy(private), false)
         push!(new_stmts, emit(loop))
     end
     return new_stmts
@@ -257,7 +257,7 @@ end
 
 function emit_cpu(loop)
     idx = gensym(:I)
-    for stmt in loop.indicies
+    for stmt in loop.indices
         # splice index into the i = @index(Cartesian, $idx)
         @assert stmt.head === :(=)
         rhs = stmt.args[2]
@@ -300,7 +300,7 @@ function emit_cpu(loop)
         loopexpr = quote
             for $idx in $__workitems_iterspace(__ctx__)
                 $__validindex(__ctx__, $idx) || continue
-                $(loop.indicies...)
+                $(loop.indices...)
                 $(unblock(body))
             end
         end
@@ -318,7 +318,7 @@ function emit_gpu(loop)
         $(loop.allocations...)
         $(loop.private_allocations...)
         if __active_lane__
-            $(loop.indicies...)
+            $(loop.indices...)
             $(unblock(body))
         end
     end

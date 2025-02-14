@@ -50,7 +50,7 @@ synchronize(backend)
 ```
 """
 macro kernel(expr)
-    return __kernel(expr, #=generate_cpu=# true, #=force_inbounds=# false, #=unsafe_indicies=# false)
+    return __kernel(expr, #=generate_cpu=# true, #=force_inbounds=# false, #=unsafe_indices=# false)
 end
 
 """
@@ -60,7 +60,7 @@ This allows for two different configurations:
 
 1. `cpu={true, false}`: Disables code-generation of the CPU function. This relaxes semantics such that KernelAbstractions primitives can be used in non-kernel functions.
 2. `inbounds={false, true}`: Enables a forced `@inbounds` macro around the function definition in the case the user is using too many `@inbounds` already in their kernel. Note that this can lead to incorrect results, crashes, etc and is fundamentally unsafe. Be careful!
-3. `unsafe_indicies={false, true}`: Disables the implicit validation of indicies, users must avoid `@index(Global)`.
+3. `unsafe_indices={false, true}`: Disables the implicit validation of indices, users must avoid `@index(Global)`.
 
 - [`@context`](@ref)
 
@@ -72,7 +72,7 @@ macro kernel(ex...)
         return __kernel(ex[1], true, false, false)
     else
         generate_cpu = true
-        unsafe_indicies = false
+        unsafe_indices = false
         force_inbounds = false
         for i in 1:(length(ex) - 1)
             if ex[i] isa Expr && ex[i].head == :(=) &&
@@ -82,19 +82,19 @@ macro kernel(ex...)
                     ex[i].args[1] == :inbounds && ex[i].args[2] isa Bool
                 force_inbounds = ex[i].args[2]
             elseif ex[i] isa Expr && ex[i].head == :(=) &&
-                    ex[i].args[1] == :unsafe_indicies && ex[i].args[2] isa Bool
-                unsafe_indicies = ex[i].args[2]
+                    ex[i].args[1] == :unsafe_indices && ex[i].args[2] isa Bool
+                unsafe_indices = ex[i].args[2]
             else
                 error(
                     "Configuration should be of form:\n" *
                         "* `cpu=false`\n" *
                         "* `inbounds=true`\n" *
-                        "* `unsafe_indicies=true`\n" *
+                        "* `unsafe_indices=true`\n" *
                         "got `", ex[i], "`",
                 )
             end
         end
-        return __kernel(ex[end], generate_cpu, force_inbounds, unsafe_indicies)
+        return __kernel(ex[end], generate_cpu, force_inbounds, unsafe_indices)
     end
 end
 

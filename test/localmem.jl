@@ -34,7 +34,7 @@ end
     end
 end
 
-@kernel unsafe_indicies = true function localmem_unsafe_indicies(A)
+@kernel unsafe_indices = true function localmem_unsafe_indices(A)
     N = @uniform prod(@groupsize())
     gI = @index(Group, Linear)
     i = @index(Local, Linear)
@@ -49,7 +49,7 @@ end
 
 function localmem_testsuite(backend, ArrayT)
     @testset "kernels" begin
-        @testset for kernel! in (localmem(backend(), 16), localmem2(backend(), 16), localmem_unsafe_indicies(backend(), 16))
+        @testset for kernel! in (localmem(backend(), 16), localmem2(backend(), 16), localmem_unsafe_indices(backend(), 16))
             A = ArrayT{Int}(undef, 64)
             kernel!(A, ndrange = size(A))
             synchronize(backend())

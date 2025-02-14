@@ -8,7 +8,7 @@
     - `ldg` on the GPU
     - `@aliasscopes` on the CPU
 
-- Cartesian or Linear indicies supported
+- Cartesian or Linear indices supported
   - `@index(Linear)
   - `@index(Cartesian)
 - `@synchronize` for inserting workgroup-level synchronization
