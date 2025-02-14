@@ -87,9 +87,9 @@ macro kernel(ex...)
             else
                 error(
                     "Configuration should be of form:\n" *
-                        "* `cpu=true`\n" *
-                        "* `inbounds=false`\n" *
-                        "* `unsafe_indicies=false`\n" *
+                        "* `cpu=false`\n" *
+                        "* `inbounds=true`\n" *
+                        "* `unsafe_indicies=true`\n" *
                         "got `", ex[i], "`",
                 )
             end

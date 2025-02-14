@@ -10,7 +10,7 @@ function find_return(stmt)
 end
 
 # XXX: Proper errors
-function __kernel(expr, generate_cpu = true, force_inbounds = false, unsafe_indicies = true)
+function __kernel(expr, generate_cpu = true, force_inbounds = false, unsafe_indicies = false)
     def = splitdef(expr)
     name = def[:name]
     args = def[:args]
@@ -88,9 +88,10 @@ function transform_gpu!(def, constargs, force_inbounds, unsafe_indicies)
     pushfirst!(def[:args], :__ctx__)
     new_stmts = Expr[]
     body = MacroTools.flatten(def[:body])
-    stmts = body.args
     push!(new_stmts, Expr(:aliasscope))
-    push!(new_stmts, :(__active_lane__ = $__validindex(__ctx__)))
+    if !unsafe_indicies
+        push!(new_stmts, :(__active_lane__ = $__validindex(__ctx__)))
+    end
     if force_inbounds
         push!(new_stmts, Expr(:inbounds, true))
     end

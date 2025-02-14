@@ -118,7 +118,7 @@ Since this transformation can be disruptive, user can now opt out of the implici
 but users must avoid the use of `@index(Global)` and instead use their own derivation based on `@index(Group)` and `@index(Local)`.
 
 ```julia
-@kernel unsafe_indicies=false function localmem(A)
+@kernel unsafe_indicies=true function localmem(A)
     N = @uniform prod(@groupsize())
     gI = @index(Group, Linear)
     i = @index(Local, Linear)
