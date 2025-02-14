@@ -34,7 +34,7 @@ end
     end
 end
 
-@kernel unsafe_indicies = false function localmem_unsafe_indicies(A)
+@kernel unsafe_indicies = true function localmem_unsafe_indicies(A)
     N = @uniform prod(@groupsize())
     gI = @index(Group, Linear)
     i = @index(Local, Linear)
