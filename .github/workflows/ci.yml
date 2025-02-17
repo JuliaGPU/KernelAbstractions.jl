@@ -30,11 +30,34 @@ jobs:
           - windows-latest
         arch:
           - x64
+        pocl: [jll,]
         include:
+          - version: '1.10'
+            os: ubuntu-latest
+            arch: x64
+            pocl: local
+            allow_failure: true
+          - version: '1.11'
+            os: ubuntu-latest
+            arch: x64
+            pocl: local
+            allow_failure: true
           - version: 'nightly'
             os: ubuntu-latest
             arch: x64
+            pocl: local
             allow_failure: true
+          - version: 'nightly'
+            os: ubuntu-latest
+            arch: x64
+            pocl: local
+            allow_failure: true
+          - version: 'nightly'
+            os: ubuntu-latest
+            arch: x64
+            pocl: jll
+            allow_failure: true
+          
     steps:
       - uses: actions/checkout@v4
       - uses: julia-actions/setup-julia@v2
@@ -43,7 +66,70 @@ jobs:
           arch: ${{ matrix.arch }}
           show-versioninfo: true
       - uses: julia-actions/cache@v2
-      - run: | 
+      - name: Checkout pocl
+        if: ${{ matrix.pocl == 'local' }}
+        uses: actions/checkout@v4
+        with:
+          repository: pocl/pocl
+          path: pocl
+      - name: Install system dependencies
+        if: ${{ matrix.pocl == 'local' }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build pkg-config
+      - name: Install Julia dependencies
+        if: ${{ matrix.pocl == 'local' }}
+        run: |
+            touch pocl/Project.toml
+            julia --project=pocl --color=yes -e '
+              using Pkg
+              # unversioned
+              Pkg.add([
+                "SPIRV_Tools_jll",
+                "OpenCL_jll",
+                "OpenCL_Headers_jll",
+                "Hwloc_jll",
+                "CMake_jll",
+              ])
+              # versioned
+              llvm_version = "$(Base.libllvm_version.major).$(Base.libllvm_version.minor)"
+              Pkg.add(name="LLVM_full_jll", version=llvm_version)
+              Pkg.add(name="SPIRV_LLVM_Translator_jll", version=llvm_version)'
+      - name: Build PoCL
+        if: ${{ matrix.pocl == 'local' }}
+        run: |
+            julia --project=pocl --color=yes -e '
+              using LLVM_full_jll,
+                    SPIRV_Tools_jll, SPIRV_LLVM_Translator_jll,
+                    OpenCL_jll, OpenCL_Headers_jll,
+                    Hwloc_jll, CMake_jll
+              sourcedir = joinpath(@__DIR__, "pocl")
+              builddir = joinpath(@__DIR__, "build")
+              destdir = joinpath(@__DIR__, "target")
+              prefix = []
+              for jll in [SPIRV_Tools_jll, SPIRV_LLVM_Translator_jll, OpenCL_jll,
+                          OpenCL_Headers_jll, Hwloc_jll]
+                  push!(prefix, jll.artifact_dir)
+              end
+              withenv("LD_LIBRARY_PATH" => joinpath(Sys.BINDIR, Base.PRIVATE_LIBDIR)) do
+                  mkpath(builddir)
+                  run(```cmake -B $builddir -S $sourcedir
+                         -GNinja
+                         -DCMAKE_CXX_FLAGS="-fdiagnostics-color=always"
+                         -DCMAKE_C_FLAGS="-fdiagnostics-color=always"
+                         -DCMAKE_BUILD_TYPE=Debug
+                         -DENABLE_TESTS:Bool=OFF
+                         -DPOCL_DEBUG_MESSAGES:Bool=ON
+                         -DCMAKE_INSTALL_PREFIX=$destdir
+                         -DWITH_LLVM_CONFIG=$(LLVM_full_jll.artifact_dir)/tools/llvm-config
+                         -DCMAKE_PREFIX_PATH="$(join(prefix, ";"))"
+                         -DKERNELLIB_HOST_CPU_VARIANTS=distro```)
+                  run(```$(cmake()) --build $builddir --parallel $(Sys.CPU_THREADS) --target install```)
+              end'
+            echo '[pocl_jll]' > test/LocalPreferences.toml
+            echo 'libpocl_path="${{ github.workspace }}/target/lib/libpocl.so"' >> test/LocalPreferences.toml
+      - name: "Co-develop Enzyme and KA"
+        run: |
           julia -e '
             using Pkg
             withenv("JULIA_PKG_PRECOMPILE_AUTO" => 0) do
