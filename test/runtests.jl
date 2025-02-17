@@ -3,6 +3,8 @@ using Test
 
 include("testsuite.jl")
 
+@info "Configuration" pocl = KernelAbstractions.POCL.nanoOpenCL.pocl_jll.libpocl
+
 @testset "CPU back-end" begin
     struct CPUBackendArray{T, N, A} end # Fake and unused
     Testsuite.testsuite(CPU, "CPU", Base, Array, CPUBackendArray)
@@ -16,15 +18,6 @@ end
 A = zeros(Int, Threads.nthreads())
 kern_static(CPU(static = true), (1,))(A, ndrange = length(A))
 @test A == 1:Threads.nthreads()
-
-@kernel cpu = false function my_no_cpu_kernel(a)
-end
-@test_throws ErrorException("This kernel is unavailable for backend CPU") my_no_cpu_kernel(CPU())
-
-# testing multiple configurations at the same time
-@kernel cpu = false inbounds = false function my_no_cpu_kernel2(a)
-end
-@test_throws ErrorException("This kernel is unavailable for backend CPU") my_no_cpu_kernel2(CPU())
 
 if Base.JLOptions().check_bounds == 0 || Base.JLOptions().check_bounds == 1
     # testing bounds errors

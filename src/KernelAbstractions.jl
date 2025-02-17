@@ -50,7 +50,7 @@ synchronize(backend)
 ```
 """
 macro kernel(expr)
-    return __kernel(expr, #=generate_cpu=# true, #=force_inbounds=# false, #=unsafe_indices=# false)
+    return __kernel(expr, #=force_inbounds=# false, #=unsafe_indices=# false)
 end
 
 """
@@ -66,18 +66,20 @@ This allows for two different configurations:
 
 !!! warn
     This is an experimental feature.
+
+!!! note
+    `cpu={true, false}` is deprecated for KernelAbstractions 1.0
 """
 macro kernel(ex...)
     if length(ex) == 1
-        return __kernel(ex[1], true, false, false)
+        return __kernel(ex[1], false, false)
     else
-        generate_cpu = true
         unsafe_indices = false
         force_inbounds = false
         for i in 1:(length(ex) - 1)
             if ex[i] isa Expr && ex[i].head == :(=) &&
                     ex[i].args[1] == :cpu && ex[i].args[2] isa Bool
-                generate_cpu = ex[i].args[2]
+                #deprecated
             elseif ex[i] isa Expr && ex[i].head == :(=) &&
                     ex[i].args[1] == :inbounds && ex[i].args[2] isa Bool
                 force_inbounds = ex[i].args[2]
@@ -94,7 +96,7 @@ macro kernel(ex...)
                 )
             end
         end
-        return __kernel(ex[end], generate_cpu, force_inbounds, unsafe_indices)
+        return __kernel(ex[end], force_inbounds, unsafe_indices)
     end
 end
 
@@ -190,6 +192,8 @@ After releasing the memory of an array, it should no longer be accessed.
 """
 function unsafe_free! end
 
+unsafe_free!(::AbstractArray) = return
+
 ###
 # Kernel language
 # - @localmem
@@ -254,6 +258,9 @@ For storage that only persists between `@synchronize` statements, an `MArray` ca
 instead.
 
 See also [`@uniform`](@ref).
+
+!!! note
+    `@private` is deprecated for KernelAbstractions 1.0
 """
 macro private(T, dims)
     if dims isa Integer
@@ -269,6 +276,9 @@ end
 
 Creates a private local of `mem` per item in the workgroup. This can be safely used
 across [`@synchronize`](@ref) statements.
+
+!!! note
+    `@private` is deprecated for KernelAbstractions 1.0
 """
 macro private(expr)
     return esc(expr)
@@ -279,6 +289,9 @@ end
 
 `expr` is evaluated outside the workitem scope. This is useful for variable declarations
 that span workitems, or are reused across `@synchronize` statements.
+
+!!! note
+    `@uniform` is deprecated for KernelAbstractions 1.0
 """
 macro uniform(value)
     return esc(value)
@@ -330,6 +343,8 @@ Access the hidden context object used by KernelAbstractions.
 !!! warn
     Only valid to be used from a kernel with `cpu=false`.
 
+!!! note
+    `@context` will be supported on all backends in KernelAbstractions 1.0
 ```
 function f(@context, a)
     I = @index(Global, Linear)
@@ -478,31 +493,11 @@ Abstract type for all GPU based KernelAbstractions backends.
 
 !!! note
     New backend implementations **must** sub-type this abstract type.
+
+!!! note
+    `GPU` will be removed in KernelAbstractions v1.0
 """
 abstract type GPU <: Backend end
-
-"""
-    CPU(; static=false)
-
-Instantiate a CPU (multi-threaded) backend.
-
-## Options:
- - `static`: Uses a static thread assignment, this can be beneficial for NUMA aware code.
-   Defaults to false.
-"""
-struct CPU <: Backend
-    static::Bool
-    CPU(; static::Bool = false) = new(static)
-end
-
-"""
-    isgpu(::Backend)::Bool
-
-Returns true for all [`GPU`](@ref) backends.
-"""
-isgpu(::GPU) = true
-isgpu(::CPU) = false
-
 
 """
     get_backend(A::AbstractArray)::Backend
@@ -518,12 +513,9 @@ function get_backend end
 # Should cover SubArray, ReshapedArray, ReinterpretArray, Hermitian, AbstractTriangular, etc.:
 get_backend(A::AbstractArray) = get_backend(parent(A))
 
-get_backend(::Array) = CPU()
-
 # Define:
 #   adapt_storage(::Backend, a::Array) = adapt(BackendArray, a)
 #   adapt_storage(::Backend, a::BackendArray) = a
-Adapt.adapt_storage(::CPU, a::Array) = a
 
 """
     allocate(::Backend, Type, dims...)::AbstractArray
@@ -743,7 +735,7 @@ Partition a kernel for the given ndrange and workgroupsize.
     return iterspace, dynamic
 end
 
-function construct(backend::Backend, ::S, ::NDRange, xpu_name::XPUName) where {Backend <: Union{CPU, GPU}, S <: _Size, NDRange <: _Size, XPUName}
+function construct(backend::Backend, ::S, ::NDRange, xpu_name::XPUName) where {Backend <: GPU, S <: _Size, NDRange <: _Size, XPUName}
     return Kernel{Backend, S, NDRange, XPUName}(backend, xpu_name)
 end
 
@@ -759,6 +751,10 @@ include("compiler.jl")
 
 function __workitems_iterspace end
 function __validindex end
+
+# for reflection
+function mkcontext end
+function launch_config end
 
 include("macros.jl")
 
@@ -829,8 +825,11 @@ end
 end
 
 # CPU backend
+include("pocl/pocl.jl")
+using .POCL
+export POCLBackend
 
-include("cpu.jl")
+const CPU = POCLBackend
 
 # precompile
 PrecompileTools.@compile_workload begin
@@ -842,21 +841,6 @@ PrecompileTools.@compile_workload begin
             @synchronize
         end
     end
-end
-
-if !isdefined(Base, :get_extension)
-    using Requires
-end
-
-@static if !isdefined(Base, :get_extension)
-    function __init__()
-        @require EnzymeCore = "f151be2c-9106-41f4-ab19-57ee4f262869" include("../ext/EnzymeExt.jl")
-    end
-end
-
-if !isdefined(Base, :get_extension)
-    include("../ext/LinearAlgebraExt.jl")
-    include("../ext/SparseArraysExt.jl")
 end
 
 end #module
