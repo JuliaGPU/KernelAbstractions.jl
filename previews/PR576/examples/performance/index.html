@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Measuring performance · KernelAbstractions.jl</title><meta name="title" content="Measuring performance · KernelAbstractions.jl"/><meta property="og:title" content="Measuring performance · KernelAbstractions.jl"/><meta property="twitter:title" content="Measuring performance · KernelAbstractions.jl"/><meta name="description" content="Documentation for KernelAbstractions.jl."/><meta property="og:description" content="Documentation for KernelAbstractions.jl."/><meta property="twitter:description" content="Documentation for KernelAbstractions.jl."/><meta property="og:url" content="https://juliagpu.github.io/KernelAbstractions.jl/examples/performance/"/><meta property="twitter:url" content="https://juliagpu.github.io/KernelAbstractions.jl/examples/performance/"/><link rel="canonical" href="https://juliagpu.github.io/KernelAbstractions.jl/examples/performance/"/><script data-outdated-warner src="../../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL="../.."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../../assets/documenter.js"></script><script src="../../search_index.js"></script><script src="../../siteinfo.js"></script><script src="../../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../../">KernelAbstractions.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../../">Home</a></li><li><a class="tocitem" href="../../quickstart/">Quickstart</a></li><li><a class="tocitem" href="../../kernels/">Writing kernels</a></li><li><span class="tocitem">Examples</span><ul><li><a class="tocitem" href="../memcopy/">Memcopy</a></li><li><a class="tocitem" href="../memcopy_static/">Memcopy with static NDRange</a></li><li><a class="tocitem" href="../naive_transpose/">Naive Transpose</a></li><li class="is-active"><a class="tocitem" href>Measuring performance</a><ul class="internal"><li><a class="tocitem" href="#Results:"><span>Results:</span></a></li><li><a class="tocitem" href="#Code"><span>Code</span></a></li></ul></li><li><a class="tocitem" href="../matmul/">Matmul</a></li><li><a class="tocitem" href="../numa_aware/">NUMA-aware SAXPY</a></li><li><a class="tocitem" href="../atomix/">Atomic operations with Atomix.jl</a></li></ul></li><li><a class="tocitem" href="../../api/">API</a></li><li><span class="tocitem">Extras</span><ul><li><a class="tocitem" href="../../extras/unrolling/">Unroll macro</a></li></ul></li><li><a class="tocitem" href="../../implementations/">Notes for implementations</a></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li><a class="is-disabled">Examples</a></li><li class="is-active"><a href>Measuring performance</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Measuring performance</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/JuliaGPU/KernelAbstractions.jl/blob/main/docs/src/examples/performance.md#L" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="Measuring-performance"><a class="docs-heading-anchor" href="#Measuring-performance">Measuring performance</a><a id="Measuring-performance-1"></a><a class="docs-heading-anchor-permalink" href="#Measuring-performance" title="Permalink"></a></h1><p>Run under <code>nsight-cu</code>:</p><pre><code class="language-sh hljs">nv-nsight-cu-cli --nvtx --profile-from-start=off --section=SpeedOfLight --section=julia --project=examples examples/performance.jl</code></pre><h2 id="Results:"><a class="docs-heading-anchor" href="#Results:">Results:</a><a id="Results:-1"></a><a class="docs-heading-anchor-permalink" href="#Results:" title="Permalink"></a></h2><p>Collated results on a V100:</p><table><tr><th style="text-align: right">Kernel</th><th style="text-align: right">Time</th><th style="text-align: right">Speed of Light Mem %</th></tr><tr><td style="text-align: right">naive (32, 32)</td><td style="text-align: right">1.19ms</td><td style="text-align: right">65.06%</td></tr><tr><td style="text-align: right">naive (1024, 1)</td><td style="text-align: right">1.79ms</td><td style="text-align: right">56.13 %</td></tr><tr><td style="text-align: right">naive (1, 1024)</td><td style="text-align: right">3.03ms</td><td style="text-align: right">60.02 %</td></tr></table><h3 id="Full-output:"><a class="docs-heading-anchor" href="#Full-output:">Full output:</a><a id="Full-output:-1"></a><a class="docs-heading-anchor-permalink" href="#Full-output:" title="Permalink"></a></h3><pre><code class="nohighlight hljs">==PROF==   0: Naive transpose (32, 32)
+    Section: GPU Speed Of Light
+    ---------------------------------------------------------------------- --------------- ------------------------------
+    Memory Frequency                                                         cycle/usecond                         878.88
+    SOL FB                                                                               %                          38.16
+    Elapsed Cycles                                                                   cycle                      1,447,874
+    SM Frequency                                                             cycle/nsecond                           1.23
+    Memory [%]                                                                           %                          65.93
+    Duration                                                                       msecond                           1.17
+    SOL L2                                                                               %                          19.08
+    SOL TEX                                                                              %                          66.19
+    SM Active Cycles                                                                 cycle                   1,440,706.40
+    SM [%]                                                                               %                          23.56
+    ---------------------------------------------------------------------- --------------- ------------------------------
+
+  ptxcall___gpu_transpose_kernel_naive__430_2, 2020-Feb-20 22:42:24, Context 1, Stream 23
+
+==PROF==   0: Naive transpose (1024, 1)
+    Section: GPU Speed Of Light
+    ---------------------------------------------------------------------- --------------- ------------------------------
+    Memory Frequency                                                         cycle/usecond                         877.69
+    SOL FB                                                                               %                          22.40
+    Elapsed Cycles                                                                   cycle                      2,473,141
+    SM Frequency                                                             cycle/nsecond                           1.23
+    Memory [%]                                                                           %                          51.17
+    Duration                                                                       msecond                           2.00
+    SOL L2                                                                               %                          50.17
+    SOL TEX                                                                              %                          51.27
+    SM Active Cycles                                                                 cycle                   2,465,610.06
+    SM [%]                                                                               %                          11.68
+    ---------------------------------------------------------------------- --------------- ------------------------------
+
+  ptxcall___gpu_transpose_kernel_naive__430_3, 2020-Feb-20 22:42:28, Context 1, Stream 25
+
+==PROF==   0: Naive transpose (1, 1024)
+    Section: GPU Speed Of Light
+    ---------------------------------------------------------------------- --------------- ------------------------------
+    Memory Frequency                                                         cycle/usecond                         876.69
+    SOL FB                                                                               %                          17.88
+    Elapsed Cycles                                                                   cycle                      3,737,127
+    SM Frequency                                                             cycle/nsecond                           1.24
+    Memory [%]                                                                           %                          60.02
+    Duration                                                                       msecond                           3.02
+    SOL L2                                                                               %                          60.02
+    SOL TEX                                                                              %                          45.65
+    SM Active Cycles                                                                 cycle                   3,732,591.59
+    SM [%]                                                                               %                          12.56
+    ---------------------------------------------------------------------- --------------- ------------------------------</code></pre><h2 id="Code"><a class="docs-heading-anchor" href="#Code">Code</a><a id="Code-1"></a><a class="docs-heading-anchor-permalink" href="#Code" title="Permalink"></a></h2><pre><code class="language-julia hljs"># EXCLUDE FROM TESTING
+using KernelAbstractions, Test, Random
+include(joinpath(dirname(pathof(KernelAbstractions)), &quot;../examples/utils.jl&quot;)) # Load backend
+using KernelAbstractions.Extras: @unroll
+
+using NVTX # TODO: Common front-end
+
+const nreps = 3
+const N = 2048
+const T = Float32
+
+const TILE_DIM = 32
+const BLOCK_ROWS = 8
+
+# Simple variants
+
+@kernel function simple_copy_kernel!(output, @Const(input))
+    I, J = @index(Global, NTuple)
+    @inbounds output[I, J] = input[I, J]
+end
+
+@kernel function simple_transpose_kernel!(output, @Const(input))
+    I, J = @index(Global, NTuple)
+    @inbounds output[J, I] = input[I, J]
+end
+
+# Local memory variants
+
+@kernel function lmem_copy_kernel!(
+        output, @Const(input),
+        ::Val{BANK} = Val(1),
+    ) where {BANK}
+    I, J = @index(Global, NTuple)
+    i, j = @index(Local, NTuple)
+
+    N = @uniform @groupsize()[1]
+    M = @uniform @groupsize()[2]
+
+    # +1 to avoid bank conflicts on shared memory
+    tile = @localmem eltype(output) (N + BANK, M)
+
+    @inbounds tile[i, j] = input[I, J]
+
+    @synchronize
+
+    @inbounds output[I, J] = tile[i, j]
+end
+
+@kernel function lmem_transpose_kernel!(
+        output, @Const(input),
+        ::Val{BANK} = Val(1),
+    ) where {BANK}
+    gi, gj = @index(Group, NTuple)
+    i, j = @index(Local, NTuple)
+
+    N = @uniform @groupsize()[1]
+    M = @uniform @groupsize()[2]
+
+    # +1 to avoid bank conflicts on shared memory
+    tile = @localmem eltype(output) (N + BANK, M)
+
+    # Manually calculate global indexes
+    # Later on we need to pivot the group index
+    I = (gi - 1) * N + i
+    J = (gj - 1) * M + j
+
+    @inbounds tile[i, j] = input[I, J]
+
+    @synchronize
+
+    # Pivot the group index
+    I = (gj - 1) * M + i
+    J = (gi - 1) * N + j
+
+    @inbounds output[I, J] = tile[j, i]
+end
+
+# Local Memory + process multiple elements per lane
+
+@kernel function coalesced_copy_kernel!(
+        output, @Const(input),
+        ::Val{BANK} = Val(1),
+    ) where {BANK}
+    gi, gj = @index(Group, NTuple)
+    i, j = @index(Local, NTuple)
+
+    TILE_DIM = @uniform @groupsize()[1]
+    BLOCK_ROWS = @uniform @groupsize()[2]
+
+    # +1 to avoid bank conflicts on shared memory
+    tile = @localmem eltype(output) (TILE_DIM + BANK, TILE_DIM)
+
+    # Can&#39;t use @index(Global), because we use a smaller ndrange
+    I = (gi - 1) * TILE_DIM + i
+    J = (gj - 1) * TILE_DIM + j
+
+    @unroll for k in 0:BLOCK_ROWS:(TILE_DIM - 1)
+        @inbounds tile[i, j + k] = input[I, J + k]
+    end
+
+    @synchronize
+
+    @unroll for k in 0:BLOCK_ROWS:(TILE_DIM - 1)
+        @inbounds output[I, J + k] = tile[i, j + k]
+    end
+end
+
+@kernel function coalesced_transpose_kernel!(
+        output, @Const(input),
+        ::Val{BANK} = Val(1),
+    ) where {BANK}
+    gi, gj = @index(Group, NTuple)
+    i, j = @index(Local, NTuple)
+
+    TILE_DIM = @uniform @groupsize()[1]
+    BLOCK_ROWS = @uniform @groupsize()[2]
+
+    # +1 to avoid bank conflicts on shared memory
+    tile = @localmem eltype(output) (TILE_DIM + BANK, TILE_DIM)
+
+    # Can&#39;t use @index(Global), because we use a smaller ndrange
+    I = (gi - 1) * TILE_DIM + i
+    J = (gj - 1) * TILE_DIM + j
+
+    @unroll for k in 0:BLOCK_ROWS:(TILE_DIM - 1)
+        @inbounds tile[i, j + k] = input[I, J + k]
+    end
+
+    @synchronize
+
+    # Transpose block offsets
+    I = (gj - 1) * TILE_DIM + i
+    J = (gi - 1) * TILE_DIM + j
+
+    @unroll for k in 0:BLOCK_ROWS:(TILE_DIM - 1)
+        @inbounds output[I, J + k] = tile[j + k, i]
+    end
+end
+
+# Benchmark simple
+
+for block_dims in ((TILE_DIM, TILE_DIM), (TILE_DIM * TILE_DIM, 1), (1, TILE_DIM * TILE_DIM))
+    for (name, kernel) in (
+            (&quot;copy&quot;, simple_copy_kernel!(backend, block_dims)),
+            (&quot;transpose&quot;, simple_transpose_kernel!(backend, block_dims)),
+        )
+        NVTX.@range &quot;Simple $name $block_dims&quot; let
+            input = rand!(allocate(backend, T, N, N))
+            output = similar(input)
+
+            # compile kernel
+            kernel(output, input, ndrange = size(output))
+            for rep in 1:nreps
+                kernel(output, input, ndrange = size(output))
+            end
+            KernelAbstractions.synchronize(backend)
+        end
+    end
+end
+
+# Benchmark localmem
+for (name, kernel) in (
+        (&quot;copy&quot;, lmem_copy_kernel!(backend, (TILE_DIM, TILE_DIM))),
+        (&quot;transpose&quot;, lmem_transpose_kernel!(backend, (TILE_DIM, TILE_DIM))),
+    )
+    for bank in (true, false)
+        NVTX.@range &quot;Localmem $name ($TILE_DIM, $TILE_DIM) bank=$bank&quot; let
+            input = rand!(allocate(backend, T, N, N))
+            output = similar(input)
+
+            # compile kernel
+            kernel(output, input, Val(Int(bank)), ndrange = size(output))
+            for rep in 1:nreps
+                kernel(output, input, Val(Int(bank)), ndrange = size(output))
+            end
+            KernelAbstractions.synchronize(backend)
+        end
+    end
+end
+
+# Benchmark localmem + multiple elements per lane
+for (name, kernel) in (
+        (&quot;copy&quot;, coalesced_copy_kernel!(backend, (TILE_DIM, BLOCK_ROWS))),
+        (&quot;transpose&quot;, coalesced_transpose_kernel!(backend, (TILE_DIM, BLOCK_ROWS))),
+    )
+    for bank in (true, false)
+        NVTX.@range &quot;Localmem + multiple elements $name ($TILE_DIM, $BLOCK_ROWS) bank=$bank&quot; let
+            input = rand!(allocate(backend, T, N, N))
+            output = similar(input)
+
+            # We want a number of blocks equivalent to (TILE_DIM, TILE_DIM)
+            # but our blocks are (TILE_DIM, BLOCK_ROWS) so we need to remove
+            # a factor from the size of the array otherwise we get to many blocks
+            block_factor = div(TILE_DIM, BLOCK_ROWS)
+            ndrange = (N, div(N, block_factor))
+
+            # compile kernel
+            kernel(output, input, Val(Int(bank)), ndrange = ndrange)
+            for rep in 1:nreps
+                kernel(output, input, Val(Int(bank)), ndrange = ndrange)
+            end
+            KernelAbstractions.synchronize(backend)
+        end
+    end
+end
+</code></pre></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../naive_transpose/">« Naive Transpose</a><a class="docs-footer-nextpage" href="../matmul/">Matmul »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.8.1 on <span class="colophon-date" title="Wednesday 26 February 2025 11:30">Wednesday 26 February 2025</span>. Using Julia version 1.11.3.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
