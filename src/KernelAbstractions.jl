@@ -533,15 +533,15 @@ Allocate a storage array appropriate for the computational backend.
 !!! note
     Backend implementations **must** implement `allocate(::NewBackend, T, dims::Tuple)`
 """
-allocate(backend::Backend, T, dims...) = allocate(backend, T, dims)
-allocate(backend::Backend, T, dims::Tuple) = throw(MethodError(allocate, (backend, T, dims)))
+allocate(backend::Backend, T::Type, dims...) = allocate(backend, T, dims)
+allocate(backend::Backend, T::Type, dims::Tuple) = throw(MethodError(allocate, (backend, T, dims)))
 
 """
     zeros(::Backend, Type, dims...)::AbstractArray
 
 Allocate a storage array appropriate for the computational backend filled with zeros.
 """
-zeros(backend::Backend, T, dims...) = zeros(backend, T, dims)
+zeros(backend::Backend, T::Type, dims...) = zeros(backend, T, dims)
 function zeros(backend::Backend, ::Type{T}, dims::Tuple) where {T}
     data = allocate(backend, T, dims...)
     fill!(data, zero(T))
@@ -553,7 +553,7 @@ end
 
 Allocate a storage array appropriate for the computational backend filled with ones.
 """
-ones(backend::Backend, T, dims...) = ones(backend, T, dims)
+ones(backend::Backend, T::Type, dims...) = ones(backend, T, dims)
 function ones(backend::Backend, ::Type{T}, dims::Tuple) where {T}
     data = allocate(backend, T, dims)
     fill!(data, one(T))

@@ -307,6 +307,13 @@ function unittest_testsuite(Backend, backend_str, backend_mod, BackendArrayT; sk
         @test size(KernelAbstractions.zeros(backend, Float32, 0, 9)) == (0, 9)
     end
 
+    @testset "Malformed allocations" begin
+        backend = Backend()
+        @test_throws MethodError KernelAbstractions.zeros(backend, 2, 2)
+        @test_throws MethodError KernelAbstractions.ones(backend, 2, 2)
+        @test_throws MethodError KernelAbstractions.allocate(backend, 2, 2)
+    end
+
     @kernel cpu = false function gpu_return_kernel!(x)
         i = @index(Global)
         if i ≤ (length(x) ÷ 2)
