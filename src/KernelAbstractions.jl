@@ -793,12 +793,12 @@ argconvert(k::Kernel{T}, arg) where {T} =
 supports_enzyme(::Backend) = false
 function __fake_compiler_job end
 
+include("groupreduction.jl")
+
 ###
 # Extras
 # - LoopInfo
 ###
-
-include("reduce.jl")
 
 include("extras/extras.jl")
 

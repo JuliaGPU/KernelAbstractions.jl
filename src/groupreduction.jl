@@ -4,7 +4,6 @@ export @groupreduce, @warp_groupreduce
     @groupreduce op val neutral [groupsize]
 
 Perform group reduction of `val` using `op`.
-If backend supports warp reduction, it will use it instead of thread reduction.
 
 # Arguments
 
@@ -25,13 +24,6 @@ macro groupreduce(op, val)
 end
 macro groupreduce(op, val, groupsize)
     :(__thread_groupreduce($(esc(:__ctx__)), $(esc(op)), $(esc(val)), Val($(esc(groupsize)))))
-end
-
-macro warp_groupreduce(op, val, neutral)
-    :(__warp_groupreduce($(esc(:__ctx__)), $(esc(op)), $(esc(val)), $(esc(neutral)), Val(prod($groupsize($(esc(:__ctx__)))))))
-end
-macro warp_groupreduce(op, val, neutral, groupsize)
-    :(__warp_groupreduce($(esc(:__ctx__)), $(esc(op)), $(esc(val)), $(esc(neutral)), Val($(esc(groupsize)))))
 end
 
 function __thread_groupreduce(__ctx__, op, val::T, ::Val{groupsize}) where {T, groupsize}
@@ -61,10 +53,37 @@ end
 
 # Warp groupreduce.
 
-# NOTE: Backends should implement these two device functions (with `@device_override`).
+"""
+    @warp_groupreduce op val neutral [groupsize]
+
+Perform group reduction of `val` using `op`.
+Each warp within a workgroup performs its own reduction using [`shfl_down`](@ref) intrinsic,
+followed by final reduction over results of individual warp reductions.
+
+!!! note
+
+    Use [`supports_warp_reduction`](@ref) to query if given backend supports warp reduction.
+"""
+macro warp_groupreduce(op, val, neutral)
+    :(__warp_groupreduce($(esc(:__ctx__)), $(esc(op)), $(esc(val)), $(esc(neutral)), Val(prod($groupsize($(esc(:__ctx__)))))))
+end
+macro warp_groupreduce(op, val, neutral, groupsize)
+    :(__warp_groupreduce($(esc(:__ctx__)), $(esc(op)), $(esc(val)), $(esc(neutral)), Val($(esc(groupsize)))))
+end
+
+"""
+    shfl_down(val::T, offset::Integer)::T where T
+
+Read `val` from a lane with higher id given by `offset`.
+"""
 function shfl_down end
 supports_warp_reduction() = false
-# Host-variant.
+
+"""
+    supports_warp_reduction(::Backend)
+
+Query if given backend supports [`shfl_down`](@ref) intrinsic and thus warp reduction.
+"""
 supports_warp_reduction(::Backend) = false
 
 # Assume warp is 32 lanes.
