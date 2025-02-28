@@ -13,7 +13,15 @@
 @uniform
 @groupsize
 @ndrange
+```
+
+### Reduction
+
+```@docs
 @groupreduce
+@warp_groupreduce
+KernelAbstractions.shfl_down
+KernelAbstractions.supports_warp_reduction
 ```
 
 ## Host language
