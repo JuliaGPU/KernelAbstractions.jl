@@ -62,10 +62,10 @@ end
 # Warp groupreduce.
 
 # NOTE: Backends should implement these two device functions (with `@device_override`).
-function __shfl_down end
-function __supports_warp_reduction()
-    return false
-end
+function shfl_down end
+supports_warp_reduction() = false
+# Host-variant.
+supports_warp_reduction(::Backend) = false
 
 # Assume warp is 32 lanes.
 const __warpsize = UInt32(32)
@@ -75,7 +75,7 @@ const __warp_bins = UInt32(32)
 @inline function __warp_reduce(val, op)
     offset::UInt32 = __warpsize ÷ 0x02
     while offset > 0x00
-        val = op(val, __shfl_down(val, offset))
+        val = op(val, shfl_down(val, offset))
         offset >>= 0x01
     end
     return val
