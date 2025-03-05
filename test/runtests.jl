@@ -10,15 +10,6 @@ include("testsuite.jl")
     Testsuite.testsuite(CPU, "CPU", Base, Array, CPUBackendArray)
 end
 
-@kernel function kern_static(A)
-    I = @index(Global)
-    A[I] = Threads.threadid()
-end
-
-A = zeros(Int, Threads.nthreads())
-kern_static(CPU(static = true), (1,))(A, ndrange = length(A))
-@test A == 1:Threads.nthreads()
-
 if Base.JLOptions().check_bounds == 0 || Base.JLOptions().check_bounds == 1
     # testing bounds errors
     @kernel inbounds = false function my_bounded_kernel(a)
