@@ -49,7 +49,7 @@ end
     supports_fp64 = "cl_khr_fp64" in dev.extensions
 
     # create GPUCompiler objects
-    target = SPIRVCompilerTarget(; supports_fp16, supports_fp64, kwargs...)
+    target = SPIRVCompilerTarget(; supports_fp16, supports_fp64, version = v"1.2", kwargs...)
     params = OpenCLCompilerParams()
     return CompilerConfig(target, params; kernel, name, always_inline)
 end
