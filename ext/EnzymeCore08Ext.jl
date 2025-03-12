@@ -1,34 +1,11 @@
-# https://github.com/EnzymeAD/Enzyme.jl/issues/1516
-# On the CPU `autodiff_deferred` can deadlock.
-# Hence a specialized CPU version
-function cpu_fwd(ctx, config, f, args...)
-    EnzymeCore.autodiff(EnzymeCore.set_runtime_activity(Forward, config), Const(f), Const{Nothing}, Const(ctx), args...)
-    return nothing
-end
-
-function gpu_fwd(ctx, config, f, args...)
+function fwd(ctx, config, f, args...)
     EnzymeCore.autodiff_deferred(EnzymeCore.set_runtime_activity(Forward, config), Const(f), Const{Nothing}, Const(ctx), args...)
     return nothing
 end
 
 function EnzymeRules.forward(
         config,
-        func::Const{<:Kernel{CPU}},
-        ::Type{Const{Nothing}},
-        args...;
-        ndrange = nothing,
-        workgroupsize = nothing,
-    )
-    kernel = func.val
-    f = kernel.f
-    fwd_kernel = similar(kernel, cpu_fwd)
-
-    return fwd_kernel(config, f, args...; ndrange, workgroupsize)
-end
-
-function EnzymeRules.forward(
-        config,
-        func::Const{<:Kernel{<:GPU}},
+        func::Const{<:Kernel},
         ::Type{Const{Nothing}},
         args...;
         ndrange = nothing,
@@ -41,40 +18,11 @@ function EnzymeRules.forward(
     return fwd_kernel(config, f, args...; ndrange, workgroupsize)
 end
 
-_enzyme_mkcontext(kernel::Kernel{CPU}, ndrange, iterspace, dynamic) =
-    mkcontext(kernel, first(blocks(iterspace)), ndrange, iterspace, dynamic)
-_enzyme_mkcontext(kernel::Kernel{<:GPU}, ndrange, iterspace, dynamic) =
+_enzyme_mkcontext(kernel::Kernel, ndrange, iterspace, dynamic) =
     mkcontext(kernel, ndrange, iterspace)
 
-_augmented_return(::Kernel{CPU}, subtape, arg_refs, tape_type) =
-    AugmentedReturn{Nothing, Nothing, Tuple{Array, typeof(arg_refs), typeof(tape_type)}}(
-    nothing,
-    nothing,
-    (subtape, arg_refs, tape_type),
-)
-_augmented_return(::Kernel{<:GPU}, subtape, arg_refs, tape_type) =
+_augmented_return(::Kernel, subtape, arg_refs, tape_type) =
     AugmentedReturn{Nothing, Nothing, Any}(nothing, nothing, (subtape, arg_refs, tape_type))
-
-function _create_tape_kernel(
-        kernel::Kernel{CPU},
-        Mode,
-        FT,
-        ctxTy,
-        ndrange,
-        iterspace,
-        args2...,
-    )
-    TapeType = EnzymeCore.tape_type(
-        Mode,
-        FT,
-        Const{Nothing},
-        Const{ctxTy},
-        map(Core.Typeof, args2)...,
-    )
-    subtape = Array{TapeType}(undef, size(blocks(iterspace)))
-    aug_kernel = similar(kernel, cpu_aug_fwd)
-    return TapeType, subtape, aug_kernel
-end
 
 function _create_tape_kernel(
         kernel::Kernel{<:GPU},
@@ -106,60 +54,11 @@ function _create_tape_kernel(
     # Allocate per thread
     subtape = allocate(backend(kernel), TapeType, prod(ndrange))
 
-    aug_kernel = similar(kernel, gpu_aug_fwd)
+    aug_kernel = similar(kernel, aug_fwd)
     return TapeType, subtape, aug_kernel
 end
 
-_create_rev_kernel(kernel::Kernel{CPU}) = similar(kernel, cpu_rev)
-_create_rev_kernel(kernel::Kernel{<:GPU}) = similar(kernel, gpu_rev)
-
-function cpu_aug_fwd(
-        ctx,
-        f::FT,
-        mode::Mode,
-        subtape,
-        ::Val{TapeType},
-        args...,
-    ) where {Mode, FT, TapeType}
-    # A2 = Const{Nothing} -- since f->Nothing
-    forward, _ = EnzymeCore.autodiff_thunk(
-        mode,
-        Const{Core.Typeof(f)},
-        Const{Nothing},
-        Const{Core.Typeof(ctx)},
-        map(Core.Typeof, args)...,
-    )
-
-    # On the CPU: F is a per block function
-    # On the CPU: subtape::Vector{Vector}
-    I = __index_Group_Cartesian(ctx, CartesianIndex(1, 1)) #=fake=#
-    subtape[I] = forward(Const(f), Const(ctx), args...)[1]
-    return nothing
-end
-
-function cpu_rev(
-        ctx,
-        f::FT,
-        mode::Mode,
-        subtape,
-        ::Val{TapeType},
-        args...,
-    ) where {Mode, FT, TapeType}
-    _, reverse = EnzymeCore.autodiff_thunk(
-        mode,
-        Const{Core.Typeof(f)},
-        Const{Nothing},
-        Const{Core.Typeof(ctx)},
-        map(Core.Typeof, args)...,
-    )
-    I = __index_Group_Cartesian(ctx, CartesianIndex(1, 1)) #=fake=#
-    tp = subtape[I]
-    reverse(Const(f), Const(ctx), args..., tp)
-    return nothing
-end
-
-# GPU support
-function gpu_aug_fwd(
+function fwd(
         ctx,
         f::FT,
         mode::Mode,
@@ -186,7 +85,7 @@ function gpu_aug_fwd(
     return nothing
 end
 
-function gpu_rev(
+function rev(
         ctx,
         f::FT,
         mode::Mode,
@@ -234,11 +133,7 @@ function EnzymeRules.augmented_primal(
     arg_refs = ntuple(Val(N)) do i
         Base.@_inline_meta
         if args[i] isa Active
-            if func.val isa Kernel{<:GPU}
-                error("Active kernel arguments not supported on GPU")
-            else
-                Ref(EnzymeCore.make_zero(args[i].val))
-            end
+            error("Active kernel arguments not supported")
         else
             nothing
         end
@@ -294,7 +189,7 @@ function EnzymeRules.reverse(
 
     ModifiedBetween = Val((overwritten(config)[1], false, overwritten(config)[2:end]...))
     Mode = EnzymeCore.set_runtime_activity(ReverseSplitModified(ReverseSplitWithPrimal, ModifiedBetween), config)
-    rev_kernel = _create_rev_kernel(kernel)
+    rev_kernel = similar(kernel, rev)
     rev_kernel(
         f,
         Mode,
