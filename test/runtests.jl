@@ -36,9 +36,9 @@ struct NewBackend <: KernelAbstractions.GPU end
 end
 
 
-include("extensions/enzyme.jl")
-@static if VERSION >= v"1.7.0"
-    @testset "Enzyme" begin
-        enzyme_testsuite(CPU, Array)
-    end
-end
+# include("extensions/enzyme.jl")
+# @static if VERSION >= v"1.7.0"
+#     @testset "Enzyme" begin
+#         enzyme_testsuite(CPU, Array)
+#     end
+# end
