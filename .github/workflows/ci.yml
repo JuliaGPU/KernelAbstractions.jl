@@ -21,16 +21,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        version:
-          - '1.10'
-          - '1.11'
-        os:
-          - ubuntu-latest
-          - macOS-latest
-          - windows-latest
-        arch:
-          - x64
-        pocl: [jll,]
+#       version:
+#         - '1.10'
+#         - '1.11'
+#      os:
+#         - ubuntu-latest
+#         - macOS-latest
+#         - windows-latest
+#       arch:
+#         - x64
+#       pocl: [jll,]
         include:
           - version: '1.10'
             os: ubuntu-latest
@@ -41,23 +41,23 @@ jobs:
             os: ubuntu-latest
             arch: x64
             pocl: local
-            allow_failure: true
-          - version: 'nightly'
-            os: ubuntu-latest
-            arch: x64
-            pocl: local
-            allow_failure: true
-          - version: 'nightly'
-            os: ubuntu-latest
-            arch: x64
-            pocl: local
-            allow_failure: true
-          - version: 'nightly'
-            os: ubuntu-latest
-            arch: x64
-            pocl: jll
-            allow_failure: true
-          
+            allow_failure: false
+#          - version: 'nightly'
+#            os: ubuntu-latest
+#            arch: x64
+#            pocl: local
+#            allow_failure: true
+#          - version: 'nightly'
+#            os: ubuntu-latest
+#            arch: x64
+#            pocl: local
+#            allow_failure: true
+#          - version: 'nightly'
+#            os: ubuntu-latest
+#            arch: x64
+#            pocl: jll
+#            allow_failure: true
+#          
     steps:
       - uses: actions/checkout@v4
       - uses: julia-actions/setup-julia@v2
