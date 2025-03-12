@@ -40,12 +40,9 @@ steps:
     command: |
       julia -e 'println("--- :julia: Instantiating project")
                 using Pkg
-                try
-                   Pkg.develop([PackageSpec(; path=pwd()), PackageSpec("Enzyme"), PackageSpec("EnzymeCore"), PackageSpec("CUDA")])
-                catch err
-                   Pkg.develop(; path=pwd())
-                  Pkg.add(["CUDA", "Enzyme"])
-                end' || exit 3
+                Pkg.develop(; path=pwd())
+                Pkg.add(["CUDA", "Enzyme"])
+                ' || exit 3
 
       julia -e 'println("+++ :julia: Running tests")
                 using CUDA
