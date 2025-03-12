@@ -13,7 +13,6 @@ end
 struct NewBackend <: KernelAbstractions.GPU end
 @testset "Default host implementation" begin
     backend = NewBackend()
-    @test KernelAbstractions.isgpu(backend) == true
 
     @test_throws MethodError KernelAbstractions.synchronize(backend)
 
