@@ -32,11 +32,11 @@ jobs:
 #         - x64
 #       pocl: [jll,]
         include:
-          - version: '1.10'
-            os: ubuntu-latest
-            arch: x64
-            pocl: local
-            allow_failure: true
+          # - version: '1.10'
+          #   os: ubuntu-latest
+          #   arch: x64
+          #   pocl: local
+          #   allow_failure: true
           - version: '1.11'
             os: ubuntu-latest
             arch: x64
