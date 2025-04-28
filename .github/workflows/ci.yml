@@ -36,8 +36,13 @@ jobs:
             os: ubuntu-latest
             arch: x64
             pocl: local
-            allow_failure: true
+            allow_failure: false
           - version: '1.11'
+            os: ubuntu-latest
+            arch: x64
+            pocl: local
+            allow_failure: false
+          - version: '1.12'
             os: ubuntu-latest
             arch: x64
             pocl: local
@@ -60,11 +65,9 @@ jobs:
 #          
     steps:
       - uses: actions/checkout@v4
-      - uses: julia-actions/setup-julia@v2
+      - uses: julia-actions/install-juliaup@v2
         with:
-          version: ${{ matrix.version }}
-          arch: ${{ matrix.arch }}
-          show-versioninfo: true
+          channel: ${{ matrix.version }}
       - uses: julia-actions/cache@v2
       - name: Checkout pocl
         if: ${{ matrix.pocl == 'local' }}
@@ -92,9 +95,8 @@ jobs:
                 "CMake_jll",
               ])
               # versioned
-              llvm_version = "$(Base.libllvm_version.major).$(Base.libllvm_version.minor)"
-              Pkg.add(name="LLVM_full_jll", version=llvm_version)
-              Pkg.add(name="SPIRV_LLVM_Translator_jll", version=llvm_version)'
+              Pkg.add(name="LLVM_full_jll", version="20")
+              Pkg.add(name="SPIRV_LLVM_Translator_jll", version="20")'
       - name: Build PoCL
         if: ${{ matrix.pocl == 'local' }}
         run: |
@@ -119,6 +121,7 @@ jobs:
                          -DCMAKE_C_FLAGS="-fdiagnostics-color=always"
                          -DCMAKE_BUILD_TYPE=Debug
                          -DENABLE_TESTS:Bool=OFF
+                         -DSTATIC_LLVM:Bool=On
                          -DPOCL_DEBUG_MESSAGES:Bool=ON
                          -DCMAKE_INSTALL_PREFIX=$destdir
                          -DWITH_LLVM_CONFIG=$(LLVM_full_jll.artifact_dir)/tools/llvm-config
