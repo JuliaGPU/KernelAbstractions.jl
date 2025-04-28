@@ -36,8 +36,13 @@ jobs:
             os: ubuntu-latest
             arch: x64
             pocl: local
-            allow_failure: true
+            allow_failure: false
           - version: '1.11'
+            os: ubuntu-latest
+            arch: x64
+            pocl: local
+            allow_failure: false
+          - version: '1.12'
             os: ubuntu-latest
             arch: x64
             pocl: local
@@ -60,18 +65,15 @@ jobs:
 #          
     steps:
       - uses: actions/checkout@v4
-      - uses: julia-actions/setup-julia@v2
+      - uses: julia-actions/install-juliaup@v2
         with:
-          version: ${{ matrix.version }}
-          arch: ${{ matrix.arch }}
-          show-versioninfo: true
+          channel: ${{ matrix.version }}
       - uses: julia-actions/cache@v2
       - name: Checkout pocl
         if: ${{ matrix.pocl == 'local' }}
         uses: actions/checkout@v4
         with:
-          repository: pjaaskel/pocl
-          ref: UnreachableToReturns-fixes
+          repository: pocl/pocl
           path: pocl
       - name: Install system dependencies
         if: ${{ matrix.pocl == 'local' }}
@@ -93,8 +95,8 @@ jobs:
                 "CMake_jll",
               ])
               # versioned
-              Pkg.add(name="LLVM_full_jll", version="19")
-              Pkg.add(name="SPIRV_LLVM_Translator_jll", version="19")'
+              Pkg.add(name="LLVM_full_jll", version="20")
+              Pkg.add(name="SPIRV_LLVM_Translator_jll", version="20")'
       - name: Build PoCL
         if: ${{ matrix.pocl == 'local' }}
         run: |
