@@ -11,6 +11,7 @@ steps:
       - JuliaCI/julia-coverage#v1:
           codecov: true
     command: |
+      echo -e "[CUDA_Runtime_jll]\nlocal = \"true\"" >LocalPreferences.toml
       julia -e 'println("--- :julia: Instantiating project")
                 using Pkg
                 Pkg.develop(; path=pwd())
@@ -38,6 +39,7 @@ steps:
       - JuliaCI/julia-coverage#v1:
           codecov: true
     command: |
+      echo -e "[CUDA_Runtime_jll]\nlocal = \"true\"" >LocalPreferences.toml
       julia -e 'println("--- :julia: Instantiating project")
                 using Pkg
                 try
@@ -70,6 +72,7 @@ steps:
       - JuliaCI/julia-coverage#v1:
           codecov: true
     command: |
+      echo -e "[CUDA_Runtime_jll]\nlocal = \"true\"" >LocalPreferences.toml
       julia -e 'println("--- :julia: Instantiating project")
                 using Pkg
                 Pkg.develop(; path=pwd())
