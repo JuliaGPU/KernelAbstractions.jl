@@ -1,5 +1,4 @@
 # EXCLUDE FROM TESTING
-if !(@isdefined backend)
 if Base.find_package("CUDA") !== nothing
     using CUDA
     using CUDA.CUDAKernels
@@ -7,7 +6,6 @@ if Base.find_package("CUDA") !== nothing
     CUDA.allowscalar(false)
 else
     const backend = CPU()
-end
 end
 
 @show backend, backend_str

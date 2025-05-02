@@ -9,7 +9,7 @@ function find_sources(path::String, sources = String[])
     return sources
 end
 
-function examples_testsuite(backend, backend_str)
+function examples_testsuite(backend_str)
     @testset "examples" begin
         examples_dir = joinpath(@__DIR__, "..", "examples")
         examples = find_sources(examples_dir)
@@ -21,7 +21,6 @@ function examples_testsuite(backend, backend_str)
         @testset "$(basename(example))" for example in examples
             @eval module $(gensym())
             backend_str = $backend_str
-            const backend = ($backend)()
             include($example)
             end
             @test true
