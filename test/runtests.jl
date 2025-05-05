@@ -24,6 +24,9 @@ struct NewBackend <: KernelAbstractions.GPU end
     @test_throws MethodError KernelAbstractions.ones(backend, Float32, 1)
 
     @test KernelAbstractions.supports_atomics(backend) == true
+    @test KernelAbstractions.supports_atomics(backend, Float64) == true
+    @test KernelAbstractions.supports_atomics(backend, Int32) == true
+
     @test KernelAbstractions.supports_float64(backend) == true
 
     @test KernelAbstractions.priority!(backend, :high) === nothing
