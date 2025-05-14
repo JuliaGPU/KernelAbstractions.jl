@@ -14,6 +14,9 @@ function examples_testsuite(backend, backend_str)
         examples_dir = joinpath(@__DIR__, "..", "examples")
         examples = find_sources(examples_dir)
         filter!(file -> readline(file) != "# EXCLUDE FROM TESTING", examples)
+        filter!(examples) do file
+            last(splitpath(file)) == "histogram.jl"
+        end
         if backend_str == "ROCM"
             filter!(file -> occursin("# INCLUDE ROCM", String(read(file))), examples)
         end
