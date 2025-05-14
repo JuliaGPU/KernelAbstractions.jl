@@ -87,9 +87,9 @@ end
     linear_input = move(backend, linear_input)
     all_two = move(backend, all_two)
 
-    rand_histogram = KernelAbstractions.zeros(backend, eltype(rand_input), 128)
-    linear_histogram = KernelAbstractions.zeros(backend, eltype(linear_input), 1024)
-    two_histogram = KernelAbstractions.zeros(backend, eltype(all_two), 2)
+    rand_histogram = KernelAbstractions.zeros(backend, eltype(rand_input), maximum(rand_input))
+    linear_histogram = KernelAbstractions.zeros(backend, eltype(linear_input), maximum(linear_input))
+    two_histogram = KernelAbstractions.zeros(backend, eltype(all_two), maximum(all_two))
 
     histogram!(rand_histogram, rand_input)
     histogram!(linear_histogram, linear_input)
