@@ -5,7 +5,7 @@ include(joinpath(dirname(pathof(KernelAbstractions)), "../examples/utils.jl")) #
 
 # Function to use as a baseline for CPU metrics
 function create_histogram(input)
-    histogram_output = zeros(Int, maximum(input))
+    histogram_output = zeros(eltype(input), maximum(input))
     for i in input
         histogram_output[i] += 1
     end
@@ -22,7 +22,7 @@ end
     @uniform gs = @groupsize()[1]
     @uniform N = length(histogram_output)
 
-    shared_histogram = @localmem Int (gs)
+    shared_histogram = @localmem eltype(input) (gs)
 
     # This will go through all input elements and assign them to a location in
     # shmem. Note that if there is not enough shem, we create different shmem
@@ -77,9 +77,10 @@ end
     if Base.VERSION < v"1.7.0" && !KernelAbstractions.isgpu(backend)
         @test_skip false
     else
-        rand_input = [rand(1:128) for i in 1:1000]
-        linear_input = [i for i in 1:1024]
-        all_two = [2 for i in 1:512]
+        # Use Int32 as some backends don't support 64-bit atomics
+        rand_input = Int32[rand(1:128) for i in 1:1000]
+        linear_input = Int32[i for i in 1:1024]
+        all_two = Int32[2 for i in 1:512]
 
         histogram_rand_baseline = create_histogram(rand_input)
         histogram_linear_baseline = create_histogram(linear_input)
@@ -89,9 +90,9 @@ end
         linear_input = move(backend, linear_input)
         all_two = move(backend, all_two)
 
-        rand_histogram = KernelAbstractions.zeros(backend, Int, 128)
-        linear_histogram = KernelAbstractions.zeros(backend, Int, 1024)
-        two_histogram = KernelAbstractions.zeros(backend, Int, 2)
+        rand_histogram = KernelAbstractions.zeros(backend, Int32, 128)
+        linear_histogram = KernelAbstractions.zeros(backend, Int32, 1024)
+        two_histogram = KernelAbstractions.zeros(backend, Int32, 2)
 
         histogram!(rand_histogram, rand_input)
         histogram!(linear_histogram, linear_input)
