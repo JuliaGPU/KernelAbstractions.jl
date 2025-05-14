@@ -16,8 +16,8 @@ function mycopy!(A, B)
     return
 end
 
-A = KernelAbstractions.zeros(backend, Float64, 128, 128)
-B = KernelAbstractions.ones(backend, Float64, 128, 128)
+A = KernelAbstractions.zeros(backend, f_type, 128, 128)
+B = KernelAbstractions.ones(backend, f_type, 128, 128)
 mycopy!(A, B)
 KernelAbstractions.synchronize(backend)
 @test A == B
