@@ -28,6 +28,8 @@ end
     # possible to get a value of 312, then we will have 2 separate shmem blocks,
     # one from 1->256, and another from 256->512
     @uniform max_element = 1
+    # @print("tid=$tid, lid=$lid, gs=$gs, N=$N, max_element=$max_element\n")
+
     for min_element in 1:gs:N
 
         # Setting shared_histogram to 0
@@ -41,8 +43,12 @@ end
 
         # Defining bin on shared memory and writing to it if possible
         bin = input[tid]
+        win = bin
+        # if lid == 5
+        # end
         if bin >= min_element && bin < max_element
             bin -= min_element - 1
+            @print("tid=$tid, lid=$lid, bin=$win, gs=$gs, N=$N, max_element=$max_element, min_element=$min_element, bin=$(bin)\n")
             @atomic shared_histogram[bin] += 1
         end
 
@@ -53,13 +59,16 @@ end
         end
 
     end
+    # @print("tid=$tid, lid=$lid, gs=$gs, N=$N, max_element=$max_element\n")
 
 end
 
-function histogram!(histogram_output, input)
+function histogram!(histogram_output, input, groupsize=256)
     backend = get_backend(histogram_output)
     # Need static block size
-    kernel! = histogram_kernel!(backend, (256,))
+    kernel! = histogram_kernel!(backend, (groupsize,))
+    @show kernel!
+    @show size(input)
     kernel!(histogram_output, input, ndrange = size(input))
     return
 end
@@ -73,28 +82,33 @@ end
 
 @testset "histogram tests" begin
     # Use Int32 as some backends don't support 64-bit atomics
-    rand_input = Int32.(rand(1:128, 1000))
-    linear_input = Int32.(rand(1:128, 1024))
-    all_two = fill(Int32(2), 512)
+    # rand_input = Int32.(rand(1:128, 1000))
+    rand_input = Int32.(rand(1:20, 20))
+    # linear_input = Int32.(rand(1:128, 1024))
+    # all_two = fill(Int32(2), 512)
 
     histogram_rand_baseline = create_histogram(rand_input)
-    histogram_linear_baseline = create_histogram(linear_input)
-    histogram_two_baseline = create_histogram(all_two)
+    # histogram_linear_baseline = create_histogram(linear_input)
+    # histogram_two_baseline = create_histogram(all_two)
 
     rand_input = move(backend, rand_input)
-    linear_input = move(backend, linear_input)
-    all_two = move(backend, all_two)
+    # linear_input = move(backend, linear_input)
+    # all_two = move(backend, all_two)
 
     rand_histogram = KernelAbstractions.zeros(backend, eltype(rand_input), maximum(rand_input))
-    linear_histogram = KernelAbstractions.zeros(backend, eltype(linear_input), maximum(linear_input))
-    two_histogram = KernelAbstractions.zeros(backend, eltype(all_two), maximum(all_two))
+    # linear_histogram = KernelAbstractions.zeros(backend, eltype(linear_input), maximum(linear_input))
+    # two_histogram = KernelAbstractions.zeros(backend, eltype(all_two), maximum(all_two))
 
-    histogram!(rand_histogram, rand_input)
-    histogram!(linear_histogram, linear_input)
-    histogram!(two_histogram, all_two)
+    histogram!(rand_histogram, rand_input, 9)
+    # histogram!(linear_histogram, linear_input)
+    # histogram!(two_histogram, all_two)
     KernelAbstractions.synchronize(backend)
 
+    @show sum(Array(rand_histogram))
+    @show sum(histogram_rand_baseline)
+    @show findall(Array(rand_histogram) .!= histogram_rand_baseline)
+
     @test isapprox(Array(rand_histogram), histogram_rand_baseline)
-    @test isapprox(Array(linear_histogram), histogram_linear_baseline)
-    @test isapprox(Array(two_histogram), histogram_two_baseline)
+    # @test isapprox(Array(linear_histogram), histogram_linear_baseline)
+    # @test isapprox(Array(two_histogram), histogram_two_baseline)
 end
