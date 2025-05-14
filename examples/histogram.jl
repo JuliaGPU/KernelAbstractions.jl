@@ -17,8 +17,6 @@ end
     tid = @index(Global, Linear)
     lid = @index(Local, Linear)
 
-    @uniform warpsize = Int(32)
-
     @uniform gs = @groupsize()[1]
     @uniform N = length(histogram_output)
 
