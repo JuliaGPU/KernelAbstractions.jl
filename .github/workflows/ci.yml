@@ -21,16 +21,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-#       version:
-#         - '1.10'
-#         - '1.11'
-#      os:
-#         - ubuntu-latest
-#         - macOS-latest
-#         - windows-latest
-#       arch:
-#         - x64
-#       pocl: [jll,]
+        version:
+          - '1.10'
+          - '1.11'
+        os:
+          - ubuntu-latest
+          - macOS-latest
+          - windows-latest
+        arch:
+          - x64
+        pocl: [jll,]
         include:
           - version: '1.10'
             os: ubuntu-latest
