@@ -7,6 +7,9 @@ using Adapt
 
 identity(x) = x
 
+struct UnknownAbstractVector <: AbstractVector{Float32}  # issue #588
+end
+
 function unittest_testsuite(Backend, backend_str, backend_mod, BackendArrayT; skip_tests = Set{String}())
     @conditional_testset "partition" skip_tests begin
         backend = Backend()
@@ -80,6 +83,7 @@ function unittest_testsuite(Backend, backend_str, backend_mod, BackendArrayT; sk
         @test @inferred(KernelAbstractions.get_backend(view(A, 2:4, 1:3))) isa backendT
         @test @inferred(KernelAbstractions.get_backend(Diagonal(x))) isa backendT
         @test @inferred(KernelAbstractions.get_backend(Tridiagonal(A))) isa backendT
+        @test_throws ArgumentError KernelAbstractions.get_backend(UnknownAbstractVector())  # issue #588
     end
 
     @conditional_testset "sparse" skip_tests begin
