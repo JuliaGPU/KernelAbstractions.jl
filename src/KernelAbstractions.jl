@@ -510,8 +510,17 @@ Get a [`Backend`](@ref) instance suitable for array `A`.
 """
 function get_backend end
 
+function get_backend_recur(f::F, x) where {F}
+    t() = throw(ArgumentError("throwing to prevent a stack overflow, possibly a `get_backend` method is missing?"))
+    y = f(x)
+    if y isa typeof(x)
+        @noinline t()
+    end
+    return get_backend(y)
+end
+
 # Should cover SubArray, ReshapedArray, ReinterpretArray, Hermitian, AbstractTriangular, etc.:
-get_backend(A::AbstractArray) = get_backend(parent(A))
+get_backend(A::AbstractArray) = get_backend_recur(parent, A)
 
 # Define:
 #   adapt_storage(::Backend, a::Array) = adapt(BackendArray, a)
