@@ -7,3 +7,5 @@ if Base.find_package("CUDA") !== nothing
 else
     const backend = CPU()
 end
+
+const f_type = KernelAbstractions.supports_float64(backend) ? Float64 : Float32
