@@ -4,7 +4,7 @@ using Test
 using Random
 include(joinpath(dirname(pathof(KernelAbstractions)), "../examples/utils.jl")) # Load backend
 
-const TILE_DIM = 32
+const TILE_DIM = 16
 
 @kernel function coalesced_matmul_kernel!(
         output, @Const(input1), @Const(input2), N, R, M,
