@@ -84,7 +84,7 @@ function testsuite(backend, backend_str, backend_mod, AT, DAT; skip_tests = Set{
     end
 
     @conditional_testset "Examples" skip_tests begin
-        examples_testsuite(backend_str)
+        examples_testsuite(backend, backend_str)
     end
 
     return
