@@ -74,7 +74,7 @@ function move(backend, input)
 end
 
 @testset "histogram tests" begin
-    rand_input = [rand(1:128) for i in 1:1000]
+    rand_input = [rand(1:128) for i in 1:10000]
     linear_input = [i for i in 1:1024]
     all_two = [2 for i in 1:512]
 
