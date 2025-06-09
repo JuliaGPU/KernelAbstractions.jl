@@ -520,7 +520,13 @@ function get_backend_recur(f::F, x) where {F}
 end
 
 # Should cover SubArray, ReshapedArray, ReinterpretArray, Hermitian, AbstractTriangular, etc.:
-get_backend(A::AbstractArray) = get_backend_recur(parent, A)
+function get_backend(A::AbstractArray)
+    P = parent(A)
+    if P isa typeof(A)
+        throw(ArgumentError("Implement `KernelAbstractions.get_backend(::$(typeof(A)))`"))
+    end
+    return get_backend(P)
+end
 
 # Define:
 #   adapt_storage(::Backend, a::Array) = adapt(BackendArray, a)
