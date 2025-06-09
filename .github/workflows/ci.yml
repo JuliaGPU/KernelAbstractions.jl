@@ -42,7 +42,7 @@ jobs:
           - os: macOS-15
             pocl: local
           - os: windows-2025
-            pocl: local    
+            pocl: local
     steps:
       - uses: actions/checkout@v4
       - uses: julia-actions/install-juliaup@v2
@@ -136,6 +136,7 @@ jobs:
           annotate: true
       - name: Setup BusyBox
         if: runner.os == 'Windows'
+        shell: pwsh
         run: |
           Invoke-WebRequest https://frippery.org/files/busybox/busybox64.exe -OutFile C:\Windows\drop.exe
       - name: Test KernelAbstractions.jl (de-escalated)
