@@ -21,48 +21,28 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        version:
-          - '1.10'
-          - '1.11'
-        os:
-          - ubuntu-latest
-          - macOS-latest
-          - windows-latest
-        arch:
-          - x64
-        pocl: [jll,]
-        include:
-          - version: '1.10'
-            os: ubuntu-latest
+        version: ['1.10', '1.11']
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macOS-13, macOS-15, windows-2025]
+        arch: [x64, arm64]
+        pocl: [jll, local]
+        exclude:
+          - os: ubuntu-24.04
+            arch: arm64
+          - os: windows-2025
+            arch: arm64
+          - os: ubuntu-24.04-arm
             arch: x64
-            pocl: local
-            allow_failure: false
-          - version: '1.11'
-            os: ubuntu-latest
+          # macOS 13 is Intel-only, while macOS 14+ only support Apple Silicon
+          - os: macOS-15
             arch: x64
+          - os: macOS-13
+            arch: arm64
+          - os: macOS-13
             pocl: local
-            allow_failure: false
-          - version: '1.12'
-            os: ubuntu-latest
-            arch: x64
+          - os: macOS-15
             pocl: local
-            allow_failure: false
-#          - version: 'nightly'
-#            os: ubuntu-latest
-#            arch: x64
-#            pocl: local
-#            allow_failure: true
-#          - version: 'nightly'
-#            os: ubuntu-latest
-#            arch: x64
-#            pocl: local
-#            allow_failure: true
-#          - version: 'nightly'
-#            os: ubuntu-latest
-#            arch: x64
-#            pocl: jll
-#            allow_failure: true
-#          
+          - os: windows-2025
+            pocl: local    
     steps:
       - uses: actions/checkout@v4
       - uses: julia-actions/install-juliaup@v2
@@ -151,8 +131,20 @@ jobs:
           '
       - uses: julia-actions/julia-buildpkg@v1
       - uses: julia-actions/julia-runtest@v1
+        if: runner.os != 'Windows'
         with:
           annotate: true
+      - name: Setup BusyBox
+        if: runner.os == 'Windows'
+        run: |
+          Invoke-WebRequest https://frippery.org/files/busybox/busybox64.exe -OutFile C:\Windows\drop.exe
+      - name: Test KernelAbstractions.jl (de-escalated)
+        if: runner.os == 'Windows'
+        shell: drop -c "julia '{0}'"
+        run: |
+          using Pkg
+          Pkg.activate(".")
+          Pkg.test()
       - uses: julia-actions/julia-processcoverage@v1
       - uses: codecov/codecov-action@v4
         with:
