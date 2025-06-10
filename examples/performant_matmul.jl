@@ -9,7 +9,7 @@ include(joinpath(dirname(pathof(KernelAbstractions)), "../examples/utils.jl")) #
 #  Metal sometimes supports fewer.
 const TILE_DIM = 16
 
-@kernel function coalesced_matmul_kernel!(
+@kernel unsafe_indices = true function coalesced_matmul_kernel!(
         output, @Const(input1), @Const(input2), N, R, M,
         ::Val{BANK} = Val(1),
     ) where {BANK}
