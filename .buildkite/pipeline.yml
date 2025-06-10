@@ -11,6 +11,7 @@ steps:
       - JuliaCI/julia-coverage#v1:
           codecov: true
     command: |
+      julia -e 'versioninfo()'
       julia -e 'println("--- :julia: Developing CUDA")
                 using Pkg
                 Pkg.develop(; name="CUDA")
