@@ -516,7 +516,13 @@ Get a [`Backend`](@ref) instance suitable for array `A`.
 function get_backend end
 
 # Should cover SubArray, ReshapedArray, ReinterpretArray, Hermitian, AbstractTriangular, etc.:
-get_backend(A::AbstractArray) = get_backend(parent(A))
+function get_backend(A::AbstractArray)
+    P = parent(A)
+    if P isa typeof(A)
+        throw(ArgumentError("Implement `KernelAbstractions.get_backend(::$(typeof(A)))`"))
+    end
+    return get_backend(P)
+end
 
 get_backend(::Array) = CPU()
 
