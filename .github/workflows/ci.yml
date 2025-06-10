@@ -136,6 +136,7 @@ jobs:
           annotate: true
       - name: Setup BusyBox
         if: runner.os == 'Windows'
+        shell: pwsh
         run: |
           Invoke-WebRequest https://frippery.org/files/busybox/busybox64.exe -OutFile C:\Windows\drop.exe
       - name: Test KernelAbstractions.jl (de-escalated)
