@@ -48,6 +48,13 @@ end
     supports_fp16 = "cl_khr_fp16" in dev.extensions
     supports_fp64 = "cl_khr_fp64" in dev.extensions
 
+    if !supports_fp64
+        @warn_once "Device does not support double precision floating point operations" dev
+    end
+    if !supports_fp16
+        @warn_once "Device does not support half precision floating point operations" dev
+    end
+
     # create GPUCompiler objects
     target = SPIRVCompilerTarget(; supports_fp16, supports_fp64, version = v"1.2", kwargs...)
     params = OpenCLCompilerParams()
