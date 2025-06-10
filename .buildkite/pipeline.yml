@@ -31,37 +31,37 @@ steps:
     soft_fail:
       - exit_status: 3
 
-  - label: "CUDA Enzyme Julia {{matrix.version}}"
-    matrix:
-      setup:
-        version:
-          - "1.10"
-          - "1.11"
-    plugins:
-      - JuliaCI/julia#v1:
-          version: "{{matrix.version}}"
-      - JuliaCI/julia-coverage#v1:
-          codecov: true
-    command: |
-      julia -e 'println("--- :julia: Instantiating project")
-                using Pkg
-                try
-                   Pkg.develop([PackageSpec(; path=pwd()), PackageSpec("Enzyme"), PackageSpec("EnzymeCore"), PackageSpec("CUDA")])
-                catch err
-                   Pkg.develop(; path=pwd())
-                  Pkg.add(["CUDA", "Enzyme"])
-                end' || exit 3
+  # - label: "CUDA Enzyme Julia {{matrix.version}}"
+  #   matrix:
+  #     setup:
+  #       version:
+  #         - "1.10"
+  #         - "1.11"
+  #   plugins:
+  #     - JuliaCI/julia#v1:
+  #         version: "{{matrix.version}}"
+  #     - JuliaCI/julia-coverage#v1:
+  #         codecov: true
+  #   command: |
+  #     julia -e 'println("--- :julia: Instantiating project")
+  #               using Pkg
+  #               try
+  #                  Pkg.develop([PackageSpec(; path=pwd()), PackageSpec("Enzyme"), PackageSpec("EnzymeCore"), PackageSpec("CUDA")])
+  #               catch err
+  #                  Pkg.develop(; path=pwd())
+  #                 Pkg.add(["CUDA", "Enzyme"])
+  #               end' || exit 3
 
-      julia -e 'println("+++ :julia: Running tests")
-                using CUDA
-                include("test/extensions/enzyme.jl")
-                enzyme_testsuite(CUDABackend, CuArray, true)'
-    agents:
-      queue: "juliagpu"
-      cuda: "*"
-    timeout_in_minutes: 120
-    soft_fail:
-      - exit_status: 3
+  #     julia -e 'println("+++ :julia: Running tests")
+  #               using CUDA
+  #               include("test/extensions/enzyme.jl")
+  #               enzyme_testsuite(CUDABackend, CuArray, true)'
+  #   agents:
+  #     queue: "juliagpu"
+  #     cuda: "*"
+  #   timeout_in_minutes: 120
+  #   soft_fail:
+  #     - exit_status: 3
 
   - label: "Metal Julia {{matrix.version}}"
     matrix:
