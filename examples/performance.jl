@@ -26,7 +26,7 @@ end
 
 # Local memory variants
 
-@kernel function lmem_copy_kernel!(
+@kernel unsafe_indices = true function lmem_copy_kernel!(
         output, @Const(input),
         ::Val{BANK} = Val(1),
     ) where {BANK}
@@ -46,7 +46,7 @@ end
     @inbounds output[I, J] = tile[i, j]
 end
 
-@kernel function lmem_transpose_kernel!(
+@kernel unsafe_indices = true function lmem_transpose_kernel!(
         output, @Const(input),
         ::Val{BANK} = Val(1),
     ) where {BANK}
@@ -77,7 +77,7 @@ end
 
 # Local Memory + process multiple elements per lane
 
-@kernel function coalesced_copy_kernel!(
+@kernel unsafe_indices = true function coalesced_copy_kernel!(
         output, @Const(input),
         ::Val{BANK} = Val(1),
     ) where {BANK}
@@ -105,7 +105,7 @@ end
     end
 end
 
-@kernel function coalesced_transpose_kernel!(
+@kernel unsafe_indices = true function coalesced_transpose_kernel!(
         output, @Const(input),
         ::Val{BANK} = Val(1),
     ) where {BANK}
