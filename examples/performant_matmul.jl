@@ -4,7 +4,10 @@ using Test
 using Random
 include(joinpath(dirname(pathof(KernelAbstractions)), "../examples/utils.jl")) # Load backend
 
-const TILE_DIM = 32
+# We use a TILE_DIM of 16 as a safe value since while
+#  most backends support up to 1024 threads per group,
+#  Metal sometimes supports fewer.
+const TILE_DIM = 16
 
 @kernel function coalesced_matmul_kernel!(
         output, @Const(input1), @Const(input2), N, R, M,
