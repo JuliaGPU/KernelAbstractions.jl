@@ -559,15 +559,15 @@ function ones(backend::Backend, ::Type{T}, dims::Tuple) where {T}
 end
 
 """
-    supports_atomics(::Backend)::Bool
+    supports_atomics(::Backend, [T::Type{<:Number}])::Bool
 
-Returns whether `@atomic` operations are supported by the backend.
+Returns whether `@atomic` operations of type `T` are supported by the backend.
 
 !!! note
     Backend implementations **must** implement this function,
     only if they **do not** support atomic operations with Atomix.
 """
-supports_atomics(::Backend) = true
+supports_atomics(::Backend, T::Type{<:Number}=Number) = true
 
 """
     supports_float64(::Backend)::Bool
