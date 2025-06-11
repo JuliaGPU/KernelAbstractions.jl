@@ -74,7 +74,7 @@ end
 
 # Local memory variants
 
-@kernel function lmem_copy_kernel!(
+@kernel unsafe_indices = true function lmem_copy_kernel!(
         output, @Const(input),
         ::Val{BANK} = Val(1),
     ) where {BANK}
@@ -94,7 +94,7 @@ end
     @inbounds output[I, J] = tile[i, j]
 end
 
-@kernel function lmem_transpose_kernel!(
+@kernel unsafe_indices = true function lmem_transpose_kernel!(
         output, @Const(input),
         ::Val{BANK} = Val(1),
     ) where {BANK}
@@ -125,7 +125,7 @@ end
 
 # Local Memory + process multiple elements per lane
 
-@kernel function coalesced_copy_kernel!(
+@kernel unsafe_indices = true function coalesced_copy_kernel!(
         output, @Const(input),
         ::Val{BANK} = Val(1),
     ) where {BANK}
@@ -153,7 +153,7 @@ end
     end
 end
 
-@kernel function coalesced_transpose_kernel!(
+@kernel unsafe_indices = true function coalesced_transpose_kernel!(
         output, @Const(input),
         ::Val{BANK} = Val(1),
     ) where {BANK}
@@ -251,4 +251,4 @@ for (name, kernel) in (
         end
     end
 end
-</code></pre></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../naive_transpose/">« Naive Transpose</a><a class="docs-footer-nextpage" href="../matmul/">Matmul »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.12.0 on <span class="colophon-date" title="Tuesday 10 June 2025 13:54">Tuesday 10 June 2025</span>. Using Julia version 1.11.5.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+</code></pre></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../naive_transpose/">« Naive Transpose</a><a class="docs-footer-nextpage" href="../matmul/">Matmul »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.12.0 on <span class="colophon-date" title="Wednesday 11 June 2025 08:28">Wednesday 11 June 2025</span>. Using Julia version 1.11.5.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
