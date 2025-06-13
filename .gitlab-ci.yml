@@ -1,0 +1,21 @@
+stages:
+  - generate
+  - test
+
+generate-pipeline:
+  stage: generate
+  image: julia:1.10
+  script:
+    - pip install reframe-hpc
+    - reframe --ci-generate=${CI_PROJECT_DIR}/pipeline.yml -c ${CI_PROJECT_DIR}/reframe/checks
+  artifacts:
+    paths:
+      - ${CI_PROJECT_DIR}/pipeline.yml
+
+test-jobs:
+  stage: test
+  trigger:
+    include:
+      - artifact: pipeline.yml
+        job: generate-pipeline
+    strategy: depend
