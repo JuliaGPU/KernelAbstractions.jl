@@ -59,7 +59,7 @@ include("device/quirks.jl")
 include("device/runtime.jl")
 
 function Adapt.adapt_storage(to::KernelAdaptor, xs::Array{T, N}) where {T, N}
-    return CLDeviceArray{T, N, AS.Global}(size(xs), reinterpret(LLVMPtr{T, AS.Global}, pointer(xs)))
+    return CLDeviceArray{T, N, AS.CrossWorkgroup}(size(xs), reinterpret(LLVMPtr{T, AS.CrossWorkgroup}, pointer(xs)))
 end
 
 include("backend.jl")
