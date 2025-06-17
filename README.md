@@ -24,8 +24,8 @@ Currently, the following backends are supported:
 [docs-stable-url]: https://juliagpu.github.io/KernelAbstractions.jl/stable
 [docs-latest-img]: https://img.shields.io/badge/docs-dev-blue.svg
 [docs-latest-url]: https://juliagpu.github.io/KernelAbstractions.jl/dev
-[doi-img]: https://zenodo.org/badge/237471203.svg
-[doi-url]: https://zenodo.org/badge/latestdoi/237471203
+[doi-img]: https://zenodo.org/DOI/10.5281/zenodo.15635193.svg
+[doi-url]: https://doi.org/10.5281/zenodo.15635193
 [codecov-img]: https://codecov.io/gh/JuliaGPU/KernelAbstractions.jl/branch/main/graph/badge.svg
 [codecov-url]: https://codecov.io/gh/JuliaGPU/KernelAbstractions.jl
 [ci-img]: https://github.com/JuliaGPU/KernelAbstractions.jl/actions/workflows/ci.yml/badge.svg?branch=main
