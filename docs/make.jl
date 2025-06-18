@@ -14,7 +14,13 @@ function main()
         format = Documenter.HTML(;
             prettyurls = ci,
             canonical = "https://juliagpu.github.io/KernelAbstractions.jl",
-            assets = String[],
+            assets = [
+                asset(
+                    "https://plausible.io/js/plausible.js",
+                    class = :js,
+                    attributes = Dict(Symbol("data-domain") => "juliagpu.github.io", :defer => "")
+                ),
+            ],
         ),
         warnonly = [:missing_docs],
         pages = [
