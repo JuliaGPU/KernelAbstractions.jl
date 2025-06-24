@@ -189,7 +189,7 @@ end
 ## Synchronization and Printing
 
 @device_override @inline function KA.__synchronize()
-    SPIRVIntrinsics.barrier(SPIRVIntrinsics.CLK_LOCAL_MEM_FENCE)
+    SPIRVIntrinsics.barrier(SPIRVIntrinsics.CLK_LOCAL_MEM_FENCE | SPIRVIntrinsics.CLK_GLOBAL_MEM_FENCE)
 end
 
 @device_override @inline function KA.__print(args...)
