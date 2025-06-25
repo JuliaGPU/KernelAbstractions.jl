@@ -194,6 +194,10 @@ function unsafe_free! end
 
 unsafe_free!(::AbstractArray) = return
 
+include("intrinsics.jl")
+import .KernelIntrinsics
+export KernelIntrinsics
+
 ###
 # Kernel language
 # - @localmem
@@ -460,13 +464,27 @@ end
 # Internal kernel functions
 ###
 
-function __index_Local_Linear end
-function __index_Group_Linear end
-function __index_Global_Linear end
+function __index_Local_Linear(ctx)
+    return KernelIntrinsics.get_local_id().x
+end
 
-function __index_Local_Cartesian end
-function __index_Group_Cartesian end
-function __index_Global_Cartesian end
+function __index_Group_Linear(ctx)
+    return KernelIntrinsics.get_group_id().x
+end
+
+function __index_Global_Linear(ctx)
+    return KernelIntrinsics.get_global_id().x
+end
+
+function __index_Local_Cartesian(ctx)
+    return @inbounds workitems(__iterspace(ctx))[KernelIntrinsics.get_local_id().x]
+end
+function __index_Group_Cartesian(ctx)
+    return @inbounds blocks(__iterspace(ctx))[KernelIntrinsics.get_group_id().x]
+end
+function __index_Global_Cartesian(ctx)
+    return @inbounds expand(__iterspace(ctx), KernelIntrinsics.get_group_id().x, KernelIntrinsics.get_local_id().x)
+end
 
 @inline __index_Local_NTuple(ctx, I...) = Tuple(__index_Local_Cartesian(ctx, I...))
 @inline __index_Group_NTuple(ctx, I...) = Tuple(__index_Group_Cartesian(ctx, I...))
