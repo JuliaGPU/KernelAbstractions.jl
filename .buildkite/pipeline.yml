@@ -171,6 +171,41 @@ steps:
       JULIA_PROJECT: "@amdgpu"
       JULIA_NUM_THREADS: 4
 
+  - label: "OpenCL Julia {{matrix.version}}"
+    matrix:
+      setup:
+        version:
+          - "1.10"
+          - "1.11"
+    plugins:
+      - JuliaCI/julia#v1:
+          version: "{{matrix.version}}"
+      - JuliaCI/julia-coverage#v1:
+          codecov: true
+    command: |
+      julia -e 'println("--- :julia: Developing OpenCL")
+                using Pkg
+                Pkg.develop(; name="OpenCL")
+                Pkg.develop(; name="GPUArrays")'
+      sed -i 's/^KernelAbstractions = "0\.9.*"/KernelAbstractions = "0.10"/' \${JULIA_DEPOT_PATH}/dev/OpenCL/Project.toml
+      sed -i 's/^KernelAbstractions = "0\.9.*"/KernelAbstractions = "0.10"/' \${JULIA_DEPOT_PATH}/dev/GPUArrays/Project.toml
+      julia -e 'println("--- :julia: Instantiating project")
+                using Pkg
+                Pkg.develop(; path=pwd())' || exit 3
+
+      julia -e 'println("+++ :julia: Running tests")
+                using Pkg
+                Pkg.test("OpenCL"; coverage=true, test_args=`--platform=cuda kernelabstractions`)'
+    agents:
+      queue: "juliagpu"
+      cuda: "*"
+    timeout_in_minutes: 120
+    soft_fail:
+      - exit_status: 3
+    env:
+      OCL_ICD_FILENAMES: "libnvidia-opencl.so.1"
+      JULIA_PROJECT: "@OpenCL"
+
 env:
   JULIA_PKG_SERVER: "" # it often struggles with our large artifacts
   SECRET_CODECOV_TOKEN: "c5pjPUwULD2L8ss0gRtjCPiagRlTQ11TdbZP6gIhTPeA/gN5w5/7JvDCg36UpKER6FXnQDeBGGkQafHiLdBaH/FWQ2B2VKErtBarIBJa2zWvKu8mYs9PJzw/qLGT2sMXI9kcao63H6/HAwbslJcY0a5Mg+SwM3M05XqSHgnrHMnbBXysKP6VzFEIX7uoyEKOnoWDj8rGJKFYLW2DBRtd6Yc23ESfFXPAqbS7sgXxwQHKzz20FMQBJUmbiDIzPlk3k2n2TvgAWQ0VNK0e4/UooMbULL3UjY4oaMOF0XpJAnWlmvGgy8gEnZKSVp3ieXy/Ubu7BWwH/BT59wDy6LuDxA==;U2FsdGVkX18Wil69f7qJYu6yU5iNx+Zq8akUcOp+McU1CR4Jw4QBsrUKIF4W4uK+/752FQo40BwFsfnIC8CJ/Q=="
