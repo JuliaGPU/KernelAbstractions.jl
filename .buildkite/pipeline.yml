@@ -149,7 +149,7 @@ steps:
       julia -e 'println("--- :julia: Developing AMDGPU")
                 using Pkg
                 Pkg.develop(; name="AMDGPU")
-                Pkg.develop(; name="GPUArrays")'
+                Pkg.develop(; name="GPUArrays")
                 Pkg.develop(; name="AcceleratedKernels")'
       sed -i 's/^KernelAbstractions = "0\.9.*"/KernelAbstractions = "0.10"/' \${JULIA_DEPOT_PATH}/dev/AMDGPU/Project.toml
       sed -i 's/^KernelAbstractions = "0\.9.*"/KernelAbstractions = "0.10"/' \${JULIA_DEPOT_PATH}/dev/GPUArrays/Project.toml
@@ -170,6 +170,42 @@ steps:
     env:
       JULIA_PROJECT: "@amdgpu"
       JULIA_NUM_THREADS: 4
+
+  - label: "OpenCL Julia {{matrix.version}}"
+    matrix:
+      setup:
+        version:
+          - "1.10"
+          - "1.11"
+    plugins:
+      - JuliaCI/julia#v1:
+          version: "{{matrix.version}}"
+      - JuliaCI/julia-coverage#v1:
+          codecov: true
+    command: |
+      julia -e 'println("--- :julia: Developing OpenCL")
+                using Pkg
+                Pkg.develop(; name="OpenCL")
+                Pkg.develop(; name="SPIRVIntrinsics")
+                Pkg.develop(; name="GPUArrays")'
+      sed -i 's/^KernelAbstractions = "0\.9.*"/KernelAbstractions = "0.10"/' \${JULIA_DEPOT_PATH}/dev/OpenCL/Project.toml
+      sed -i 's/^KernelAbstractions = "0\.9.*"/KernelAbstractions = "0.10"/' \${JULIA_DEPOT_PATH}/dev/GPUArrays/Project.toml
+      julia -e 'println("--- :julia: Instantiating project")
+                using Pkg
+                Pkg.develop(; path=pwd())' || exit 3
+
+      julia -e 'println("+++ :julia: Running tests")
+                using Pkg
+                Pkg.test("OpenCL"; coverage=true, test_args=`--platform=cuda kernelabstractions`)'
+    agents:
+      queue: "juliagpu"
+      cuda: "*"
+    timeout_in_minutes: 120
+    soft_fail:
+      - exit_status: 3
+    env:
+      OCL_ICD_FILENAMES: "libnvidia-opencl.so.1"
+      JULIA_PROJECT: "@OpenCL"
 
 env:
   JULIA_PKG_SERVER: "" # it often struggles with our large artifacts
