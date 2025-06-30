@@ -150,8 +150,10 @@ steps:
                 using Pkg
                 Pkg.develop(; name="AMDGPU")
                 Pkg.develop(; name="GPUArrays")'
+                Pkg.develop(; name="AcceleratedKernels")'
       sed -i 's/^KernelAbstractions = "0\.9.*"/KernelAbstractions = "0.10"/' \${JULIA_DEPOT_PATH}/dev/AMDGPU/Project.toml
       sed -i 's/^KernelAbstractions = "0\.9.*"/KernelAbstractions = "0.10"/' \${JULIA_DEPOT_PATH}/dev/GPUArrays/Project.toml
+      sed -i 's/^KernelAbstractions = "0\.9.*"/KernelAbstractions = "0.10"/' \${JULIA_DEPOT_PATH}/dev/AcceleratedKernels/Project.toml
       julia -e 'println("--- :julia: Instantiating project")
                 using Pkg
                 Pkg.develop(; path=pwd())' || exit 3
