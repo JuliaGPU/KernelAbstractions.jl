@@ -4,6 +4,7 @@ using InteractiveUtils
 using LinearAlgebra
 using SparseArrays
 using Adapt
+using StaticArrays
 
 identity(x) = x
 
@@ -93,6 +94,18 @@ function unittest_testsuite(Backend, backend_str, backend_mod, BackendArrayT; sk
 
         A = allocate(backend, Float32, 5, 5)
         @test @inferred(KernelAbstractions.get_backend(sparse(A))) isa backendT
+    end
+
+    @conditional_testset "StaticArrays" skip_tests begin
+        backend = Backend()
+        backendT = typeof(backend).name.wrapper # To look through CUDABackend{true, false}
+        @test backend isa backendT
+
+        @test KernelAbstractions.get_backend(@MMatrix [1.0]) isa CPU
+        @test_throws ArgumentError KernelAbstractions.get_backend(@SMatrix [1.0])
+
+        A = allocate(backend, Float32, 5, 5)
+        @test @inferred(KernelAbstractions.get_backend(SizedMatrix{5, 5}(A))) isa backendT
     end
 
     @conditional_testset "adapt" skip_tests begin

@@ -865,4 +865,7 @@ if !isdefined(Base, :get_extension)
     include("../ext/SparseArraysExt.jl")
 end
 
+# Currently we have a direct dependency on StaticArrays
+include("../ext/StaticArraysExt.jl")
+
 end #module
