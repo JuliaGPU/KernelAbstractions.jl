@@ -50,12 +50,10 @@ function __kernel(expr, generate_cpu = true, force_inbounds = false, unsafe_indi
     gpu_function = combinedef(def_gpu)
 
     # create constructor functions
+    _name = Symbol(:_, name)
     constructors = quote
         if $(name isa Symbol ? :(!@isdefined($name)) : true)
-            Core.@__doc__ $name(dev) = $name(dev, $DynamicSize(), $DynamicSize())
-            $name(dev, size) = $name(dev, $StaticSize(size), $DynamicSize())
-            $name(dev, size, range) = $name(dev, $StaticSize(size), $StaticSize(range))
-            function $name(dev::Dev, sz::S, range::NDRange) where {Dev, S <: $_Size, NDRange <: $_Size}
+            function $_name(dev::Dev, sz::S, range::NDRange) where {Dev, S <: $_Size, NDRange <: $_Size}
                 if $isgpu(dev)
                     return $construct(dev, sz, range, $gpu_name)
                 else
@@ -66,6 +64,10 @@ function __kernel(expr, generate_cpu = true, force_inbounds = false, unsafe_indi
                     end
                 end
             end
+            Core.@__doc__ $name(dev) = $_name(dev, $DynamicSize(), $DynamicSize())
+            $name(dev, size) = $_name(dev, $StaticSize(size), $DynamicSize())
+            $name(dev, size, range) = $_name(dev, $StaticSize(size), $StaticSize(range))
+            $name(dev, size::$_Size, range::$_Size) = $_name(dev, size, range)
         end
     end
 

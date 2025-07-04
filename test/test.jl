@@ -349,5 +349,20 @@ function unittest_testsuite(Backend, backend_str, backend_mod, BackendArrayT; sk
         end
     end
 
+    @testset "`@kernel` as a closure" begin
+        function foo()
+            @kernel function kernel(A)
+                i = @index(Global)
+                A[i] = 1
+            end
+            return kernel
+        end
+        ftypes = fieldtypes(typeof(foo()))
+        @test !any(T -> T <: Core.Box, ftypes)
+        @test all(ftypes) do T
+            !any(T -> T <: Core.Box, fieldtypes(T))
+        end
+    end
+
     return
 end
