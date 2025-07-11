@@ -6,7 +6,7 @@ const OpenCLCompilerJob = CompilerJob{SPIRVCompilerTarget, OpenCLCompilerParams}
 
 GPUCompiler.runtime_module(::CompilerJob{<:Any, OpenCLCompilerParams}) = POCL
 
-GPUCompiler.method_table_view(job::OpenCLCompilerJob) = GPUCompiler.StackedMethodTable(job.world, method_table, spirv_method_table)
+GPUCompiler.method_table_view(job::OpenCLCompilerJob) = GPUCompiler.StackedMethodTable(job.world, method_table, SPIRVIntrinsics.method_table)
 
 # filter out OpenCL built-ins
 # TODO: eagerly lower these using the translator API

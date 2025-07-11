@@ -45,40 +45,11 @@ import LLVM
 using Adapt
 
 ## device overrides
-
-# local method table for device functions
-Base.Experimental.@MethodTable(method_table)
-
-macro device_override(ex)
-    return esc(
-        quote
-            Base.Experimental.@overlay($method_table, $ex)
-        end
-    )
-end
-
-macro device_function(ex)
-    ex = macroexpand(__module__, ex)
-    def = ExprTools.splitdef(ex)
-
-    # generate a function that errors
-    def[:body] = quote
-        error("This function is not intended for use on the CPU")
-    end
-
-    return esc(
-        quote
-            $(ExprTools.combinedef(def))
-            @device_override $ex
-        end
-    )
-end
-
 import SPIRVIntrinsics
 SPIRVIntrinsics.@import_all
 SPIRVIntrinsics.@reexport_public
-
-const spirv_method_table = SPIRVIntrinsics.method_table
+# local method table for device functions
+Base.Experimental.@MethodTable(method_table)
 
 include("compiler/compilation.jl")
 include("compiler/execution.jl")

@@ -34,13 +34,13 @@ SparseArraysExt = "SparseArrays"
 Adapt = "0.4, 1.0, 2.0, 3.0, 4"
 Atomix = "0.1, 1"
 EnzymeCore = "0.7, 0.8.1"
-GPUCompiler = "1.2"
+GPUCompiler = "1.6"
 InteractiveUtils = "1.6"
 LLVM = "9"
 LinearAlgebra = "1.6"
 MacroTools = "0.5"
 PrecompileTools = "1"
-SPIRVIntrinsics = "0.3"
+SPIRVIntrinsics = "0.4"
 SPIRV_LLVM_Backend_jll = "20"
 SPIRV_Tools_jll = "2024.4, 2025.1"
 SparseArrays = "<0.0.1, 1.6"
@@ -53,7 +53,3 @@ pocl_jll = "7"
 EnzymeCore = "f151be2c-9106-41f4-ab19-57ee4f262869"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
-
-[sources]
-GPUCompiler = {url="https://github.com/JuliaGPU/GPUCompiler.jl", rev="vc/mtv"}
-SPIRVIntrinsics = {url="https://github.com/JuliaGPU/OpenCL.jl", rev="vc/mtv", subdir="lib/intrinsics"}
