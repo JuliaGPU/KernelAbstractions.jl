@@ -16,11 +16,11 @@ Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 SPIRVIntrinsics = "71d1d633-e7e8-4a92-83a1-de8814b09ba8"
 SPIRV_LLVM_Backend_jll = "4376b9bf-cff8-51b6-bb48-39421dff0d0c"
 SPIRV_Tools_jll = "6ac6d60f-d740-5983-97d7-a4482c0689f4"
-StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 UUIDs = "cf7118a7-6976-5b1a-9a39-7adc72f591a4"
 pocl_jll = "627d6b7a-bbe6-5189-83e7-98cc0a5aeadd"
 
 [weakdeps]
+StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 EnzymeCore = "f151be2c-9106-41f4-ab19-57ee4f262869"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
@@ -29,6 +29,7 @@ SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 EnzymeExt = "EnzymeCore"
 LinearAlgebraExt = "LinearAlgebra"
 SparseArraysExt = "SparseArrays"
+StaticArraysExt = "StaticArrays"
 
 [compat]
 Adapt = "0.4, 1.0, 2.0, 3.0, 4"
@@ -50,6 +51,7 @@ julia = "1.10"
 pocl_jll = "7"
 
 [extras]
+StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 EnzymeCore = "f151be2c-9106-41f4-ab19-57ee4f262869"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
