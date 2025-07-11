@@ -1,7 +1,7 @@
 module POCLKernels
 
 using ..POCL
-using ..POCL: @device_override, SPIRVIntrinsics, cl
+using ..POCL: @device_override, SPIRVIntrinsics, cl, method_table
 using ..POCL: device
 
 import KernelAbstractions as KA
