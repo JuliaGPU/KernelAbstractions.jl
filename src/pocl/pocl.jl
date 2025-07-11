@@ -44,9 +44,12 @@ using GPUCompiler
 import LLVM
 using Adapt
 
+## device overrides
 import SPIRVIntrinsics
 SPIRVIntrinsics.@import_all
 SPIRVIntrinsics.@reexport_public
+# local method table for device functions
+Base.Experimental.@MethodTable(method_table)
 
 include("compiler/compilation.jl")
 include("compiler/execution.jl")

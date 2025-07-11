@@ -6,7 +6,7 @@ const OpenCLCompilerJob = CompilerJob{SPIRVCompilerTarget, OpenCLCompilerParams}
 
 GPUCompiler.runtime_module(::CompilerJob{<:Any, OpenCLCompilerParams}) = POCL
 
-GPUCompiler.method_table(::OpenCLCompilerJob) = method_table
+GPUCompiler.method_table_view(job::OpenCLCompilerJob) = GPUCompiler.StackedMethodTable(job.world, method_table, SPIRVIntrinsics.method_table)
 
 # filter out OpenCL built-ins
 # TODO: eagerly lower these using the translator API
@@ -50,7 +50,7 @@ end
 
 
     # create GPUCompiler objects
-    target = SPIRVCompilerTarget(; supports_fp16, supports_fp64, version = v"1.2", kwargs...)
+    target = SPIRVCompilerTarget(; supports_fp16, supports_fp64, kwargs...)
     params = OpenCLCompilerParams()
     return CompilerConfig(target, params; kernel, name, always_inline)
 end
