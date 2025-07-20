@@ -532,39 +532,54 @@ get_backend(::Array) = CPU()
 Adapt.adapt_storage(::CPU, a::Array) = a
 
 """
-    allocate(::Backend, Type, dims...)::AbstractArray
+    allocate(::Backend, Type, dims...; unified=false)::AbstractArray
 
-Allocate a storage array appropriate for the computational backend.
+Allocate a storage array appropriate for the computational backend. `unified`
+allocates an array using unified memory if the backend supports it. Use
+[`supports_unified`](@ref) to determine whether it is supported by a backend.
 
 !!! note
     Backend implementations **must** implement `allocate(::NewBackend, T, dims::Tuple)`
 """
-allocate(backend::Backend, T::Type, dims...) = allocate(backend, T, dims)
-allocate(backend::Backend, T::Type, dims::Tuple) = throw(MethodError(allocate, (backend, T, dims)))
+allocate(backend::Backend, T::Type, dims...; unified=false) = allocate(backend, T, dims; unified)
+allocate(backend::Backend, T::Type, dims::Tuple; unified=false) = throw(MethodError(allocate, (backend, T, dims)))
 
 """
-    zeros(::Backend, Type, dims...)::AbstractArray
+    zeros(::Backend, Type, dims...; unified=false)::AbstractArray
 
 Allocate a storage array appropriate for the computational backend filled with zeros.
+`unified` allocates an array using unified memory if the backend supports it.
 """
-zeros(backend::Backend, T::Type, dims...) = zeros(backend, T, dims)
-function zeros(backend::Backend, ::Type{T}, dims::Tuple) where {T}
-    data = allocate(backend, T, dims...)
+zeros(backend::Backend, T::Type, dims...; kwargs...) = zeros(backend, T, dims; kwargs...)
+function zeros(backend::Backend, ::Type{T}, dims::Tuple; unified=false) where {T}
+    data = allocate(backend, T, dims...; unified)
     fill!(data, zero(T))
     return data
 end
 
 """
-    ones(::Backend, Type, dims...)::AbstractArray
+    ones(::Backend, Type, dims...; unified=false)::AbstractArray
 
 Allocate a storage array appropriate for the computational backend filled with ones.
+`unified` allocates an array using unified memory if the backend supports it.
 """
-ones(backend::Backend, T::Type, dims...) = ones(backend, T, dims)
-function ones(backend::Backend, ::Type{T}, dims::Tuple) where {T}
-    data = allocate(backend, T, dims)
+ones(backend::Backend, T::Type, dims...; kwargs...) = ones(backend, T, dims; kwargs...)
+function ones(backend::Backend, ::Type{T}, dims::Tuple; unified=false) where {T}
+    data = allocate(backend, T, dims; unified)
     fill!(data, one(T))
     return data
 end
+
+"""
+    supports_unified(::Backend)::Bool
+
+Returns whether unified memory arrays are supported by the backend.
+
+!!! note
+    Backend implementations **must** implement this function
+    only if they **do not** support unified memory.
+"""
+supports_unified(::Backend) = true
 
 """
     supports_atomics(::Backend)::Bool

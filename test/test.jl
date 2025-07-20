@@ -78,6 +78,15 @@ function unittest_testsuite(Backend, backend_str, backend_mod, BackendArrayT; sk
         backendT = typeof(backend).name.wrapper # To look through CUDABackend{true, false}
         @test backend isa backendT
 
+        unified = supports_unified(backend)
+        @test unified isa Bool
+        U = allocate(backend, Float32, 5; unified)
+        if unified
+            @test U[3] isa Float32
+        else
+            @test_throws U[3]
+        end
+
         x = allocate(backend, Float32, 5)
         A = allocate(backend, Float32, 5, 5)
         @test @inferred(KernelAbstractions.get_backend(A)) isa backendT
