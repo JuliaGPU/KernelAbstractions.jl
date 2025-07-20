@@ -541,8 +541,8 @@ allocates an array using unified memory if the backend supports it. Use
 !!! note
     Backend implementations **must** implement `allocate(::NewBackend, T, dims::Tuple)`
 """
-allocate(backend::Backend, T::Type, dims...; unified=false) = allocate(backend, T, dims; unified)
-allocate(backend::Backend, T::Type, dims::Tuple; unified=false) = throw(MethodError(allocate, (backend, T, dims)))
+allocate(backend::Backend, T::Type, dims...; unified = false) = allocate(backend, T, dims; unified)
+allocate(backend::Backend, T::Type, dims::Tuple; unified = false) = throw(MethodError(allocate, (backend, T, dims)))
 
 """
     zeros(::Backend, Type, dims...; unified=false)::AbstractArray
@@ -551,7 +551,7 @@ Allocate a storage array appropriate for the computational backend filled with z
 `unified` allocates an array using unified memory if the backend supports it.
 """
 zeros(backend::Backend, T::Type, dims...; kwargs...) = zeros(backend, T, dims; kwargs...)
-function zeros(backend::Backend, ::Type{T}, dims::Tuple; unified=false) where {T}
+function zeros(backend::Backend, ::Type{T}, dims::Tuple; unified = false) where {T}
     data = allocate(backend, T, dims...; unified)
     fill!(data, zero(T))
     return data
@@ -564,7 +564,7 @@ Allocate a storage array appropriate for the computational backend filled with o
 `unified` allocates an array using unified memory if the backend supports it.
 """
 ones(backend::Backend, T::Type, dims...; kwargs...) = ones(backend, T, dims; kwargs...)
-function ones(backend::Backend, ::Type{T}, dims::Tuple; unified=false) where {T}
+function ones(backend::Backend, ::Type{T}, dims::Tuple; unified = false) where {T}
     data = allocate(backend, T, dims; unified)
     fill!(data, one(T))
     return data
