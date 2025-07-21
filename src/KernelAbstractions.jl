@@ -543,7 +543,7 @@ allocates an array using unified memory if the backend supports it. Use
 """
 allocate(backend::Backend, T::Type, dims...; kwargs...) = allocate(backend, T, dims; kwargs...)
 function allocate(backend::Backend, T::Type, dims::Tuple; unified::Union{Nothing, Bool} = nothing)
-    if isnothing(unified)
+    return if isnothing(unified)
         throw(MethodError(allocate, (backend, T, dims)))
     elseif unified
         throw(ArgumentError("`$(typeof(backend))` either does not support unified memory or it has not yet defined `allocate(backend::$backend, T::Type, dims::Tuple; unified::Bool)`"))

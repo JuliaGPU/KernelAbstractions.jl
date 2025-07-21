@@ -84,7 +84,7 @@ function unittest_testsuite(Backend, backend_str, backend_mod, BackendArrayT; sk
         if unified
             @test U[3] isa Float32
         else
-            @test_throws U[3]
+            @test_throws ErrorException U[3]
         end
 
         x = allocate(backend, Float32, 5)
