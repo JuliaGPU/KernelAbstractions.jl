@@ -1,6 +1,6 @@
 synchronize(::CPU) = nothing
 
-allocate(::CPU, ::Type{T}, dims::Tupl; unified::Bool=false) where {T} = Array{T}(undef, dims)
+allocate(::CPU, ::Type{T}, dims::Tuple; unified::Bool=false) where {T} = Array{T}(undef, dims)
 
 function zeros(backend::CPU, ::Type{T}, dims::Tuple; kwargs...) where {T}
     arr = allocate(backend, T, dims; kwargs...)
