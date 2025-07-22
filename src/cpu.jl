@@ -1,16 +1,16 @@
 unsafe_free!(::AbstractArray) = return
 synchronize(::CPU) = nothing
 
-allocate(::CPU, ::Type{T}, dims::Tuple) where {T} = Array{T}(undef, dims)
+allocate(::CPU, ::Type{T}, dims::Tuple; unified::Bool = false) where {T} = Array{T}(undef, dims)
 
-function zeros(backend::CPU, ::Type{T}, dims::Tuple) where {T}
-    arr = allocate(backend, T, dims)
+function zeros(backend::CPU, ::Type{T}, dims::Tuple; kwargs...) where {T}
+    arr = allocate(backend, T, dims; kwargs...)
     kernel = init_kernel(backend)
     kernel(arr, zero, T, ndrange = length(arr))
     return arr
 end
-function ones(backend::CPU, ::Type{T}, dims::Tuple) where {T}
-    arr = allocate(backend, T, dims)
+function ones(backend::CPU, ::Type{T}, dims::Tuple; kwargs...) where {T}
+    arr = allocate(backend, T, dims; kwargs...)
     kernel = init_kernel(backend)
     kernel(arr, one, T; ndrange = length(arr))
     return arr
@@ -34,6 +34,7 @@ end
 
 functional(::CPU) = true
 pagelock!(::CPU, x) = nothing
+supports_unified(::CPU) = true
 
 function (obj::Kernel{CPU})(args...; ndrange = nothing, workgroupsize = nothing)
     ndrange, workgroupsize, iterspace, dynamic = launch_config(obj, ndrange, workgroupsize)
