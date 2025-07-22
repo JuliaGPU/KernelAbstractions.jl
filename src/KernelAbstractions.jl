@@ -540,13 +540,14 @@ allocates an array using unified memory if the backend supports it. Use
 
 !!! note
     Backend implementations **must** implement `allocate(::NewBackend, T, dims::Tuple)`
+    Backend implementations **should** implement `allocate(::NewBackend, T, dims::Tuple; unified::Bool=false)`
 """
 allocate(backend::Backend, T::Type, dims...; kwargs...) = allocate(backend, T, dims; kwargs...)
 function allocate(backend::Backend, T::Type, dims::Tuple; unified::Union{Nothing, Bool} = nothing)
     if isnothing(unified)
         throw(MethodError(allocate, (backend, T, dims)))
     elseif unified
-        throw(ArgumentError("`$(typeof(backend))` either does not support unified memory or it has not yet defined `allocate(backend::$backend, T::Type, dims::Tuple; unified::Bool)`"))
+        throw(ArgumentError("`$(typeof(backend))` does not support unified memory. If you believe it does, please open a github issue."))
     else
         return allocate(backend, T, dims)
     end
