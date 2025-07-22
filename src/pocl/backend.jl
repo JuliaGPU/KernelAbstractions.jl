@@ -58,6 +58,7 @@ KA.pagelock!(::POCLBackend, x) = nothing
 KA.get_backend(::Array) = POCLBackend()
 KA.synchronize(::POCLBackend) = nothing
 KA.supports_float64(::POCLBackend) = true
+KA.supports_unified(::POCLBackend) = true
 
 
 ## Kernel Launch
