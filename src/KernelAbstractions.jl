@@ -587,8 +587,7 @@ Returns whether unified memory arrays are supported by the backend.
 
 !!! note
     Backend implementations **should** implement this function
-    only if they **do** support unified memory. It will be required
-    in KernelAbstractions 0.10.
+    only if they **do** support unified memory.
 """
 supports_unified(::Backend) = false
 
