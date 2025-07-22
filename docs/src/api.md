@@ -21,6 +21,7 @@ allocate
 
 ```@docs
 KernelAbstractions.zeros
+KernelAbstractions.supports_unified
 ```
 
 ## Internal
