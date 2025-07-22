@@ -2,13 +2,13 @@ synchronize(::CPU) = nothing
 
 allocate(::CPU, ::Type{T}, dims::Tupl; unified::Bool=false) where {T} = Array{T}(undef, dims)
 
-function zeros(backend::CPU, ::Type{T}, dims::Tuple, kwargs...) where {T}
+function zeros(backend::CPU, ::Type{T}, dims::Tuple; kwargs...) where {T}
     arr = allocate(backend, T, dims; kwargs...)
     kernel = init_kernel(backend)
     kernel(arr, zero, T, ndrange = length(arr))
     return arr
 end
-function ones(backend::CPU, ::Type{T}, dims::Tuple, kwargs...) where {T}
+function ones(backend::CPU, ::Type{T}, dims::Tuple; kwargs...) where {T}
     arr = allocate(backend, T, dims; kwargs...)
     kernel = init_kernel(backend)
     kernel(arr, one, T; ndrange = length(arr))
