@@ -534,9 +534,9 @@ Adapt.adapt_storage(::CPU, a::Array) = a
 """
     allocate(::Backend, Type, dims...; unified=false)::AbstractArray
 
-Allocate a storage array appropriate for the computational backend. `unified`
-allocates an array using unified memory if the backend supports it. Use
-[`supports_unified`](@ref) to determine whether it is supported by a backend.
+Allocate a storage array appropriate for the computational backend. `unified=true`
+allocates an array using unified memory if the backend supports it and throws otherwise.
+Use [`supports_unified`](@ref) to determine whether it is supported by a backend.
 
 !!! note
     Backend implementations **must** implement `allocate(::NewBackend, T, dims::Tuple)`
@@ -558,7 +558,8 @@ end
     zeros(::Backend, Type, dims...; unified=false)::AbstractArray
 
 Allocate a storage array appropriate for the computational backend filled with zeros.
-`unified` allocates an array using unified memory if the backend supports it.
+`unified=true` allocates an array using unified memory if the backend supports it and
+throws otherwise.
 """
 zeros(backend::Backend, T::Type, dims...; kwargs...) = zeros(backend, T, dims; kwargs...)
 function zeros(backend::Backend, ::Type{T}, dims::Tuple; kwargs...) where {T}
@@ -571,7 +572,8 @@ end
     ones(::Backend, Type, dims...; unified=false)::AbstractArray
 
 Allocate a storage array appropriate for the computational backend filled with ones.
-`unified` allocates an array using unified memory if the backend supports it.
+`unified=true` allocates an array using unified memory if the backend supports it and
+throws otherwise.
 """
 ones(backend::Backend, T::Type, dims...; kwargs...) = ones(backend, T, dims; kwargs...)
 function ones(backend::Backend, ::Type{T}, dims::Tuple; kwargs...) where {T}
