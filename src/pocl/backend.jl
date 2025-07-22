@@ -21,7 +21,7 @@ end
 
 ## Memory Operations
 
-KA.allocate(::POCLBackend, ::Type{T}, dims::Tuple; unified::Bool=false) where {T} = Array{T}(undef, dims)
+KA.allocate(::POCLBackend, ::Type{T}, dims::Tuple; unified::Bool = false) where {T} = Array{T}(undef, dims)
 
 function KA.zeros(backend::POCLBackend, ::Type{T}, dims::Tuple; kwargs...) where {T}
     arr = KA.allocate(backend, T, dims; kwargs...)
