@@ -814,7 +814,9 @@ include("macros.jl")
 ###
 
 function Scratchpad end
-function SharedMemory end
+function SharedMemory(t::Type{T}, dims::Val{Dims}, id::Val{Id}) where {T, Dims, Id}
+    KernelIntrinsics.localmemory(t, dims, id)
+end
 
 function __synchronize()
     error("@synchronize used outside kernel or not captured")
