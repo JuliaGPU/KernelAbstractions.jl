@@ -819,7 +819,7 @@ function SharedMemory(t::Type{T}, dims::Val{Dims}, id::Val{Id}) where {T, Dims, 
 end
 
 function __synchronize()
-    error("@synchronize used outside kernel or not captured")
+    KernelIntrinsics.barrier()
 end
 
 @generated function __print(items...)

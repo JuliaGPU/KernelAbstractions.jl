@@ -52,7 +52,9 @@ Returns the unique group ID.
 function get_group_id end
 
 function localmemory end
-function barrier end
+function barrier()
+    error("Group barrier used outside kernel or not captured")
+end
 function print end
 
 end
