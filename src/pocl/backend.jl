@@ -154,6 +154,18 @@ end
     return (; x = get_global_id(1), y = get_global_id(2), z = get_global_id(3))
 end
 
+@device_override @inline function KI.get_local_size()
+    return (; x = get_local_size(1), y = get_local_size(2), z = get_local_size(3))
+end
+
+@device_override @inline function KI.get_num_groups()
+    return (; x = get_num_groups(1), y = get_num_groups(2), z = get_num_groups(3))
+end
+
+@device_override @inline function KI.get_global_size()
+    return (; x = get_global_size(1), y = get_global_size(2), z = get_global_size(3))
+end
+
 @device_override @inline function KA.__validindex(ctx)
     if KA.__dynamic_checkbounds(ctx)
         I = @inbounds KA.expand(KA.__iterspace(ctx), get_group_id(1), get_local_id(1))
@@ -178,7 +190,7 @@ end
 
 ## Synchronization and Printing
 
-@device_override @inline function KA.__synchronize()
+@device_override @inline function KI.barrier()
     work_group_barrier(POCL.LOCAL_MEM_FENCE | POCL.GLOBAL_MEM_FENCE)
 end
 
