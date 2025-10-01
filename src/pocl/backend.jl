@@ -143,27 +143,27 @@ end
 const KI = KA.KernelIntrinsics
 
 @device_override @inline function KI.get_local_id()
-    return (; x = get_local_id(1), y = get_local_id(2), z = get_local_id(3))
+    return (; x = Int(get_local_id(1)), y = Int(get_local_id(2)), z = Int(get_local_id(3)))
 end
 
 @device_override @inline function KI.get_group_id()
-    return (; x = get_group_id(1), y = get_group_id(2), z = get_group_id(3))
+    return (; x = Int(get_group_id(1)), y = Int(get_group_id(2)), z = Int(get_group_id(3)))
 end
 
 @device_override @inline function KI.get_global_id()
-    return (; x = get_global_id(1), y = get_global_id(2), z = get_global_id(3))
+    return (; x = Int(get_global_id(1)), y = Int(get_global_id(2)), z = Int(get_global_id(3)))
 end
 
 @device_override @inline function KI.get_local_size()
-    return (; x = get_local_size(1), y = get_local_size(2), z = get_local_size(3))
+    return (; x = Int(get_local_size(1)), y = Int(get_local_size(2)), z = Int(get_local_size(3)))
 end
 
 @device_override @inline function KI.get_num_groups()
-    return (; x = get_num_groups(1), y = get_num_groups(2), z = get_num_groups(3))
+    return (; x = Int(get_num_groups(1)), y = Int(get_num_groups(2)), z = Int(get_num_groups(3)))
 end
 
 @device_override @inline function KI.get_global_size()
-    return (; x = get_global_size(1), y = get_global_size(2), z = get_global_size(3))
+    return (; x = Int(get_global_size(1)), y = Int(get_global_size(2)), z = Int(get_global_size(3)))
 end
 
 @device_override @inline function KA.__validindex(ctx)

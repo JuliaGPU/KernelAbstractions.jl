@@ -25,7 +25,7 @@ function intrinsics_testsuite(backend, AT)
 
             # Test with small kernel
             N = 16
-            results = AT(zeros(UInt32, 6, N))
+            results = AT(zeros(Int, 6, N))
 
             kernel = test_intrinsics_kernel(backend(), 4, (N,))
             kernel(results, ndrange = N)
