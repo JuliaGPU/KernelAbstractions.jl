@@ -190,7 +190,7 @@ end
 ## Synchronization and Printing
 
 @device_override @inline function KA.__synchronize()
-    work_group_barrier.(POCL.LOCAL_MEM_FENCE | POCL.GLOBAL_MEM_FENCE)
+    work_group_barrier(POCL.LOCAL_MEM_FENCE | POCL.GLOBAL_MEM_FENCE)
 end
 
 @device_override @inline function KA.__print(args...)
