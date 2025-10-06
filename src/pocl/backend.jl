@@ -1,7 +1,7 @@
 module POCLKernels
 
 using ..POCL
-using ..POCL: @device_override, SPIRVIntrinsics, cl, method_table
+using ..POCL: @device_override, cl, method_table
 using ..POCL: device
 
 import KernelAbstractions as KA
@@ -178,7 +178,7 @@ end
 ## Shared and Scratch Memory
 
 @device_override @inline function KA.SharedMemory(::Type{T}, ::Val{Dims}, ::Val{Id}) where {T, Dims, Id}
-    ptr = SPIRVIntrinsics.emit_localmemory(T, Val(prod(Dims)))
+    ptr = POCL.emit_localmemory(T, Val(prod(Dims)))
     CLDeviceArray(Dims, ptr)
 end
 
@@ -190,11 +190,11 @@ end
 ## Synchronization and Printing
 
 @device_override @inline function KA.__synchronize()
-    SPIRVIntrinsics.barrier(SPIRVIntrinsics.CLK_LOCAL_MEM_FENCE | SPIRVIntrinsics.CLK_GLOBAL_MEM_FENCE)
+    work_group_barrier(POCL.LOCAL_MEM_FENCE | POCL.GLOBAL_MEM_FENCE)
 end
 
 @device_override @inline function KA.__print(args...)
-    SPIRVIntrinsics._print(args...)
+    POCL._print(args...)
 end
 
 
