@@ -580,7 +580,7 @@ end
 Returns whether unified memory arrays are supported by the backend.
 
 !!! note
-    Backend implementations **must** implement this function
+    Backend implementations **should** implement this function
     only if they **do** support unified memory.
 """
 supports_unified(::Backend) = false
