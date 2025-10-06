@@ -77,6 +77,15 @@ function unittest_testsuite(Backend, backend_str, backend_mod, BackendArrayT; sk
         backendT = typeof(backend).name.wrapper # To look through CUDABackend{true, false}
         @test backend isa backendT
 
+        unified = KernelAbstractions.supports_unified(backend)
+        @test unified isa Bool
+        U = allocate(backend, Float32, 5; unified)
+        if unified
+            @test U[3] isa Float32
+        else
+            @test_throws ErrorException U[3]
+        end
+
         x = allocate(backend, Float32, 5)
         A = allocate(backend, Float32, 5, 5)
         @test @inferred(KernelAbstractions.get_backend(A)) isa backendT
@@ -305,6 +314,21 @@ function unittest_testsuite(Backend, backend_str, backend_mod, BackendArrayT; sk
         Ah = Array(A)
         @test all(a -> a == 1, @view(Ah[1:(length(A) ÷ 2)]))
         @test all(a -> a == 0, @view(Ah[(length(A) ÷ 2 + 1):end]))
+    end
+
+    @testset "`@kernel` as a closure" begin
+        function foo()
+            @kernel function kernel(A)
+                i = @index(Global)
+                A[i] = 1
+            end
+            return kernel
+        end
+        ftypes = fieldtypes(typeof(foo()))
+        @test !any(T -> T <: Core.Box, ftypes)
+        @test all(ftypes) do T
+            !any(T -> T <: Core.Box, fieldtypes(T))
+        end
     end
 
     return

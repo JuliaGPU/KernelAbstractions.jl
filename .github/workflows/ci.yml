@@ -22,7 +22,7 @@ jobs:
       fail-fast: false
       matrix:
         version: ['1.10', '1.11']
-        os: [ubuntu-24.04, ubuntu-24.04-arm, macOS-13, macOS-15, windows-2025]
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macOS-15, macOS-15-intel, windows-2025]
         arch: [x64, arm64]
         pocl: [jll, local]
         exclude:
@@ -35,14 +35,14 @@ jobs:
           # macOS 13 is Intel-only, while macOS 14+ only support Apple Silicon
           - os: macOS-15
             arch: x64
-          - os: macOS-13
+          - os: macOS-15-intel
             arch: arm64
-          - os: macOS-13
+          - os: macOS-15-intel
             pocl: local
           - os: macOS-15
             pocl: local
           - os: windows-2025
-            pocl: local    
+            pocl: local
     steps:
       - uses: actions/checkout@v4
       - uses: julia-actions/install-juliaup@v2
@@ -83,14 +83,13 @@ jobs:
             julia --project=pocl --color=yes -e '
               using LLVM_full_jll,
                     SPIRV_Tools_jll, SPIRV_LLVM_Translator_jll,
-                    OpenCL_jll, OpenCL_Headers_jll,
-                    Hwloc_jll, CMake_jll
+                    OpenCL_jll, OpenCL_Headers_jll, CMake_jll
               sourcedir = joinpath(@__DIR__, "pocl")
               builddir = joinpath(@__DIR__, "build")
               destdir = joinpath(@__DIR__, "target")
               prefix = []
-              for jll in [SPIRV_Tools_jll, SPIRV_LLVM_Translator_jll, OpenCL_jll,
-                          OpenCL_Headers_jll, Hwloc_jll]
+              for jll in [SPIRV_Tools_jll, SPIRV_LLVM_Translator_jll,
+                          OpenCL_jll, OpenCL_Headers_jll]
                   push!(prefix, jll.artifact_dir)
               end
               withenv("LD_LIBRARY_PATH" => joinpath(Sys.BINDIR, Base.PRIVATE_LIBDIR)) do

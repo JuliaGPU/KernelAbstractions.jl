@@ -1,7 +1,7 @@
 module POCLKernels
 
 using ..POCL
-using ..POCL: @device_override, SPIRVIntrinsics, cl, method_table
+using ..POCL: @device_override, cl, method_table
 using ..POCL: device
 
 import KernelAbstractions as KA
@@ -21,16 +21,16 @@ end
 
 ## Memory Operations
 
-KA.allocate(::POCLBackend, ::Type{T}, dims::Tuple) where {T} = Array{T}(undef, dims)
+KA.allocate(::POCLBackend, ::Type{T}, dims::Tuple; unified::Bool = false) where {T} = Array{T}(undef, dims)
 
-function KA.zeros(backend::POCLBackend, ::Type{T}, dims::Tuple) where {T}
-    arr = KA.allocate(backend, T, dims)
+function KA.zeros(backend::POCLBackend, ::Type{T}, dims::Tuple; kwargs...) where {T}
+    arr = KA.allocate(backend, T, dims; kwargs...)
     kernel = KA.init_kernel(backend)
     kernel(arr, zero, T, ndrange = length(arr))
     return arr
 end
-function KA.ones(backend::POCLBackend, ::Type{T}, dims::Tuple) where {T}
-    arr = KA.allocate(backend, T, dims)
+function KA.ones(backend::POCLBackend, ::Type{T}, dims::Tuple; kwargs...) where {T}
+    arr = KA.allocate(backend, T, dims; kwargs...)
     kernel = KA.init_kernel(backend)
     kernel(arr, one, T; ndrange = length(arr))
     return arr
@@ -58,6 +58,7 @@ KA.pagelock!(::POCLBackend, x) = nothing
 KA.get_backend(::Array) = POCLBackend()
 KA.synchronize(::POCLBackend) = nothing
 KA.supports_float64(::POCLBackend) = true
+KA.supports_unified(::POCLBackend) = true
 
 
 ## Kernel Launch
@@ -177,7 +178,7 @@ end
 ## Shared and Scratch Memory
 
 @device_override @inline function KA.SharedMemory(::Type{T}, ::Val{Dims}, ::Val{Id}) where {T, Dims, Id}
-    ptr = SPIRVIntrinsics.emit_localmemory(T, Val(prod(Dims)))
+    ptr = POCL.emit_localmemory(T, Val(prod(Dims)))
     CLDeviceArray(Dims, ptr)
 end
 
@@ -189,11 +190,11 @@ end
 ## Synchronization and Printing
 
 @device_override @inline function KA.__synchronize()
-    SPIRVIntrinsics.barrier(SPIRVIntrinsics.CLK_LOCAL_MEM_FENCE | SPIRVIntrinsics.CLK_GLOBAL_MEM_FENCE)
+    work_group_barrier(POCL.LOCAL_MEM_FENCE | POCL.GLOBAL_MEM_FENCE)
 end
 
 @device_override @inline function KA.__print(args...)
-    SPIRVIntrinsics._print(args...)
+    POCL._print(args...)
 end
 
 

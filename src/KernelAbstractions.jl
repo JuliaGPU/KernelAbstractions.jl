@@ -524,39 +524,66 @@ end
 #   adapt_storage(::Backend, a::BackendArray) = a
 
 """
-    allocate(::Backend, Type, dims...)::AbstractArray
+    allocate(::Backend, Type, dims...; unified=false)::AbstractArray
 
-Allocate a storage array appropriate for the computational backend.
+Allocate a storage array appropriate for the computational backend. `unified=true`
+allocates an array using unified memory if the backend supports it and throws otherwise.
+Use [`supports_unified`](@ref) to determine whether it is supported by a backend.
 
 !!! note
     Backend implementations **must** implement `allocate(::NewBackend, T, dims::Tuple)`
+    Backend implementations **should** implement `allocate(::NewBackend, T, dims::Tuple; unified::Bool=false)`
 """
-allocate(backend::Backend, T::Type, dims...) = allocate(backend, T, dims)
-allocate(backend::Backend, T::Type, dims::Tuple) = throw(MethodError(allocate, (backend, T, dims)))
+allocate(backend::Backend, T::Type, dims...; kwargs...) = allocate(backend, T, dims; kwargs...)
+function allocate(backend::Backend, T::Type, dims::Tuple; unified::Union{Nothing, Bool} = nothing)
+    if isnothing(unified)
+        throw(MethodError(allocate, (backend, T, dims)))
+    elseif unified
+        throw(ArgumentError("`$(typeof(backend))` does not support unified memory. If you believe it does, please open a github issue."))
+    else
+        return allocate(backend, T, dims)
+    end
+end
+
 
 """
-    zeros(::Backend, Type, dims...)::AbstractArray
+    zeros(::Backend, Type, dims...; unified=false)::AbstractArray
 
 Allocate a storage array appropriate for the computational backend filled with zeros.
+`unified=true` allocates an array using unified memory if the backend supports it and
+throws otherwise.
 """
-zeros(backend::Backend, T::Type, dims...) = zeros(backend, T, dims)
-function zeros(backend::Backend, ::Type{T}, dims::Tuple) where {T}
-    data = allocate(backend, T, dims...)
+zeros(backend::Backend, T::Type, dims...; kwargs...) = zeros(backend, T, dims; kwargs...)
+function zeros(backend::Backend, ::Type{T}, dims::Tuple; kwargs...) where {T}
+    data = allocate(backend, T, dims...; kwargs...)
     fill!(data, zero(T))
     return data
 end
 
 """
-    ones(::Backend, Type, dims...)::AbstractArray
+    ones(::Backend, Type, dims...; unified=false)::AbstractArray
 
 Allocate a storage array appropriate for the computational backend filled with ones.
+`unified=true` allocates an array using unified memory if the backend supports it and
+throws otherwise.
 """
-ones(backend::Backend, T::Type, dims...) = ones(backend, T, dims)
-function ones(backend::Backend, ::Type{T}, dims::Tuple) where {T}
-    data = allocate(backend, T, dims)
+ones(backend::Backend, T::Type, dims...; kwargs...) = ones(backend, T, dims; kwargs...)
+function ones(backend::Backend, ::Type{T}, dims::Tuple; kwargs...) where {T}
+    data = allocate(backend, T, dims; kwargs...)
     fill!(data, one(T))
     return data
 end
+
+"""
+    supports_unified(::Backend)::Bool
+
+Returns whether unified memory arrays are supported by the backend.
+
+!!! note
+    Backend implementations **should** implement this function
+    only if they **do** support unified memory.
+"""
+supports_unified(::Backend) = false
 
 """
     supports_atomics(::Backend)::Bool
@@ -564,7 +591,7 @@ end
 Returns whether `@atomic` operations are supported by the backend.
 
 !!! note
-    Backend implementations **must** implement this function,
+    Backend implementations **must** implement this function
     only if they **do not** support atomic operations with Atomix.
 """
 supports_atomics(::Backend) = true
@@ -575,7 +602,7 @@ supports_atomics(::Backend) = true
 Returns whether `Float64` values are supported by the backend.
 
 !!! note
-    Backend implementations **must** implement this function,
+    Backend implementations **must** implement this function
     only if they **do not** support `Float64`.
 """
 supports_float64(::Backend) = true
