@@ -110,7 +110,51 @@ struct KIKernel{Backend, BKern}
     kern::BKern
 end
 
+"""
+    kernel_max_work_group_size(backend, kern; [max_work_items::Int])::Int
+
+The maximum workgroup size limit for a kernel as reported by the backend.
+This function should always be used to determine the workgroup size before
+launching a kernel.
+
+!!! note
+    Backend implementations **must** implement:
+    ```
+    kernel_max_work_group_size(backend::NewBackend, kern::KIKernel{<:NewBackend}; max_work_items::Int=typemax(Int))::Int
+    ```
+    As well as the on-device functionality.
+"""
 function kernel_max_work_group_size end
+
+"""
+    max_work_group_size(backend, kern; [max_work_items::Int])::Int
+
+The maximum workgroup size limit for a kernel as reported by the backend.
+This function represents a theoretical maximum; `kernel_max_work_group_size`
+should be used before launching a kernel as some backends may error if
+kernel launch with too big a workgroup is attempted.
+
+!!! note
+    Backend implementations **must** implement:
+    ```
+    max_work_group_size(backend::NewBackend)::Int
+    ```
+    As well as the on-device functionality.
+"""
 function max_work_group_size end
-function multiprocessor_count end
+
+"""
+    multiprocessor_count(backend::NewBackend)::Int
+
+The multiprocessor count for the current device used by `backend`.
+Used for certain algorithm optimizations.
+
+!!! note
+    Backend implementations **may** implement:
+    ```
+    multiprocessor_count(backend::NewBackend)::Int
+    ```
+    As well as the on-device functionality.
+"""
+multiprocessor_count(::Backend) = 0
 end
