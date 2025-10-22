@@ -105,9 +105,9 @@ kernel on the host.
     ```
     As well as the on-device functionality.
 """
-struct KIKernel{Backend, BKern}
-    backend::Backend
-    kern::BKern
+struct KIKernel{B, Kern}
+    backend::B
+    kern::Kern
 end
 
 """
@@ -156,5 +156,5 @@ Used for certain algorithm optimizations.
     ```
     As well as the on-device functionality.
 """
-multiprocessor_count(::Backend) = 0
+multiprocessor_count(_) = 0
 end
