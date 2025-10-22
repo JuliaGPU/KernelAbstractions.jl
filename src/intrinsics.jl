@@ -66,9 +66,28 @@ Declare memory that is local to a workgroup.
 localmemory(::Type{T}, dims) where T = localmemory(T, Val(dims))
 # @inline localmemory(::Type{T}, dims::Val{Dims}) where {T, Dims} = localmemory(T, dims, Val(gensym("static_shmem")))
 
+"""
+    barrier()
+
+After a `barrier()` call, all read and writes to global and local memory
+from each thread in the workgroup are visible in from all other threads in the
+workgroup.
+
+!!! note
+    `barrier()` must be encountered by all workitems of a work-group executing the kernel or by none at all.
+
+!!! note
+    Backend implementations **must** implement:
+    ```
+    @device_override barrier()
+    ```
+    As well as the on-device functionality.
+"""
 function barrier()
     error("Group barrier used outside kernel or not captured")
 end
+
+# TODO
 function print end
 
 
