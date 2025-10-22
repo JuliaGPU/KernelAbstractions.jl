@@ -101,7 +101,7 @@ kernel on the host.
     Backend implementations **must** implement:
     ```
     KI.KIKernel(::NewBackend, f, args...; kwargs...)
-    (kernel::KIKernel{<:NewBackend})(args...; numworkgroups=nothing, workgroupsize=nothing)
+    (kernel::KIKernel{<:NewBackend})(args...; numworkgroups=nothing, workgroupsize=nothing, kwargs...)
     ```
     As well as the on-device functionality.
 """
