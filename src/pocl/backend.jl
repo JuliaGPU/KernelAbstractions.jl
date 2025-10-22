@@ -178,7 +178,7 @@ end
 
 ## Shared and Scratch Memory
 
-@device_override @inline function KI.localmemory(::Type{T}, ::Val{Dims}, ::Val{Id}) where {T, Dims, Id}
+@device_override @inline function KI.localmemory(::Type{T}, ::Val{Dims}) where {T, Dims}
     ptr = POCL.emit_localmemory(T, Val(prod(Dims)))
     CLDeviceArray(Dims, ptr)
 end
