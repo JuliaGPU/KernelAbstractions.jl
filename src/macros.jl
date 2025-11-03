@@ -90,7 +90,10 @@ function transform_gpu!(def, constargs, force_inbounds, unsafe_indices)
     pushfirst!(def[:args], :__ctx__)
     new_stmts = Expr[]
     body = MacroTools.flatten(def[:body])
-    push!(new_stmts, Expr(:aliasscope))
+    # On 1.11 and later having this aliasscope causes issues
+    # even with kernels that don't use `@Const` on arguments
+    # See https://github.com/JuliaGPU/KernelAbstractions.jl/issues/652
+    # push!(new_stmts, Expr(:aliasscope))
     if !unsafe_indices
         push!(new_stmts, :(__active_lane__ = $__validindex(__ctx__)))
     end
@@ -105,7 +108,7 @@ function transform_gpu!(def, constargs, force_inbounds, unsafe_indices)
     if force_inbounds
         push!(new_stmts, Expr(:inbounds, :pop))
     end
-    push!(new_stmts, Expr(:popaliasscope))
+    # push!(new_stmts, Expr(:popaliasscope))
     push!(new_stmts, :(return nothing))
     def[:body] = Expr(
         :let,
@@ -132,7 +135,10 @@ function transform_cpu!(def, constargs, force_inbounds)
     pushfirst!(def[:args], :__ctx__)
     new_stmts = Expr[]
     body = MacroTools.flatten(def[:body])
-    push!(new_stmts, Expr(:aliasscope))
+    # On 1.11 and later having this aliasscope causes issues
+    # even with kernels that don't use `@Const` on arguments
+    # See https://github.com/JuliaGPU/KernelAbstractions.jl/issues/652
+    # push!(new_stmts, Expr(:aliasscope))
     if force_inbounds
         push!(new_stmts, Expr(:inbounds, true))
     end
@@ -140,7 +146,7 @@ function transform_cpu!(def, constargs, force_inbounds)
     if force_inbounds
         push!(new_stmts, Expr(:inbounds, :pop))
     end
-    push!(new_stmts, Expr(:popaliasscope))
+    # push!(new_stmts, Expr(:popaliasscope))
     push!(new_stmts, :(return nothing))
     def[:body] = Expr(
         :let,
