@@ -331,5 +331,54 @@ function unittest_testsuite(Backend, backend_str, backend_mod, BackendArrayT; sk
         end
     end
 
+    # from https://github.com/JuliaGPU/KernelAbstractions.jl/issues/652
+    @kernel function unaliased_accumulate!(output, input, n)
+        i, j = @index(Global, NTuple)
+
+        for k in j:n
+            output[i, j] += input[i, k]
+        end
+    end
+
+    @kernel function unaliased_accumulate_local!(output, input, n)
+        i, j = @index(Global, NTuple)
+
+        # Use local accumulator
+        sum_val = zero(eltype(output))
+        for k in j:n
+            sum_val += input[i, k]
+        end
+        output[i, j] = sum_val
+    end
+
+    @testset "unaliased accumulate" begin
+        backend = Backend()
+        N = 8
+        M = 5
+
+        input = Float32[i + k for i in 1:M, k in 1:N]
+
+        reference = zeros(Float32, M, N)
+        for i in 1:M
+            for j in 1:N
+                for k in j:N
+                    reference[i, j] += input[i, k]
+                end
+            end
+        end
+
+        # Allocate device arrays
+        input = adapt(backend, input)
+        output = KernelAbstractions.zeros(backend, Float32, M, N)
+
+        # Perform accumulation
+        unaliased_accumulate!(backend)(output, input, N; ndrange = size(output))
+        @test adapt(Array, output) == reference
+
+        fill!(output, 0)
+        unaliased_accumulate_local!(backend)(output, input, N; ndrange = size(output))
+        @test adapt(Array, output) == reference
+    end
+
     return
 end
