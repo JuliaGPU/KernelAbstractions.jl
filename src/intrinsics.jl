@@ -169,7 +169,7 @@ function kiconvert end
 function kifunction end
 
 const MACRO_KWARGS = [:launch, :backend]
-const COMPILER_KWARGS = [:kernel, :name, :always_inline]
+const COMPILER_KWARGS = [:name]
 const LAUNCH_KWARGS = [:numworkgroups, :workgroupsize]
 
 macro kikernel(backend, ex...)
