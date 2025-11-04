@@ -1,5 +1,8 @@
 module KernelIntrinsics
 
+import ..KernelAbstractions: Backend
+import GPUCompiler: split_kwargs, assign_args!
+
 """
     get_global_size()::@NamedTuple{x::Int, y::Int, z::Int}
 
@@ -100,7 +103,6 @@ kernel on the host.
 !!! note
     Backend implementations **must** implement:
     ```
-    KI.KIKernel(::NewBackend, f, args...; kwargs...)
     (kernel::KIKernel{<:NewBackend})(args...; numworkgroups=nothing, workgroupsize=nothing, kwargs...)
     ```
     As well as the on-device functionality.
@@ -157,4 +159,88 @@ Used for certain algorithm optimizations.
     As well as the on-device functionality.
 """
 multiprocessor_count(_) = 0
+
+# TODO: docstring
+# kiconvert(::NewBackend, arg)
+function kiconvert end
+
+# TODO: docstring
+# KI.kifunction(::NewBackend, f::F, tt::TT=Tuple{}; name=nothing, kwargs...) where {F,TT}
+function kifunction end
+
+const MACRO_KWARGS = [:launch, :backend]
+const COMPILER_KWARGS = [:kernel, :name, :always_inline]
+const LAUNCH_KWARGS = [:numworkgroups, :workgroupsize]
+
+macro kikernel(backend, ex...)
+    call = ex[end]
+    kwargs = map(ex[1:end-1]) do kwarg
+        if kwarg isa Symbol
+            :($kwarg = $kwarg)
+        elseif Meta.isexpr(kwarg, :(=))
+            kwarg
+        else
+            throw(ArgumentError("Invalid keyword argument '$kwarg'"))
+        end
+    end
+
+    # destructure the kernel call
+    Meta.isexpr(call, :call) || throw(ArgumentError("final argument to @kikern should be a function call"))
+    f = call.args[1]
+    args = call.args[2:end]
+
+    code = quote end
+    vars, var_exprs = assign_args!(code, args)
+
+    # group keyword argument
+    macro_kwargs, compiler_kwargs, call_kwargs, other_kwargs =
+        split_kwargs(kwargs, MACRO_KWARGS, COMPILER_KWARGS, LAUNCH_KWARGS)
+    if !isempty(other_kwargs)
+        key,val = first(other_kwargs).args
+        throw(ArgumentError("Unsupported keyword argument '$key'"))
+    end
+
+    # handle keyword arguments that influence the macro's behavior
+    launch = true
+    for kwarg in macro_kwargs
+        key,val = kwarg.args
+        if key === :launch
+            isa(val, Bool) || throw(ArgumentError("`launch` keyword argument to @kikern should be a Bool"))
+            launch = val::Bool
+        else
+            throw(ArgumentError("Unsupported keyword argument '$key'"))
+        end
+    end
+    if !launch && !isempty(call_kwargs)
+        error("@kikern with launch=false does not support launch-time keyword arguments; use them when calling the kernel")
+    end
+
+    # FIXME: macro hygiene wrt. escaping kwarg values (this broke with 1.5)
+    #        we esc() the whole thing now, necessitating gensyms...
+    @gensym f_var kernel_f kernel_args kernel_tt kernel
+
+    # convert the arguments, call the compiler and launch the kernel
+    # while keeping the original arguments alive
+    push!(code.args,
+        quote
+            $f_var = $f
+            GC.@preserve $(vars...) $f_var begin
+                $kernel_f = $kiconvert($backend, $f_var)
+                $kernel_args = map(x -> $kiconvert($backend, x), ($(var_exprs...),))
+                $kernel_tt = Tuple{map(Core.Typeof, $kernel_args)...}
+                $kernel = $kifunction($backend, $kernel_f, $kernel_tt; $(compiler_kwargs...))
+                if $launch
+                    $kernel($(var_exprs...); $(call_kwargs...))
+                end
+                $kernel
+            end
+         end)
+
+    return esc(quote
+        let
+            $code
+        end
+    end)
+end
+
 end

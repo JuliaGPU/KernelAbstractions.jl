@@ -194,6 +194,11 @@ function unsafe_free! end
 
 unsafe_free!(::AbstractArray) = return
 
+"""
+Abstract type for all KernelAbstractions backends.
+"""
+abstract type Backend end
+
 include("intrinsics.jl")
 import .KernelIntrinsics
 export KernelIntrinsics
@@ -500,11 +505,6 @@ constify(arg) = adapt(ConstAdaptor(), arg)
 # Backend hierarchy
 ###
 
-"""
-
-Abstract type for all KernelAbstractions backends.
-"""
-abstract type Backend end
 
 """
 Abstract type for all GPU based KernelAbstractions backends.
