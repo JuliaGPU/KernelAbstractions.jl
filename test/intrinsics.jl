@@ -1,4 +1,3 @@
-
 function test_intrinsics_kernel(results)
     # Test all intrinsics return NamedTuples with x, y, z fields
     global_size = KI.get_global_size()
@@ -18,7 +17,6 @@ function test_intrinsics_kernel(results)
     end
     return
 end
-
 
 function intrinsics_testsuite(backend, AT)
     @testset "KernelIntrinsics Tests" begin
