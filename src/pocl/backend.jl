@@ -141,9 +141,9 @@ end
 
 KI.kiconvert(::POCLBackend, arg) = clconvert(arg)
 
-function KI.kifunction(::POCLBackend, f::F, tt::TT = Tuple{}; name=nothing, kwargs...) where {F, TT}
+function KI.kifunction(::POCLBackend, f::F, tt::TT = Tuple{}; name = nothing, kwargs...) where {F, TT}
     kern = clfunction(f, tt; name, kwargs...)
-    KI.KIKernel{POCLBackend, typeof(kern)}(POCLBackend(), kern)
+    return KI.KIKernel{POCLBackend, typeof(kern)}(POCLBackend(), kern)
 end
 
 function (obj::KI.KIKernel{POCLBackend})(args...; numworkgroups = nothing, workgroupsize = nothing)
