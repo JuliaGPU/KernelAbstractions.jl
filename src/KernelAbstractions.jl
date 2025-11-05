@@ -469,25 +469,25 @@ end
 # Internal kernel functions
 ###
 
-function __index_Local_Linear(ctx)
+@inline function __index_Local_Linear(ctx)
     return KernelIntrinsics.get_local_id().x
 end
 
-function __index_Group_Linear(ctx)
+@inline function __index_Group_Linear(ctx)
     return KernelIntrinsics.get_group_id().x
 end
 
-function __index_Global_Linear(ctx)
+@inline function __index_Global_Linear(ctx)
     return KernelIntrinsics.get_global_id().x
 end
 
-function __index_Local_Cartesian(ctx)
+@inline function __index_Local_Cartesian(ctx)
     return @inbounds workitems(__iterspace(ctx))[KernelIntrinsics.get_local_id().x]
 end
-function __index_Group_Cartesian(ctx)
+@inline function __index_Group_Cartesian(ctx)
     return @inbounds blocks(__iterspace(ctx))[KernelIntrinsics.get_group_id().x]
 end
-function __index_Global_Cartesian(ctx)
+@inline function __index_Global_Cartesian(ctx)
     return @inbounds expand(__iterspace(ctx), KernelIntrinsics.get_group_id().x, KernelIntrinsics.get_local_id().x)
 end
 

@@ -147,7 +147,7 @@ function KI.kifunction(::POCLBackend, f::F, tt::TT=Tuple{}; name=nothing, kwargs
     KI.KIKernel{POCLBackend, typeof(kern)}(POCLBackend(), kern)
 end
 
-function (obj::KI.KIKernel{POCLBackend})(args...; numworkgroups=nothing, workgroupsize=nothing, kwargs...)
+function (obj::KI.KIKernel{POCLBackend})(args...; numworkgroups=nothing, workgroupsize=nothing)
     local_size = isnothing(workgroupsize) ? 1 : workgroupsize
     global_size = if isnothing(numworkgroups)
         1
