@@ -168,7 +168,7 @@ function kiconvert end
 # KI.kifunction(::NewBackend, f::F, tt::TT=Tuple{}; name=nothing, kwargs...) where {F,TT}
 function kifunction end
 
-const MACRO_KWARGS = [:launch, :backend]
+const MACRO_KWARGS = [:launch]
 const COMPILER_KWARGS = [:name]
 const LAUNCH_KWARGS = [:numworkgroups, :workgroupsize]
 
