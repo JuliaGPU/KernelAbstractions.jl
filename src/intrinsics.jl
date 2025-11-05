@@ -160,18 +160,62 @@ Used for certain algorithm optimizations.
 """
 multiprocessor_count(_) = 0
 
-# TODO: docstring
-# kiconvert(::NewBackend, arg)
+"""
+    kiconvert(::NewBackend, arg)
+
+This function is called for every argument to be passed to a kernel, allowing it to be
+converted to a GPU-friendly format.
+
+!!! note
+    Backend implementations **must** implement:
+    ```
+    kiconvert(::NewBackend, arg)
+    ```
+"""
 function kiconvert end
 
-# TODO: docstring
-# KI.kifunction(::NewBackend, f::F, tt::TT=Tuple{}; name=nothing, kwargs...) where {F,TT}
+"""
+    KI.kifunction(::NewBackend, f::F, tt::TT=Tuple{}; name=nothing, kwargs...) where {F,TT}
+
+Low-level interface to compile a function invocation for the currently-active GPU, returning
+a callable kernel object. For a higher-level interface, use [`@kikernel`](@ref).
+
+Currently, only `kifunction` only supports the `name` keyword argument as it is the only one
+by all backends.
+
+Keyword arguments:
+- `name`: override the name that the kernel will have in the generated code
+
+!!! note
+    Backend implementations **must** implement:
+    ```
+    kifunction(::NewBackend, f::F, tt::TT=Tuple{}; name=nothing, kwargs...) where {F,TT}
+    ```
+"""
 function kifunction end
 
 const MACRO_KWARGS = [:launch]
 const COMPILER_KWARGS = [:name]
 const LAUNCH_KWARGS = [:numworkgroups, :workgroupsize]
 
+"""
+    @kikernel backend workgroupsize=... numworkgroups=... [kwargs...] func(args...)
+
+High-level interface for executing code on a GPU.
+
+The `@kikernel` macro should prefix a call, with `func` a callable function or object that
+should return nothing. It will be compiled to a function native to the specified `backend`
+upon first use, and to a certain extent arguments will be converted and managed automatically
+using `kiconvert`. Finally, if `launch=true`, the newly created callable kernel object is
+called and launched according to the specified `backend`.
+
+There are a few keyword arguments that influence the behavior of `@kikernel`:
+
+- `launch`: whether to launch this kernel, defaults to `true`. If `false`, the returned
+  kernel object should be launched by calling it and passing arguments again.
+- `name`: the name of the kernel in the generated code. Defaults to an automatically-
+  generated name.
+"""
 macro kikernel(backend, ex...)
     call = ex[end]
     kwargs = map(ex[1:end-1]) do kwarg
