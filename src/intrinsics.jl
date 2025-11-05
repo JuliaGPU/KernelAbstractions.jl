@@ -91,7 +91,24 @@ function barrier()
 end
 
 # TODO
-function print end
+@generated function _print(items...)
+    str = ""
+    args = []
+
+    for i in 1:length(items)
+        item = :(items[$i])
+        T = items[i]
+        if T <: Val
+            item = QuoteNode(T.parameters[1])
+        end
+        push!(args, item)
+    end
+
+    return quote
+        print($(args...))
+    end
+end
+
 
 
 """

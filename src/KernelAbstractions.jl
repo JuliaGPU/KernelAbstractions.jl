@@ -819,23 +819,7 @@ SharedMemory(t::Type{T}, dims::Val{Dims}) where {T, Dims} = KernelIntrinsics.loc
 
 __synchronize() = KernelIntrinsics.barrier()
 
-@generated function __print(items...)
-    str = ""
-    args = []
-
-    for i in 1:length(items)
-        item = :(items[$i])
-        T = items[i]
-        if T <: Val
-            item = QuoteNode(T.parameters[1])
-        end
-        push!(args, item)
-    end
-
-    return quote
-        print($(args...))
-    end
-end
+__print(args...) = KernelIntrinsics._print(args...)
 
 # Utils
 __size(args::Tuple) = Tuple{args...}

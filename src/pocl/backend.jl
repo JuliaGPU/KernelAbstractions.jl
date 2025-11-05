@@ -224,7 +224,7 @@ end
     work_group_barrier(POCL.LOCAL_MEM_FENCE | POCL.GLOBAL_MEM_FENCE)
 end
 
-@device_override @inline function KA.__print(args...)
+@device_override @inline function KI._print(args...)
     POCL._print(args...)
 end
 
