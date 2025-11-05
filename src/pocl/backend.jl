@@ -5,6 +5,7 @@ using ..POCL: @device_override, cl, method_table
 using ..POCL: device, clconvert, clfunction
 
 import KernelAbstractions as KA
+import KA.KernelIntrinsics as KI
 
 import StaticArrays
 
@@ -137,8 +138,6 @@ function (obj::KA.Kernel{POCLBackend})(args...; ndrange = nothing, workgroupsize
     cl.clReleaseEvent(event)
     return nothing
 end
-
-const KI = KA.KernelIntrinsics
 
 KI.kiconvert(::POCLBackend, arg) = clconvert(arg)
 
