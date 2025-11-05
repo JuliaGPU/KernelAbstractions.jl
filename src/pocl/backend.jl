@@ -56,7 +56,7 @@ KA.functional(::POCLBackend) = true
 KA.pagelock!(::POCLBackend, x) = nothing
 
 KA.get_backend(::Array) = POCLBackend()
-KA.synchronize(::POCLBackend) = nothing
+KA.synchronize(::POCLBackend) = cl.finish(cl.queue())
 KA.supports_float64(::POCLBackend) = true
 KA.supports_unified(::POCLBackend) = true
 
@@ -160,13 +160,14 @@ end
 
 
 function KI.kernel_max_work_group_size(::POCLBackend, kikern::KI.KIKernel{<:POCLBackend}; max_work_items::Int=typemax(Int))::Int
-    4096
+    wginfo = cl.work_group_info(kikern.kern.fun, device())
+    Int(min(wginfo.size, max_work_items))
 end
 function KI.max_work_group_size(::POCLBackend)::Int
-    4096
+    Int(device().max_work_group_size)
 end
 function KI.multiprocessor_count(::POCLBackend)::Int
-    1
+    Int(device().max_compute_units)
 end
 
 ## Indexing Functions

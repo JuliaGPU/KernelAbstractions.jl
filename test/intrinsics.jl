@@ -30,8 +30,7 @@ function intrinsics_testsuite(backend, AT)
             # Test with small kernel
             N = 16
             results = AT(zeros(Int, 6, N))
-
-            kernel = KI.@kikernel backend() test_intrinsics_kernel(results)
+            kernel = KI.@kikernel backend() launch=false test_intrinsics_kernel(results)
 
             @test KI.kernel_max_work_group_size(backend(), kernel) isa Int
             @test KI.kernel_max_work_group_size(backend(), kernel; max_work_items=1) == 1
