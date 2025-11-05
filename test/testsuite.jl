@@ -1,6 +1,7 @@
 module Testsuite
 
 using ..KernelAbstractions
+import ..KernelAbstractions.KernelIntrinsics as KI
 using ..Test
 
 # We can't add test-dependencies withouth breaking backend packages

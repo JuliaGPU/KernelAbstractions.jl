@@ -1,12 +1,12 @@
 
-@kernel cpu = false inbounds = true unsafe_indices = true function test_intrinsics_kernel(results)
+function test_intrinsics_kernel(results)
     # Test all intrinsics return NamedTuples with x, y, z fields
-    global_size = KernelIntrinsics.get_global_size()
-    global_id = KernelIntrinsics.get_global_id()
-    local_size = KernelIntrinsics.get_local_size()
-    local_id = KernelIntrinsics.get_local_id()
-    num_groups = KernelIntrinsics.get_num_groups()
-    group_id = KernelIntrinsics.get_group_id()
+    global_size = KI.get_global_size()
+    global_id = KI.get_global_id()
+    local_size = KI.get_local_size()
+    local_id = KI.get_local_id()
+    num_groups = KI.get_num_groups()
+    group_id = KI.get_group_id()
 
     if UInt32(global_id.x) <= UInt32(global_size.x)
         results[1, global_id.x] = global_id.x
@@ -16,6 +16,7 @@
         results[5, global_id.x] = local_size.x
         results[6, global_id.x] = num_groups.x
     end
+    return
 end
 
 
@@ -23,12 +24,19 @@ function intrinsics_testsuite(backend, AT)
     @testset "KernelIntrinsics Tests" begin
         @testset "Basic intrinsics functionality" begin
 
+            @test KI.max_work_group_size(backend()) isa Int
+            @test KI.multiprocessor_count(backend()) isa Int
+
             # Test with small kernel
             N = 16
             results = AT(zeros(Int, 6, N))
 
-            kernel = test_intrinsics_kernel(backend(), 4, (N,))
-            kernel(results, ndrange = N)
+            kernel = KI.@kikernel backend() test_intrinsics_kernel(results)
+
+            @test KI.kernel_max_work_group_size(backend(), kernel) isa Int
+            @test KI.kernel_max_work_group_size(backend(), kernel; max_work_items=1) == 1
+
+            kernel(results, workgroupsize = 4, numworkgroups = 4)
             KernelAbstractions.synchronize(backend())
 
             host_results = Array(results)
