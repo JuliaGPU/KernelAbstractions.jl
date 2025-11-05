@@ -248,11 +248,8 @@ end
 Declare storage that is local to a workgroup.
 """
 macro localmem(T, dims)
-    # Stay in sync with CUDAnative
-    # id = gensym("static_shmem")
-
     return quote
-        $SharedMemory($(esc(T)), Val($(esc(dims))))#, Val($(QuoteNode(id))))
+        $SharedMemory($(esc(T)), Val($(esc(dims))))
     end
 end
 

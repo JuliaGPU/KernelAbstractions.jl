@@ -141,32 +141,32 @@ end
 
 KI.kiconvert(::POCLBackend, arg) = clconvert(arg)
 
-function KI.kifunction(::POCLBackend, f::F, tt::TT=Tuple{}; name=nothing, kwargs...) where {F,TT}
+function KI.kifunction(::POCLBackend, f::F, tt::TT = Tuple{}; name=nothing, kwargs...) where {F, TT}
     kern = clfunction(f, tt; name, kwargs...)
     KI.KIKernel{POCLBackend, typeof(kern)}(POCLBackend(), kern)
 end
 
-function (obj::KI.KIKernel{POCLBackend})(args...; numworkgroups=nothing, workgroupsize=nothing)
+function (obj::KI.KIKernel{POCLBackend})(args...; numworkgroups = nothing, workgroupsize = nothing)
     local_size = isnothing(workgroupsize) ? 1 : workgroupsize
     global_size = if isnothing(numworkgroups)
         1
     else
-        numworkgroups*local_size
+        numworkgroups * local_size
     end
 
-    obj.kern(args...; local_size, global_size)
+    return obj.kern(args...; local_size, global_size)
 end
 
 
-function KI.kernel_max_work_group_size(::POCLBackend, kikern::KI.KIKernel{<:POCLBackend}; max_work_items::Int=typemax(Int))::Int
+function KI.kernel_max_work_group_size(::POCLBackend, kikern::KI.KIKernel{<:POCLBackend}; max_work_items::Int = typemax(Int))::Int
     wginfo = cl.work_group_info(kikern.kern.fun, device())
-    Int(min(wginfo.size, max_work_items))
+    return Int(min(wginfo.size, max_work_items))
 end
 function KI.max_work_group_size(::POCLBackend)::Int
-    Int(device().max_work_group_size)
+    return Int(device().max_work_group_size)
 end
 function KI.multiprocessor_count(::POCLBackend)::Int
-    Int(device().max_compute_units)
+    return Int(device().max_compute_units)
 end
 
 ## Indexing Functions

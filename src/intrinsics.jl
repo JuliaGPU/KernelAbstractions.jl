@@ -66,8 +66,7 @@ Declare memory that is local to a workgroup.
     ```
     As well as the on-device functionality.
 """
-localmemory(::Type{T}, dims) where T = localmemory(T, Val(dims))
-# @inline localmemory(::Type{T}, dims::Val{Dims}) where {T, Dims} = localmemory(T, dims, Val(gensym("static_shmem")))
+localmemory(::Type{T}, dims) where {T} = localmemory(T, Val(dims))
 
 """
     barrier()
@@ -108,7 +107,6 @@ end
         print($(args...))
     end
 end
-
 
 
 """
@@ -235,7 +233,7 @@ There are a few keyword arguments that influence the behavior of `@kikernel`:
 """
 macro kikernel(backend, ex...)
     call = ex[end]
-    kwargs = map(ex[1:end-1]) do kwarg
+    kwargs = map(ex[1:(end - 1)]) do kwarg
         if kwarg isa Symbol
             :($kwarg = $kwarg)
         elseif Meta.isexpr(kwarg, :(=))
@@ -257,14 +255,14 @@ macro kikernel(backend, ex...)
     macro_kwargs, compiler_kwargs, call_kwargs, other_kwargs =
         split_kwargs(kwargs, MACRO_KWARGS, COMPILER_KWARGS, LAUNCH_KWARGS)
     if !isempty(other_kwargs)
-        key,val = first(other_kwargs).args
+        key, val = first(other_kwargs).args
         throw(ArgumentError("Unsupported keyword argument '$key'"))
     end
 
     # handle keyword arguments that influence the macro's behavior
     launch = true
     for kwarg in macro_kwargs
-        key,val = kwarg.args
+        key, val = kwarg.args
         if key === :launch
             isa(val, Bool) || throw(ArgumentError("`launch` keyword argument to @kikern should be a Bool"))
             launch = val::Bool
@@ -282,7 +280,8 @@ macro kikernel(backend, ex...)
 
     # convert the arguments, call the compiler and launch the kernel
     # while keeping the original arguments alive
-    push!(code.args,
+    push!(
+        code.args,
         quote
             $f_var = $f
             GC.@preserve $(vars...) $f_var begin
@@ -295,13 +294,16 @@ macro kikernel(backend, ex...)
                 end
                 $kernel
             end
-         end)
-
-    return esc(quote
-        let
-            $code
         end
-    end)
+    )
+
+    return esc(
+        quote
+            let
+                $code
+            end
+        end
+    )
 end
 
 end
