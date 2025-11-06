@@ -27,7 +27,7 @@ function intrinsics_testsuite(backend, AT)
                 gi, _, _ = KI.get_group_id()
                 ngi, _, _ = KI.get_num_groups()
 
-                arr[(gi - 1) * ngi + i] = 1f0
+                arr[(gi - 1) * ngi + i] = 1.0f0
                 return
             end
             arr1d = AT(zeros(Float32, 4))
@@ -47,7 +47,7 @@ function intrinsics_testsuite(backend, AT)
                 gi, gj, _ = KI.get_group_id()
                 ngi, ngj, _ = KI.get_num_groups()
 
-                arr[(gi - 1) * ngi + i, (gj - 1) * ngj + j] = 1f0
+                arr[(gi - 1) * ngi + i, (gj - 1) * ngj + j] = 1.0f0
                 return
             end
             arr2d = AT(zeros(Float32, 4, 4))
@@ -61,7 +61,7 @@ function intrinsics_testsuite(backend, AT)
                 gi, gj, gk = KI.get_group_id()
                 ngi, ngj, ngk = KI.get_num_groups()
 
-                arr[(gi - 1) * ngi + i, (gj - 1) * ngj + j, (gk - 1) * ngk + k] = 1f0
+                arr[(gi - 1) * ngi + i, (gj - 1) * ngj + j, (gk - 1) * ngk + k] = 1.0f0
                 return
             end
             arr3d = AT(zeros(Float32, 4, 4, 4))
