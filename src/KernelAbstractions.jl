@@ -248,8 +248,11 @@ end
 Declare storage that is local to a workgroup.
 """
 macro localmem(T, dims)
+    # Stay in sync with CUDAnative
+    id = gensym("static_shmem")
+
     return quote
-        $SharedMemory($(esc(T)), Val($(esc(dims))))
+        $SharedMemory($(esc(T)), Val($(esc(dims))), Val($(QuoteNode(id))))
     end
 end
 
@@ -811,8 +814,7 @@ include("macros.jl")
 ###
 
 function Scratchpad end
-# SharedMemory(t::Type{T}, dims::Val{Dims}, id::Val{Id}) where {T, Dims, Id} = KernelIntrinsics.localmemory(t, dims, id)
-SharedMemory(t::Type{T}, dims::Val{Dims}) where {T, Dims} = KernelIntrinsics.localmemory(t, dims)
+SharedMemory(t::Type{T}, dims::Val{Dims}, id::Val{Id}) where {T, Dims, Id} = KernelIntrinsics.localmemory(t, dims)
 
 __synchronize() = KernelIntrinsics.barrier()
 
