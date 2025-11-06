@@ -89,7 +89,20 @@ function barrier()
     error("Group barrier used outside kernel or not captured")
 end
 
-# TODO
+"""
+    _print(items...)
+
+    Overloaded by backends to enable `KernelAbstractions.@print`
+    functionality.
+
+!!! note
+    Backend implementations **must** implement:
+    ```
+    _print(items...)
+    ```
+    As well as the on-device functionality,
+    or define it to return `nothing`
+"""
 @generated function _print(items...)
     str = ""
     args = []
