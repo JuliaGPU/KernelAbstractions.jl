@@ -20,6 +20,56 @@ end
 
 function intrinsics_testsuite(backend, AT)
     @testset "KernelIntrinsics Tests" begin
+        @testset "Launch parameters" begin
+            # 1d
+            function launch_kernel1d(arr)
+                i, _, _ = KI.get_local_id()
+                gi, _, _ = KI.get_group_id()
+                ngi, _, _ = KI.get_num_groups()
+
+                arr[(gi - 1) * ngi + i] = 1f0
+                return
+            end
+            arr1d = AT(zeros(Float32, 4))
+            KI.@kikernel backend() numworkgroups = 2 workgroupsize = 2 launch_kernel1d(arr1d)
+            KernelAbstractions.synchronize(backend())
+            @test all(Array(arr1d) .== 1)
+
+            # 1d tuple
+            arr1dt = AT(zeros(Float32, 4))
+            KI.@kikernel backend() numworkgroups = (2,) workgroupsize = (2,) launch_kernel1d(arr1dt)
+            KernelAbstractions.synchronize(backend())
+            @test all(Array(arr1dt) .== 1)
+
+            # 2d
+            function launch_kernel2d(arr)
+                i, j, _ = KI.get_local_id()
+                gi, gj, _ = KI.get_group_id()
+                ngi, ngj, _ = KI.get_num_groups()
+
+                arr[(gi - 1) * ngi + i, (gj - 1) * ngj + j] = 1f0
+                return
+            end
+            arr2d = AT(zeros(Float32, 4, 4))
+            KI.@kikernel backend() numworkgroups = (2, 2) workgroupsize = (2, 2) launch_kernel2d(arr2d)
+            KernelAbstractions.synchronize(backend())
+            @test all(Array(arr2d) .== 1)
+
+            # 3d
+            function launch_kernel3d(arr)
+                i, j, k = KI.get_local_id()
+                gi, gj, gk = KI.get_group_id()
+                ngi, ngj, ngk = KI.get_num_groups()
+
+                arr[(gi - 1) * ngi + i, (gj - 1) * ngj + j, (gk - 1) * ngk + k] = 1f0
+                return
+            end
+            arr3d = AT(zeros(Float32, 4, 4, 4))
+            KI.@kikernel backend() numworkgroups = (2, 2, 2) workgroupsize = (2, 2, 2) launch_kernel3d(arr3d)
+            KernelAbstractions.synchronize(backend())
+            @test all(Array(arr3d) .== 1)
+        end
+
         @testset "Basic intrinsics functionality" begin
 
             @test KI.max_work_group_size(backend()) isa Int
