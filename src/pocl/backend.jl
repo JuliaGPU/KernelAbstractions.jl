@@ -139,7 +139,7 @@ function (obj::KA.Kernel{POCLBackend})(args...; ndrange = nothing, workgroupsize
     return nothing
 end
 
-KI.kiconvert(::POCLBackend, arg) = clconvert(arg)
+KI.argconvert(::POCLBackend, arg) = clconvert(arg)
 
 function KI.kifunction(::POCLBackend, f::F, tt::TT = Tuple{}; name = nothing, kwargs...) where {F, TT}
     kern = clfunction(f, tt; name, kwargs...)

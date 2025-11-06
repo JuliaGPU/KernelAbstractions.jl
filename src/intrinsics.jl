@@ -224,7 +224,7 @@ Used for certain algorithm optimizations.
 multiprocessor_count(_) = 0
 
 """
-    kiconvert(::NewBackend, arg)
+    argconvert(::NewBackend, arg)
 
 This function is called for every argument to be passed to a kernel, allowing it to be
 converted to a GPU-friendly format.
@@ -232,10 +232,10 @@ converted to a GPU-friendly format.
 !!! note
     Backend implementations **must** implement:
     ```
-    kiconvert(::NewBackend, arg)
+    argconvert(::NewBackend, arg)
     ```
 """
-function kiconvert end
+function argconvert end
 
 """
     KI.kifunction(::NewBackend, f::F, tt::TT=Tuple{}; name=nothing, kwargs...) where {F,TT}
@@ -269,7 +269,7 @@ High-level interface for executing code on a GPU.
 The `@kikernel` macro should prefix a call, with `func` a callable function or object that
 should return nothing. It will be compiled to a function native to the specified `backend`
 upon first use, and to a certain extent arguments will be converted and managed automatically
-using `kiconvert`. Finally, if `launch=true`, the newly created callable kernel object is
+using `argconvert`. Finally, if `launch=true`, the newly created callable kernel object is
 called and launched according to the specified `backend`.
 
 There are a few keyword arguments that influence the behavior of `@kikernel`:
@@ -333,8 +333,8 @@ macro kikernel(backend, ex...)
         quote
             $f_var = $f
             GC.@preserve $(vars...) $f_var begin
-                $kernel_f = $kiconvert($backend, $f_var)
-                $kernel_args = Base.map(x -> $kiconvert($backend, x), ($(var_exprs...),))
+                $kernel_f = $argconvert($backend, $f_var)
+                $kernel_args = Base.map(x -> $argconvert($backend, x), ($(var_exprs...),))
                 $kernel_tt = Tuple{Base.map(Core.Typeof, $kernel_args)...}
                 $kernel = $kifunction($backend, $kernel_f, $kernel_tt; $(compiler_kwargs...))
                 if $launch
