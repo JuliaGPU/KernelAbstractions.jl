@@ -138,23 +138,8 @@ end
     If the backend does not support printing,
     define it to return `nothing`.
 """
-@generated function _print(items...)
-    str = ""
-    args = []
+function _print end
 
-    for i in 1:length(items)
-        item = :(items[$i])
-        T = items[i]
-        if T <: Val
-            item = QuoteNode(T.parameters[1])
-        end
-        push!(args, item)
-    end
-
-    return quote
-        print($(args...))
-    end
-end
 
 
 """
