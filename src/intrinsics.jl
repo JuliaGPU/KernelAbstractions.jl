@@ -7,6 +7,12 @@ import GPUCompiler: split_kwargs, assign_args!
     get_global_size()::@NamedTuple{x::Int, y::Int, z::Int}
 
 Return the number of global work-items specified.
+
+!!! note
+    Backend implementations **must** implement:
+    ```
+    @device_override get_global_size()::@NamedTuple{x::Int, y::Int, z::Int}
+    ```
 """
 function get_global_size end
 
@@ -17,6 +23,12 @@ Returns the unique global work-item ID.
 
 !!! note
     1-based.
+
+!!! note
+    Backend implementations **must** implement:
+    ```
+    @device_override get_global_id()::@NamedTuple{x::Int, y::Int, z::Int}
+    ```
 """
 function get_global_id end
 
@@ -24,6 +36,12 @@ function get_global_id end
     get_local_size()::@NamedTuple{x::Int, y::Int, z::Int}
 
 Return the number of local work-items specified.
+
+!!! note
+    Backend implementations **must** implement:
+    ```
+    @device_override get_local_size()::@NamedTuple{x::Int, y::Int, z::Int}
+    ```
 """
 function get_local_size end
 
@@ -34,6 +52,12 @@ Returns the unique local work-item ID.
 
 !!! note
     1-based.
+
+!!! note
+    Backend implementations **must** implement:
+    ```
+    @device_override get_local_id()::@NamedTuple{x::Int, y::Int, z::Int}
+    ```
 """
 function get_local_id end
 
@@ -41,6 +65,12 @@ function get_local_id end
     get_num_groups()::@NamedTuple{x::Int, y::Int, z::Int}
 
 Returns the number of groups.
+
+!!! note
+    Backend implementations **must** implement:
+    ```
+    @device_override get_num_groups()::@NamedTuple{x::Int, y::Int, z::Int}
+    ```
 """
 function get_num_groups end
 
@@ -51,6 +81,12 @@ Returns the unique group ID.
 
 !!! note
     1-based.
+
+!!! note
+    Backend implementations **must** implement:
+    ```
+    @device_override get_group_id()::@NamedTuple{x::Int, y::Int, z::Int}
+    ```
 """
 function get_group_id end
 
@@ -62,7 +98,7 @@ Declare memory that is local to a workgroup.
 !!! note
     Backend implementations **must** implement:
     ```
-    localmemory(T::DataType, ::Val{Dims}) where {T, Dims}
+    @device_override localmemory(T::DataType, ::Val{Dims}) where {T, Dims}
     ```
     As well as the on-device functionality.
 """
@@ -83,14 +119,13 @@ workgroup.
     ```
     @device_override barrier()
     ```
-    As well as the on-device functionality.
 """
 function barrier()
     error("Group barrier used outside kernel or not captured")
 end
 
 """
-    _print(items...)
+    _print(args...)
 
     Overloaded by backends to enable `KernelAbstractions.@print`
     functionality.
@@ -98,10 +133,10 @@ end
 !!! note
     Backend implementations **must** implement:
     ```
-    _print(items...)
+    @device_override _print(args...)
     ```
-    As well as the on-device functionality,
-    or define it to return `nothing`
+    If the backend does not support printing,
+    define it to return `nothing`.
 """
 @generated function _print(items...)
     str = ""
