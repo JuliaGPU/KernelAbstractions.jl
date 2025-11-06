@@ -176,7 +176,7 @@ struct Kernel{B, Kern}
 end
 
 """
-    kernel_max_work_group_size(backend, kern; [max_work_items::Int])::Int
+    kernel_max_work_group_size(kern; [max_work_items::Int])::Int
 
 The maximum workgroup size limit for a kernel as reported by the backend.
 This function should always be used to determine the workgroup size before
@@ -185,7 +185,7 @@ launching a kernel.
 !!! note
     Backend implementations **must** implement:
     ```
-    kernel_max_work_group_size(backend::NewBackend, kern::Kernel{<:NewBackend}; max_work_items::Int=typemax(Int))::Int
+    kernel_max_work_group_size(kern::Kernel{<:NewBackend}; max_work_items::Int=typemax(Int))::Int
     ```
     As well as the on-device functionality.
 """

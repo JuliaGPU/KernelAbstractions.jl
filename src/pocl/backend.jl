@@ -164,7 +164,7 @@ function (obj::KI.Kernel{POCLBackend})(args...; numworkgroups = nothing, workgro
     return obj.kern(args...; local_size, global_size)
 end
 
-function KI.kernel_max_work_group_size(::POCLBackend, kikern::KI.Kernel{<:POCLBackend}; max_work_items::Int = typemax(Int))::Int
+function KI.kernel_max_work_group_size(kikern::KI.Kernel{<:POCLBackend}; max_work_items::Int = typemax(Int))::Int
     wginfo = cl.work_group_info(kikern.kern.fun, device())
     return Int(min(wginfo.size, max_work_items))
 end
