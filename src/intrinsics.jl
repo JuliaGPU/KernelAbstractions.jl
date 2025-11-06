@@ -334,8 +334,8 @@ macro kikernel(backend, ex...)
             $f_var = $f
             GC.@preserve $(vars...) $f_var begin
                 $kernel_f = $kiconvert($backend, $f_var)
-                $kernel_args = map(x -> $kiconvert($backend, x), ($(var_exprs...),))
-                $kernel_tt = Tuple{map(Core.Typeof, $kernel_args)...}
+                $kernel_args = Base.map(x -> $kiconvert($backend, x), ($(var_exprs...),))
+                $kernel_tt = Tuple{Base.map(Core.Typeof, $kernel_args)...}
                 $kernel = $kifunction($backend, $kernel_f, $kernel_tt; $(compiler_kwargs...))
                 if $launch
                     $kernel($(var_exprs...); $(call_kwargs...))
