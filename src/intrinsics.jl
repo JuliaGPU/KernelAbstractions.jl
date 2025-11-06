@@ -158,19 +158,19 @@ end
 
 
 """
-    KIKernel{Backend, BKern}
+    Kernel{Backend, BKern}
 
-KIKernel closure struct that is used to represent the backend
+Kernel closure struct that is used to represent the backend
 kernel on the host.
 
 !!! note
     Backend implementations **must** implement:
     ```
-    (kernel::KIKernel{<:NewBackend})(args...; numworkgroups=nothing, workgroupsize=nothing, kwargs...)
+    (kernel::Kernel{<:NewBackend})(args...; numworkgroups=nothing, workgroupsize=nothing, kwargs...)
     ```
     As well as the on-device functionality.
 """
-struct KIKernel{B, Kern}
+struct Kernel{B, Kern}
     backend::B
     kern::Kern
 end
@@ -185,7 +185,7 @@ launching a kernel.
 !!! note
     Backend implementations **must** implement:
     ```
-    kernel_max_work_group_size(backend::NewBackend, kern::KIKernel{<:NewBackend}; max_work_items::Int=typemax(Int))::Int
+    kernel_max_work_group_size(backend::NewBackend, kern::Kernel{<:NewBackend}; max_work_items::Int=typemax(Int))::Int
     ```
     As well as the on-device functionality.
 """

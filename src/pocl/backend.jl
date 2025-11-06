@@ -143,10 +143,10 @@ KI.kiconvert(::POCLBackend, arg) = clconvert(arg)
 
 function KI.kifunction(::POCLBackend, f::F, tt::TT = Tuple{}; name = nothing, kwargs...) where {F, TT}
     kern = clfunction(f, tt; name, kwargs...)
-    return KI.KIKernel{POCLBackend, typeof(kern)}(POCLBackend(), kern)
+    return KI.Kernel{POCLBackend, typeof(kern)}(POCLBackend(), kern)
 end
 
-function (obj::KI.KIKernel{POCLBackend})(args...; numworkgroups = nothing, workgroupsize = nothing)
+function (obj::KI.Kernel{POCLBackend})(args...; numworkgroups = nothing, workgroupsize = nothing)
     local_size = StaticArrays.MVector{3}((1, 1, 1))
     if !isnothing(workgroupsize)
         for (i, val) in enumerate(workgroupsize)
@@ -164,7 +164,7 @@ function (obj::KI.KIKernel{POCLBackend})(args...; numworkgroups = nothing, workg
     return obj.kern(args...; local_size, global_size)
 end
 
-function KI.kernel_max_work_group_size(::POCLBackend, kikern::KI.KIKernel{<:POCLBackend}; max_work_items::Int = typemax(Int))::Int
+function KI.kernel_max_work_group_size(::POCLBackend, kikern::KI.Kernel{<:POCLBackend}; max_work_items::Int = typemax(Int))::Int
     wginfo = cl.work_group_info(kikern.kern.fun, device())
     return Int(min(wginfo.size, max_work_items))
 end
