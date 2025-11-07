@@ -211,8 +211,8 @@ multiprocessor_count(_) = 0
 """
     argconvert(::NewBackend, arg)
 
-This function is called for every argument to be passed to a kernel, allowing it to be
-converted to a GPU-friendly format.
+This function is called for every argument to be passed to a kernel,
+converting them to their device side representation.
 
 !!! note
     Backend implementations **must** implement:
