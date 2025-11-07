@@ -31,13 +31,13 @@ function intrinsics_testsuite(backend, AT)
                 return
             end
             arr1d = AT(zeros(Float32, 4))
-            KI.@kikernel backend() numworkgroups = 2 workgroupsize = 2 launch_kernel1d(arr1d)
+            KI.@kernel backend() numworkgroups = 2 workgroupsize = 2 launch_kernel1d(arr1d)
             KernelAbstractions.synchronize(backend())
             @test all(Array(arr1d) .== 1)
 
             # 1d tuple
             arr1dt = AT(zeros(Float32, 4))
-            KI.@kikernel backend() numworkgroups = (2,) workgroupsize = (2,) launch_kernel1d(arr1dt)
+            KI.@kernel backend() numworkgroups = (2,) workgroupsize = (2,) launch_kernel1d(arr1dt)
             KernelAbstractions.synchronize(backend())
             @test all(Array(arr1dt) .== 1)
 
@@ -51,7 +51,7 @@ function intrinsics_testsuite(backend, AT)
                 return
             end
             arr2d = AT(zeros(Float32, 4, 4))
-            KI.@kikernel backend() numworkgroups = (2, 2) workgroupsize = (2, 2) launch_kernel2d(arr2d)
+            KI.@kernel backend() numworkgroups = (2, 2) workgroupsize = (2, 2) launch_kernel2d(arr2d)
             KernelAbstractions.synchronize(backend())
             @test all(Array(arr2d) .== 1)
 
@@ -65,7 +65,7 @@ function intrinsics_testsuite(backend, AT)
                 return
             end
             arr3d = AT(zeros(Float32, 4, 4, 4))
-            KI.@kikernel backend() numworkgroups = (2, 2, 2) workgroupsize = (2, 2, 2) launch_kernel3d(arr3d)
+            KI.@kernel backend() numworkgroups = (2, 2, 2) workgroupsize = (2, 2, 2) launch_kernel3d(arr3d)
             KernelAbstractions.synchronize(backend())
             @test all(Array(arr3d) .== 1)
         end
@@ -78,7 +78,7 @@ function intrinsics_testsuite(backend, AT)
             # Test with small kernel
             N = 16
             results = AT(zeros(Int, 6, N))
-            kernel = KI.@kikernel backend() launch = false test_intrinsics_kernel(results)
+            kernel = KI.@kernel backend() launch = false test_intrinsics_kernel(results)
 
             @test KI.kernel_max_work_group_size(kernel) isa Int
             @test KI.kernel_max_work_group_size(kernel; max_work_items = 1) == 1

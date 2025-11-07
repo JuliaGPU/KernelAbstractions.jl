@@ -241,7 +241,7 @@ function argconvert end
     KI.gpufunction(::NewBackend, f::F, tt::TT=Tuple{}; name=nothing, kwargs...) where {F,TT}
 
 Low-level interface to compile a function invocation for the currently-active GPU, returning
-a callable kernel object. For a higher-level interface, use [`@kikernel`](@ref).
+a callable kernel object. For a higher-level interface, use [`KernelIntrinsics.@kernel`](@ref).
 
 Currently, only `gpufunction` only supports the `name` keyword argument as it is the only one
 by all backends.
@@ -262,24 +262,30 @@ const COMPILER_KWARGS = [:name]
 const LAUNCH_KWARGS = [:numworkgroups, :workgroupsize]
 
 """
-    @kikernel backend workgroupsize=... numworkgroups=... [kwargs...] func(args...)
+    KernelIntrinsics.@kernel backend workgroupsize=... numworkgroups=... [kwargs...] func(args...)
 
 High-level interface for executing code on a GPU.
 
-The `@kikernel` macro should prefix a call, with `func` a callable function or object that
+The `KernelIntrinsics.@kernel` macro should prefix a call, with `func` a callable function or object that
 should return nothing. It will be compiled to a function native to the specified `backend`
 upon first use, and to a certain extent arguments will be converted and managed automatically
 using `argconvert`. Finally, if `launch=true`, the newly created callable kernel object is
 called and launched according to the specified `backend`.
 
-There are a few keyword arguments that influence the behavior of `@kikernel`:
+There are a few keyword arguments that influence the behavior of `KernelIntrinsics.@kernel`:
 
 - `launch`: whether to launch this kernel, defaults to `true`. If `false`, the returned
   kernel object should be launched by calling it and passing arguments again.
 - `name`: the name of the kernel in the generated code. Defaults to an automatically-
   generated name.
+
+!!! note
+    `KernelIntrinsics.@kernel` differs from the `KernelAbstractions` macro in that this macro acts
+    a wrapper around backend kernel compilation/launching (such as `@cuda`, `@metal`, etc.). It is
+    used when calling a function to be run on a specific backend, while `KernelAbstractions.@kernel`
+    is used kernel definition for use with the original higher-level `KernelAbstractions` API.
 """
-macro kikernel(backend, ex...)
+macro kernel(backend, ex...)
     call = ex[end]
     kwargs = map(ex[1:(end - 1)]) do kwarg
         if kwarg isa Symbol
