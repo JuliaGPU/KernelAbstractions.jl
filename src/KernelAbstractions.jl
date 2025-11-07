@@ -369,6 +369,25 @@ macro context()
     return esc(:(__ctx__))
 end
 
+# Defined to keep cpu support for `__print`
+@generated function KernelIntrinsics._print(items...)
+    str = ""
+    args = []
+
+    for i in 1:length(items)
+        item = :(items[$i])
+        T = items[i]
+        if T <: Val
+            item = QuoteNode(T.parameters[1])
+        end
+        push!(args, item)
+    end
+
+    return quote
+        print($(args...))
+    end
+end
+
 """
     @print(items...)
 
