@@ -200,8 +200,8 @@ Abstract type for all KernelAbstractions backends.
 abstract type Backend end
 
 include("intrinsics.jl")
-import .KernelIntrinsics
-export KernelIntrinsics
+import .KernelIntrinsics: KernelIntrinsics, KI
+export KernelIntrinsics, KI
 
 ###
 # Kernel language
@@ -370,7 +370,7 @@ macro context()
 end
 
 # Defined to keep cpu support for `__print`
-@generated function KernelIntrinsics._print(items...)
+@generated function KI._print(items...)
     str = ""
     args = []
 
@@ -489,25 +489,25 @@ end
 ###
 
 @inline function __index_Local_Linear(ctx)
-    return KernelIntrinsics.get_local_id().x
+    return KI.get_local_id().x
 end
 
 @inline function __index_Group_Linear(ctx)
-    return KernelIntrinsics.get_group_id().x
+    return KI.get_group_id().x
 end
 
 @inline function __index_Global_Linear(ctx)
-    return KernelIntrinsics.get_global_id().x
+    return KI.get_global_id().x
 end
 
 @inline function __index_Local_Cartesian(ctx)
-    return @inbounds workitems(__iterspace(ctx))[KernelIntrinsics.get_local_id().x]
+    return @inbounds workitems(__iterspace(ctx))[KI.get_local_id().x]
 end
 @inline function __index_Group_Cartesian(ctx)
-    return @inbounds blocks(__iterspace(ctx))[KernelIntrinsics.get_group_id().x]
+    return @inbounds blocks(__iterspace(ctx))[KI.get_group_id().x]
 end
 @inline function __index_Global_Cartesian(ctx)
-    return @inbounds expand(__iterspace(ctx), KernelIntrinsics.get_group_id().x, KernelIntrinsics.get_local_id().x)
+    return @inbounds expand(__iterspace(ctx), KI.get_group_id().x, KI.get_local_id().x)
 end
 
 @inline __index_Local_NTuple(ctx, I...) = Tuple(__index_Local_Cartesian(ctx, I...))
@@ -833,11 +833,11 @@ include("macros.jl")
 ###
 
 function Scratchpad end
-SharedMemory(t::Type{T}, dims::Val{Dims}, id::Val{Id}) where {T, Dims, Id} = KernelIntrinsics.localmemory(t, dims)
+SharedMemory(t::Type{T}, dims::Val{Dims}, id::Val{Id}) where {T, Dims, Id} = KI.localmemory(t, dims)
 
-__synchronize() = KernelIntrinsics.barrier()
+__synchronize() = KI.barrier()
 
-__print(args...) = KernelIntrinsics._print(args...)
+__print(args...) = KI._print(args...)
 
 # Utils
 __size(args::Tuple) = Tuple{args...}

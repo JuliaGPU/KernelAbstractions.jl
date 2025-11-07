@@ -141,7 +141,7 @@ end
 
 KI.argconvert(::POCLBackend, arg) = clconvert(arg)
 
-function KI.gpufunction(::POCLBackend, f::F, tt::TT = Tuple{}; name = nothing, kwargs...) where {F, TT}
+function KI.kernel_function(::POCLBackend, f::F, tt::TT = Tuple{}; name = nothing, kwargs...) where {F, TT}
     kern = clfunction(f, tt; name, kwargs...)
     return KI.Kernel{POCLBackend, typeof(kern)}(POCLBackend(), kern)
 end

@@ -1,16 +1,19 @@
 """
-# KernelIntrinics
+# `KernelIntrinics`/`KI`
 
-The `KernelIntrinics` module defines the API interface for backends to define various lower-level device and
-host-side functionality. The `KernelIntrinsics` intrinsics are used to define the higher-level device-side
+The `KernelIntrinics` (or `KI`) module defines the API interface for backends to define various lower-level device and
+host-side functionality. The `KI` intrinsics are used to define the higher-level device-side
 intrinsics functionality in `KernelAbstractions`.
 
-Both provide APIs for host and device-side functionality, but `KernelIntrinsics` focuses on on lower-level
+Both provide APIs for host and device-side functionality, but `KI` focuses on on lower-level
 functionality that is shared amongst backends, while `KernelAbstractions` provides higher-level functionality
 such as writing kernels that work on arrays with an arbitrary number of dimensions, or convenience functions
 like allocating arrays on a backend.
 """
 module KernelIntrinsics
+
+const KI = KernelIntrinsics
+export KI
 
 import ..KernelAbstractions: Backend
 import GPUCompiler: split_kwargs, assign_args!
@@ -238,12 +241,12 @@ converting them to their device side representation.
 function argconvert end
 
 """
-    KI.gpufunction(::NewBackend, f::F, tt::TT=Tuple{}; name=nothing, kwargs...) where {F,TT}
+    KI.kernel_function(::NewBackend, f::F, tt::TT=Tuple{}; name=nothing, kwargs...) where {F,TT}
 
 Low-level interface to compile a function invocation for the currently-active GPU, returning
-a callable kernel object. For a higher-level interface, use [`KernelIntrinsics.@kernel`](@ref).
+a callable kernel object. For a higher-level interface, use [`KI.@kernel`](@ref).
 
-Currently, only `gpufunction` only supports the `name` keyword argument as it is the only one
+Currently, `kernel_function` only supports the `name` keyword argument as it is the only one
 by all backends.
 
 Keyword arguments:
@@ -252,27 +255,27 @@ Keyword arguments:
 !!! note
     Backend implementations **must** implement:
     ```
-    gpufunction(::NewBackend, f::F, tt::TT=Tuple{}; name=nothing, kwargs...) where {F,TT}
+    kernel_function(::NewBackend, f::F, tt::TT=Tuple{}; name=nothing, kwargs...) where {F,TT}
     ```
 """
-function gpufunction end
+function kernel_function end
 
 const MACRO_KWARGS = [:launch]
 const COMPILER_KWARGS = [:name]
 const LAUNCH_KWARGS = [:numworkgroups, :workgroupsize]
 
 """
-    KernelIntrinsics.@kernel backend workgroupsize=... numworkgroups=... [kwargs...] func(args...)
+    KI.@kernel backend workgroupsize=... numworkgroups=... [kwargs...] func(args...)
 
 High-level interface for executing code on a GPU.
 
-The `KernelIntrinsics.@kernel` macro should prefix a call, with `func` a callable function or object that
+The `KI.@kernel` macro should prefix a call, with `func` a callable function or object that
 should return nothing. It will be compiled to a function native to the specified `backend`
 upon first use, and to a certain extent arguments will be converted and managed automatically
 using `argconvert`. Finally, if `launch=true`, the newly created callable kernel object is
 called and launched according to the specified `backend`.
 
-There are a few keyword arguments that influence the behavior of `KernelIntrinsics.@kernel`:
+There are a few keyword arguments that influence the behavior of `KI.@kernel`:
 
 - `launch`: whether to launch this kernel, defaults to `true`. If `false`, the returned
   kernel object should be launched by calling it and passing arguments again.
@@ -280,7 +283,7 @@ There are a few keyword arguments that influence the behavior of `KernelIntrinsi
   generated name.
 
 !!! note
-    `KernelIntrinsics.@kernel` differs from the `KernelAbstractions` macro in that this macro acts
+    `KI.@kernel` differs from the `KernelAbstractions` macro in that this macro acts
     a wrapper around backend kernel compilation/launching (such as `@cuda`, `@metal`, etc.). It is
     used when calling a function to be run on a specific backend, while `KernelAbstractions.@kernel`
     is used kernel definition for use with the original higher-level `KernelAbstractions` API.
@@ -342,7 +345,7 @@ macro kernel(backend, ex...)
                 $kernel_f = $argconvert($backend, $f_var)
                 $kernel_args = Base.map(x -> $argconvert($backend, x), ($(var_exprs...),))
                 $kernel_tt = Tuple{Base.map(Core.Typeof, $kernel_args)...}
-                $kernel = $gpufunction($backend, $kernel_f, $kernel_tt; $(compiler_kwargs...))
+                $kernel = $kernel_function($backend, $kernel_f, $kernel_tt; $(compiler_kwargs...))
                 if $launch
                     $kernel($(var_exprs...); $(call_kwargs...))
                 end
