@@ -1,3 +1,15 @@
+"""
+# KernelIntrinics
+
+The `KernelIntrinics` module defines the API interface for backends to define various lower-level device and
+host-side functionality. The `KernelIntrinsics` intrinsics are used to define the higher-level device-side
+intrinsics functionality in `KernelAbstractions`.
+
+Both provide APIs for host and device-side functionality, but `KernelIntrinsics` focuses on on lower-level
+functionality that is shared amongst backends, while `KernelAbstractions` provides higher-level functionality
+such as writing kernels that work on arrays with an arbitrary number of dimensions, or convenience functions
+like allocating arrays on a backend.
+"""
 module KernelIntrinsics
 
 import ..KernelAbstractions: Backend
@@ -110,6 +122,9 @@ localmemory(::Type{T}, dims) where {T} = localmemory(T, Val(dims))
 After a `barrier()` call, all read and writes to global and local memory
 from each thread in the workgroup are visible in from all other threads in the
 workgroup.
+
+This does **not** guarantee that a write from a thread in a certain workgroup will
+be visible to a thread in a different workgroup.
 
 !!! note
     `barrier()` must be encountered by all workitems of a work-group executing the kernel or by none at all.
