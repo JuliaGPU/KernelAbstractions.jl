@@ -141,7 +141,7 @@ end
 
 KI.argconvert(::POCLBackend, arg) = clconvert(arg)
 
-function KI.kifunction(::POCLBackend, f::F, tt::TT = Tuple{}; name = nothing, kwargs...) where {F, TT}
+function KI.gpufunction(::POCLBackend, f::F, tt::TT = Tuple{}; name = nothing, kwargs...) where {F, TT}
     kern = clfunction(f, tt; name, kwargs...)
     return KI.Kernel{POCLBackend, typeof(kern)}(POCLBackend(), kern)
 end
@@ -164,8 +164,8 @@ function (obj::KI.Kernel{POCLBackend})(args...; numworkgroups = nothing, workgro
     return obj.kern(args...; local_size, global_size)
 end
 
-function KI.kernel_max_work_group_size(kikern::KI.Kernel{<:POCLBackend}; max_work_items::Int = typemax(Int))::Int
-    wginfo = cl.work_group_info(kikern.kern.fun, device())
+function KI.kernel_max_work_group_size(kernel::KI.Kernel{<:POCLBackend}; max_work_items::Int = typemax(Int))::Int
+    wginfo = cl.work_group_info(kernel.kern.fun, device())
     return Int(min(wginfo.size, max_work_items))
 end
 function KI.max_work_group_size(::POCLBackend)::Int

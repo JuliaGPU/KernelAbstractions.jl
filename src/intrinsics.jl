@@ -143,7 +143,7 @@ function _print end
 
 
 """
-    Kernel{Backend, BKern}
+    Kernel{Backend, Kern}
 
 Kernel closure struct that is used to represent the backend
 kernel on the host.
@@ -223,12 +223,12 @@ converted to a GPU-friendly format.
 function argconvert end
 
 """
-    KI.kifunction(::NewBackend, f::F, tt::TT=Tuple{}; name=nothing, kwargs...) where {F,TT}
+    KI.gpufunction(::NewBackend, f::F, tt::TT=Tuple{}; name=nothing, kwargs...) where {F,TT}
 
 Low-level interface to compile a function invocation for the currently-active GPU, returning
 a callable kernel object. For a higher-level interface, use [`@kikernel`](@ref).
 
-Currently, only `kifunction` only supports the `name` keyword argument as it is the only one
+Currently, only `gpufunction` only supports the `name` keyword argument as it is the only one
 by all backends.
 
 Keyword arguments:
@@ -237,10 +237,10 @@ Keyword arguments:
 !!! note
     Backend implementations **must** implement:
     ```
-    kifunction(::NewBackend, f::F, tt::TT=Tuple{}; name=nothing, kwargs...) where {F,TT}
+    gpufunction(::NewBackend, f::F, tt::TT=Tuple{}; name=nothing, kwargs...) where {F,TT}
     ```
 """
-function kifunction end
+function gpufunction end
 
 const MACRO_KWARGS = [:launch]
 const COMPILER_KWARGS = [:name]
@@ -321,7 +321,7 @@ macro kikernel(backend, ex...)
                 $kernel_f = $argconvert($backend, $f_var)
                 $kernel_args = Base.map(x -> $argconvert($backend, x), ($(var_exprs...),))
                 $kernel_tt = Tuple{Base.map(Core.Typeof, $kernel_args)...}
-                $kernel = $kifunction($backend, $kernel_f, $kernel_tt; $(compiler_kwargs...))
+                $kernel = $gpufunction($backend, $kernel_f, $kernel_tt; $(compiler_kwargs...))
                 if $launch
                     $kernel($(var_exprs...); $(call_kwargs...))
                 end
