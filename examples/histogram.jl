@@ -12,16 +12,15 @@ function create_histogram(input)
     return histogram_output
 end
 
-# This a 1D histogram kernel where the histogramming happens on shmem
-@kernel unsafe_indices = true function histogram_kernel!(histogram_output, input)
-    gid = @index(Group, Linear)
-    lid = @index(Local, Linear)
+# This a 1D histogram kernel where the histogramming happens on static shmem
+function histogram_kernel!(histogram_output, input, ::Val{gs}) where gs
+    gid = KI.get_group_id().x
+    lid = KI.get_local_id().x
 
-    @uniform gs = prod(@groupsize())
     tid = (gid - 1) * gs + lid
-    @uniform N = length(histogram_output)
+    N = length(histogram_output)
 
-    shared_histogram = @localmem eltype(input) (gs)
+    shared_histogram = KI.localmemory(eltype(input), gs)
 
     # This will go through all input elements and assign them to a location in
     # shmem. Note that if there is not enough shem, we create different shmem
@@ -32,7 +31,7 @@ end
 
         # Setting shared_histogram to 0
         @inbounds shared_histogram[lid] = 0
-        @synchronize()
+        KI.barrier()
 
         max_element = min_element + gs
         if max_element > N
@@ -46,7 +45,7 @@ end
             @atomic shared_histogram[bin] += 1
         end
 
-        @synchronize()
+        KI.barrier()
 
         if ((lid + min_element - 1) <= N)
             @atomic histogram_output[lid + min_element - 1] += shared_histogram[lid]
@@ -59,8 +58,7 @@ end
 function histogram!(histogram_output, input, groupsize = 256)
     backend = get_backend(histogram_output)
     # Need static block size
-    kernel! = histogram_kernel!(backend, (groupsize,))
-    kernel!(histogram_output, input, ndrange = size(input))
+    KI.@kernel backend workgroupsize=groupsize numworkgroups=cld(length(input), groupsize) histogram_kernel!(histogram_output, input, Val(groupsize))
     return
 end
 
