@@ -52,7 +52,7 @@ function histogram_kernel!(histogram_output, input, ::Val{gs}) where {gs}
         end
 
     end
-
+    return
 end
 
 function histogram!(histogram_output, input, groupsize = 256)

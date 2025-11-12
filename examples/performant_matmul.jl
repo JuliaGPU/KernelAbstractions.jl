@@ -70,7 +70,7 @@ function coalesced_matmul_kernel!(
     if I <= N && J <= M
         @inbounds output[I, J] = outval
     end
-    return nothing
+    return
 end
 
 N = 1024
