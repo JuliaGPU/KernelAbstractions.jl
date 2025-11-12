@@ -146,20 +146,13 @@ function KI.kernel_function(::POCLBackend, f::F, tt::TT = Tuple{}; name = nothin
     return KI.Kernel{POCLBackend, typeof(kern)}(POCLBackend(), kern)
 end
 
-function (obj::KI.Kernel{POCLBackend})(args...; numworkgroups = nothing, workgroupsize = nothing)
-    local_size = StaticArrays.MVector{3}((1, 1, 1))
-    if !isnothing(workgroupsize)
-        for (i, val) in enumerate(workgroupsize)
-            local_size[i] = val
-        end
-    end
+function (obj::KI.Kernel{POCLBackend})(args...; numworkgroups = 1, workgroupsize = 1)
+    KI.check_launch_args(numworkgroups, workgroupsize)
 
-    global_size = StaticArrays.MVector{3}((1, 1, 1))
-    if !isnothing(numworkgroups)
-        for (i, val) in enumerate(numworkgroups)
-            global_size[i] = val * local_size[i]
-        end
-    end
+    local_size = (workgroupsize..., ntuple(_->1, 3-length(workgroupsize))...,)
+
+    numworkgroups = (numworkgroups..., ntuple(_->1, 3-length(numworkgroups))...,)
+    global_size = local_size .* numworkgroups
 
     return obj.kern(args...; local_size, global_size)
 end

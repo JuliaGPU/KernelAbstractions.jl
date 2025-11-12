@@ -68,6 +68,10 @@ function intrinsics_testsuite(backend, AT)
             KI.@kernel backend() numworkgroups = (2, 2, 2) workgroupsize = (2, 2, 2) launch_kernel3d(arr3d)
             KernelAbstractions.synchronize(backend())
             @test all(Array(arr3d) .== 1)
+
+            # 4d (Errors)
+            @test_throws ArgumentError (KI.@kernel backend() numworkgroups = (2, 2, 2, 2) workgroupsize = (2, 2, 2) launch_kernel3d(arr3d))
+            @test_throws ArgumentError (KI.@kernel backend() numworkgroups = (2, 2, 2) workgroupsize = (2, 2, 2, 2) launch_kernel3d(arr3d))
         end
 
         @testset "Basic intrinsics functionality" begin

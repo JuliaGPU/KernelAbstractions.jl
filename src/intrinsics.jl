@@ -168,13 +168,26 @@ kernel on the host.
 !!! note
     Backend implementations **must** implement:
     ```
-    (kernel::Kernel{<:NewBackend})(args...; numworkgroups=nothing, workgroupsize=nothing, kwargs...)
+    (kernel::Kernel{<:NewBackend})(args...; numworkgroups=1, workgroupsize=1)
     ```
-    As well as the on-device functionality.
+    With the `numworkgroups` and `workgroupsize` arguments accepting a scalar Integer
+    or or a 1, 2, or 3 Integer tuple and throwing an `ArgumentError` otherwise. The
+    helper function `KI.check_launch_args(numworkgroups, workgroupsize)` can be used
+    by the backend or a custom check can be implemented.
+
+    Backends must also implement the on-device kernel launch functionality.
 """
 struct Kernel{B, Kern}
     backend::B
     kern::Kern
+end
+
+function check_launch_args(numworkgroups, workgroupsize)
+    length(numworkgroups) <= 3 ||
+        throw(ArgumentError("`numworkgroups` only accepts up to 3 dimensions"))
+    length(workgroupsize) <= 3 ||
+        throw(ArgumentError("`workgroupsize` only accepts up to 3 dimensions"))
+    return
 end
 
 """
