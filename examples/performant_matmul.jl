@@ -81,7 +81,7 @@ B = rand!(allocate(backend, Float32, R, M))
 C = KernelAbstractions.zeros(backend, Float32, N, M)
 
 workgroupsize=(TILE_DIM, TILE_DIM)
-numworkgroups=(cld(size(C,1), TILE_DIM), cld(size(C,2), TILE_DIM))
+numworkgroups=(cld(size(C, 1), TILE_DIM), cld(size(C, 2), TILE_DIM))
 
 KI.@kernel backend workgroupsize numworkgroups coalesced_matmul_kernel!(C, A, B, N, R, M, Val(TILE_DIM))
 KernelAbstractions.synchronize(backend)

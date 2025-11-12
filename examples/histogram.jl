@@ -13,7 +13,7 @@ function create_histogram(input)
 end
 
 # This a 1D histogram kernel where the histogramming happens on static shmem
-function histogram_kernel!(histogram_output, input, ::Val{gs}) where gs
+function histogram_kernel!(histogram_output, input, ::Val{gs}) where {gs}
     gid = KI.get_group_id().x
     lid = KI.get_local_id().x
 
@@ -58,7 +58,7 @@ end
 function histogram!(histogram_output, input, groupsize = 256)
     backend = get_backend(histogram_output)
     # Need static block size
-    KI.@kernel backend workgroupsize=groupsize numworkgroups=cld(length(input), groupsize) histogram_kernel!(histogram_output, input, Val(groupsize))
+    KI.@kernel backend workgroupsize = groupsize numworkgroups = cld(length(input), groupsize) histogram_kernel!(histogram_output, input, Val(groupsize))
     return
 end
 
