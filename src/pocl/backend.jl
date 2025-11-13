@@ -154,7 +154,10 @@ function (obj::KI.Kernel{POCLBackend})(args...; numworkgroups = 1, workgroupsize
     numworkgroups = (numworkgroups..., ntuple(_->1, 3-length(numworkgroups))...,)
     global_size = local_size .* numworkgroups
 
-    return obj.kern(args...; local_size, global_size)
+    event = obj.kern(args...; local_size, global_size)
+    wait(event)
+    cl.clReleaseEvent(event)
+    return nothing
 end
 
 function KI.kernel_max_work_group_size(kernel::KI.Kernel{<:POCLBackend}; max_work_items::Int = typemax(Int))::Int
