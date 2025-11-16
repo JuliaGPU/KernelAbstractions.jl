@@ -57,7 +57,14 @@ KA.functional(::POCLBackend) = true
 KA.pagelock!(::POCLBackend, x) = nothing
 
 KA.get_backend(::Array) = POCLBackend()
-KA.synchronize(::POCLBackend) = cl.finish(cl.queue())
+
+## Implementation note:
+## The POCL backend uses `Base.Array` as it's array type, so the external operations
+## `broadcast`, `*` and other high-level operations are handled by Julia. In order
+## to provide the same memory synchronization semantics as other backends, we
+## must synchronize upon kernel launch and can't rely on synchronization upon
+## array access. Therefore, `synchronize` is a no-op.
+KA.synchronize(::POCLBackend) = nothing
 KA.supports_float64(::POCLBackend) = true
 KA.supports_unified(::POCLBackend) = true
 
@@ -149,9 +156,9 @@ end
 function (obj::KI.Kernel{POCLBackend})(args...; numworkgroups = 1, workgroupsize = 1)
     KI.check_launch_args(numworkgroups, workgroupsize)
 
-    local_size = (workgroupsize..., ntuple(_->1, 3-length(workgroupsize))...,)
+    local_size = (workgroupsize..., ntuple(_ -> 1, 3 - length(workgroupsize))...)
 
-    numworkgroups = (numworkgroups..., ntuple(_->1, 3-length(numworkgroups))...,)
+    numworkgroups = (numworkgroups..., ntuple(_ -> 1, 3 - length(numworkgroups))...)
     global_size = local_size .* numworkgroups
 
     event = obj.kern(args...; local_size, global_size)

@@ -1,7 +1,7 @@
 """
-# `KernelIntrinics`/`KI`
+# `KernelIntrinsics`
 
-The `KernelIntrinics` (or `KI`) module defines the API interface for backends to define various lower-level device and
+The `KernelIntrinsics` (or `KI`) module defines the API interface for backends to define various lower-level device and
 host-side functionality. The `KI` intrinsics are used to define the higher-level device-side
 intrinsics functionality in `KernelAbstractions`.
 
@@ -11,9 +11,6 @@ such as writing kernels that work on arrays with an arbitrary number of dimensio
 like allocating arrays on a backend.
 """
 module KernelIntrinsics
-
-const KI = KernelIntrinsics
-export KI
 
 import ..KernelAbstractions: Backend
 import GPUCompiler: split_kwargs, assign_args!

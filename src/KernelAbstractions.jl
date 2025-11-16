@@ -200,8 +200,8 @@ Abstract type for all KernelAbstractions backends.
 abstract type Backend end
 
 include("intrinsics.jl")
-import .KernelIntrinsics: KernelIntrinsics, KI
-export KernelIntrinsics, KI
+import .KernelIntrinsics as KI
+export KernelIntrinsics
 
 ###
 # Kernel language

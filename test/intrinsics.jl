@@ -1,3 +1,5 @@
+import KernelAbstractions.KernelIntrinsics as KI
+
 function test_intrinsics_kernel(results)
     # Test all intrinsics return NamedTuples with x, y, z fields
     global_size = KI.get_global_size()

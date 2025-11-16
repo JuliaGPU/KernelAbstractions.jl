@@ -1,7 +1,10 @@
 using KernelAbstractions
+import KernelAbstractions.KernelIntrinsics as KI
+
 using StaticArrays
 using Test
 using Random
+
 include(joinpath(dirname(pathof(KernelAbstractions)), "../examples/utils.jl")) # Load backend
 
 # We use a TILE_DIM of 16 as a safe value since while
