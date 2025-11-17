@@ -2,9 +2,10 @@ module POCLKernels
 
 using ..POCL
 using ..POCL: @device_override, cl, method_table
-using ..POCL: device
+using ..POCL: device, clconvert, clfunction
 
 import KernelAbstractions as KA
+import KernelAbstractions.KernelIntrinsics as KI
 
 import StaticArrays
 
@@ -56,6 +57,13 @@ KA.functional(::POCLBackend) = true
 KA.pagelock!(::POCLBackend, x) = nothing
 
 KA.get_backend(::Array) = POCLBackend()
+
+## Implementation note:
+## The POCL backend uses `Base.Array` as it's array type, so the external operations
+## `broadcast`, `*` and other high-level operations are handled by Julia. In order
+## to provide the same memory synchronization semantics as other backends, we
+## must synchronize upon kernel launch and can't rely on synchronization upon
+## array access. Therefore, `synchronize` is a no-op.
 KA.synchronize(::POCLBackend) = nothing
 KA.supports_float64(::POCLBackend) = true
 KA.supports_unified(::POCLBackend) = true
@@ -138,31 +146,62 @@ function (obj::KA.Kernel{POCLBackend})(args...; ndrange = nothing, workgroupsize
     return nothing
 end
 
+KI.argconvert(::POCLBackend, arg) = clconvert(arg)
+
+function KI.kernel_function(::POCLBackend, f::F, tt::TT = Tuple{}; name = nothing, kwargs...) where {F, TT}
+    kern = clfunction(f, tt; name, kwargs...)
+    return KI.Kernel{POCLBackend, typeof(kern)}(POCLBackend(), kern)
+end
+
+function (obj::KI.Kernel{POCLBackend})(args...; numworkgroups = 1, workgroupsize = 1)
+    KI.check_launch_args(numworkgroups, workgroupsize)
+
+    local_size = (workgroupsize..., ntuple(_ -> 1, 3 - length(workgroupsize))...)
+
+    numworkgroups = (numworkgroups..., ntuple(_ -> 1, 3 - length(numworkgroups))...)
+    global_size = local_size .* numworkgroups
+
+    event = obj.kern(args...; local_size, global_size)
+    wait(event)
+    cl.clReleaseEvent(event)
+    return nothing
+end
+
+function KI.kernel_max_work_group_size(kernel::KI.Kernel{<:POCLBackend}; max_work_items::Int = typemax(Int))::Int
+    wginfo = cl.work_group_info(kernel.kern.fun, device())
+    return Int(min(wginfo.size, max_work_items))
+end
+function KI.max_work_group_size(::POCLBackend)::Int
+    return Int(device().max_work_group_size)
+end
+function KI.multiprocessor_count(::POCLBackend)::Int
+    return Int(device().max_compute_units)
+end
 
 ## Indexing Functions
 
-@device_override @inline function KA.__index_Local_Linear(ctx)
-    return get_local_id(1)
+@device_override @inline function KI.get_local_id()
+    return (; x = Int(get_local_id(1)), y = Int(get_local_id(2)), z = Int(get_local_id(3)))
 end
 
-@device_override @inline function KA.__index_Group_Linear(ctx)
-    return get_group_id(1)
+@device_override @inline function KI.get_group_id()
+    return (; x = Int(get_group_id(1)), y = Int(get_group_id(2)), z = Int(get_group_id(3)))
 end
 
-@device_override @inline function KA.__index_Global_Linear(ctx)
-    return get_global_id(1)
+@device_override @inline function KI.get_global_id()
+    return (; x = Int(get_global_id(1)), y = Int(get_global_id(2)), z = Int(get_global_id(3)))
 end
 
-@device_override @inline function KA.__index_Local_Cartesian(ctx)
-    @inbounds KA.workitems(KA.__iterspace(ctx))[get_local_id(1)]
+@device_override @inline function KI.get_local_size()
+    return (; x = Int(get_local_size(1)), y = Int(get_local_size(2)), z = Int(get_local_size(3)))
 end
 
-@device_override @inline function KA.__index_Group_Cartesian(ctx)
-    @inbounds KA.blocks(KA.__iterspace(ctx))[get_group_id(1)]
+@device_override @inline function KI.get_num_groups()
+    return (; x = Int(get_num_groups(1)), y = Int(get_num_groups(2)), z = Int(get_num_groups(3)))
 end
 
-@device_override @inline function KA.__index_Global_Cartesian(ctx)
-    return @inbounds KA.expand(KA.__iterspace(ctx), get_group_id(1), get_local_id(1))
+@device_override @inline function KI.get_global_size()
+    return (; x = Int(get_global_size(1)), y = Int(get_global_size(2)), z = Int(get_global_size(3)))
 end
 
 @device_override @inline function KA.__validindex(ctx)
@@ -177,7 +216,7 @@ end
 
 ## Shared and Scratch Memory
 
-@device_override @inline function KA.SharedMemory(::Type{T}, ::Val{Dims}, ::Val{Id}) where {T, Dims, Id}
+@device_override @inline function KI.localmemory(::Type{T}, ::Val{Dims}) where {T, Dims}
     ptr = POCL.emit_localmemory(T, Val(prod(Dims)))
     CLDeviceArray(Dims, ptr)
 end
@@ -189,11 +228,11 @@ end
 
 ## Synchronization and Printing
 
-@device_override @inline function KA.__synchronize()
+@device_override @inline function KI.barrier()
     work_group_barrier(POCL.LOCAL_MEM_FENCE | POCL.GLOBAL_MEM_FENCE)
 end
 
-@device_override @inline function KA.__print(args...)
+@device_override @inline function KI._print(args...)
     POCL._print(args...)
 end
 

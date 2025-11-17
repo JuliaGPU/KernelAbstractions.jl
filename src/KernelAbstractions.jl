@@ -194,6 +194,15 @@ function unsafe_free! end
 
 unsafe_free!(::AbstractArray) = return
 
+"""
+Abstract type for all KernelAbstractions backends.
+"""
+abstract type Backend end
+
+include("intrinsics.jl")
+import .KernelIntrinsics as KI
+export KernelIntrinsics
+
 ###
 # Kernel language
 # - @localmem
@@ -360,6 +369,25 @@ macro context()
     return esc(:(__ctx__))
 end
 
+# Defined to keep cpu support for `__print`
+@generated function KI._print(items...)
+    str = ""
+    args = []
+
+    for i in 1:length(items)
+        item = :(items[$i])
+        T = items[i]
+        if T <: Val
+            item = QuoteNode(T.parameters[1])
+        end
+        push!(args, item)
+    end
+
+    return quote
+        print($(args...))
+    end
+end
+
 """
     @print(items...)
 
@@ -460,13 +488,27 @@ end
 # Internal kernel functions
 ###
 
-function __index_Local_Linear end
-function __index_Group_Linear end
-function __index_Global_Linear end
+@inline function __index_Local_Linear(ctx)
+    return KI.get_local_id().x
+end
 
-function __index_Local_Cartesian end
-function __index_Group_Cartesian end
-function __index_Global_Cartesian end
+@inline function __index_Group_Linear(ctx)
+    return KI.get_group_id().x
+end
+
+@inline function __index_Global_Linear(ctx)
+    return KI.get_global_id().x
+end
+
+@inline function __index_Local_Cartesian(ctx)
+    return @inbounds workitems(__iterspace(ctx))[KI.get_local_id().x]
+end
+@inline function __index_Group_Cartesian(ctx)
+    return @inbounds blocks(__iterspace(ctx))[KI.get_group_id().x]
+end
+@inline function __index_Global_Cartesian(ctx)
+    return @inbounds expand(__iterspace(ctx), KI.get_group_id().x, KI.get_local_id().x)
+end
 
 @inline __index_Local_NTuple(ctx, I...) = Tuple(__index_Local_Cartesian(ctx, I...))
 @inline __index_Group_NTuple(ctx, I...) = Tuple(__index_Group_Cartesian(ctx, I...))
@@ -482,11 +524,6 @@ constify(arg) = adapt(ConstAdaptor(), arg)
 # Backend hierarchy
 ###
 
-"""
-
-Abstract type for all KernelAbstractions backends.
-"""
-abstract type Backend end
 
 """
 Abstract type for all GPU based KernelAbstractions backends.
@@ -796,29 +833,11 @@ include("macros.jl")
 ###
 
 function Scratchpad end
-function SharedMemory end
+SharedMemory(t::Type{T}, dims::Val{Dims}, id::Val{Id}) where {T, Dims, Id} = KI.localmemory(t, dims)
 
-function __synchronize()
-    error("@synchronize used outside kernel or not captured")
-end
+__synchronize() = KI.barrier()
 
-@generated function __print(items...)
-    str = ""
-    args = []
-
-    for i in 1:length(items)
-        item = :(items[$i])
-        T = items[i]
-        if T <: Val
-            item = QuoteNode(T.parameters[1])
-        end
-        push!(args, item)
-    end
-
-    return quote
-        print($(args...))
-    end
-end
+__print(args...) = KI._print(args...)
 
 # Utils
 __size(args::Tuple) = Tuple{args...}
