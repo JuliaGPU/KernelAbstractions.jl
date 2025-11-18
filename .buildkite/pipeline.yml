@@ -108,7 +108,7 @@ steps:
     command: |
       julia -e 'println("--- :julia: Developing oneAPI")
                 using Pkg
-                Pkg.add(url="https://github.com/christiangnrd/oneAPI.jl", rev="intrinsics")
+                Pkg.add(url="https://github.com/christiangnrd/oneAPI.jl", rev="intrinsics")'
       julia -e 'println("--- :julia: Instantiating project")
                 using Pkg
                 Pkg.develop(; path=pwd())' || exit 3
@@ -174,9 +174,9 @@ steps:
     command: |
       julia -e 'println("--- :julia: Developing OpenCL")
                 using Pkg
-                Pkg.add(url="https://github.com/christiangnrd/CUDA.jl", rev="intrinsics")
+                Pkg.add(url="https://github.com/christiangnrd/OpenCL.jl", rev="intrinsics")
                 Pkg.develop(; name="SPIRVIntrinsics")'
-      sed -i 's/^KernelAbstractions = "0\.9.*"/KernelAbstractions = "0.10"/' \${JULIA_DEPOT_PATH}/dev/OpenCL/Project.toml
+      sed -i 's/^KernelAbstractions = "0\.9.*"/KernelAbstractions = "0.9, 0.10"/' \${JULIA_DEPOT_PATH}/dev/OpenCL/Project.toml
       julia -e 'println("--- :julia: Instantiating project")
                 using Pkg
                 Pkg.develop(; path=pwd())' || exit 3
