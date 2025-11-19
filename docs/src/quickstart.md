@@ -79,7 +79,7 @@ all(A .== 2.0)
 
 The code around KA may heavily rely on
 [`GPUArrays`](https://github.com/JuliaGPU/GPUArrays.jl), for example, to
-intialize variables.
+initialize variables.
 ```julia
 function mymul(A)
     A .= 1.0
