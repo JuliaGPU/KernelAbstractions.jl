@@ -41,7 +41,7 @@ function queue()
 end
 
 using GPUCompiler
-import LLVM
+using LLVM
 using Adapt
 
 ## device overrides
@@ -60,6 +60,7 @@ import Core: LLVMPtr
 include("device/array.jl")
 include("device/quirks.jl")
 include("device/runtime.jl")
+include("device/random.jl")
 
 function Adapt.adapt_storage(to::KernelAdaptor, xs::Array{T, N}) where {T, N}
     return CLDeviceArray{T, N, AS.CrossWorkgroup}(size(xs), reinterpret(LLVMPtr{T, AS.CrossWorkgroup}, pointer(xs)))
