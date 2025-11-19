@@ -13,10 +13,7 @@ steps:
     command: |
       julia -e 'println("--- :julia: Developing CUDA")
                 using Pkg
-                Pkg.develop(; name="CUDA")
-                Pkg.develop(; name="GPUArrays")'
-      sed -i 's/^KernelAbstractions = "0\.9.*"/KernelAbstractions = "0.10"/' \${JULIA_DEPOT_PATH}/dev/CUDA/Project.toml
-      sed -i 's/^KernelAbstractions = "0\.9.*"/KernelAbstractions = "0.10"/' \${JULIA_DEPOT_PATH}/dev/GPUArrays/Project.toml
+                Pkg.add(url="https://github.com/christiangnrd/CUDA.jl", rev="intrinsics")'
       julia -e 'println("--- :julia: Instantiating project")
                 using Pkg
                 Pkg.develop(; path=pwd())' || exit 3
@@ -79,10 +76,7 @@ steps:
     command: |
       julia -e 'println("--- :julia: Developing Metal")
                 using Pkg
-                Pkg.develop(; name="Metal")
-                Pkg.develop(; name="GPUArrays")'
-      sed -i '' 's/^KernelAbstractions = "0\.9.*"/KernelAbstractions = "0.10"/' \${JULIA_DEPOT_PATH}/dev/Metal/Project.toml
-      sed -i '' 's/^KernelAbstractions = "0\.9.*"/KernelAbstractions = "0.10"/' \${JULIA_DEPOT_PATH}/dev/GPUArrays/Project.toml
+                Pkg.add(url="https://github.com/JuliaGPU/Metal.jl", rev="kaintr")'
       julia -e 'println("--- :julia: Instantiating project")
                 using Pkg
                 Pkg.develop(; path=pwd())' || exit 3
@@ -114,10 +108,9 @@ steps:
     command: |
       julia -e 'println("--- :julia: Developing oneAPI")
                 using Pkg
-                Pkg.develop(; name="oneAPI")
-                Pkg.develop(; name="GPUArrays")'
-      sed -i 's/^KernelAbstractions = "0\.9.*"/KernelAbstractions = "0.10"/' \${JULIA_DEPOT_PATH}/dev/oneAPI/Project.toml
-      sed -i 's/^KernelAbstractions = "0\.9.*"/KernelAbstractions = "0.10"/' \${JULIA_DEPOT_PATH}/dev/GPUArrays/Project.toml
+                Pkg.add(url="https://github.com/christiangnrd/oneAPI.jl", rev="intrinsics")
+                Pkg.develop(; name="AcceleratedKernels")'
+      sed -i 's/^KernelAbstractions = "0\.9.*"/KernelAbstractions = "0.10"/' \${JULIA_DEPOT_PATH}/dev/AcceleratedKernels/Project.toml
       julia -e 'println("--- :julia: Instantiating project")
                 using Pkg
                 Pkg.develop(; path=pwd())' || exit 3
@@ -148,14 +141,12 @@ steps:
     command: |
       julia -e 'println("--- :julia: Developing AMDGPU")
                 using Pkg
-                Pkg.develop(; name="AMDGPU")
-                Pkg.develop(; name="GPUArrays")
                 Pkg.develop(; name="AcceleratedKernels")'
-      sed -i 's/^KernelAbstractions = "0\.9.*"/KernelAbstractions = "0.10"/' \${JULIA_DEPOT_PATH}/dev/AMDGPU/Project.toml
-      sed -i 's/^KernelAbstractions = "0\.9.*"/KernelAbstractions = "0.10"/' \${JULIA_DEPOT_PATH}/dev/GPUArrays/Project.toml
       sed -i 's/^KernelAbstractions = "0\.9.*"/KernelAbstractions = "0.10"/' \${JULIA_DEPOT_PATH}/dev/AcceleratedKernels/Project.toml
-      julia -e 'println("--- :julia: Instantiating project")
+      julia -e '
                 using Pkg
+                Pkg.add(url="https://github.com/christiangnrd/AMDGPU.jl", rev="intrinsics")
+                println("--- :julia: Instantiating project")
                 Pkg.develop(; path=pwd())' || exit 3
 
       julia -e 'println("+++ :julia: Running tests")
@@ -185,11 +176,8 @@ steps:
     command: |
       julia -e 'println("--- :julia: Developing OpenCL")
                 using Pkg
-                Pkg.develop(; name="OpenCL")
-                Pkg.develop(; name="SPIRVIntrinsics")
-                Pkg.develop(; name="GPUArrays")'
-      sed -i 's/^KernelAbstractions = "0\.9.*"/KernelAbstractions = "0.10"/' \${JULIA_DEPOT_PATH}/dev/OpenCL/Project.toml
-      sed -i 's/^KernelAbstractions = "0\.9.*"/KernelAbstractions = "0.10"/' \${JULIA_DEPOT_PATH}/dev/GPUArrays/Project.toml
+                Pkg.add(url="https://github.com/christiangnrd/OpenCL.jl", rev="intrinsics")
+                Pkg.develop(; name="SPIRVIntrinsics")'
       julia -e 'println("--- :julia: Instantiating project")
                 using Pkg
                 Pkg.develop(; path=pwd())' || exit 3
