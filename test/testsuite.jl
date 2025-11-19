@@ -39,6 +39,7 @@ include("reflection.jl")
 include("examples.jl")
 include("convert.jl")
 include("specialfunctions.jl")
+include("random.jl")
 
 function testsuite(backend, backend_str, backend_mod, AT, DAT; skip_tests = Set{String}())
     @conditional_testset "Unittests" skip_tests begin
@@ -91,6 +92,10 @@ function testsuite(backend, backend_str, backend_mod, AT, DAT; skip_tests = Set{
 
     @conditional_testset "Examples" skip_tests begin
         examples_testsuite(backend, backend_str)
+    end
+
+    @conditional_testset "Random" skip_tests begin
+        random_testsuite(backend)
     end
 
     return
