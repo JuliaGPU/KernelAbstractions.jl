@@ -41,6 +41,32 @@ function test_subgroup_kernel(results)
     return
 end
 
+# Do NOT use this kernel as an example for your code.
+#  It was written assuming one workgroup of size 32 and
+#  is only valid for those
+function shfl_down_test_kernel(a, b)
+    # This is not valid
+    idx = KI.get_local_id().x
+
+    temp = KI.localmemory(eltype(b), 32)
+    temp[idx] = a[idx]
+
+    KI.barrier()
+
+    if idx == 1
+        value = temp[idx]
+
+        value = value + KI.shfl_down(value, 16)
+        value = value + KI.shfl_down(value,  8)
+        value = value + KI.shfl_down(value,  4)
+        value = value + KI.shfl_down(value,  2)
+        value = value + KI.shfl_down(value,  1)
+
+        b[idx] = value
+    end
+    return
+end
+
 function intrinsics_testsuite(backend, AT)
     @testset "KernelIntrinsics Tests" begin
         @testset "Launch parameters" begin
@@ -173,6 +199,18 @@ function intrinsics_testsuite(backend, AT)
                 expected_sg_local = ((i - 1) % sg_size) + 1
                 @test sg_data.sub_group_local_id == expected_sg_local
             end
+        end
+        @testset "shfl_down(::$T)" for T in KI.shfl_down_types(backend())
+            a = zeros(T, 32)
+            rand!(a, (1:4))
+
+            dev_a = AT(a)
+            dev_b = AT(zeros(T, 32))
+
+            KI.@kernel backend() workgroupsize=32 shfl_down_test_kernel(dev_a, dev_b)
+
+            b = Array(dev_b)
+            @test sum(a) ≈ b[1]
         end
     end
     return nothing

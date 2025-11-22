@@ -189,6 +189,32 @@ Declare memory that is local to a workgroup.
 localmemory(::Type{T}, dims) where {T} = localmemory(T, Val(dims))
 
 """
+    shfl_down(val::T, offset::Integer)::T where T
+
+Read `val` from a lane with higher id given by `offset`.
+
+!!! note
+    Backend implementations **must** implement:
+    ```
+    @device_override shfl_down(val::T, offset::Integer)::T where T
+    ```
+    As well as the on-device functionality.
+"""
+function shfl_down end
+
+"""
+    shfl_down_types(::Backend)::Vector{DataType}
+
+Returns a vector of `DataType`s supported on `backend`
+
+!!! note
+    Backend implementations **must** implement this function
+    only if they support `shfl_down` for any types.
+"""
+shfl_down_types(::Backend) = DataType[]
+
+
+"""
     barrier()
 
 After a `barrier()` call, all read and writes to global and local memory
