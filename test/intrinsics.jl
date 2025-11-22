@@ -45,6 +45,25 @@ function test_subgroup_kernel(results)
     return
 end
 
+function shfl_down_test_kernel(a, b, ::Val{N}) where {N}
+    idx = KI.get_sub_group_local_id()
+
+    val = a[idx]
+
+    offset = 0x00000001
+    while offset < N
+        val += KI.shfl_down(val, offset)
+        offset <<= 1
+    end
+
+    KI.sub_group_barrier()
+
+    if idx == 1
+        b[idx] = val
+    end
+    return
+end
+
 function intrinsics_testsuite(backend, AT)
     @testset "KernelIntrinsics Tests" begin
         @testset "Launch parameters" begin
@@ -175,6 +194,23 @@ function intrinsics_testsuite(backend, AT)
                 # Local ID should be 1-based within group
                 expected_sg_local = ((i - 1) % sg_size) + 1
                 @test sg_data.sub_group_local_id == expected_sg_local
+            end
+        end
+        @testset "shfl_down" begin
+            @test !isempty(KI.shfl_down_types(backend()))
+            types_to_test = setdiff(KI.shfl_down_types(backend()), [Bool])
+            @testset "$T" for T in types_to_test
+                N = KI.sub_group_size(backend())
+                a = zeros(T, N)
+                rand!(a, (0:1))
+
+                dev_a = AT(a)
+                dev_b = AT(zeros(T, N))
+
+                KI.@kernel backend() workgroupsize = N shfl_down_test_kernel(dev_a, dev_b, Val(N))
+
+                b = Array(dev_b)
+                @test sum(a) ≈ b[1]
             end
         end
     end
