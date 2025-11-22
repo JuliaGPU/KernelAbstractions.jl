@@ -310,7 +310,7 @@ macro kernel(backend, ex...)
     end
 
     # destructure the kernel call
-    Meta.isexpr(call, :call) || throw(ArgumentError("final argument to @kikern should be a function call"))
+    Meta.isexpr(call, :call) || throw(ArgumentError("final argument to KI.@kernel should be a function call"))
     f = call.args[1]
     args = call.args[2:end]
 
@@ -330,14 +330,14 @@ macro kernel(backend, ex...)
     for kwarg in macro_kwargs
         key, val = kwarg.args
         if key === :launch
-            isa(val, Bool) || throw(ArgumentError("`launch` keyword argument to @kikern should be a Bool"))
+            isa(val, Bool) || throw(ArgumentError("`launch` keyword argument to KI.@kernel should be a Bool"))
             launch = val::Bool
         else
             throw(ArgumentError("Unsupported keyword argument '$key'"))
         end
     end
     if !launch && !isempty(call_kwargs)
-        error("@kikern with launch=false does not support launch-time keyword arguments; use them when calling the kernel")
+        error("KI.@kernel with launch=false does not support launch-time keyword arguments; use them when calling the kernel")
     end
 
     # FIXME: macro hygiene wrt. escaping kwarg values (this broke with 1.5)
