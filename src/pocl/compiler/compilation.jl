@@ -19,6 +19,87 @@ GPUCompiler.isintrinsic(job::OpenCLCompilerJob, fn::String) =
     in(fn, known_intrinsics) ||
     contains(fn, "__spirv_")
 
+GPUCompiler.kernel_state_type(::OpenCLCompilerJob) = KernelState
+
+function GPUCompiler.finish_module!(@nospecialize(job::OpenCLCompilerJob),
+                                          mod::LLVM.Module, entry::LLVM.Function)
+    entry = invoke(GPUCompiler.finish_module!,
+                   Tuple{CompilerJob{SPIRVCompilerTarget}, LLVM.Module, LLVM.Function},
+                   job, mod, entry)
+
+    # if this kernel uses our RNG, we should prime the shared state.
+    # XXX: these transformations should really happen at the Julia IR level...
+    if haskey(functions(mod), "julia.opencl.random_keys") && job.config.kernel
+        # insert call to `initialize_rng_state`
+        f = initialize_rng_state
+        ft = typeof(f)
+        tt = Tuple{}
+
+        # create a deferred compilation job for `initialize_rng_state`
+        src = methodinstance(ft, tt, GPUCompiler.tls_world_age())
+        cfg = CompilerConfig(job.config; kernel=false, name=nothing)
+        job = CompilerJob(src, cfg, job.world)
+        id = length(GPUCompiler.deferred_codegen_jobs) + 1
+        GPUCompiler.deferred_codegen_jobs[id] = job
+
+        # generate IR for calls to `deferred_codegen` and the resulting function pointer
+        top_bb = first(blocks(entry))
+        bb = BasicBlock(top_bb, "initialize_rng")
+        @dispose builder=IRBuilder() begin
+            position!(builder, bb)
+            subprogram = LLVM.subprogram(entry)
+            if subprogram !== nothing
+                loc = DILocation(0, 0, subprogram)
+                debuglocation!(builder, loc)
+            end
+            debuglocation!(builder, first(instructions(top_bb)))
+
+            # call the `deferred_codegen` marker function
+            T_ptr = if LLVM.version() >= v"17"
+                LLVM.PointerType()
+            elseif VERSION >= v"1.12.0-DEV.225"
+                LLVM.PointerType(LLVM.Int8Type())
+            else
+                LLVM.Int64Type()
+            end
+            T_id = convert(LLVMType, Int)
+            deferred_codegen_ft = LLVM.FunctionType(T_ptr, [T_id])
+            deferred_codegen = if haskey(functions(mod), "deferred_codegen")
+                functions(mod)["deferred_codegen"]
+            else
+                LLVM.Function(mod, "deferred_codegen", deferred_codegen_ft)
+            end
+            fptr = call!(builder, deferred_codegen_ft, deferred_codegen, [ConstantInt(id)])
+
+            # call the `initialize_rng_state` function
+            rt = Core.Compiler.return_type(f, tt)
+            llvm_rt = convert(LLVMType, rt)
+            llvm_ft = LLVM.FunctionType(llvm_rt)
+            fptr = inttoptr!(builder, fptr, LLVM.PointerType(llvm_ft))
+            call!(builder, llvm_ft, fptr)
+            br!(builder, top_bb)
+
+            # note the use of the device-side RNG in this kernel
+            push!(function_attributes(entry), StringAttribute("julia.opencl.rng", ""))
+        end
+
+        # XXX: put some of the above behind GPUCompiler abstractions
+        #      (e.g., a compile-time version of `deferred_codegen`)
+    end
+    return entry
+end
+
+function GPUCompiler.finish_linked_module!(@nospecialize(job::OpenCLCompilerJob), mod::LLVM.Module)
+    for f in GPUCompiler.kernels(mod)
+        kernel_intrinsics = Dict(
+            "julia.opencl.random_keys" => (; name = "random_keys", typ = LLVMPtr{UInt32, AS.Workgroup}),
+            "julia.opencl.random_counters" => (; name = "random_counters", typ = LLVMPtr{UInt32, AS.Workgroup}),
+        )
+        GPUCompiler.add_input_arguments!(job, mod, f, kernel_intrinsics)
+    end
+    return
+end
+
 
 ## compiler implementation (cache, configure, compile, and link)
 
@@ -60,10 +141,13 @@ end
 function compile(@nospecialize(job::CompilerJob))
     # TODO: this creates a context; cache those.
     obj, meta = JuliaContext() do ctx
-        GPUCompiler.compile(:obj, job)
-    end
+        obj, meta = GPUCompiler.compile(:obj, job)
 
-    return (; obj, entry = LLVM.name(meta.entry))
+        entry = LLVM.name(meta.entry)
+        device_rng = StringAttribute("julia.opencl.rng", "") in collect(function_attributes(meta.entry))
+
+        (; obj, entry, device_rng)
+    end
 end
 
 # link into an executable kernel
@@ -74,5 +158,5 @@ function link(@nospecialize(job::CompilerJob), compiled)
         error("Your device does not support SPIR-V, which is currently required for native execution.")
     end
     cl.build!(prog)
-    return cl.Kernel(prog, compiled.entry)
+    (; kernel=cl.Kernel(prog, compiled.entry), compiled.device_rng)
 end
