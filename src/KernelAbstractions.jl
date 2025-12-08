@@ -714,6 +714,10 @@ include("nditeration.jl")
 using .NDIteration
 import .NDIteration: get
 
+function fake_new_function_to_test_format_and_coverage(badformat =85)
+    println(badformat)
+end
+
 ###
 # Kernel closure struct
 ###
