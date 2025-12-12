@@ -833,7 +833,7 @@ include("macros.jl")
 ###
 
 function Scratchpad end
-SharedMemory(t::Type{T}, dims::Val{Dims}, id::Val{Id}) where {T, Dims, Id} = KI.localmemory(t, dims)
+SharedMemory(::Type{T}, dims::Val{Dims}, id::Val{Id}) where {T, Dims, Id} = KI.localmemory(T, dims)
 
 __synchronize() = KI.barrier()
 

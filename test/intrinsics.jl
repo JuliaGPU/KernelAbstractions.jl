@@ -89,7 +89,7 @@ function intrinsics_testsuite(backend, AT)
             @test KI.kernel_max_work_group_size(kernel) isa Int
             @test KI.kernel_max_work_group_size(kernel; max_work_items = 1) == 1
 
-            kernel(results, workgroupsize = 4, numworkgroups = 4)
+            kernel(results; workgroupsize = 4, numworkgroups = 4)
             KernelAbstractions.synchronize(backend())
 
             host_results = Array(results)
