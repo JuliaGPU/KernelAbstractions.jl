@@ -45,7 +45,7 @@ The [`synchronize`](@ref) blocks the *host* until the kernel has completed on th
 
 ## Launching kernel on the backend
 
-To launch the kernel on a backend-supported backend `isa(backend, KA.GPU)` (e.g., `CUDABackend()`, `ROCBackend()`, `oneAPIBackend()`), we generate the kernel
+To launch the kernel on a backend-supported backend `isa(backend, KA.GPU)` (e.g., `CUDABackend()`, `ROCBackend()`, `oneAPIBackend()`, `MetalBackend()`), we generate the kernel
 for this backend.
 
 First, we initialize the array using the Array constructor of the chosen backend with
@@ -64,12 +64,17 @@ A = ROCArray(ones(1024, 1024))
 using oneAPI: oneArray
 A = oneArray(ones(1024, 1024))
 ```
+
+```julia
+using Metal: MtlArray
+A = MtlArray(Float32.(ones(1024, 1024)))
+```
 The kernel generation and execution are then
 ```julia
 backend = get_backend(A)
 mul2_kernel(backend, 64)(A, ndrange=size(A))
 synchronize(backend)
-all(A .== 2.0)
+all(A .== 2.0) # For Metal use: all(A .== 2.0f0) : only float32 are supported
 ```
 
 ## Synchronization
