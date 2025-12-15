@@ -50,7 +50,7 @@ synchronize(backend)
 ```
 """
 macro kernel(expr)
-    return __kernel(expr, #=generate_cpu=# true, #=force_inbounds=# false, #=unsafe_indices=# false)
+    return __kernel(expr, #=generate_cpu=# true, #=force_inbounds=# false, #=unsafe_indices=# false, #=generated=# false)
 end
 
 """
@@ -69,11 +69,12 @@ This allows for two different configurations:
 """
 macro kernel(ex...)
     if length(ex) == 1
-        return __kernel(ex[1], true, false, false)
+        return __kernel(ex[1], true, false, false, false)
     else
         generate_cpu = true
         unsafe_indices = false
         force_inbounds = false
+        generated = false
         for i in 1:(length(ex) - 1)
             if ex[i] isa Expr && ex[i].head == :(=) &&
                     ex[i].args[1] == :cpu && ex[i].args[2] isa Bool
@@ -84,17 +85,21 @@ macro kernel(ex...)
             elseif ex[i] isa Expr && ex[i].head == :(=) &&
                     ex[i].args[1] == :unsafe_indices && ex[i].args[2] isa Bool
                 unsafe_indices = ex[i].args[2]
+            elseif ex[i] isa Expr && ex[i].head == :(=) &&
+                    ex[i].args[1] == :generated && ex[i].args[2] isa Bool
+                generated = ex[i].args[2]
             else
                 error(
                     "Configuration should be of form:\n" *
                         "* `cpu=false`\n" *
                         "* `inbounds=true`\n" *
                         "* `unsafe_indices=true`\n" *
+                        "* `generated=true`\n" *
                         "got `", ex[i], "`",
                 )
             end
         end
-        return __kernel(ex[end], generate_cpu, force_inbounds, unsafe_indices)
+        return __kernel(ex[end], generate_cpu, force_inbounds, unsafe_indices, generated)
     end
 end
 
