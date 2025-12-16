@@ -50,7 +50,7 @@ synchronize(backend)
 ```
 """
 macro kernel(expr)
-    return __kernel(expr, #=generate_cpu=# true, #=force_inbounds=# false, #=unsafe_indices=# false, #=generated=# false)
+    return __kernel(__module__, expr, #=generate_cpu=# true, #=force_inbounds=# false, #=unsafe_indices=# false, #=generated=# false)
 end
 
 """
@@ -69,7 +69,7 @@ This allows for two different configurations:
 """
 macro kernel(ex...)
     if length(ex) == 1
-        return __kernel(ex[1], true, false, false, false)
+        return __kernel(__module__, ex[1], true, false, false, false)
     else
         generate_cpu = true
         unsafe_indices = false
@@ -99,7 +99,7 @@ macro kernel(ex...)
                 )
             end
         end
-        return __kernel(ex[end], generate_cpu, force_inbounds, unsafe_indices, generated)
+        return __kernel(__module__, ex[end], generate_cpu, force_inbounds, unsafe_indices, generated)
     end
 end
 
