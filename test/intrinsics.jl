@@ -23,6 +23,27 @@ function test_intrinsics_kernel(results)
     end
     return
 end
+struct SubgroupData
+    sub_group_size::UInt32
+    max_sub_group_size::UInt32
+    num_sub_groups::UInt32
+    sub_group_id::UInt32
+    sub_group_local_id::UInt32
+end
+function test_subgroup_kernel(results)
+    i = KI.get_global_id().x
+
+    if i <= length(results)
+        @inbounds results[i] = SubgroupData(
+            KI.get_sub_group_size(),
+            KI.get_max_sub_group_size(),
+            KI.get_num_sub_groups(),
+            KI.get_sub_group_id(),
+            KI.get_sub_group_local_id()
+        )
+    end
+    return
+end
 
 function intrinsics_testsuite(backend, AT)
     @testset "KernelIntrinsics Tests" begin
@@ -120,6 +141,40 @@ function intrinsics_testsuite(backend, AT)
                 # Local ID should be 1-based within group
                 expected_local = ((i - 1) % workgroupsize) + 1
                 @test k_data.local_id == expected_local
+            end
+        end
+
+        @testset "Sub-groups" begin
+            @test KI.sub_group_size(backend()) isa Int
+
+            # Test with small kernel
+            sg_size = KI.sub_group_size(backend())
+            sg_n = 2
+            workgroupsize = sg_size * sg_n
+            numworkgroups = 2
+            N = workgroupsize * numworkgroups
+
+            results = AT(Vector{SubgroupData}(undef, N))
+            kernel = KI.@kernel backend() launch = false test_subgroup_kernel(results)
+
+            kernel(results; workgroupsize, numworkgroups)
+            KernelAbstractions.synchronize(backend())
+
+            host_results = Array(results)
+
+            # Verify results make sense
+            for (i, sg_data) in enumerate(host_results)
+                @test sg_data.sub_group_size == sg_size
+                @test sg_data.max_sub_group_size == sg_size
+                @test sg_data.num_sub_groups == sg_n
+
+                # Group ID should be 1-based
+                expected_sub_group = div(((i - 1) % workgroupsize), sg_size) + 1
+                @test sg_data.sub_group_id == expected_sub_group
+
+                # Local ID should be 1-based within group
+                expected_sg_local = ((i - 1) % sg_size) + 1
+                @test sg_data.sub_group_local_id == expected_sg_local
             end
         end
     end
