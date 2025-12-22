@@ -103,6 +103,78 @@ Returns the unique group ID.
 function get_group_id end
 
 """
+    get_sub_group_size()::UInt32
+
+Returns the number of work-items in the sub-group.
+
+!!! note
+    Backend implementations **must** implement:
+    ```
+    @device_override get_sub_group_size()::UInt32
+    ```
+"""
+function get_sub_group_size end
+
+"""
+    get_max_sub_group_size()::UInt32
+
+Returns the maximum sub-group size for sub-groups in the current workgroup.
+
+!!! note
+    Backend implementations **must** implement:
+    ```
+    @device_override get_max_sub_group_size()::UInt32
+    ```
+"""
+function get_max_sub_group_size end
+
+"""
+    get_num_sub_groups()::UInt32
+
+Returns the number of sub-groups in the current workgroup.
+
+!!! note
+    Backend implementations **must** implement:
+    ```
+    @device_override get_num_sub_groups()::UInt32
+    ```
+"""
+function get_num_sub_groups end
+
+"""
+    get_sub_group_id()::UInt32
+
+Returns the sub-group ID within the work-group.
+
+!!! note
+    1-based.
+
+!!! note
+    Backend implementations **must** implement:
+    ```
+    @device_override get_sub_group_id()::UInt32
+    ```
+"""
+function get_sub_group_id end
+
+"""
+    get_sub_group_local_id()::UInt32
+
+Returns the work-item ID within the current sub-group.
+
+!!! note
+    1-based.
+
+!!! note
+    Backend implementations **must** implement:
+    ```
+    @device_override get_sub_group_local_id()::UInt32
+    ```
+"""
+function get_sub_group_local_id end
+
+
+"""
     localmemory(::Type{T}, dims)
 
 Declare memory that is local to a workgroup.
@@ -140,6 +212,29 @@ function barrier()
 end
 
 """
+    sub_group_barrier()
+
+After a `sub_group_barrier()` call, all read and writes to global and local memory
+from each thread in the sub-group are visible in from all other threads in the
+sub-group.
+
+This does **not** guarantee that a write from a thread in a certain sub-group will
+be visible to a thread in a different sub-group.
+
+!!! note
+    `sub_group_barrier()` must be encountered by all workitems of a sub-group executing the kernel or by none at all.
+
+!!! note
+    Backend implementations **must** implement:
+    ```
+    @device_override sub_group_barrier()
+    ```
+"""
+function sub_group_barrier()
+    error("Sub-group barrier used outside kernel or not captured")
+end
+
+"""
     _print(args...)
 
     Overloaded by backends to enable `KernelAbstractions.@print`
@@ -174,7 +269,7 @@ kernel on the host.
 
     Backends must also implement the on-device kernel launch functionality.
 """
-struct Kernel{B, Kern}
+struct Kernel{B,Kern}
     backend::B
     kern::Kern
 end
@@ -219,6 +314,22 @@ kernel launch with too big a workgroup is attempted.
     As well as the on-device functionality.
 """
 function max_work_group_size end
+
+"""
+    sub_group_size(backend)::Int
+
+Returns a reasonable sub-group size supported by the currently
+active device for the specified backend. This would typically
+be 32, or 64 for devices that don't support 32.
+
+!!! note
+    Backend implementations **must** implement:
+    ```
+    sub_group_size(backend::NewBackend)::Int
+    ```
+    As well as the on-device functionality.
+"""
+function sub_group_size end
 
 """
     multiprocessor_count(backend::NewBackend)::Int
@@ -299,7 +410,7 @@ There are a few keyword arguments that influence the behavior of `KI.@kernel`:
 """
 macro kernel(backend, ex...)
     call = ex[end]
-    kwargs = map(ex[1:(end - 1)]) do kwarg
+    kwargs = map(ex[1:(end-1)]) do kwarg
         if kwarg isa Symbol
             :($kwarg = $kwarg)
         elseif Meta.isexpr(kwarg, :(=))
