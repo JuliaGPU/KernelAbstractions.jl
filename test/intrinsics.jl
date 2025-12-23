@@ -144,7 +144,7 @@ function intrinsics_testsuite(backend, AT)
             @test KI.sub_group_size(backend()) isa Int
 
             # Test with small kernel
-            sg_size = 32
+            sg_size = KI.sub_group_size(backend())
             sg_n = 2
             workgroupsize = sg_size * sg_n
             numworkgroups = 2
