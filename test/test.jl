@@ -110,7 +110,7 @@ function unittest_testsuite(Backend, backend_str, backend_mod, BackendArrayT; sk
         backendT = typeof(backend).name.wrapper # To look through CUDABackend{true, false}
         @test backend isa backendT
 
-        @test KernelAbstractions.get_backend(@MMatrix [1.0]) isa CPU
+        @test KernelAbstractions.get_backend(@MMatrix [1.0]) isa KernelAbstractions.POCLBackend
         @test_throws ArgumentError KernelAbstractions.get_backend(@SMatrix [1.0])
 
         A = allocate(backend, Float32, 5, 5)
