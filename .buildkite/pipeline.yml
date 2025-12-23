@@ -108,7 +108,7 @@ steps:
     command: |
       julia -e 'println("--- :julia: Developing oneAPI")
                 using Pkg
-                Pkg.add(url="https://github.com/christiangnrd/oneAPI.jl", rev="intrinsics")
+                Pkg.add(url="https://github.com/christiangnrd/oneAPI.jl", rev="intrinsicsnew")
                 Pkg.add(url="https://github.com/christiangnrd/AcceleratedKernels.jl", rev="ka0.10simple")'
       julia -e 'println("--- :julia: Instantiating project")
                 using Pkg
