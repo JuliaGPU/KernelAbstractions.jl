@@ -13,7 +13,7 @@ steps:
     command: |
       julia -e 'println("--- :julia: Developing CUDA")
                 using Pkg
-                Pkg.add(url="https://github.com/christiangnrd/CUDA.jl", rev="intrinsics")'
+                Pkg.add(url="https://github.com/christiangnrd/CUDA.jl", rev="intrinsicsnew")'
       julia -e 'println("--- :julia: Instantiating project")
                 using Pkg
                 Pkg.develop(; path=pwd())' || exit 3
@@ -76,7 +76,7 @@ steps:
     command: |
       julia -e 'println("--- :julia: Developing Metal")
                 using Pkg
-                Pkg.add(url="https://github.com/JuliaGPU/Metal.jl", rev="kaintr")'
+                Pkg.add(url="https://github.com/JuliaGPU/Metal.jl", rev="kaintrnew")'
       julia -e 'println("--- :julia: Instantiating project")
                 using Pkg
                 Pkg.develop(; path=pwd())' || exit 3
