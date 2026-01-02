@@ -192,6 +192,8 @@ localmemory(::Type{T}, dims) where {T} = localmemory(T, Val(dims))
     shfl_down(val::T, offset::Integer) where T
 
 Read `val` from a lane with higher id given by `offset`.
+When writing kernels using this function, it should be
+assumed that it is not synchronized.
 
 !!! note
     Backend implementations **must** implement:
