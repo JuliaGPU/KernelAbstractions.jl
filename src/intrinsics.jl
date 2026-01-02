@@ -194,11 +194,19 @@ localmemory(::Type{T}, dims) where {T} = localmemory(T, Val(dims))
 Read `val` from a lane with higher id given by `offset`.
 
 !!! note
+    `shfl_down` must be encountered by all workitems of a sub-group executing the kernel or by none at all.
+
+!!! note
     Backend implementations **must** implement:
     ```
     @device_override shfl_down(val::T, offset::Integer) where T
     ```
     As well as the on-device functionality.
+
+    This implementation **must** be synchronizing.
+    That is, kernels using this function can safely assume that
+    they do **not** need a `sub_group_barrier` before calling
+    this function.
 """
 function shfl_down end
 
