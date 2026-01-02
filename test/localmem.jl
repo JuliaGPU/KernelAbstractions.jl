@@ -47,9 +47,26 @@ end
     end
 end
 
+@kernel function many_localmem(A)
+    N = @uniform prod(@groupsize())
+    @uniform begin
+        N2 = prod(@groupsize())
+    end
+    I = @index(Global, Linear)
+    i = @index(Local, Linear)
+    lmem1 = @localmem Int (N,) # Ok iff groupsize is static
+    lmem2 = @localmem Int (N,) # Ok iff groupsize is static
+    @inbounds begin
+        lmem1[i] = i-1
+        lmem2[i] = 1
+        @synchronize
+        A[I] = lmem1[N2 - i + 1] + lmem2[N2 - i + 1]
+    end
+end
+
 function localmem_testsuite(backend, ArrayT)
     @testset "kernels" begin
-        @testset for kernel! in (localmem(backend(), 16), localmem2(backend(), 16), localmem_unsafe_indices(backend(), 16))
+        @testset for kernel! in (localmem(backend(), 16), localmem2(backend(), 16), localmem_unsafe_indices(backend(), 16), many_localmem(backend(), 16))
             A = ArrayT{Int}(undef, 64)
             kernel!(A, ndrange = size(A))
             synchronize(backend())

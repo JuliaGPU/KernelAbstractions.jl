@@ -103,14 +103,14 @@ Returns the unique group ID.
 function get_group_id end
 
 """
-    localmemory(T, dims)
+    localmemory(::Type{T}, dims)
 
 Declare memory that is local to a workgroup.
 
 !!! note
     Backend implementations **must** implement:
     ```
-    @device_override localmemory(T::DataType, ::Val{Dims}) where {T, Dims}
+    @device_override localmemory(::Type{T}, ::Val{Dims}) where {T, Dims}
     ```
     As well as the on-device functionality.
 """
