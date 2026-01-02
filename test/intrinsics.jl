@@ -44,11 +44,11 @@ end
 # Do NOT use this kernel as an example for your code.
 #  It was written assuming one workgroup of size 32 and
 #  is only valid for those
-function shfl_down_test_kernel(a, b)
+function shfl_down_test_kernel(a, b, ::Val{N}) where N
     # This is not valid
-    idx = KI.get_local_id().x
+    idx = KI.get_sub_group_local_id()
 
-    temp = KI.localmemory(eltype(b), 32)
+    temp = KI.localmemory(eltype(b), N)
     temp[idx] = a[idx]
 
     KI.barrier()
@@ -56,11 +56,24 @@ function shfl_down_test_kernel(a, b)
     if idx == 1
         value = temp[idx]
 
+        if KI.get_sub_group_size() > 32
+            value = value + KI.shfl_down(value, 32)
+            KI.sub_group_barrier()
+        end
         value = value + KI.shfl_down(value, 16)
+        KI.sub_group_barrier()
+
         value = value + KI.shfl_down(value,  8)
+        KI.sub_group_barrier()
+
         value = value + KI.shfl_down(value,  4)
+        KI.sub_group_barrier()
+
         value = value + KI.shfl_down(value,  2)
+        KI.sub_group_barrier()
+
         value = value + KI.shfl_down(value,  1)
+        KI.sub_group_barrier()
 
         b[idx] = value
     end
@@ -201,13 +214,14 @@ function intrinsics_testsuite(backend, AT)
             end
         end
         @testset "shfl_down(::$T)" for T in KI.shfl_down_types(backend())
-            a = zeros(T, 32)
+            N = KI.sub_group_size(backend())
+            a = zeros(T, N)
             rand!(a, (1:4))
 
             dev_a = AT(a)
-            dev_b = AT(zeros(T, 32))
+            dev_b = AT(zeros(T, N))
 
-            KI.@kernel backend() workgroupsize=32 shfl_down_test_kernel(dev_a, dev_b)
+            KI.@kernel backend() workgroupsize=N shfl_down_test_kernel(dev_a, dev_b, Val(N))
 
             b = Array(dev_b)
             @test sum(a) ≈ b[1]
