@@ -74,7 +74,7 @@ The kernel generation and execution are then
 backend = get_backend(A)
 mul2_kernel(backend, 64)(A, ndrange=size(A))
 synchronize(backend)
-all(A .== 2.0) # For Metal use: all(A .== 2.0f0) : only float32 are supported
+all(A .== 2)
 ```
 
 ## Synchronization
