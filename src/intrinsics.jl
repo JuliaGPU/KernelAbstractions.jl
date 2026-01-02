@@ -189,7 +189,7 @@ Declare memory that is local to a workgroup.
 localmemory(::Type{T}, dims) where {T} = localmemory(T, Val(dims))
 
 """
-    shfl_down(val::T, offset::Integer)::T where T
+    shfl_down(val::T, offset::Integer) where T
 
 Read `val` from a lane with higher id given by `offset`.
 When writing kernels using this function, it should be
@@ -198,7 +198,7 @@ assumed that it is not synchronized.
 !!! note
     Backend implementations **must** implement:
     ```
-    @device_override shfl_down(val::T, offset::Integer)::T where T
+    @device_override shfl_down(val::T, offset::Integer) where T
     ```
     As well as the on-device functionality.
 """
