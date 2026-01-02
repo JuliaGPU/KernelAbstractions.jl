@@ -7,7 +7,7 @@ include(joinpath(dirname(pathof(KernelAbstractions)), "../examples/utils.jl")) #
 
     # creating a temporary sum variable for matrix multiplication
     tmp_sum = zero(eltype(output))
-    for k in 1:size(a)[2]
+    for k in axes(a, 2)
         tmp_sum += a[i, k] * b[k, j]
     end
 
@@ -16,7 +16,7 @@ end
 
 # Creating a wrapper kernel for launching with error checks
 function matmul!(output, a, b)
-    if size(a)[2] != size(b)[1]
+    if size(a, 2) != size(b, 1)
         println("Matrix size mismatch!")
         return nothing
     end
