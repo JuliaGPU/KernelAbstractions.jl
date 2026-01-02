@@ -67,7 +67,7 @@ A = oneArray(ones(1024, 1024))
 
 ```julia
 using Metal: MtlArray
-A = MtlArray(Float32.(ones(1024, 1024)))
+A = MtlArray(ones(Float32, 1024, 1024))
 ```
 The kernel generation and execution are then
 ```julia
