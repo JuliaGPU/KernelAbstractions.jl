@@ -198,7 +198,7 @@ function intrinsics_testsuite(backend, AT)
             @testset "$T" for T in KI.shfl_down_types(backend())
                 N = KI.sub_group_size(backend())
                 a = zeros(T, N)
-                rand!(a, (1:4))
+                rand!(a, (0:1))
 
                 dev_a = AT(a)
                 dev_b = AT(zeros(T, N))
