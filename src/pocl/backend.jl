@@ -192,7 +192,7 @@ function KI.multiprocessor_count(::POCLBackend)::Int
     return Int(device().max_compute_units)
 end
 
-function KI.shfl_down_types(backend::POCLBackend)
+function KI.shfl_down_types(::POCLBackend)
     res = copy(SPIRVIntrinsics.gentypes)
 
     backend_extensions = cl.device().extensions
