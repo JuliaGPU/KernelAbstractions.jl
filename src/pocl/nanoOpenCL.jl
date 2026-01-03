@@ -390,6 +390,8 @@ const CL_KERNEL_EXEC_INFO_SVM_PTRS = 0x11b6
 
 const CL_KERNEL_EXEC_INFO_SVM_FINE_GRAIN_SYSTEM = 0x11b7
 
+const CL_DEVICE_SUB_GROUP_SIZES_INTEL = 0x4108
+
 struct CLError <: Exception
     code::Cint
 end
