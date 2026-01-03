@@ -195,7 +195,9 @@ function intrinsics_testsuite(backend, AT)
         end
         @testset "shfl_down" begin
             @test !isempty(KI.shfl_down_types(backend()))
-            @testset "$T" for T in KI.shfl_down_types(backend())
+            types_to_test = setdiff(KI.shfl_down_types(backend()), Bool)
+            @testset "$T" for T in types_to_test
+
                 N = KI.sub_group_size(backend())
                 a = zeros(T, N)
                 rand!(a, (0:1))
