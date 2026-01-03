@@ -1,6 +1,14 @@
 ## gpucompiler interface
 
-struct OpenCLCompilerParams <: AbstractCompilerParams end
+Base.@kwdef struct OpenCLCompilerParams <: AbstractCompilerParams
+    sub_group_size::Int
+end
+function Base.hash(params::OpenCLCompilerParams, h::UInt)
+    h = hash(params.sub_group_size, h)
+
+    return h
+end
+
 const OpenCLCompilerConfig = CompilerConfig{SPIRVCompilerTarget, OpenCLCompilerParams}
 const OpenCLCompilerJob = CompilerJob{SPIRVCompilerTarget, OpenCLCompilerParams}
 
@@ -19,7 +27,21 @@ GPUCompiler.isintrinsic(job::OpenCLCompilerJob, fn::String) =
     in(fn, known_intrinsics) ||
     contains(fn, "__spirv_")
 
+function GPUCompiler.finish_module!(
+        @nospecialize(job::OpenCLCompilerJob),
+        mod::LLVM.Module, entry::LLVM.Function
+    )
+    entry = invoke(
+        GPUCompiler.finish_module!,
+        Tuple{CompilerJob{SPIRVCompilerTarget}, LLVM.Module, LLVM.Function},
+        job, mod, entry
+    )
 
+    # Set the subgroup size
+    metadata(entry)["intel_reqd_sub_group_size"] = MDNode([ConstantInt(Int32(job.config.params.sub_group_size))])
+
+    return entry
+end
 ## compiler implementation (cache, configure, compile, and link)
 
 # cache of compilation caches, per context
@@ -52,7 +74,7 @@ end
 
     # create GPUCompiler objects
     target = SPIRVCompilerTarget(; supports_fp16, supports_fp64, kwargs...)
-    params = OpenCLCompilerParams()
+    params = OpenCLCompilerParams(; sub_group_size=32)
     return CompilerConfig(target, params; kernel, name, always_inline)
 end
 
