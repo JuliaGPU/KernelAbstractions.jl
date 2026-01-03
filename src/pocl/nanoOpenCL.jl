@@ -935,6 +935,14 @@ devices(p::Platform) = devices(p, CL_DEVICE_TYPE_ALL)
         return tuple([Int(r) for r in result]...)
     end
 
+    if s == :sub_group_sizes
+        res_size = Ref{Csize_t}()
+        clGetDeviceInfo(d, CL_DEVICE_SUB_GROUP_SIZES_INTEL, C_NULL, C_NULL, res_size)
+        result = Vector{Csize_t}(undef, res_size[] ÷ sizeof(Csize_t))
+        clGetDeviceInfo(d, CL_DEVICE_SUB_GROUP_SIZES_INTEL, sizeof(result), result, C_NULL)
+        return tuple([Int(r) for r in result]...)
+    end
+
     if s == :max_image2d_shape
         width = Ref{Csize_t}()
         height = Ref{Csize_t}()
