@@ -193,19 +193,21 @@ function intrinsics_testsuite(backend, AT)
                 @test sg_data.sub_group_local_id == expected_sg_local
             end
         end
-        @testset "shfl_down(::$T)" for T in KI.shfl_down_types(backend())
-            N = KI.sub_group_size(backend())
-            a = ones(T, N)
-            # a = zeros(T, N)
-            # rand!(a, (1:4))
+        @testset "shfl_down" begin
+            @test !isempty(KI.shfl_down_types(backend()))
+            @testset "$T" for T in KI.shfl_down_types(backend())
+                N = KI.sub_group_size(backend())
+                a = zeros(T, N)
+                rand!(a, (1:4))
 
-            dev_a = AT(a)
-            dev_b = AT(zeros(T, N))
+                dev_a = AT(a)
+                dev_b = AT(zeros(T, N))
 
-            KI.@kernel backend() workgroupsize=N shfl_down_test_kernel(dev_a, dev_b, Val(N))
+                KI.@kernel backend() workgroupsize=N shfl_down_test_kernel(dev_a, dev_b, Val(N))
 
-            b = Array(dev_b)
-            @test sum(a) ≈ b[1]
+                b = Array(dev_b)
+                @test sum(a) ≈ b[1]
+            end
         end
     end
     return nothing
