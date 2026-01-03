@@ -176,7 +176,7 @@ end
 function KI.max_work_group_size(::POCLBackend)::Int
     return Int(device().max_work_group_size)
 end
-function KI.sub_group_size(::OpenCLBackend)::Int
+function KI.sub_group_size(::POCLBackend)::Int
     sg_sizes = cl.device().sub_group_sizes
     if 32 in sg_sizes
         return 32
