@@ -67,14 +67,17 @@ function compiler_config(dev::cl.Device; kwargs...)
     end
     return config
 end
-@noinline function _compiler_config(dev; kernel = true, name = nothing, always_inline = false, kwargs...)
+@noinline function _compiler_config(dev; kernel = true, name = nothing, always_inline = false, sub_group_size = 32, kwargs...)
     supports_fp16 = "cl_khr_fp16" in dev.extensions
     supports_fp64 = "cl_khr_fp64" in dev.extensions
 
+    if sub_group_size ∉ dev.sub_group_sizes
+        @error("$sub_group_size is not a valid sub-group size for this device.")
+    end
 
     # create GPUCompiler objects
     target = SPIRVCompilerTarget(; supports_fp16, supports_fp64, kwargs...)
-    params = OpenCLCompilerParams(; sub_group_size=32)
+    params = OpenCLCompilerParams(; sub_group_size)
     return CompilerConfig(target, params; kernel, name, always_inline)
 end
 
