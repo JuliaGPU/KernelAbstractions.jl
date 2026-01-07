@@ -1,21 +1,65 @@
 import KernelAbstractions.KernelIntrinsics as KI
 
+struct KernelData
+    global_size::Int
+    global_id::Int
+    local_size::Int
+    local_id::Int
+    num_groups::Int
+    group_id::Int
+end
 function test_intrinsics_kernel(results)
-    # Test all intrinsics return NamedTuples with x, y, z fields
-    global_size = KI.get_global_size()
-    global_id = KI.get_global_id()
-    local_size = KI.get_local_size()
-    local_id = KI.get_local_id()
-    num_groups = KI.get_num_groups()
-    group_id = KI.get_group_id()
+    i = KI.get_global_id().x
 
-    if UInt32(global_id.x) <= UInt32(global_size.x)
-        results[1, global_id.x] = global_id.x
-        results[2, global_id.x] = local_id.x
-        results[3, global_id.x] = group_id.x
-        results[4, global_id.x] = global_size.x
-        results[5, global_id.x] = local_size.x
-        results[6, global_id.x] = num_groups.x
+    if i <= length(results)
+        @inbounds results[i] = KernelData(
+            KI.get_global_size().x,
+            KI.get_global_id().x,
+            KI.get_local_size().x,
+            KI.get_local_id().x,
+            KI.get_num_groups().x,
+            KI.get_group_id().x
+        )
+    end
+    return
+end
+struct SubgroupData
+    sub_group_size::UInt32
+    max_sub_group_size::UInt32
+    num_sub_groups::UInt32
+    sub_group_id::UInt32
+    sub_group_local_id::UInt32
+end
+function test_subgroup_kernel(results)
+    i = KI.get_global_id().x
+
+    if i <= length(results)
+        @inbounds results[i] = SubgroupData(
+            KI.get_sub_group_size(),
+            KI.get_max_sub_group_size(),
+            KI.get_num_sub_groups(),
+            KI.get_sub_group_id(),
+            KI.get_sub_group_local_id()
+        )
+    end
+    return
+end
+
+function shfl_down_test_kernel(a, b, ::Val{N}) where {N}
+    idx = KI.get_sub_group_local_id()
+
+    val = a[idx]
+
+    offset = 0x00000001
+    while offset < N
+        val += KI.shfl_down(val, offset)
+        offset <<= 1
+    end
+
+    KI.sub_group_barrier()
+
+    if idx == 1
+        b[idx] = val
     end
     return
 end
@@ -82,41 +126,92 @@ function intrinsics_testsuite(backend, AT)
             @test KI.multiprocessor_count(backend()) isa Int
 
             # Test with small kernel
-            N = 16
-            results = AT(zeros(Int, 6, N))
+            workgroupsize = 4
+            numworkgroups = 4
+            N = workgroupsize * numworkgroups
+            results = AT(Vector{KernelData}(undef, N))
             kernel = KI.@kernel backend() launch = false test_intrinsics_kernel(results)
 
             @test KI.kernel_max_work_group_size(kernel) isa Int
             @test KI.kernel_max_work_group_size(kernel; max_work_items = 1) == 1
 
-            kernel(results, workgroupsize = 4, numworkgroups = 4)
+            kernel(results; workgroupsize, numworkgroups)
             KernelAbstractions.synchronize(backend())
 
             host_results = Array(results)
 
             # Verify results make sense
-            for i in 1:N
-                global_id_x, local_id_x, group_id_x, global_size_x, local_size_x, num_groups_x = host_results[:, i]
+            for (i, k_data) in enumerate(host_results)
 
                 # Global IDs should be 1-based and sequential
-                @test global_id_x == i
+                @test k_data.global_id == i
 
                 # Global size should match our ndrange
-                @test global_size_x == N
+                @test k_data.global_size == N
 
-                # Local size should be 4 (our workgroupsize)
-                @test local_size_x == 4
+                @test k_data.local_size == workgroupsize
 
-                # Number of groups should be ceil(N/4) = 4
-                @test num_groups_x == 4
+                @test k_data.num_groups == numworkgroups
 
                 # Group ID should be 1-based
-                expected_group = div(i - 1, 4) + 1
-                @test group_id_x == expected_group
+                expected_group = div(i - 1, numworkgroups) + 1
+                @test k_data.group_id == expected_group
 
                 # Local ID should be 1-based within group
-                expected_local = ((i - 1) % 4) + 1
-                @test local_id_x == expected_local
+                expected_local = ((i - 1) % workgroupsize) + 1
+                @test k_data.local_id == expected_local
+            end
+        end
+
+        @testset "Subgroups" begin
+            @test KI.sub_group_size(backend()) isa Int
+
+            # Test with small kernel
+            sg_size = KI.sub_group_size(backend())
+            sg_n = 2
+            workgroupsize = sg_size * sg_n
+            numworkgroups = 2
+            N = workgroupsize * numworkgroups
+
+            results = AT(Vector{SubgroupData}(undef, N))
+            kernel = KI.@kernel backend() launch = false test_subgroup_kernel(results)
+
+            kernel(results; workgroupsize, numworkgroups)
+            KernelAbstractions.synchronize(backend())
+
+            host_results = Array(results)
+
+            # Verify results make sense
+            for (i, sg_data) in enumerate(host_results)
+                @test sg_data.sub_group_size == sg_size
+                @test sg_data.max_sub_group_size == sg_size
+                @test sg_data.num_sub_groups == sg_n
+
+                # Group ID should be 1-based
+                div(((i - 1) % workgroupsize), sg_n) + 1
+                expected_sub_group = div(((i - 1) % workgroupsize), sg_size) + 1
+                @test sg_data.sub_group_id == expected_sub_group
+
+                # Local ID should be 1-based within group
+                expected_sg_local = ((i - 1) % sg_size) + 1
+                @test sg_data.sub_group_local_id == expected_sg_local
+            end
+        end
+        @testset "shfl_down" begin
+            @test !isempty(KI.shfl_down_types(backend()))
+            types_to_test = setdiff(KI.shfl_down_types(backend()), [Bool])
+            @testset "$T" for T in types_to_test
+                N = KI.sub_group_size(backend())
+                a = zeros(T, N)
+                rand!(a, (0:1))
+
+                dev_a = AT(a)
+                dev_b = AT(zeros(T, N))
+
+                KI.@kernel backend() workgroupsize = N shfl_down_test_kernel(dev_a, dev_b, Val(N))
+
+                b = Array(dev_b)
+                @test sum(a) ≈ b[1]
             end
         end
     end

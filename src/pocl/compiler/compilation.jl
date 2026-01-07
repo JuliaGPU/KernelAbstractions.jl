@@ -1,6 +1,14 @@
 ## gpucompiler interface
 
-struct OpenCLCompilerParams <: AbstractCompilerParams end
+Base.@kwdef struct OpenCLCompilerParams <: AbstractCompilerParams
+    sub_group_size::Int
+end
+function Base.hash(params::OpenCLCompilerParams, h::UInt)
+    h = hash(params.sub_group_size, h)
+
+    return h
+end
+
 const OpenCLCompilerConfig = CompilerConfig{SPIRVCompilerTarget, OpenCLCompilerParams}
 const OpenCLCompilerJob = CompilerJob{SPIRVCompilerTarget, OpenCLCompilerParams}
 
@@ -19,7 +27,21 @@ GPUCompiler.isintrinsic(job::OpenCLCompilerJob, fn::String) =
     in(fn, known_intrinsics) ||
     contains(fn, "__spirv_")
 
+function GPUCompiler.finish_module!(
+        @nospecialize(job::OpenCLCompilerJob),
+        mod::LLVM.Module, entry::LLVM.Function
+    )
+    entry = invoke(
+        GPUCompiler.finish_module!,
+        Tuple{CompilerJob{SPIRVCompilerTarget}, LLVM.Module, LLVM.Function},
+        job, mod, entry
+    )
 
+    # Set the subgroup size
+    metadata(entry)["intel_reqd_sub_group_size"] = MDNode([ConstantInt(Int32(job.config.params.sub_group_size))])
+
+    return entry
+end
 ## compiler implementation (cache, configure, compile, and link)
 
 # cache of compilation caches, per context
@@ -45,14 +67,17 @@ function compiler_config(dev::cl.Device; kwargs...)
     end
     return config
 end
-@noinline function _compiler_config(dev; kernel = true, name = nothing, always_inline = false, kwargs...)
+@noinline function _compiler_config(dev; kernel = true, name = nothing, always_inline = false, sub_group_size = 32, kwargs...)
     supports_fp16 = "cl_khr_fp16" in dev.extensions
     supports_fp64 = "cl_khr_fp64" in dev.extensions
 
+    if sub_group_size ∉ dev.sub_group_sizes
+        @error("$sub_group_size is not a valid sub-group size for this device.")
+    end
 
     # create GPUCompiler objects
     target = SPIRVCompilerTarget(; supports_fp16, supports_fp64, kwargs...)
-    params = OpenCLCompilerParams()
+    params = OpenCLCompilerParams(; sub_group_size)
     return CompilerConfig(target, params; kernel, name, always_inline)
 end
 
