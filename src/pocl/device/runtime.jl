@@ -12,7 +12,7 @@ import SPIRVIntrinsics: get_global_id
 function report_exception(ex)
     SPIRVIntrinsics.@printf(
         "ERROR: a %s was thrown during kernel execution on thread (%d, %d, %d).\n",
-        ex, get_global_id(UInt32(0)), get_global_id(UInt32(1)), get_global_id(UInt32(2))
+            ex, get_global_id(UInt32(1)), get_global_id(UInt32(2)), get_global_id(UInt32(3))
     )
     return
 end
@@ -20,7 +20,7 @@ end
 function report_exception_name(ex)
     SPIRVIntrinsics.@printf(
         "ERROR: a %s was thrown during kernel execution on thread (%d, %d, %d).\n",
-        ex, get_global_id(UInt32(0)), get_global_id(UInt32(1)), get_global_id(UInt32(2))
+            ex, get_global_id(UInt32(1)), get_global_id(UInt32(2)), get_global_id(UInt32(3))
     )
     SPIRVIntrinsics.@printf("Stacktrace:\n")
     return
