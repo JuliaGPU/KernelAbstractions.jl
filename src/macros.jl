@@ -277,7 +277,7 @@ function emit_cpu(loop)
     append!(stmts, loop.allocations)
 
     # private_allocations turn into lhs = ntuple(i->rhs, length(__workitems_iterspace()))
-    N = gensym(:N)
+    N = Symbol("_", gensym(:N)) # Prefix name with `_` because it may be unused, but it's ok
     push!(stmts, :($N = length($__workitems_iterspace(__ctx__))))
 
     for stmt in loop.private_allocations
