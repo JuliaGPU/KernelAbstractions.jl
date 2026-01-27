@@ -46,7 +46,7 @@ Cite this package as
 author = {Churavy, Valentin},
 license = {MIT},
 title = {{KernelAbstractions.jl}},
-url = {https://github.com/JuliaGPU/KernelAbstractions.jl}
-doi = {10.5281/zenodo.4021259},
+url = {https://github.com/JuliaGPU/KernelAbstractions.jl},
+doi = {10.5281/zenodo.4021259}
 }
 ```
