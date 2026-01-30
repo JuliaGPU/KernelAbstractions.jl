@@ -15,6 +15,11 @@ end
     A[I] = i + C[I]
 end
 
+@kernel generated = true function f(::Val{N}) where {N}
+    KernelAbstractions.Extras.@unroll $N for i in 1:10
+    end
+end
+
 function test_typed_kernel_dynamic(backend, backend_str, ArrayT)
     A = ArrayT(ones(Float32, 1024, 1024))
     kernel = mul2(backend())
@@ -102,5 +107,6 @@ function reflection_testsuite(backend, backend_str, ArrayT)
     test_typed_kernel_static(backend, backend_str, ArrayT)
     test_typed_kernel_no_optimize(backend, backend_str, ArrayT)
     test_expr_kernel(backend, backend_str, ArrayT)
+    test_generated_kernel(backend, backend_str, ArrayT)
     return
 end
