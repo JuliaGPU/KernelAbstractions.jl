@@ -195,7 +195,11 @@ function unittest_testsuite(Backend, backend_str, backend_mod, BackendArrayT; sk
                 @test occursin("!alias.scope", IR)
                 @test occursin("!noalias", IR)
             elseif backend_str == "CUDA"
-                @test occursin("@llvm.nvvm.ldg", IR)
+                if Base.libllvm_version >= v"20"
+                    @test occursin("addrspace(1)", IR)
+                else
+                    @test occursin("@llvm.nvvm.ldg", IR)
+                end
             elseif backend_str == "ROCM"
                 @test occursin("addrspace(4)", IR)
             else
