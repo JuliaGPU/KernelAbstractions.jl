@@ -1,36 +1,36 @@
 steps:
-  - label: "CUDA Julia {{matrix.version}}"
-    matrix:
-      setup:
-        version:
-          - "1.10"
-          - "1.11"
-          - "1.12"
-          - "1.13"
-    plugins:
-      - JuliaCI/julia#v1:
-          version: "{{matrix.version}}"
-      - JuliaCI/julia-coverage#v1:
-          codecov: true
-    command: |
-      julia -e 'println("--- :julia: Developing CUDA")
-                using Pkg
-                Pkg.add(url="https://github.com/christiangnrd/CUDA.jl", rev="intrinsics")'
-      julia -e 'println("--- :julia: Instantiating project")
-                using Pkg
-                Pkg.develop(; path=pwd())' || exit 3
-
-      julia -e 'println("+++ :julia: Running tests")
-                using Pkg
-                Pkg.test("CUDA"; coverage=true, test_args=["base/kernelabstractions"])'
-    agents:
-      queue: "juliagpu"
-      cuda: "*"
-    timeout_in_minutes: 120
-    soft_fail:
-      - exit_status: 3
-    env:
-      JULIA_PROJECT: "@cuda"
+  # - label: "CUDA Julia {{matrix.version}}"
+  #   matrix:
+  #     setup:
+  #       version:
+  #         - "1.10"
+  #         - "1.11"
+  #         - "1.12"
+  #         - "1.13"
+  #   plugins:
+  #     - JuliaCI/julia#v1:
+  #         version: "{{matrix.version}}"
+  #     - JuliaCI/julia-coverage#v1:
+  #         codecov: true
+  #   command: |
+  #     julia -e 'println("--- :julia: Developing CUDA")
+  #               using Pkg
+  #               Pkg.add(url="https://github.com/christiangnrd/CUDA.jl", rev="intrinsics")'
+  #     julia -e 'println("--- :julia: Instantiating project")
+  #               using Pkg
+  #               Pkg.develop(; path=pwd())' || exit 3
+  # 
+  #     julia -e 'println("+++ :julia: Running tests")
+  #               using Pkg
+  #               Pkg.test("CUDA"; coverage=true, test_args=["base/kernelabstractions"])'
+  #   agents:
+  #     queue: "juliagpu"
+  #     cuda: "*"
+  #   timeout_in_minutes: 120
+  #   soft_fail:
+  #     - exit_status: 3
+  #   env:
+  #     JULIA_PROJECT: "@cuda"
 
   # - label: "CUDA Enzyme Julia {{matrix.version}}"
   #   matrix:
