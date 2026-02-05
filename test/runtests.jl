@@ -36,7 +36,7 @@ if Base.JLOptions().check_bounds == 0 || Base.JLOptions().check_bounds == 1
 end
 
 if Base.JLOptions().check_bounds == 0 || Base.JLOptions().check_bounds == 2
-    @kernel inbounds = true function my_bounded_kernel(a)
+    @kernel inbounds = true function my_inbounds_kernel(a)
         idx = @index(Global, Linear)
         a[idx] = 0
     end
@@ -73,7 +73,8 @@ struct NewBackend <: KernelAbstractions.GPU end
 end
 
 include("extensions/enzyme.jl")
-@static if VERSION >= v"1.7.0"
+# The Enzyme tests fail with Julia 1.13. They also fail with Julia 1.12 on Windows.
+@static if VERSION >= v"1.7.0" && VERSION < v"1.13-" && !(Sys.iswindows() && VERSION >= v"1.12-")
     @testset "Enzyme" begin
         enzyme_testsuite(CPU, Array)
     end

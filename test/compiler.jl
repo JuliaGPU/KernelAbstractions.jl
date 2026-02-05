@@ -24,11 +24,19 @@ end
     A[1] = Base.Checked.checked_add(a, b)
 end
 
+@static if VERSION > v"1.12"
+    const MethodOrCodeInstance = Core.CodeInstance
+    _getname(mi) = mi.def.def.name
+else
+    const MethodOrCodeInstance = Core.MethodInstance
+    _getname(mi) = mi.def.name
+end
+
 function check_for_overdub(stmt)
     if stmt isa Expr
         if stmt.head == :invoke
-            mi = first(stmt.args)::Core.MethodInstance
-            if mi.def.name === :overdub
+            mi = first(stmt.args)::MethodOrCodeInstance
+            if _getname(mi) === :overdub
                 @show stmt
                 return true
             end
