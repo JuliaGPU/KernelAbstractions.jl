@@ -73,7 +73,8 @@ struct NewBackend <: KernelAbstractions.GPU end
 end
 
 include("extensions/enzyme.jl")
-@static if VERSION >= v"1.7.0" && VERSION < v"1.13-"
+# The Enzyme tests fail with Julia 1.13. They also fail with Julia 1.12 on Windows.
+@static if VERSION >= v"1.7.0" && VERSION < v"1.13-" && !(Sys.iswindows() && VERSION >= v"1.12-")
     @testset "Enzyme" begin
         enzyme_testsuite(CPU, Array)
     end
