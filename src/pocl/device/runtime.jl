@@ -10,23 +10,29 @@ report_oom(sz) = return
 import SPIRVIntrinsics: get_global_id
 
 function report_exception(ex)
-    SPIRVIntrinsics.@printf(
-        "ERROR: a %s was thrown during kernel execution on thread (%d, %d, %d).\n",
-        ex, get_global_id(UInt32(0)), get_global_id(UInt32(1)), get_global_id(UInt32(2))
-    )
+    @static if VERSION < v"1.12"
+        SPIRVIntrinsics.@printf(
+            "ERROR: a %s was thrown during kernel execution on thread (%d, %d, %d).\n",
+            ex, get_global_id(UInt32(1)), get_global_id(UInt32(2)), get_global_id(UInt32(3))
+        )
+    end
     return
 end
 
 function report_exception_name(ex)
-    SPIRVIntrinsics.@printf(
-        "ERROR: a %s was thrown during kernel execution on thread (%d, %d, %d).\n",
-        ex, get_global_id(UInt32(0)), get_global_id(UInt32(1)), get_global_id(UInt32(2))
-    )
-    SPIRVIntrinsics.@printf("Stacktrace:\n")
+    @static if VERSION < v"1.12"
+        SPIRVIntrinsics.@printf(
+            "ERROR: a %s was thrown during kernel execution on thread (%d, %d, %d).\n",
+            ex, get_global_id(UInt32(1)), get_global_id(UInt32(2)), get_global_id(UInt32(3))
+        )
+        SPIRVIntrinsics.@printf("Stacktrace:\n")
+    end
     return
 end
 
 function report_exception_frame(idx, func, file, line)
-    SPIRVIntrinsics.@printf(" [%d] %s at %s:%d\n", idx, func, file, line)
+    @static if VERSION < v"1.12"
+        SPIRVIntrinsics.@printf(" [%d] %s at %s:%d\n", idx, func, file, line)
+    end
     return
 end
