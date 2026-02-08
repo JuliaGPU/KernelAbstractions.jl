@@ -103,6 +103,78 @@ Returns the unique group ID.
 function get_group_id end
 
 """
+    get_sub_group_size()::UInt32
+
+Returns the number of work-items in the sub-group.
+
+!!! note
+    Backend implementations **must** implement:
+    ```
+    @device_override get_sub_group_size()::UInt32
+    ```
+"""
+function get_sub_group_size end
+
+"""
+    get_max_sub_group_size()::UInt32
+
+Returns the maximum sub-group size for sub-groups in the current workgroup.
+
+!!! note
+    Backend implementations **must** implement:
+    ```
+    @device_override get_max_sub_group_size()::UInt32
+    ```
+"""
+function get_max_sub_group_size end
+
+"""
+    get_num_sub_groups()::UInt32
+
+Returns the number of sub-groups in the current workgroup.
+
+!!! note
+    Backend implementations **must** implement:
+    ```
+    @device_override get_num_sub_groups()::UInt32
+    ```
+"""
+function get_num_sub_groups end
+
+"""
+    get_sub_group_id()::UInt32
+
+Returns the sub-group ID within the work-group.
+
+!!! note
+    1-based.
+
+!!! note
+    Backend implementations **must** implement:
+    ```
+    @device_override get_sub_group_id()::UInt32
+    ```
+"""
+function get_sub_group_id end
+
+"""
+    get_sub_group_local_id()::UInt32
+
+Returns the work-item ID within the current sub-group.
+
+!!! note
+    1-based.
+
+!!! note
+    Backend implementations **must** implement:
+    ```
+    @device_override get_sub_group_local_id()::UInt32
+    ```
+"""
+function get_sub_group_local_id end
+
+
+"""
     localmemory(::Type{T}, dims)
 
 Declare memory that is local to a workgroup.
@@ -115,6 +187,34 @@ Declare memory that is local to a workgroup.
     As well as the on-device functionality.
 """
 localmemory(::Type{T}, dims) where {T} = localmemory(T, Val(dims))
+
+"""
+    shfl_down(val::T, offset::Integer) where T
+
+Read `val` from a lane with higher id given by `offset`.
+When writing kernels using this function, it should be
+assumed that it is not synchronized.
+
+!!! note
+    Backend implementations **must** implement:
+    ```
+    @device_override shfl_down(val::T, offset::Integer) where T
+    ```
+    As well as the on-device functionality.
+"""
+function shfl_down end
+
+"""
+    shfl_down_types(::Backend)::Vector{DataType}
+
+Returns a vector of `DataType`s supported on `backend`
+
+!!! note
+    Backend implementations **must** implement this function
+    only if they support `shfl_down` for any types.
+"""
+shfl_down_types(::Backend) = DataType[]
+
 
 """
     barrier()
@@ -137,6 +237,29 @@ be visible to a thread in a different workgroup.
 """
 function barrier()
     error("Group barrier used outside kernel or not captured")
+end
+
+"""
+    sub_group_barrier()
+
+After a `sub_group_barrier()` call, all read and writes to global and local memory
+from each thread in the sub-group are visible in from all other threads in the
+sub-group.
+
+This does **not** guarantee that a write from a thread in a certain sub-group will
+be visible to a thread in a different sub-group.
+
+!!! note
+    `sub_group_barrier()` must be encountered by all workitems of a sub-group executing the kernel or by none at all.
+
+!!! note
+    Backend implementations **must** implement:
+    ```
+    @device_override sub_group_barrier()
+    ```
+"""
+function sub_group_barrier()
+    error("Sub-group barrier used outside kernel or not captured")
 end
 
 """
@@ -219,6 +342,22 @@ kernel launch with too big a workgroup is attempted.
     As well as the on-device functionality.
 """
 function max_work_group_size end
+
+"""
+    sub_group_size(backend)::Int
+
+Returns a reasonable sub-group size supported by the currently
+active device for the specified backend. This would typically
+be 32, or 64 for devices that don't support 32.
+
+!!! note
+    Backend implementations **must** implement:
+    ```
+    sub_group_size(backend::NewBackend)::Int
+    ```
+    As well as the on-device functionality.
+"""
+function sub_group_size end
 
 """
     multiprocessor_count(backend::NewBackend)::Int

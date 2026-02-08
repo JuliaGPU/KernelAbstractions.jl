@@ -7,6 +7,8 @@ using ..POCL: device, clconvert, clfunction
 import KernelAbstractions as KA
 import KernelAbstractions.KernelIntrinsics as KI
 
+import SPIRVIntrinsics
+
 import StaticArrays
 
 import Adapt
@@ -174,8 +176,34 @@ end
 function KI.max_work_group_size(::POCLBackend)::Int
     return Int(device().max_work_group_size)
 end
+function KI.sub_group_size(::POCLBackend)::Int
+    sg_sizes = cl.device().sub_group_sizes
+    if 32 in sg_sizes
+        return 32
+    elseif 64 in sg_sizes
+        return 64
+    elseif 16 in sg_sizes
+        return 16
+    else
+        return 1
+    end
+end
 function KI.multiprocessor_count(::POCLBackend)::Int
     return Int(device().max_compute_units)
+end
+
+function KI.shfl_down_types(::POCLBackend)
+    res = copy(SPIRVIntrinsics.gentypes)
+
+    backend_extensions = cl.device().extensions
+    if "cl_khr_fp64" ∉ backend_extensions
+        res = setdiff(res, [Float64])
+    end
+    if "cl_khr_fp16" ∉ backend_extensions
+        res = setdiff(res, [Float16])
+    end
+
+    return res
 end
 
 ## Indexing Functions
@@ -204,6 +232,16 @@ end
     return (; x = Int(get_global_size(1)), y = Int(get_global_size(2)), z = Int(get_global_size(3)))
 end
 
+@device_override KI.get_sub_group_size() = get_sub_group_size()
+
+@device_override KI.get_max_sub_group_size() = get_max_sub_group_size()
+
+@device_override KI.get_num_sub_groups() = get_num_sub_groups()
+
+@device_override KI.get_sub_group_id() = get_sub_group_id()
+
+@device_override KI.get_sub_group_local_id() = get_sub_group_local_id()
+
 @device_override @inline function KA.__validindex(ctx)
     if KA.__dynamic_checkbounds(ctx)
         I = @inbounds KA.expand(KA.__iterspace(ctx), get_group_id(1), get_local_id(1))
@@ -230,6 +268,14 @@ end
 
 @device_override @inline function KI.barrier()
     work_group_barrier(POCL.LOCAL_MEM_FENCE | POCL.GLOBAL_MEM_FENCE)
+end
+
+@device_override @inline function KI.sub_group_barrier()
+    sub_group_barrier(POCL.LOCAL_MEM_FENCE | POCL.GLOBAL_MEM_FENCE)
+end
+
+@device_override function KI.shfl_down(val::T, offset::Integer) where {T}
+    sub_group_shuffle(val, get_sub_group_local_id() + offset)
 end
 
 @device_override @inline function KI._print(args...)

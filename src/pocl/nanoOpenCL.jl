@@ -390,6 +390,8 @@ const CL_KERNEL_EXEC_INFO_SVM_PTRS = 0x11b6
 
 const CL_KERNEL_EXEC_INFO_SVM_FINE_GRAIN_SYSTEM = 0x11b7
 
+const CL_DEVICE_SUB_GROUP_SIZES_INTEL = 0x4108
+
 struct CLError <: Exception
     code::Cint
 end
@@ -932,6 +934,14 @@ devices(p::Platform) = devices(p, CL_DEVICE_TYPE_ALL)
     if s == :max_work_item_size
         result = Vector{Csize_t}(undef, d.max_work_item_dims)
         clGetDeviceInfo(d, CL_DEVICE_MAX_WORK_ITEM_SIZES, sizeof(result), result, C_NULL)
+        return tuple([Int(r) for r in result]...)
+    end
+
+    if s == :sub_group_sizes
+        res_size = Ref{Csize_t}()
+        clGetDeviceInfo(d, CL_DEVICE_SUB_GROUP_SIZES_INTEL, C_NULL, C_NULL, res_size)
+        result = Vector{Csize_t}(undef, res_size[] ÷ sizeof(Csize_t))
+        clGetDeviceInfo(d, CL_DEVICE_SUB_GROUP_SIZES_INTEL, sizeof(result), result, C_NULL)
         return tuple([Int(r) for r in result]...)
     end
 
