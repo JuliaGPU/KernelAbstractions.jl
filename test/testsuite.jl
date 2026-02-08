@@ -39,6 +39,7 @@ include("reflection.jl")
 include("examples.jl")
 include("convert.jl")
 include("specialfunctions.jl")
+include("groupreduce.jl")
 
 function testsuite(backend, backend_str, backend_mod, AT, DAT; skip_tests = Set{String}())
     @conditional_testset "Unittests" skip_tests begin
@@ -91,6 +92,13 @@ function testsuite(backend, backend_str, backend_mod, AT, DAT; skip_tests = Set{
 
     @conditional_testset "Examples" skip_tests begin
         examples_testsuite(backend, backend_str)
+    end
+
+    # TODO @index(Local) only works as a top-level expression on CPU.
+    if backend != CPU
+        @conditional_testset "@groupreduce" skip_tests begin
+            groupreduce_testsuite(backend, AT)
+        end
     end
 
     return
