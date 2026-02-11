@@ -5,6 +5,8 @@ steps:
         version:
           - "1.10"
           - "1.11"
+          - "1.12"
+          - "1.13"
     plugins:
       - JuliaCI/julia#v1:
           version: "{{matrix.version}}"
@@ -15,7 +17,6 @@ steps:
                 using Pkg
                 Pkg.develop(; path=pwd())
                 Pkg.develop(; name="CUDA")' || exit 3
-
       julia -e 'println("+++ :julia: Running tests")
                 using Pkg
                 Pkg.test("CUDA"; coverage=true, test_args=["base/kernelabstractions"])'
