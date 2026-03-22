@@ -78,8 +78,8 @@ end
 N = 1024
 R = 512
 M = 2048
-A = rand!(allocate(backend, Float32, N, R))
-B = rand!(allocate(backend, Float32, R, M))
+A = copyto!(allocate(backend, Float32, N, R), rand(Float32, N, R))
+B = copyto!(allocate(backend, Float32, R, M), rand(Float32, R, M))
 C = KernelAbstractions.zeros(backend, Float32, N, M)
 
 kern = coalesced_matmul_kernel!(backend, (TILE_DIM, TILE_DIM))

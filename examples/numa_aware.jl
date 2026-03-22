@@ -27,11 +27,11 @@ function measure_membw(
 
     a = dtype(3.1415)
     if init == :serial
-        X = rand!(zeros(dtype, N))
-        Y = rand!(zeros(dtype, N))
+        X = rand(dtype, N)
+        Y = rand(dtype, N)
     else
-        X = rand!(KernelAbstractions.zeros(backend, dtype, N))
-        Y = rand!(KernelAbstractions.zeros(backend, dtype, N))
+        X = copyto!(KernelAbstractions.zeros(backend, dtype, N), rand(dtype, N))
+        Y = copyto!(KernelAbstractions.zeros(backend, dtype, N), rand(dtype, N))
     end
     workgroup_size = 1024
 
