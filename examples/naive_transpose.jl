@@ -24,7 +24,7 @@ end
 res = 1024
 
 # creating initial arrays
-b = rand!(allocate(backend, Float32, res, res))
+b = copyto!(allocate(backend, Float32, res, res), rand(Float32, res, res))
 a = KernelAbstractions.zeros(backend, Float32, res, res)
 
 naive_transpose!(a, b)
