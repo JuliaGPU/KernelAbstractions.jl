@@ -145,7 +145,7 @@ for block_dims in ((TILE_DIM, TILE_DIM), (TILE_DIM * TILE_DIM, 1), (1, TILE_DIM 
             ("transpose", simple_transpose_kernel!(backend, block_dims)),
         )
         NVTX.@range "Simple $name $block_dims" let
-            input = rand!(allocate(backend, T, N, N))
+            input = copyto!(allocate(backend, T, N, N), rand(T, N, N))
             output = similar(input)
 
             # compile kernel
@@ -165,7 +165,7 @@ for (name, kernel) in (
     )
     for bank in (true, false)
         NVTX.@range "Localmem $name ($TILE_DIM, $TILE_DIM) bank=$bank" let
-            input = rand!(allocate(backend, T, N, N))
+            input = copyto!(allocate(backend, T, N, N), rand(T, N, N))
             output = similar(input)
 
             # compile kernel
@@ -185,7 +185,7 @@ for (name, kernel) in (
     )
     for bank in (true, false)
         NVTX.@range "Localmem + multiple elements $name ($TILE_DIM, $BLOCK_ROWS) bank=$bank" let
-            input = rand!(allocate(backend, T, N, N))
+            input = copyto!(allocate(backend, T, N, N), rand(T, N, N))
             output = similar(input)
 
             # We want a number of blocks equivalent to (TILE_DIM, TILE_DIM)
