@@ -1,7 +1,7 @@
 name: Benchmark a pull request
 
 on:
-  pull_request:
+  pull_request_target:
 
 permissions:
   pull-requests: write
