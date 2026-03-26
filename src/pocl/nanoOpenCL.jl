@@ -629,6 +629,22 @@ end
     )::cl_int
 end
 
+@checked function clGetKernelSubGroupInfo(
+        kernel, device, param_name, input_value_size,
+        input_value, param_value_size, param_value,
+        param_value_size_ret
+    )
+    @ccall libopencl.clGetKernelSubGroupInfo(
+        kernel::cl_kernel, device::cl_device_id,
+        param_name::cl_kernel_sub_group_info,
+        input_value_size::Csize_t,
+        input_value::Ptr{Cvoid},
+        param_value_size::Csize_t,
+        param_value::Ptr{Cvoid},
+        param_value_size_ret::Ptr{Csize_t}
+    )::cl_int
+end
+
 @checked function clEnqueueNDRangeKernel(
         command_queue, kernel, work_dim,
         global_work_offset, global_work_size,
@@ -1227,7 +1243,7 @@ end
 
 function enqueue_kernel(
         k::Kernel, global_work_size, local_work_size = nothing;
-        global_work_offset = nothing
+        global_work_offset = nothing, rng_state = false, nargs = nothing
     )
     max_work_dim = device().max_work_item_dims
     work_dim = length(global_work_size)
@@ -1271,6 +1287,20 @@ function enqueue_kernel(
         # null local size means OpenCL decides
     end
 
+    if rng_state
+        if local_work_size !== nothing
+            num_sub_groups = KernelSubGroupInfo(k, device(), lsize).sub_group_count
+        else
+            num_sub_groups = KernelSubGroupInfo(k, device(), Csize_t[]).max_num_sub_groups
+        end
+        if nargs === nothing
+            nargs = k.num_args - 2
+        end
+        rng_state_size = sizeof(UInt32) * num_sub_groups
+        set_arg!(k, nargs + 1, LocalMem(UInt32, rng_state_size))
+        set_arg!(k, nargs + 2, LocalMem(UInt32, rng_state_size))
+    end
+
     n_events = cl_uint(0)
     wait_event_ids = C_NULL
     ret_event = Ref{cl_event}()
@@ -1285,7 +1315,8 @@ end
 function call(
         k::Kernel, args...; global_size = (1,), local_size = nothing,
         global_work_offset = nothing,
-        svm_pointers::Vector{Ptr{Cvoid}} = Ptr{Cvoid}[]
+        svm_pointers::Vector{Ptr{Cvoid}} = Ptr{Cvoid}[],
+        rng_state = false
     )
     set_args!(k, args...)
     if !isempty(svm_pointers)
@@ -1294,7 +1325,7 @@ function call(
             sizeof(svm_pointers), svm_pointers
         )
     end
-    return enqueue_kernel(k, global_size, local_size; global_work_offset)
+    return enqueue_kernel(k, global_size, local_size; global_work_offset, rng_state, nargs=length(args))
 end
 
 # convert the argument values to match the kernel's signature (specified by the user)
@@ -1362,6 +1393,37 @@ function Base.getproperty(ki::KernelWorkGroupInfo, s::Symbol)
         Int(get(CL_KERNEL_PRIVATE_MEM_SIZE, cl_ulong))
     elseif s == :prefered_size_multiple
         Int(get(CL_KERNEL_PREFERRED_WORK_GROUP_SIZE_MULTIPLE, Csize_t))
+    else
+        getfield(ki, s)
+    end
+end
+
+struct KernelSubGroupInfo
+    kernel::Kernel
+    device::Device
+    local_work_size::Vector{Csize_t}
+end
+sub_group_info(k::Kernel, d::Device, lsize::Vector{Csize_t}) = KernelSubGroupInfo(k, d, lsize)
+
+function Base.getproperty(ki::KernelSubGroupInfo, s::Symbol)
+    k = getfield(ki, :kernel)
+    d = getfield(ki, :device)
+    lsize = getfield(ki, :local_work_size)
+
+    function get(val, typ)
+        result = Ref{typ}()
+        clGetKernelSubGroupInfo(k, d, val, sizeof(lsize), lsize, sizeof(typ), result, C_NULL)
+        return result[]
+    end
+
+    return if s == :max_sub_group_size
+        Int(get(CL_KERNEL_MAX_SUB_GROUP_SIZE_FOR_NDRANGE, Csize_t))
+    elseif s == :sub_group_count
+        Int(get(CL_KERNEL_SUB_GROUP_COUNT_FOR_NDRANGE, Csize_t))
+    elseif s == :max_num_sub_groups
+        Int(get(CL_KERNEL_MAX_NUM_SUB_GROUPS, Csize_t))
+    elseif s == :compile_num_sub_groups
+        Int(get(CL_KERNEL_COMPILE_NUM_SUB_GROUPS, Csize_t))
     else
         getfield(ki, s)
     end
