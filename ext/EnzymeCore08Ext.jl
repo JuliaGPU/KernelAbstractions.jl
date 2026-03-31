@@ -235,7 +235,12 @@ function EnzymeRules.augmented_primal(
         Base.@_inline_meta
         if args[i] isa Active
             if func.val isa Kernel{<:GPU}
-                error("Active kernel arguments not supported on GPU, got\n\n$(typeof(args[i]))\n\nfor argument $i of kernel\n\n$(func.val).")
+                error("""
+                Active kernel arguments not supported on GPU, got
+                \n$(typeof(args[i]))
+                \nFor argument $i of kernel
+                \n$(func.val).
+                """)
             else
                 Ref(EnzymeCore.make_zero(args[i].val))
             end
