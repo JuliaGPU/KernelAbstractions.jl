@@ -43,7 +43,7 @@ jobs:
       - uses: julia-actions/install-juliaup@v2
         with:
           channel: ${{ matrix.version }}
-      - uses: julia-actions/cache@v2
+      - uses: julia-actions/cache@v3
       - name: Checkout pocl
         if: ${{ matrix.pocl == 'local' }}
         uses: actions/checkout@v6
