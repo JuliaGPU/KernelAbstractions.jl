@@ -118,6 +118,10 @@ Base.@propagate_inbounds function expand(ndrange::NDRange, groupidx::Integer, id
     W = workitems(ndrange)
     assume_nonzero(B)
     assume_nonzero(W)
+    assume(groupidx >= 1)
+    assume(groupidx <= length(B))
+    assume(idx >= 1)
+    assume(idx <= length(W))
     return expand(ndrange, B[groupidx], workitems(ndrange)[idx])
 end
 
