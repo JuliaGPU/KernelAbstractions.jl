@@ -1,7 +1,8 @@
 ## gpucompiler interface
 
 Base.@kwdef struct OpenCLCompilerParams <: AbstractCompilerParams
-    sub_group_size::Int
+    # request a fixed sub-group width via `intel_reqd_sub_group_size`
+    sub_group_size::Union{Nothing, Int} = nothing
 end
 
 const OpenCLCompilerConfig = CompilerConfig{SPIRVCompilerTarget, OpenCLCompilerParams}
@@ -34,7 +35,10 @@ function GPUCompiler.finish_module!(
         job, mod, entry
     )
 
-    metadata(entry)["intel_reqd_sub_group_size"] = MDNode([ConstantInt(Int32(job.config.params.sub_group_size))])
+    sg_size = job.config.params.sub_group_size
+    if sg_size !== nothing
+        metadata(entry)["intel_reqd_sub_group_size"] = MDNode([ConstantInt(Int32(sg_size))])
+    end
 
     # if this kernel uses our RNG, we should prime the shared state.
     # XXX: these transformations should really happen at the Julia IR level...
@@ -135,12 +139,12 @@ function compiler_config(dev::cl.Device; kwargs...)
     end
     return config
 end
-@noinline function _compiler_config(dev; kernel = true, name = nothing, always_inline = false, sub_group_size = 32, kwargs...)
+@noinline function _compiler_config(dev; kernel = true, name = nothing, always_inline = false, sub_group_size::Union{Nothing, Int} = nothing, kwargs...)
     supports_fp16 = "cl_khr_fp16" in dev.extensions
     supports_fp64 = "cl_khr_fp64" in dev.extensions
 
-    if sub_group_size ∉ dev.sub_group_sizes
-        @error("$sub_group_size is not a valid sub-group size for this device.")
+    if sub_group_size !== nothing && sub_group_size ∉ dev.sub_group_sizes
+        error("$sub_group_size is not a valid sub-group size for this device.")
     end
 
     # create GPUCompiler objects
