@@ -15,14 +15,17 @@ steps:
     command: |
       julia -e 'println("--- :julia: Developing CUDA")
                 using Pkg
-                Pkg.add(url="https://github.com/christiangnrd/CUDA.jl", rev="intrinsics")'
+                url="https://github.com/christiangnrd/CUDA.jl"
+                rev="intrinsics"
+                subdirs = ["CUDACore", "CUDATools", "lib/cusolver", "lib/curand", "lib/cublas", "lib/cufft", "lib/cusparse", "lib/cupti", "lib/nvml", "lib/custatevec", "lib/cudnn", "lib/cutensor", "lib/cutensornet"]
+                Pkg.add([(;url, rev); [(; url, rev, subdir) for subdir in subdirs]])'
       julia -e 'println("--- :julia: Instantiating project")
                 using Pkg
                 Pkg.develop(; path=pwd())' || exit 3
 
       julia -e 'println("+++ :julia: Running tests")
                 using Pkg
-                Pkg.test("CUDA"; coverage=true, test_args=["base/kernelabstractions"])'
+                Pkg.test("CUDA"; coverage=true, test_args=["core/kernelabstractions"])'
     agents:
       queue: "juliagpu"
       cuda: "*"
