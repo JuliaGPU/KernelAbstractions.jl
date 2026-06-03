@@ -12,7 +12,6 @@ import PrecompileTools
 import Atomix: @atomic, @atomicswap, @atomicreplace
 
 using MacroTools
-using StaticArrays
 using Adapt
 
 """
