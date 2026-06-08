@@ -2,12 +2,11 @@ module nanoOpenCL
 
 using ..POCL: platform, device, context, queue
 
-import OpenCL_jll
-import pocl_jll
+import pocl_standalone_jll
 
 using Printf
 
-const libopencl = OpenCL_jll.libopencl # TODO directly use POCL
+const libopencl = pocl_standalone_jll.libpocl
 
 """
     @checked function foo(...)
@@ -491,7 +490,7 @@ const cl_command_queue_properties = cl_bitfield
 const cl_event_info = cl_uint
 
 @checked function clGetPlatformIDs(num_entries, platforms, num_platforms)
-    @ccall libopencl.clGetPlatformIDs(
+    @ccall libopencl.POclGetPlatformIDs(
         num_entries::cl_uint, platforms::Ptr{cl_platform_id},
         num_platforms::Ptr{cl_uint}
     )::cl_int
@@ -501,7 +500,7 @@ end
         platform, param_name, param_value_size, param_value,
         param_value_size_ret
     )
-    @ccall libopencl.clGetPlatformInfo(
+    @ccall libopencl.POclGetPlatformInfo(
         platform::cl_platform_id,
         param_name::cl_platform_info,
         param_value_size::Csize_t, param_value::Ptr{Cvoid},
@@ -510,7 +509,7 @@ end
 end
 
 @checked function clGetDeviceIDs(platform, device_type, num_entries, devices, num_devices)
-    @ccall libopencl.clGetDeviceIDs(
+    @ccall libopencl.POclGetDeviceIDs(
         platform::cl_platform_id, device_type::cl_device_type,
         num_entries::cl_uint, devices::Ptr{cl_device_id},
         num_devices::Ptr{cl_uint}
@@ -521,7 +520,7 @@ end
         device, param_name, param_value_size, param_value,
         param_value_size_ret
     )
-    @ccall libopencl.clGetDeviceInfo(
+    @ccall libopencl.POclGetDeviceInfo(
         device::cl_device_id, param_name::cl_device_info,
         param_value_size::Csize_t, param_value::Ptr{Cvoid},
         param_value_size_ret::Ptr{Csize_t}
@@ -532,7 +531,7 @@ function clCreateContext(
         properties, num_devices, devices, pfn_notify, user_data,
         errcode_ret
     )
-    return @ccall libopencl.clCreateContext(
+    return @ccall libopencl.POclCreateContext(
         properties::Ptr{cl_context_properties},
         num_devices::cl_uint, devices::Ptr{cl_device_id},
         pfn_notify::Ptr{Cvoid}, user_data::Ptr{Cvoid},
@@ -541,11 +540,11 @@ function clCreateContext(
 end
 
 @checked function clReleaseContext(context)
-    @ccall libopencl.clReleaseContext(context::cl_context)::cl_int
+    @ccall libopencl.POclReleaseContext(context::cl_context)::cl_int
 end
 
 function clCreateProgramWithIL(context, il, length, errcode_ret)
-    return @ccall libopencl.clCreateProgramWithIL(
+    return @ccall libopencl.POclCreateProgramWithIL(
         context::cl_context, il::Ptr{Cvoid},
         length::Csize_t,
         errcode_ret::Ptr{cl_int}
@@ -553,14 +552,14 @@ function clCreateProgramWithIL(context, il, length, errcode_ret)
 end
 
 @checked function clReleaseProgram(program)
-    @ccall libopencl.clReleaseProgram(program::cl_program)::cl_int
+    @ccall libopencl.POclReleaseProgram(program::cl_program)::cl_int
 end
 
 @checked function clBuildProgram(
         program, num_devices, device_list, options, pfn_notify,
         user_data
     )
-    @ccall libopencl.clBuildProgram(
+    @ccall libopencl.POclBuildProgram(
         program::cl_program, num_devices::cl_uint,
         device_list::Ptr{cl_device_id}, options::Ptr{Cchar},
         pfn_notify::Ptr{Cvoid}, user_data::Ptr{Cvoid}
@@ -571,7 +570,7 @@ end
         program, param_name, param_value_size, param_value,
         param_value_size_ret
     )
-    @ccall libopencl.clGetProgramInfo(
+    @ccall libopencl.POclGetProgramInfo(
         program::cl_program, param_name::cl_program_info,
         param_value_size::Csize_t, param_value::Ptr{Cvoid},
         param_value_size_ret::Ptr{Csize_t}
@@ -582,7 +581,7 @@ end
         program, device, param_name, param_value_size,
         param_value, param_value_size_ret
     )
-    @ccall libopencl.clGetProgramBuildInfo(
+    @ccall libopencl.POclGetProgramBuildInfo(
         program::cl_program, device::cl_device_id,
         param_name::cl_program_build_info,
         param_value_size::Csize_t,
@@ -592,25 +591,25 @@ end
 end
 
 function clCreateKernel(program, kernel_name, errcode_ret)
-    return @ccall libopencl.clCreateKernel(
+    return @ccall libopencl.POclCreateKernel(
         program::cl_program, kernel_name::Ptr{Cchar},
         errcode_ret::Ptr{cl_int}
     )::cl_kernel
 end
 
 @checked function clReleaseKernel(kernel)
-    @ccall libopencl.clReleaseKernel(kernel::cl_kernel)::cl_int
+    @ccall libopencl.POclReleaseKernel(kernel::cl_kernel)::cl_int
 end
 
 @checked function clSetKernelArg(kernel, arg_index, arg_size, arg_value)
-    @ccall libopencl.clSetKernelArg(
+    @ccall libopencl.POclSetKernelArg(
         kernel::cl_kernel, arg_index::cl_uint,
         arg_size::Csize_t, arg_value::Ptr{Cvoid}
     )::cl_int
 end
 
 @checked function clSetKernelArgSVMPointer(kernel, arg_index, arg_value)
-    @ccall libopencl.clSetKernelArgSVMPointer(
+    @ccall libopencl.POclSetKernelArgSVMPointer(
         kernel::cl_kernel, arg_index::cl_uint,
         arg_value::Ptr{Cvoid}
     )::cl_int
@@ -620,7 +619,7 @@ end
         kernel, device, param_name, param_value_size,
         param_value, param_value_size_ret
     )
-    @ccall libopencl.clGetKernelWorkGroupInfo(
+    @ccall libopencl.POclGetKernelWorkGroupInfo(
         kernel::cl_kernel, device::cl_device_id,
         param_name::cl_kernel_work_group_info,
         param_value_size::Csize_t,
@@ -635,7 +634,7 @@ end
         local_work_size, num_events_in_wait_list,
         event_wait_list, event
     )
-    @ccall libopencl.clEnqueueNDRangeKernel(
+    @ccall libopencl.POclEnqueueNDRangeKernel(
         command_queue::cl_command_queue,
         kernel::cl_kernel, work_dim::cl_uint,
         global_work_offset::Ptr{Csize_t},
@@ -648,7 +647,7 @@ end
 end
 
 function clCreateCommandQueue(context, device, properties, errcode_ret)
-    return @ccall libopencl.clCreateCommandQueue(
+    return @ccall libopencl.POclCreateCommandQueue(
         context::cl_context, device::cl_device_id,
         properties::cl_command_queue_properties,
         errcode_ret::Ptr{cl_int}
@@ -656,22 +655,22 @@ function clCreateCommandQueue(context, device, properties, errcode_ret)
 end
 
 @checked function clReleaseCommandQueue(command_queue)
-    @ccall libopencl.clReleaseCommandQueue(command_queue::cl_command_queue)::cl_int
+    @ccall libopencl.POclReleaseCommandQueue(command_queue::cl_command_queue)::cl_int
 end
 
 @checked function clFinish(command_queue)
-    @ccall libopencl.clFinish(command_queue::cl_command_queue)::cl_int
+    @ccall libopencl.POclFinish(command_queue::cl_command_queue)::cl_int
 end
 
 @checked function clWaitForEvents(num_events, event_list)
-    @ccall libopencl.clWaitForEvents(num_events::cl_uint, event_list::Ptr{cl_event})::cl_int
+    @ccall libopencl.POclWaitForEvents(num_events::cl_uint, event_list::Ptr{cl_event})::cl_int
 end
 
 @checked function clGetEventInfo(
         event, param_name, param_value_size, param_value,
         param_value_size_ret
     )
-    @ccall libopencl.clGetEventInfo(
+    @ccall libopencl.POclGetEventInfo(
         event::cl_event, param_name::cl_event_info,
         param_value_size::Csize_t, param_value::Ptr{Cvoid},
         param_value_size_ret::Ptr{Csize_t}
@@ -679,7 +678,7 @@ end
 end
 
 @checked function clReleaseEvent(event)
-    @ccall libopencl.clReleaseEvent(event::cl_event)::cl_int
+    @ccall libopencl.POclReleaseEvent(event::cl_event)::cl_int
 end
 
 # Init
@@ -688,6 +687,7 @@ end
 const initialized = Ref{Bool}(false)
 @noinline function initialize()
     initialized[] = true
+    return nothing
 
     # @static if Sys.iswindows()
     #     if is_high_integrity_level()
@@ -697,25 +697,25 @@ const initialized = Ref{Bool}(false)
     #     end
     # end
 
-    ocd_filenames = join(OpenCL_jll.drivers, ':')
-    if haskey(ENV, "OCL_ICD_FILENAMES")
-        ocd_filenames *= ":" * ENV["OCL_ICD_FILENAMES"]
-    end
+    # ocd_filenames = join(OpenCL_jll.drivers, ':')
+    # if haskey(ENV, "OCL_ICD_FILENAMES")
+    #     ocd_filenames *= ":" * ENV["OCL_ICD_FILENAMES"]
+    # end
 
-    return withenv("OCL_ICD_FILENAMES" => ocd_filenames) do
-        num_platforms = Ref{Cuint}()
-        @ccall libopencl.clGetPlatformIDs(
-            0::cl_uint, C_NULL::Ptr{cl_platform_id},
-            num_platforms::Ptr{cl_uint}
-        )::cl_int
+    # return withenv("OCL_ICD_FILENAMES" => ocd_filenames) do
+    #     num_platforms = Ref{Cuint}()
+    #     @ccall libopencl.POclGetPlatformIDs(
+    #         0::cl_uint, C_NULL::Ptr{cl_platform_id},
+    #         num_platforms::Ptr{cl_uint}
+    #     )::cl_int
 
-        if num_platforms[] == 0 && isempty(OpenCL_jll.drivers)
-            @error """No OpenCL drivers available, either system-wide or provided by a JLL.
+    #     if num_platforms[] == 0 && isempty(OpenCL_jll.drivers)
+    #         @error """No OpenCL drivers available, either system-wide or provided by a JLL.
 
-            Please install a system-wide OpenCL driver, or load one together with OpenCL.jl,
-            e.g., by doing `using OpenCL, pocl_jll`."""
-        end
-    end
+    #         Please install a system-wide OpenCL driver, or load one together with OpenCL.jl,
+    #         e.g., by doing `using OpenCL, pocl_jll`."""
+    #     end
+    # end
 end
 
 # Julia API

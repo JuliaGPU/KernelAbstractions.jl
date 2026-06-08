@@ -142,7 +142,7 @@ function (obj::KA.Kernel{POCLBackend})(args...; ndrange = nothing, workgroupsize
     local_size = items
     event = kernel(ctx, args...; global_size, local_size)
     wait(event)
-    cl.clReleaseEvent(event)
+    cl.POclReleaseEvent(event)
     return nothing
 end
 
@@ -163,7 +163,7 @@ function (obj::KI.Kernel{POCLBackend})(args...; numworkgroups = 1, workgroupsize
 
     event = obj.kern(args...; local_size, global_size)
     wait(event)
-    cl.clReleaseEvent(event)
+    cl.POclReleaseEvent(event)
     return nothing
 end
 

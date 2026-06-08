@@ -107,7 +107,7 @@ jobs:
                          -DKERNELLIB_HOST_CPU_VARIANTS=distro```)
                   run(```$(cmake()) --build $builddir --parallel $(Sys.CPU_THREADS) --target install```)
               end'
-            echo '[pocl_jll]' > test/LocalPreferences.toml
+            echo '[pocl_standalone_jll]' > test/LocalPreferences.toml
             echo 'libpocl_path="${{ github.workspace }}/target/lib/libpocl.so"' >> test/LocalPreferences.toml
       - name: "Co-develop Enzyme and KA"
         run: |
