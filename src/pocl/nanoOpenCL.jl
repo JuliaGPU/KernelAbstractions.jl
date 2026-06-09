@@ -633,7 +633,7 @@ end
         input_value, param_value_size, param_value,
         param_value_size_ret
     )
-    @ccall libopencl.clGetKernelSubGroupInfo(
+    @ccall libopencl.POclGetKernelSubGroupInfo(
         kernel::cl_kernel, device::cl_device_id,
         param_name::cl_kernel_sub_group_info,
         input_value_size::Csize_t,

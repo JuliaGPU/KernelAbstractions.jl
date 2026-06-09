@@ -35,7 +35,7 @@ struct Philox2x32{R} <: RandomNumbers.AbstractRNG{UInt64} end
 @inline Philox2x32() = Philox2x32{7}()
 
 @inline function Base.getproperty(rng::Philox2x32, field::Symbol)
-    subgroup_id = get_sub_group_local_id()
+    subgroup_id = get_sub_group_id()
 
     if field === :key
         @inbounds global_random_keys()[subgroup_id]
@@ -47,7 +47,7 @@ struct Philox2x32{R} <: RandomNumbers.AbstractRNG{UInt64} end
 end
 
 @inline function Base.setproperty!(rng::Philox2x32, field::Symbol, x)
-    subgroup_id = get_sub_group_local_id()
+    subgroup_id = get_sub_group_id()
 
     if field === :key
         @inbounds global_random_keys()[subgroup_id] = x

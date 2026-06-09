@@ -41,7 +41,7 @@ function queue()
 end
 
 using GPUCompiler
-import LLVM
+using LLVM, LLVM.Interop
 using SPIRV_LLVM_Backend_jll, SPIRV_Tools_jll
 using Adapt
 
