@@ -19,7 +19,8 @@ function apply_seed(seed)
 end
 
 function random_testsuite(backend)
-    eltypes = [Float16, Float32, Float64, Int32, UInt32, Int64, UInt64, Bool, UInt16]
+    eltypes = [Float16, Float32, Int32, UInt32, Int64, UInt64, Bool, UInt16]
+    KA.supports_float64(backend()) && push!(eltypes, Float64)
 
     @testset "rand($T), seed $seed" for T in eltypes, seed in (nothing, #=missing,=# 1234)
         # different kernel invocations should get different numbers
