@@ -21,11 +21,15 @@ GPUCompiler.isintrinsic(job::OpenCLCompilerJob, fn::String) =
 
 GPUCompiler.kernel_state_type(::OpenCLCompilerJob) = KernelState
 
-function GPUCompiler.finish_module!(@nospecialize(job::OpenCLCompilerJob),
-                                          mod::LLVM.Module, entry::LLVM.Function)
-    entry = invoke(GPUCompiler.finish_module!,
-                   Tuple{CompilerJob{SPIRVCompilerTarget}, LLVM.Module, LLVM.Function},
-                   job, mod, entry)
+function GPUCompiler.finish_module!(
+        @nospecialize(job::OpenCLCompilerJob),
+        mod::LLVM.Module, entry::LLVM.Function
+    )
+    entry = invoke(
+        GPUCompiler.finish_module!,
+        Tuple{CompilerJob{SPIRVCompilerTarget}, LLVM.Module, LLVM.Function},
+        job, mod, entry
+    )
 
     # if this kernel uses our RNG, we should prime the shared state.
     # XXX: these transformations should really happen at the Julia IR level...
@@ -37,7 +41,7 @@ function GPUCompiler.finish_module!(@nospecialize(job::OpenCLCompilerJob),
 
         # create a deferred compilation job for `initialize_rng_state`
         src = methodinstance(ft, tt, GPUCompiler.tls_world_age())
-        cfg = CompilerConfig(job.config; kernel=false, name=nothing)
+        cfg = CompilerConfig(job.config; kernel = false, name = nothing)
         job = CompilerJob(src, cfg, job.world)
         id = length(GPUCompiler.deferred_codegen_jobs) + 1
         GPUCompiler.deferred_codegen_jobs[id] = job
@@ -45,7 +49,7 @@ function GPUCompiler.finish_module!(@nospecialize(job::OpenCLCompilerJob),
         # generate IR for calls to `deferred_codegen` and the resulting function pointer
         top_bb = first(blocks(entry))
         bb = BasicBlock(top_bb, "initialize_rng")
-        @dispose builder=IRBuilder() begin
+        @dispose builder = IRBuilder() begin
             position!(builder, bb)
             subprogram = LLVM.subprogram(entry)
             if subprogram !== nothing
@@ -140,7 +144,7 @@ end
 # compile to executable machine code
 function compile(@nospecialize(job::CompilerJob))
     # TODO: this creates a context; cache those.
-    obj, meta = JuliaContext() do ctx
+    return obj, meta = JuliaContext() do ctx
         obj, meta = GPUCompiler.compile(:obj, job)
 
         entry = LLVM.name(meta.entry)
@@ -158,5 +162,5 @@ function link(@nospecialize(job::CompilerJob), compiled)
         error("Your device does not support SPIR-V, which is currently required for native execution.")
     end
     cl.build!(prog)
-    (; kernel=cl.Kernel(prog, compiled.entry), compiled.device_rng)
+    return (; kernel = cl.Kernel(prog, compiled.entry), compiled.device_rng)
 end

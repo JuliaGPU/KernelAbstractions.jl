@@ -5,16 +5,17 @@ const n = 256
 function apply_seed(seed)
     if seed === missing
         # should result in different numbers across launches
-        Random.seed!()
+        return Random.seed!()
         # XXX: this currently doesn't work, because of the definition in Base,
         #      `seed!(r::MersenneTwister=default_rng())`, which breaks overriding
         #      `default_rng` with a non-MersenneTwister RNG.
     elseif seed !== nothing
         # should result in the same numbers
-        Random.seed!(seed)
+        return Random.seed!(seed)
     elseif seed === nothing
         # should result in different numbers across launches,
         # as determined by the seed set during module loading.
+        return nothing
     end
 end
 
@@ -35,9 +36,9 @@ function random_testsuite(backend)
             a = KernelAbstractions.zeros(backend(), T, n)
             b = KernelAbstractions.zeros(backend(), T, n)
 
-            kernel(backend())(a, seed, ndrange=n, workgroupsize=n)
+            kernel(backend())(a, seed, ndrange = n, workgroupsize = n)
             KernelAbstractions.synchronize(backend())
-            kernel(backend())(b, seed, ndrange=n, workgroupsize=n)
+            kernel(backend())(b, seed, ndrange = n, workgroupsize = n)
             KernelAbstractions.synchronize(backend())
 
             if seed === nothing || seed === missing
@@ -59,7 +60,7 @@ function random_testsuite(backend)
             a = KernelAbstractions.zeros(backend(), T, n)
             b = KernelAbstractions.zeros(backend(), T, n)
 
-            kernel(backend())(a, b, seed, ndrange=n, workgroupsize=n)
+            kernel(backend())(a, b, seed, ndrange = n, workgroupsize = n)
             KernelAbstractions.synchronize(backend())
 
             @test Array(a) != Array(b)
@@ -79,10 +80,10 @@ function random_testsuite(backend)
                 end
 
                 tx, ty, tz, bx, by, bz = [dim == active_dim ? 3 : 1 for dim in 1:6]
-                gx, gy, gz = tx*bx, ty*by, tz*bz
+                gx, gy, gz = tx * bx, ty * by, tz * bz
                 a = KernelAbstractions.zeros(backend(), T, 3)
 
-                kernel(backend())(a, seed, ndrange=(gx, gy, gz), workgroupsize=(tx, ty, tz))
+                kernel(backend())(a, seed, ndrange = (gx, gy, gz), workgroupsize = (tx, ty, tz))
                 KernelAbstractions.synchronize(backend())
 
                 # NOTE: we don't just generate two numbers and compare them, instead generating a
@@ -103,9 +104,9 @@ function random_testsuite(backend)
         a = KernelAbstractions.zeros(backend(), T, n)
         b = KernelAbstractions.zeros(backend(), T, n)
 
-        kernel(backend())(a, seed, ndrange=n, workgroupsize=n)
+        kernel(backend())(a, seed, ndrange = n, workgroupsize = n)
         KernelAbstractions.synchronize(backend())
-        kernel(backend())(b, seed, ndrange=n, workgroupsize=n)
+        kernel(backend())(b, seed, ndrange = n, workgroupsize = n)
         KernelAbstractions.synchronize(backend())
 
         if seed === nothing || seed === missing
@@ -132,9 +133,9 @@ function random_testsuite(backend)
         a = KernelAbstractions.zeros(backend(), T, n)
         b = KernelAbstractions.zeros(backend(), T, n)
 
-        kernel(backend())(a, seed, ndrange=n, workgroupsize=n)
+        kernel(backend())(a, seed, ndrange = n, workgroupsize = n)
         KernelAbstractions.synchronize(backend())
-        kernel(backend())(b, seed, ndrange=n, workgroupsize=n)
+        kernel(backend())(b, seed, ndrange = n, workgroupsize = n)
         KernelAbstractions.synchronize(backend())
 
         if seed === nothing || seed === missing
@@ -144,7 +145,7 @@ function random_testsuite(backend)
         end
     end
 
-    @testset "rand(::AbstractRange{$T}), seed $seed" for T in (Int32, Int64, UInt32, UInt64), seed in (nothing, #=missing,=# 1234)
+    return @testset "rand(::AbstractRange{$T}), seed $seed" for T in (Int32, Int64, UInt32, UInt64), seed in (nothing, #=missing,=# 1234)
         @kernel function kernel(A::AbstractArray{T}, seed) where {T}
             apply_seed(seed)
             tid = @index(Global, Linear)
@@ -154,9 +155,9 @@ function random_testsuite(backend)
         a = KernelAbstractions.zeros(backend(), T, n)
         b = KernelAbstractions.zeros(backend(), T, n)
 
-        kernel(backend())(a, seed, ndrange=n, workgroupsize=n)
+        kernel(backend())(a, seed, ndrange = n, workgroupsize = n)
         KernelAbstractions.synchronize(backend())
-        kernel(backend())(b, seed, ndrange=n, workgroupsize=n)
+        kernel(backend())(b, seed, ndrange = n, workgroupsize = n)
         KernelAbstractions.synchronize(backend())
 
         if seed === nothing || seed === missing

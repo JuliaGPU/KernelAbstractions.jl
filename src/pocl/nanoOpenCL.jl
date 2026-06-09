@@ -1325,7 +1325,7 @@ function call(
             sizeof(svm_pointers), svm_pointers
         )
     end
-    return enqueue_kernel(k, global_size, local_size; global_work_offset, rng_state, nargs=length(args))
+    return enqueue_kernel(k, global_size, local_size; global_work_offset, rng_state, nargs = length(args))
 end
 
 # convert the argument values to match the kernel's signature (specified by the user)

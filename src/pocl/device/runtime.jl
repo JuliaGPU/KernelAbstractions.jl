@@ -60,7 +60,7 @@ end
 
 # run-time equivalent
 function additional_arg_value(state, name)
-    @dispose ctx=Context() begin
+    return @dispose ctx = Context() begin
         T_state = convert(LLVMType, state)
 
         # create function
@@ -72,7 +72,7 @@ function additional_arg_value(state, name)
         state_intr_ft = function_type(state_intr)
 
         # generate IR
-        @dispose builder=IRBuilder() begin
+        @dispose builder = IRBuilder() begin
             entry = BasicBlock(llvm_f, "entry")
             position!(builder, entry)
 

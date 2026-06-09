@@ -21,7 +21,7 @@ end
 function initialize_rng_state()
     subgroup_id = get_sub_group_id()
     @inbounds global_random_keys()[subgroup_id] = kernel_state().random_seed
-    @inbounds global_random_counters()[subgroup_id] = 0
+    return @inbounds global_random_counters()[subgroup_id] = 0
 end
 
 # generators
@@ -38,11 +38,11 @@ struct Philox2x32{R} <: RandomNumbers.AbstractRNG{UInt64} end
     subgroup_id = get_sub_group_id()
 
     if field === :key
-        @inbounds global_random_keys()[subgroup_id]
+        return @inbounds global_random_keys()[subgroup_id]
     elseif field === :ctr1
-        @inbounds global_random_counters()[subgroup_id]
+        return @inbounds global_random_counters()[subgroup_id]
     elseif field === :ctr2
-        unsafe_trunc(UInt32, get_global_linear_id())
+        return unsafe_trunc(UInt32, get_global_linear_id())
     end
 end
 
@@ -65,7 +65,7 @@ end
 Seed the on-device Philox2x32 generator with an UInt32 number.
 Should be called by at least one thread per warp.
 """
-function Random.seed!(rng::Philox2x32, seed::Integer, counter::Integer=UInt32(0))
+function Random.seed!(rng::Philox2x32, seed::Integer, counter::Integer = UInt32(0))
     rng.key = seed % UInt32
     rng.ctr1 = counter
     return
@@ -95,25 +95,57 @@ end
 
 Generate a byte of random data using the on-device Tausworthe generator.
 """
-function Random.rand(rng::Philox2x32{R},::Type{UInt64}) where {R}
+function Random.rand(rng::Philox2x32{R}, ::Type{UInt64}) where {R}
     ctr1, ctr2, key = rng.ctr1, rng.ctr2, rng.key
 
-    if R > 0                               ctr1, ctr2 = philox2x_round(ctr1, ctr2, key); end
-    if R > 1  key = philox2x_bumpkey(key); ctr1, ctr2 = philox2x_round(ctr1, ctr2, key); end
-    if R > 2  key = philox2x_bumpkey(key); ctr1, ctr2 = philox2x_round(ctr1, ctr2, key); end
-    if R > 3  key = philox2x_bumpkey(key); ctr1, ctr2 = philox2x_round(ctr1, ctr2, key); end
-    if R > 4  key = philox2x_bumpkey(key); ctr1, ctr2 = philox2x_round(ctr1, ctr2, key); end
-    if R > 5  key = philox2x_bumpkey(key); ctr1, ctr2 = philox2x_round(ctr1, ctr2, key); end
-    if R > 6  key = philox2x_bumpkey(key); ctr1, ctr2 = philox2x_round(ctr1, ctr2, key); end
-    if R > 7  key = philox2x_bumpkey(key); ctr1, ctr2 = philox2x_round(ctr1, ctr2, key); end
-    if R > 8  key = philox2x_bumpkey(key); ctr1, ctr2 = philox2x_round(ctr1, ctr2, key); end
-    if R > 9  key = philox2x_bumpkey(key); ctr1, ctr2 = philox2x_round(ctr1, ctr2, key); end
-    if R > 10 key = philox2x_bumpkey(key); ctr1, ctr2 = philox2x_round(ctr1, ctr2, key); end
-    if R > 11 key = philox2x_bumpkey(key); ctr1, ctr2 = philox2x_round(ctr1, ctr2, key); end
-    if R > 12 key = philox2x_bumpkey(key); ctr1, ctr2 = philox2x_round(ctr1, ctr2, key); end
-    if R > 13 key = philox2x_bumpkey(key); ctr1, ctr2 = philox2x_round(ctr1, ctr2, key); end
-    if R > 14 key = philox2x_bumpkey(key); ctr1, ctr2 = philox2x_round(ctr1, ctr2, key); end
-    if R > 15 key = philox2x_bumpkey(key); ctr1, ctr2 = philox2x_round(ctr1, ctr2, key); end
+    if R > 0
+        ctr1, ctr2 = philox2x_round(ctr1, ctr2, key)
+    end
+    if R > 1
+        key = philox2x_bumpkey(key); ctr1, ctr2 = philox2x_round(ctr1, ctr2, key)
+    end
+    if R > 2
+        key = philox2x_bumpkey(key); ctr1, ctr2 = philox2x_round(ctr1, ctr2, key)
+    end
+    if R > 3
+        key = philox2x_bumpkey(key); ctr1, ctr2 = philox2x_round(ctr1, ctr2, key)
+    end
+    if R > 4
+        key = philox2x_bumpkey(key); ctr1, ctr2 = philox2x_round(ctr1, ctr2, key)
+    end
+    if R > 5
+        key = philox2x_bumpkey(key); ctr1, ctr2 = philox2x_round(ctr1, ctr2, key)
+    end
+    if R > 6
+        key = philox2x_bumpkey(key); ctr1, ctr2 = philox2x_round(ctr1, ctr2, key)
+    end
+    if R > 7
+        key = philox2x_bumpkey(key); ctr1, ctr2 = philox2x_round(ctr1, ctr2, key)
+    end
+    if R > 8
+        key = philox2x_bumpkey(key); ctr1, ctr2 = philox2x_round(ctr1, ctr2, key)
+    end
+    if R > 9
+        key = philox2x_bumpkey(key); ctr1, ctr2 = philox2x_round(ctr1, ctr2, key)
+    end
+    if R > 10
+        key = philox2x_bumpkey(key); ctr1, ctr2 = philox2x_round(ctr1, ctr2, key)
+    end
+    if R > 11
+        key = philox2x_bumpkey(key); ctr1, ctr2 = philox2x_round(ctr1, ctr2, key)
+    end
+    if R > 12
+        key = philox2x_bumpkey(key); ctr1, ctr2 = philox2x_round(ctr1, ctr2, key)
+    end
+    if R > 13
+        key = philox2x_bumpkey(key); ctr1, ctr2 = philox2x_round(ctr1, ctr2, key)
+    end
+    if R > 14
+        key = philox2x_bumpkey(key); ctr1, ctr2 = philox2x_round(ctr1, ctr2, key)
+    end
+    if R > 15
+        key = philox2x_bumpkey(key); ctr1, ctr2 = philox2x_round(ctr1, ctr2, key)
+    end
 
     # update the warp counter
     # NOTE: this performs the same update on every thread in the warp, but each warp writes
@@ -127,13 +159,12 @@ function Random.rand(rng::Philox2x32{R},::Type{UInt64}) where {R}
 end
 
 
-
 # a hacky method of exposing constant tables as constant GPU memory
 
 function emit_constant_array(name::Symbol, data::AbstractArray{T}) where {T}
-    @dispose ctx=Context() begin
+    return @dispose ctx = Context() begin
         T_val = convert(LLVMType, T)
-        T_ptr = convert(LLVMType, LLVMPtr{T,AS.UniformConstant})
+        T_ptr = convert(LLVMType, LLVMPtr{T, AS.UniformConstant})
 
         # define function and get LLVM module
         llvm_f, _ = create_function(T_ptr)
@@ -149,7 +180,7 @@ function emit_constant_array(name::Symbol, data::AbstractArray{T}) where {T}
         alignment!(gv, 16)
 
         # generate IR
-        @dispose builder=IRBuilder() begin
+        @dispose builder = IRBuilder() begin
             entry = BasicBlock(llvm_f, "entry")
             position!(builder, entry)
 
@@ -160,17 +191,17 @@ function emit_constant_array(name::Symbol, data::AbstractArray{T}) where {T}
             ret!(builder, untyped_ptr)
         end
 
-        call_function(llvm_f, LLVMPtr{T,AS.UniformConstant})
+        call_function(llvm_f, LLVMPtr{T, AS.UniformConstant})
     end
 end
 
 for var in [:ki, :wi, :fi, :ke, :we, :fe]
     val = getfield(Random, var)
     gpu_var = Symbol("gpu_$var")
-    arr_typ = :(CLDeviceArray{$(eltype(val)),$(ndims(val)),AS.UniformConstant})
+    arr_typ = :(CLDeviceArray{$(eltype(val)), $(ndims(val)), AS.UniformConstant})
     @eval @inline @generated function $gpu_var()
         ptr = emit_constant_array($(QuoteNode(var)), $val)
-        Expr(:call, $arr_typ, $(size(val)), ptr)
+        return Expr(:call, $arr_typ, $(size(val)), ptr)
     end
 end
 
@@ -183,17 +214,17 @@ end
         r &= 0x000fffffffffffff
         rabs = Int64(r >> 1) # One bit for the sign
         idx = rabs & 0xFF
-        x = ifelse(r % Bool, -rabs, rabs)*gpu_wi()[idx+1]
-        rabs < gpu_ki()[idx+1] && return x # 99.3% of the time we return here 1st try
+        x = ifelse(r % Bool, -rabs, rabs) * gpu_wi()[idx + 1]
+        rabs < gpu_ki()[idx + 1] && return x # 99.3% of the time we return here 1st try
         # TODO: This code could be outlined once LLVM supports LDS access in recursively-called functions
         @inbounds if idx == 0
             while true
-                xx = -Random.ziggurat_nor_inv_r*log(Random.rand(rng))
+                xx = -Random.ziggurat_nor_inv_r * log(Random.rand(rng))
                 yy = -log(Random.rand(rng))
-                yy+yy > xx*xx &&
-                    return (rabs >> 8) % Bool ? -Random.ziggurat_nor_r-xx : Random.ziggurat_nor_r+xx
+                yy + yy > xx * xx &&
+                    return (rabs >> 8) % Bool ? -Random.ziggurat_nor_r - xx : Random.ziggurat_nor_r + xx
             end
-        elseif (gpu_fi()[idx] - gpu_fi()[idx+1])*Random.rand(rng) + gpu_fi()[idx+1] < exp(-0.5*x*x)
+        elseif (gpu_fi()[idx] - gpu_fi()[idx + 1]) * Random.rand(rng) + gpu_fi()[idx + 1] < exp(-0.5 * x * x)
             return x # return from the triangular area
         else
             @goto retry
@@ -213,12 +244,12 @@ end
     @inbounds begin
         ri &= 0x000fffffffffffff
         idx = ri & 0xFF
-        x = ri*gpu_we()[idx+1]
-        ri < gpu_ke()[idx+1] && return x # 98.9% of the time we return here 1st try
+        x = ri * gpu_we()[idx + 1]
+        ri < gpu_ke()[idx + 1] && return x # 98.9% of the time we return here 1st try
         # TODO: This code could be outlined once LLVM supports LDS access in recursively-called functions
         @inbounds if idx == 0
             return Random.ziggurat_exp_r - log(Random.rand(rng))
-        elseif (gpu_fe()[idx] - gpu_fe()[idx+1])*Random.rand(rng) + gpu_fe()[idx+1] < exp(-x)
+        elseif (gpu_fe()[idx] - gpu_fe()[idx + 1]) * Random.rand(rng) + gpu_fe()[idx + 1] < exp(-x)
             return x # return from the triangular area
         else
             @goto retry
@@ -230,5 +261,7 @@ end
     @invoke Random.randexp(rng::AbstractRNG, T::Type{<:AbstractFloat})
 end
 
-@device_override Random.Sampler(::Type{<:AbstractRNG}, r::AbstractUnitRange{T},
-                                ::Random.Repetition) where {T<:Union{Int64, UInt64}} = Random.SamplerRangeFast(r)
+@device_override Random.Sampler(
+    ::Type{<:AbstractRNG}, r::AbstractUnitRange{T},
+    ::Random.Repetition
+) where {T <: Union{Int64, UInt64}} = Random.SamplerRangeFast(r)
