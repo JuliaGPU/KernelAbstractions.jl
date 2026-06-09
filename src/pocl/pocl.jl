@@ -42,6 +42,7 @@ end
 
 using GPUCompiler
 import LLVM
+using SPIRV_LLVM_Backend_jll, SPIRV_Tools_jll
 using Adapt
 
 ## device overrides
