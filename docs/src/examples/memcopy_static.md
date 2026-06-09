@@ -1,4 +1,4 @@
-# Memcopy with static NDRange
+# [Memcopy with static NDRange](@id memcopy_static)
 
 The first example simple copies memory from `B` to `A`. In contrast to the previous examples
 it uses a fully static kernel configuration. Specializing the kernel on the iteration range itself.

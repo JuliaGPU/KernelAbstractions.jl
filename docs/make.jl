@@ -1,5 +1,3 @@
-push!(Base.LOAD_PATH, dirname(@__DIR__))
-
 using KernelAbstractions
 using Documenter
 

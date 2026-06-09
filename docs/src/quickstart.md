@@ -43,6 +43,21 @@ all(A .== 2.0)
 All kernels are launched asynchronously.
 The [`synchronize`](@ref) blocks the *host* until the kernel has completed on the backend.
 
+### Static workgroup size and `ndrange`
+
+When the workgroup size and `ndrange` are known ahead of time, pass them to the kernel
+constructor to enable additional compile-time optimizations and avoid supplying them at
+every launch:
+
+```julia
+# workgroup size 32, ndrange (128, 128) — fixed for this kernel object
+kernel = mul2_kernel(dev, 32, size(A))
+kernel(A)  # ndrange inferred from construction
+synchronize(dev)
+```
+
+See also [Memcopy with static NDRange](@ref memcopy_static).
+
 ## Launching kernel on the backend
 
 To launch the kernel on a backend-supported backend `isa(backend, KA.GPU)` (e.g., `CUDABackend()`, `ROCBackend()`, `oneAPIBackend()`, `MetalBackend()`), we generate the kernel
@@ -108,6 +123,38 @@ function mymul(A, B)
 end
 ```
 
-## Using task programming to launch kernels in parallel.
+## Using task programming to launch kernels in parallel
 
-TODO
+As shown in the [Synchronization](@ref) section above, multiple kernels can be enqueued on the
+same backend before a single [`synchronize`](@ref) call. The same pattern extends to Julia's
+task-based parallelism: launch kernels from [`Threads.@spawn`](https://docs.julialang.org/en/stable/base/multi-threading/#Base.Threads.@spawn)
+tasks when you want to overlap kernel execution with other asynchronous host work.
+
+On GPU backends, [`synchronize`](@ref) is **cooperative** — it yields to the Julia scheduler
+rather than blocking inside a driver call, so other tasks can make progress while a kernel runs.
+See [Notes for backend implementations](@ref implementations_notes) for the contract backend authors must follow.
+
+```julia
+function cooperative_wait(task::Task)
+    while !Base.istaskdone(task)
+        yield()
+    end
+    return wait(task)
+end
+
+function exchange_and_compute!(backend, A, B)
+    recv = Threads.@spawn begin
+        mul2_kernel(backend, 64)(A, ndrange=length(A))
+        synchronize(backend)  # cooperative on GPU backends
+    end
+    send = Threads.@spawn begin
+        mul2_kernel(backend, 64)(B, ndrange=length(B))
+        synchronize(backend)
+    end
+    cooperative_wait(recv)
+    cooperative_wait(send)
+end
+```
+
+A full MPI example that overlaps communication with device copies is in
+[`examples/mpi.jl`](https://github.com/JuliaGPU/KernelAbstractions.jl/blob/master/examples/mpi.jl).
