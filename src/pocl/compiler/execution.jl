@@ -4,7 +4,7 @@ export @opencl, clfunction, clconvert
 ## high-level @opencl interface
 
 const MACRO_KWARGS = [:launch]
-const COMPILER_KWARGS = [:kernel, :name, :always_inline]
+const COMPILER_KWARGS = [:kernel, :name, :always_inline, :validate]
 const LAUNCH_KWARGS = [:global_size, :local_size, :queue]
 
 macro opencl(ex...)
