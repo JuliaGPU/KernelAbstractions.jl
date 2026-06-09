@@ -16,7 +16,7 @@ steps:
       julia -e 'println("--- :julia: Developing CUDA")
                 using Pkg
                 url="https://github.com/christiangnrd/CUDA.jl"
-                rev="intrinsics"
+                rev="intrinsicsnew"
                 subdirs = ["CUDACore", "CUDATools", "lib/cusolver", "lib/curand", "lib/cublas", "lib/cufft", "lib/cusparse", "lib/cupti", "lib/nvml", "lib/custatevec", "lib/cudnn", "lib/cutensor", "lib/cutensornet"]
                 Pkg.add([(;url, rev); [(; url, rev, subdir) for subdir in subdirs]])'
       julia -e 'println("--- :julia: Instantiating project")
@@ -83,7 +83,7 @@ steps:
     command: |
       julia -e 'println("--- :julia: Developing Metal")
                 using Pkg
-                Pkg.add(url="https://github.com/JuliaGPU/Metal.jl", rev="kaintr")'
+                Pkg.add(url="https://github.com/JuliaGPU/Metal.jl", rev="kaintrnew")'
       julia -e 'println("--- :julia: Instantiating project")
                 using Pkg
                 Pkg.develop(; path=pwd())' || exit 3
@@ -117,7 +117,7 @@ steps:
     command: |
       julia -e 'println("--- :julia: Developing oneAPI")
                 using Pkg
-                Pkg.add(url="https://github.com/christiangnrd/oneAPI.jl", rev="intrinsics")
+                Pkg.add(url="https://github.com/christiangnrd/oneAPI.jl", rev="intrinsicsnew")
                 Pkg.add(url="https://github.com/christiangnrd/AcceleratedKernels.jl", rev="ka0.10simple")'
       julia -e 'println("--- :julia: Instantiating project")
                 using Pkg
@@ -154,7 +154,7 @@ steps:
                 Pkg.add(url="https://github.com/christiangnrd/AcceleratedKernels.jl", rev="ka0.10simple")'
       julia -e '
                 using Pkg
-                Pkg.add(url="https://github.com/christiangnrd/AMDGPU.jl", rev="intrinsics")
+                Pkg.add(url="https://github.com/christiangnrd/AMDGPU.jl", rev="intrinsicsnew")
                 println("--- :julia: Instantiating project")
                 Pkg.develop(; path=pwd())' || exit 3
 
@@ -187,7 +187,7 @@ steps:
     command: |
       julia -e 'println("--- :julia: Developing OpenCL")
                 using Pkg
-                Pkg.add(url="https://github.com/christiangnrd/OpenCL.jl", rev="intrinsics")
+                Pkg.add(url="https://github.com/christiangnrd/OpenCL.jl", rev="intrinsicsnew")
                 Pkg.develop(; name="SPIRVIntrinsics")'
       julia -e 'println("--- :julia: Instantiating project")
                 using Pkg

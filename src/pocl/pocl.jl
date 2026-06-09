@@ -41,7 +41,7 @@ function queue()
 end
 
 using GPUCompiler
-import LLVM
+import LLVM: LLVM, MDNode, ConstantInt, metadata
 using Adapt
 
 ## device overrides
