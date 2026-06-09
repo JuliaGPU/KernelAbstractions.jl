@@ -3,7 +3,7 @@ using Test
 
 include("testsuite.jl")
 
-@info "Configuration" pocl = KernelAbstractions.POCL.nanoOpenCL.pocl_jll.libpocl
+@info "Configuration" pocl = KernelAbstractions.POCL.nanoOpenCL.pocl_standalone_jll.libpocl
 
 @testset "CPU back-end" begin
     struct CPUBackendArray{T, N, A} end # Fake and unused

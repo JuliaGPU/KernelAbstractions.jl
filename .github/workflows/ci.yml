@@ -66,10 +66,10 @@ jobs:
             julia --project=pocl --color=yes -e '
               using Pkg
               # unversioned
+              # NOTE: the standalone build (ENABLE_ICD=OFF) uses the vendored OpenCL
+              #       headers from PoCL, so OpenCL_jll/OpenCL_Headers_jll are not needed.
               Pkg.add([
                 "SPIRV_Tools_jll",
-                "OpenCL_jll",
-                "OpenCL_Headers_jll",
                 "Hwloc_jll",
                 "CMake_jll",
               ])
@@ -79,16 +79,25 @@ jobs:
       - name: Build PoCL
         if: ${{ matrix.pocl == 'local' }}
         run: |
+            # Build the standalone (OpenCL-less) variant, mirroring the
+            # pocl_standalone_jll build in Yggdrasil (P/pocl/common.jl):
+            #  - ENABLE_ICD=OFF builds a directly-linkable library instead of an ICD driver;
+            #  - RENAME_POCL=ON renames the cl* entrypoints to POcl*, matching the symbols
+            #    nanoOpenCL.jl @ccalls, so PoCL can coexist with a real OpenCL ICD loader;
+            #  - the sed renames the library itself (libOpenCL -> libpocl_standalone), which
+            #    ENABLE_ICD=OFF would otherwise call "OpenCL", colliding with a system loader.
+            # The local build only runs on Linux (see the matrix excludes), where RENAME_POCL
+            # works against upstream pocl/pocl. The JuliaGPU fork + pocl#2189 are only needed
+            # to make the rename work on macOS, which never runs the local build.
+            sed -i 's/set(POCL_LIBRARY_NAME "OpenCL")/set(POCL_LIBRARY_NAME "pocl_standalone")/' pocl/CMakeLists.txt
             julia --project=pocl --color=yes -e '
               using LLVM_full_jll,
-                    SPIRV_Tools_jll, SPIRV_LLVM_Translator_jll,
-                    OpenCL_jll, OpenCL_Headers_jll, CMake_jll
+                    SPIRV_Tools_jll, SPIRV_LLVM_Translator_jll, CMake_jll
               sourcedir = joinpath(@__DIR__, "pocl")
               builddir = joinpath(@__DIR__, "build")
               destdir = joinpath(@__DIR__, "target")
               prefix = []
-              for jll in [SPIRV_Tools_jll, SPIRV_LLVM_Translator_jll,
-                          OpenCL_jll, OpenCL_Headers_jll]
+              for jll in [SPIRV_Tools_jll, SPIRV_LLVM_Translator_jll]
                   push!(prefix, jll.artifact_dir)
               end
               withenv("LD_LIBRARY_PATH" => joinpath(Sys.BINDIR, Base.PRIVATE_LIBDIR)) do
@@ -99,6 +108,8 @@ jobs:
                          -DCMAKE_C_FLAGS="-fdiagnostics-color=always"
                          -DCMAKE_BUILD_TYPE=Debug
                          -DENABLE_TESTS:Bool=OFF
+                         -DENABLE_ICD:Bool=OFF
+                         -DRENAME_POCL:Bool=ON
                          -DSTATIC_LLVM:Bool=On
                          -DPOCL_DEBUG_MESSAGES:Bool=ON
                          -DCMAKE_INSTALL_PREFIX=$destdir
@@ -107,8 +118,8 @@ jobs:
                          -DKERNELLIB_HOST_CPU_VARIANTS=distro```)
                   run(```$(cmake()) --build $builddir --parallel $(Sys.CPU_THREADS) --target install```)
               end'
-            echo '[pocl_jll]' > test/LocalPreferences.toml
-            echo 'libpocl_path="${{ github.workspace }}/target/lib/libpocl.so"' >> test/LocalPreferences.toml
+            echo '[pocl_standalone_jll]' > test/LocalPreferences.toml
+            echo 'libpocl_path="${{ github.workspace }}/target/lib/libpocl_standalone.so"' >> test/LocalPreferences.toml
       - name: "Co-develop Enzyme and KA"
         run: |
           julia -e '
