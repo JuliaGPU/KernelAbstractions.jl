@@ -184,6 +184,11 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DOCUMENTER_KEY: ${{ secrets.DOCUMENTER_KEY }}
+      - name: Upload build artefact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: docs/build
+          name: docs-build
 
   doctests:
     name: Doctests
