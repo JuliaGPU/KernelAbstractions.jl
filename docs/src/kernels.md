@@ -1,7 +1,7 @@
 # Writing kernels
 
 These kernel language constructs are intended to be used inside [`@kernel`](@ref) functions.
-They are not valid in ordinary Julia code (except when using experimental `@kernel cpu=false`).
+They are not valid in ordinary Julia code.
 
 ## Constant arguments
 
