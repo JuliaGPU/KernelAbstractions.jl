@@ -708,6 +708,10 @@ end
     device(backend::Backend)::Int
 
 Return the 1-based index of the currently active device for `backend`.
+
+!!! note
+    Backend implementations **may** implement `device(backend::Backend)::Int` if they support multiple devices.
+    They **must** implement [`ndevices`](@ref KernelAbstractions.ndevices) and [`device!`](@ref KernelAbstractions.device!).
 """
 function device(::Backend)
     return 1
@@ -717,6 +721,10 @@ end
     ndevices(backend::Backend)::Int
 
 Return the number of devices available to `backend`.
+
+!!! note
+    Backend implementations **must** implement `ndevices(backend::Backend)::Int` and [`device!`](@ref KernelAbstractions.device!).
+    They **may** also implement [`device`](@ref KernelAbstractions.device) if they support multiple devices.
 """
 function ndevices(::Backend)
     return 1
@@ -733,6 +741,10 @@ Select the active device for `backend`. `id` is a 1-based device index and must 
 ```julia
 device!(CUDABackend(), 2)  # use the second CUDA device
 ```
+
+!!! note
+    Backend implementations **must** implement `devices!(backend::Backend, id::Int)` and [`ndevices`](@ref KernelAbstractions.ndevices).
+    They **may** also implement [`device`](@ref KernelAbstractions.device) if they support multiple devices.
 """
 function device!(backend::Backend, id::Int)
     if !(0 < id <= ndevices(backend))
