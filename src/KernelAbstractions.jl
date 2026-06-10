@@ -248,14 +248,14 @@ export KernelIntrinsics
 """
     groupsize(ctx)
 
-Return the workgroup size as a tuple. Equivalent to [`@groupsize`](@ref) inside a kernel.
+Return the workgroup size as a tuple.
 """
 function groupsize end
 
 """
     ndrange(ctx)
 
-Return the launch `ndrange` as a tuple. Equivalent to [`@ndrange`](@ref) inside a kernel.
+Return the launch `ndrange` as a tuple.
 """
 function ndrange end
 
