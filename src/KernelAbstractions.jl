@@ -978,9 +978,6 @@ export POCLBackend
 
 CPU backend that compiles kernels to OpenCL via [POCL](https://portablecl.org/) and executes
 them on the host. This is the concrete type behind the [`CPU`](@ref) alias.
-
-Requires a working POCL installation. Use [`functional`](@ref KernelAbstractions.functional)(`CPU()`)
-to check availability at runtime.
 """
 POCLBackend
 
