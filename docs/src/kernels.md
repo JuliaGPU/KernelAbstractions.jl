@@ -103,6 +103,5 @@ kernel = my_kernel(backend, 32, size(A))
 kernel(A)
 ```
 
-On GPU backends, obtain the backend from an array with [`get_backend`](@ref) and always call
-[`synchronize`](@ref) before reading results on the host. See the [Quickstart](@ref) for a full walkthrough and the Examples section of the manual
-for larger patterns.
+Obtain the backend from an array with [`get_backend`](@ref) and always call [`synchronize`](@ref) before reading results on the host.
+See the [Quickstart](@ref) for a full walkthrough and the Examples section of the manual for larger patterns.
