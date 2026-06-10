@@ -13,13 +13,22 @@
 @uniform
 @groupsize
 @ndrange
-synchronize
-allocate
+```
+
+### Reduction
+
+```@docs
+@groupreduce
+@warp_groupreduce
+KernelAbstractions.shfl_down
+KernelAbstractions.supports_warp_reduction
 ```
 
 ## Host language
 
 ```@docs
+synchronize
+allocate
 KernelAbstractions.zeros
 KernelAbstractions.supports_unified
 ```
