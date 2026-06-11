@@ -5,6 +5,7 @@ function quality_assurance_testsuite()
         Aqua.test_all(
             KernelAbstractions;
             stale_deps = (; ignore = [:Enzyme, :EnzymeCore]),
+            deps_compat = (; ignore = [:Enzyme, :EnzymeCore]),
         )
     end
     return nothing
