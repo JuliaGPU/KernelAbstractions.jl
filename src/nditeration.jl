@@ -22,12 +22,6 @@ struct DynamicSize <: _Size end
     StaticSize{S}
 
 Marker type encoding a compile-time workgroup size or `ndrange` as a tuple `S`.
-
-# Example
-
-```julia
-my_kernel(backend, StaticSize(64), StaticSize(1024))
-```
 """
 struct StaticSize{S} <: _Size
     function StaticSize{S}() where {S}
