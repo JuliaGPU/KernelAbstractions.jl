@@ -68,8 +68,13 @@ on the CPU backend via [`@ka_code_llvm`](@ref).
 
 ## Internal
 
+The functionalities in this section are considered internal and not part of the public API contract.
+They are only documented here for developers and contributors of `KernelAbstractions.jl`, but should not be used by end users (and if they do, they should expect breakage without notice).
+
 ```@docs
 KernelAbstractions.partition
 KernelAbstractions.@context
 KernelAbstractions.argconvert
+KernelAbstractions.NDIteration.DynamicSize
+KernelAbstractions.NDIteration.StaticSize
 ```
