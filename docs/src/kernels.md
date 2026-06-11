@@ -11,10 +11,30 @@ the kernel, and that it does not alias any other memory in the kernel. If you ar
 this is similar to `const restrict`.
 
 ```julia
+using KernelAbstractions
+
 @kernel function saxpy!(a, @Const(X), Y)
     I = @index(Global)
     @inbounds Y[I] = a * X[I] + Y[I]
 end
+
+a = 2.0
+X = collect(1.0:8.0)
+Y = fill(1.0, 8)
+saxpy!(CPU(), 8, size(Y))(a, X, Y)
+Y
+
+# output
+
+8-element Vector{Float64}:
+  3.0
+  5.0
+  7.0
+  9.0
+ 11.0
+ 13.0
+ 15.0
+ 17.0
 ```
 
 ## Indexing
@@ -34,7 +54,9 @@ and an optional **kind**:
 | `Cartesian` | `CartesianIndex` for multi-dimensional `ndrange` |
 | `NTuple` | `NTuple` of `Int` indices |
 
-```julia
+```jldoctest
+using KernelAbstractions
+
 @kernel function fill_diagonal!(A, val)
     I = @index(Global, Cartesian)
     if I[1] == I[2]
@@ -42,26 +64,92 @@ and an optional **kind**:
     end
 end
 
-@kernel function linear_example(A)
+A = collect(reshape(1.0:16.0, 4, 4))
+fill_diagonal!(CPU(), 4, size(A))(A, 42)
+A
+
+# output
+
+4×4 Matrix{Float64}:
+ 42.0   5.0   9.0  13.0
+  2.0  42.0  10.0  14.0
+  3.0   7.0  42.0  15.0
+  4.0   8.0  12.0  42.0
+```
+
+```jldoctest
+using KernelAbstractions
+
+@kernel function linear_example!(A)
     I = @index(Global, Linear)   # 1, 2, 3, ...
     g = @index(Group, Linear)    # workgroup id
     l = @index(Local, Linear)    # lane within workgroup
     @inbounds A[I] = g + l
 end
+
+A = collect(1.0:16.0)
+linear_example!(CPU(), 4, size(A))(A)
+A
+
+# output
+
+16-element Vector{Float64}:
+ 2.0
+ 3.0
+ 4.0
+ 5.0
+ 3.0
+ 4.0
+ 5.0
+ 6.0
+ 4.0
+ 5.0
+ 6.0
+ 7.0
+ 5.0
+ 6.0
+ 7.0
+ 8.0
 ```
 
 Inside a kernel, [`@groupsize`](@ref) and [`@ndrange`](@ref) query the launch configuration:
 
-```julia
+```jldoctest
+using KernelAbstractions
+
 @kernel function scale!(A, factor)
-    N = prod(@groupsize())
+    N = @uniform prod(@groupsize())
     I = @index(Global, Linear)
     lmem = @localmem Float32 (N,)
     i = @index(Local, Linear)
     lmem[i] = factor
     @synchronize()
-    @inbounds A[I] = lmem[i]
+    @inbounds A[I] = A[I] * lmem[i]
 end
+
+A = collect(1.0:16.0)
+scale!(CPU(), 8, size(A))(A, 2)
+A
+
+# output
+
+16-element Vector{Float64}:
+  2.0
+  4.0
+  6.0
+  8.0
+ 10.0
+ 12.0
+ 14.0
+ 16.0
+ 18.0
+ 20.0
+ 22.0
+ 24.0
+ 26.0
+ 28.0
+ 30.0
+ 32.0
 ```
 
 ## Local memory, synchronization, and private memory
@@ -72,16 +160,42 @@ local memory is supported at the moment: the allocation size must be known at co
 the workgroup size is fixed when the kernel is constructed). Reads and writes must be
 separated by [`@synchronize`](@ref) if they are performed by different work items:
 
-```julia
+```jldoctest
+using KernelAbstractions
+
 @kernel function reverse_block!(A)
     I = @index(Global, Linear)
     i = @index(Local, Linear)
-    N = prod(@groupsize())
+    N = @uniform prod(@groupsize())
     buf = @localmem Int (N,)
     buf[i] = i
     @synchronize()
     @inbounds A[I] = buf[N - i + 1]
 end
+
+A = collect(1.0:16.0)
+reverse_block!(CPU(), 8, size(A))(A)
+A
+
+# output
+
+16-element Vector{Float64}:
+ 8.0
+ 7.0
+ 6.0
+ 5.0
+ 4.0
+ 3.0
+ 2.0
+ 1.0
+ 8.0
+ 7.0
+ 6.0
+ 5.0
+ 4.0
+ 3.0
+ 2.0
+ 1.0
 ```
 
 [`@private`](@ref) and [`@uniform`](@ref) are deprecated for KernelAbstractions 1.0. Prefer
