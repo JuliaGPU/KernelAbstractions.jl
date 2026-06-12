@@ -33,6 +33,7 @@ steps:
       - exit_status: 3
     env:
       JULIA_PROJECT: "@cuda"
+      JULIA_PKG_PRECOMPILE_AUTO: "0"
 
   # - label: "CUDA Enzyme Julia {{matrix.version}}"
   #   matrix:
@@ -79,10 +80,10 @@ steps:
       - JuliaCI/julia-coverage#v1:
           codecov: true
     command: |
-      JULIA_PKG_PRECOMPILE_AUTO=0 julia -e 'println("--- :julia: Developing Metal")
+      julia -e 'println("--- :julia: Developing Metal")
                 using Pkg
                 Pkg.add(url="https://github.com/JuliaGPU/Metal.jl", rev="kaintr")'
-      JULIA_PKG_PRECOMPILE_AUTO=0 julia -e 'println("--- :julia: Instantiating project")
+      julia -e 'println("--- :julia: Instantiating project")
                 using Pkg
                 Pkg.develop(; path=pwd())' || exit 3
 
@@ -96,6 +97,7 @@ steps:
       - exit_status: 3
     env:
       JULIA_PROJECT: "@metal"
+      JULIA_PKG_PRECOMPILE_AUTO: "0"
 
 
   - label: "oneAPI Julia {{matrix.version}}"
@@ -130,6 +132,7 @@ steps:
       - exit_status: 3
     env:
       JULIA_PROJECT: "@oneAPI"
+      JULIA_PKG_PRECOMPILE_AUTO: "0"
 
   - label: "AMDGPU Julia {{matrix.version}}"
     matrix:
@@ -165,6 +168,7 @@ steps:
     env:
       JULIA_PROJECT: "@amdgpu"
       JULIA_NUM_THREADS: 4
+      JULIA_PKG_PRECOMPILE_AUTO: "0"
 
   - label: "OpenCL Julia {{matrix.version}}"
     matrix:
@@ -199,6 +203,7 @@ steps:
     env:
       OCL_ICD_FILENAMES: "libnvidia-opencl.so.1"
       JULIA_PROJECT: "@OpenCL"
+      JULIA_PKG_PRECOMPILE_AUTO: "0"
 
 env:
   JULIA_PKG_SERVER: "" # it often struggles with our large artifacts
