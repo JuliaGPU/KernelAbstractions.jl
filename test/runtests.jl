@@ -1,7 +1,12 @@
 using KernelAbstractions
 using Test
 
+include("quality_assurance.jl")
 include("testsuite.jl")
+
+@testset "Quality assurance" begin
+    quality_assurance_testsuite()
+end
 
 @info "Configuration" pocl = KernelAbstractions.POCL.nanoOpenCL.pocl_standalone_jll.libpocl
 
