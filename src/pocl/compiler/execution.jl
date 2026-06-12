@@ -146,6 +146,8 @@ end
 
 abstract type AbstractKernel{F, TT} end
 
+pass_arg(@nospecialize dt) = !(GPUCompiler.isghosttype(dt) || Core.Compiler.isconstType(dt))
+
 @inline @generated function (kernel::AbstractKernel{F, TT})(
         args...;
         call_kwargs...
@@ -154,8 +156,7 @@ abstract type AbstractKernel{F, TT} end
     args = (:(kernel.f), (:(clconvert(args[$i], svm_pointers)) for i in 1:length(args))...)
 
     # filter out ghost arguments that shouldn't be passed
-    predicate = dt -> GPUCompiler.isghosttype(dt) || Core.Compiler.isconstType(dt)
-    to_pass = map(!predicate, sig.parameters)
+    to_pass = map(pass_arg, sig.parameters)
     call_t = Type[x[1] for x in zip(sig.parameters, to_pass) if x[2]]
     call_args = Union{Expr, Symbol}[x[1] for x in zip(args, to_pass)            if x[2]]
 
@@ -167,12 +168,15 @@ abstract type AbstractKernel{F, TT} end
         end
     end
 
+    pushfirst!(call_t, KernelState)
+    pushfirst!(call_args, :(KernelState(kernel.rng_state ? Base.rand(UInt32) : UInt32(0))))
+
     # finalize types
     call_tt = Base.to_tuple_type(call_t)
 
     return quote
         svm_pointers = Ptr{Cvoid}[]
-        $cl.clcall(kernel.fun, $call_tt, $(call_args...); svm_pointers, call_kwargs...)
+        $cl.clcall(kernel.fun, $call_tt, $(call_args...); svm_pointers, kernel.rng_state, call_kwargs...)
     end
 end
 
@@ -182,6 +186,7 @@ end
 struct HostKernel{F, TT} <: AbstractKernel{F, TT}
     f::F
     fun::cl.Kernel
+    rng_state::Bool
 end
 
 
@@ -198,15 +203,15 @@ function clfunction(f::F, tt::TT = Tuple{}; kwargs...) where {F, TT}
         cache = compiler_cache(ctx)
         source = methodinstance(F, tt)
         config = compiler_config(dev; kwargs...)::OpenCLCompilerConfig
-        fun = GPUCompiler.cached_compilation(cache, source, config, compile, link)
+        linked = GPUCompiler.cached_compilation(cache, source, config, compile, link)
 
         # create a callable object that captures the function instance. we don't need to think
         # about world age here, as GPUCompiler already does and will return a different object
-        h = hash(fun, hash(f, hash(tt)))
+        h = hash(linked.kernel, hash(f, hash(tt)))
         kernel = get(_kernel_instances, h, nothing)
         if kernel === nothing
             # create the kernel state object
-            kernel = HostKernel{F, tt}(f, fun)
+            kernel = HostKernel{F, tt}(f, linked.kernel, linked.device_rng)
             _kernel_instances[h] = kernel
         end
         return kernel::HostKernel{F, tt}
