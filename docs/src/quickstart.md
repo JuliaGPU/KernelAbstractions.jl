@@ -17,7 +17,9 @@ you can use the [kernel language](@ref api_kernel_language). As an example, the 
 below will multiply each element of the array `A` by `2`. It uses the [`@index`](@ref) macro
 to obtain the global linear index of the current work item.
 
-```julia
+```@example mul2_kernel
+using KernelAbstractions
+
 @kernel function mul2_kernel(A)
   I = @index(Global)
   A[I] = 2 * A[I]
@@ -32,16 +34,32 @@ the second argument being the workgroup size. This returns a generated kernel
 executable that is then executed with the input argument `A` and the additional
 argument being a static `ndrange`.
 
-```julia
+```@example mul2_kernel
 dev = CPU()
 A = ones(1024, 1024)
-ev = mul2_kernel(dev, 64)(A, ndrange=size(A))
+mul2_kernel(dev, 64)(A, ndrange=size(A))
 synchronize(dev)
-all(A .== 2.0)
+@assert all(A .== 2.0)
 ```
 
 All kernels are launched asynchronously.
 The [`synchronize`](@ref) blocks the *host* until the kernel has completed on the backend.
+
+### Static workgroup size and `ndrange`
+
+When the workgroup size and `ndrange` are known ahead of time, pass them to the kernel
+constructor to enable additional compile-time optimizations and avoid supplying them at
+every launch:
+
+```@example mul2_kernel
+# workgroup size 32, ndrange (128, 128) — fixed for this kernel object
+kernel = mul2_kernel(dev, 32, size(A))
+kernel(A)  # ndrange inferred from construction
+synchronize(dev)
+@assert all(A .== 4)
+```
+
+See also [Memcopy with static NDRange](@ref memcopy_static).
 
 ## Launching kernel on the backend
 
@@ -74,7 +92,7 @@ The kernel generation and execution are then
 backend = get_backend(A)
 mul2_kernel(backend, 64)(A, ndrange=size(A))
 synchronize(backend)
-all(A .== 2)
+@assert all(A .== 2)
 ```
 
 ## Synchronization
@@ -85,17 +103,19 @@ all(A .== 2)
 The code around KA may heavily rely on
 [`GPUArrays`](https://github.com/JuliaGPU/GPUArrays.jl), for example, to
 initialize variables.
-```julia
+```@example mul2_kernel
 function mymul(A)
     A .= 1.0
     backend = get_backend(A)
     ev = mul2_kernel(backend, 64)(A, ndrange=size(A))
     synchronize(backend)
-    all(A .== 2.0)
+    @assert all(A .== 2.0)
 end
+
+mymul(A)
 ```
 
-```julia
+```@example mul2_kernel
 function mymul(A, B)
     A .= 1.0
     B .= 3.0
@@ -104,10 +124,44 @@ function mymul(A, B)
     mul2_kernel(backend, 64)(A, ndrange=size(A))
     mul2_kernel(backend, 64)(B, ndrange=size(B))
     synchronize(backend)
-    all(A .+ B .== 8.0)
+    @assert all(A .+ B .== 8.0)
+end
+
+mymul(A, ones(size(A)))
+```
+
+## Using task programming to launch kernels in parallel
+
+As shown in the [Synchronization](@ref) section above, multiple kernels can be enqueued on the
+same backend before a single [`synchronize`](@ref) call. The same pattern extends to Julia's
+task-based parallelism: launch kernels from [`Threads.@spawn`](https://docs.julialang.org/en/stable/base/multi-threading/#Base.Threads.@spawn)
+tasks when you want to overlap kernel execution with other asynchronous host work.
+
+On GPU backends, [`synchronize`](@ref) is **cooperative** — it yields to the Julia scheduler
+rather than blocking inside a driver call, so other tasks can make progress while a kernel runs.
+See [Notes for backend implementations](@ref implementations_notes) for the contract backend authors must follow.
+
+```julia
+function cooperative_wait(task::Task)
+    while !Base.istaskdone(task)
+        yield()
+    end
+    return wait(task)
+end
+
+function exchange_and_compute!(backend, A, B)
+    recv = Threads.@spawn begin
+        mul2_kernel(backend, 64)(A, ndrange=length(A))
+        synchronize(backend)  # cooperative on GPU backends
+    end
+    send = Threads.@spawn begin
+        mul2_kernel(backend, 64)(B, ndrange=length(B))
+        synchronize(backend)
+    end
+    cooperative_wait(recv)
+    cooperative_wait(send)
 end
 ```
 
-## Using task programming to launch kernels in parallel.
-
-TODO
+A full MPI example that overlaps communication with device copies is in
+[`examples/mpi.jl`](https://github.com/JuliaGPU/KernelAbstractions.jl/blob/master/examples/mpi.jl).

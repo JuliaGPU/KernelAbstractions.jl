@@ -10,7 +10,19 @@ struct DynamicCheck end
 struct NoDynamicCheck end
 
 abstract type _Size end
+
+"""
+    DynamicSize
+
+Marker type indicating that a kernel's workgroup size or `ndrange` is chosen at launch time.
+"""
 struct DynamicSize <: _Size end
+
+"""
+    StaticSize{S}
+
+Marker type encoding a compile-time workgroup size or `ndrange` as a tuple `S`.
+"""
 struct StaticSize{S} <: _Size
     function StaticSize{S}() where {S}
         return new{S::Tuple{Vararg{Int}}}()

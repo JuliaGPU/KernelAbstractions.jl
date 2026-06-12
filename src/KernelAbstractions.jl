@@ -18,7 +18,7 @@ using Adapt
 """
     @kernel function f(args) end
 
-Takes a function definition and generates a [`Kernel`](@ref) constructor from it.
+Takes a function definition and generates a [`Kernel`](@ref KernelAbstractions.Kernel) constructor from it.
 The enclosed function is allowed to contain kernel language constructs.
 In order to call it the kernel has first to be specialized on the backend
 and then invoked on the arguments.
@@ -35,18 +35,34 @@ and then invoked on the arguments.
 - [`@synchronize`](@ref)
 - [`@print`](@ref)
 
-# Example:
+# Kernel constructor
+
+After defining a kernel function `f`, call `f(backend[, workgroupsize[, ndrange]])` to obtain a
+[`Kernel`](@ref KernelAbstractions.Kernel) specialized for that backend. Workgroup size and `ndrange` can be fixed at
+construction time (for fewer runtime checks and less recompilation) or supplied at launch:
 
 ```julia
+f(backend)                    # dynamic workgroup size and ndrange
+f(backend, 64)                # static workgroup size of 64
+f(backend, 64, 1024)          # static workgroup size and ndrange
+f(backend, 64, (128, 128))    # multi-dimensional ndrange
+```
+
+# Example
+
+```julia
+using KernelAbstractions
+
 @kernel function vecadd(A, @Const(B))
     I = @index(Global)
     @inbounds A[I] += B[I]
 end
 
+dev = CPU()
 A = ones(1024)
 B = rand(1024)
-vecadd(CPU(), 64)(A, B, ndrange=size(A))
-synchronize(backend)
+vecadd(dev, 64)(A, B, ndrange=length(A))
+synchronize(dev)
 ```
 """
 macro kernel(expr)
@@ -64,7 +80,7 @@ This allows for two different configurations:
 
 - [`@context`](@ref)
 
-!!! warn
+!!! warning
     This is an experimental feature.
 
 !!! note
@@ -195,7 +211,22 @@ function unsafe_free! end
 unsafe_free!(::AbstractArray) = return
 
 """
-Abstract type for all KernelAbstractions backends.
+    Backend
+
+Abstract supertype for all KernelAbstractions backends.
+
+Concrete backends (for example `CUDABackend` from CUDA.jl or [`CPU`](@ref) from this package)
+determine where arrays are allocated and where kernels execute. Use [`get_backend`](@ref) to
+obtain the backend for an array and [`allocate`](@ref) to create storage on a backend.
+
+# Example
+
+```julia
+backend = get_backend(A)
+kernel = my_kernel(backend, 256)
+kernel(A, ndrange=length(A))
+synchronize(backend)
+```
 """
 abstract type Backend end
 
@@ -214,7 +245,18 @@ export KernelIntrinsics
 # - @ndrange
 ###
 
+"""
+    groupsize(ctx)
+
+Return the workgroup size as a tuple.
+"""
 function groupsize end
+
+"""
+    ndrange(ctx)
+
+Return the launch `ndrange` as a tuple.
+"""
 function ndrange end
 
 """
@@ -333,7 +375,7 @@ workgroup. `cond` is not allowed to have any visible sideffects.
   - `GPU`: This synchronization will only occur if the `cond` evaluates.
   - `CPU`: This synchronization will always occur.
 
-!!! warn
+!!! warning
     This variant of the `@synchronize` macro violates the requirement that `@synchronize` must be encountered
     by all workitems of a work-group executing the kernel or by none at all.
     Since v`0.9.34` this version of the macro is deprecated and lowers to `@synchronize()`
@@ -349,7 +391,7 @@ end
 
 Access the hidden context object used by KernelAbstractions.
 
-!!! warn
+!!! warning
     Only valid to be used from a kernel with `cpu=false`.
 
 !!! note
@@ -663,25 +705,46 @@ function priority!(::Backend, prio::Symbol)
 end
 
 """
-    device(::Backend)::Int
+    device(backend::Backend)::Int
 
-Returns the ordinal number of the currently active device starting at one.
+Return the 1-based index of the currently active device for `backend`.
+
+!!! note
+    Backend implementations **may** implement `device(backend::Backend)::Int` if they support multiple devices.
+    They **must** implement [`ndevices`](@ref KernelAbstractions.ndevices) and [`device!`](@ref KernelAbstractions.device!).
 """
 function device(::Backend)
     return 1
 end
 
 """
-    ndevices(::Backend)::Int
+    ndevices(backend::Backend)::Int
 
-Returns the number of devices the backend supports.
+Return the number of devices available to `backend`.
+
+!!! note
+    Backend implementations **must** implement `ndevices(backend::Backend)::Int` and [`device!`](@ref KernelAbstractions.device!).
+    They **may** also implement [`device`](@ref KernelAbstractions.device) if they support multiple devices.
 """
 function ndevices(::Backend)
     return 1
 end
 
 """
-    device!(::Backend, id::Int)
+    device!(backend::Backend, id::Int)
+
+Select the active device for `backend`. `id` is a 1-based device index and must satisfy
+`1 <= id <= ndevices(backend)`.
+
+# Example
+
+```julia
+device!(CUDABackend(), 2)  # use the second CUDA device
+```
+
+!!! note
+    Backend implementations **must** implement `devices!(backend::Backend, id::Int)` and [`ndevices`](@ref KernelAbstractions.ndevices).
+    They **may** also implement [`device`](@ref KernelAbstractions.device) if they support multiple devices.
 """
 function device!(backend::Backend, id::Int)
     if !(0 < id <= ndevices(backend))
@@ -721,9 +784,19 @@ import .NDIteration: get
 """
     Kernel{Backend, WorkgroupSize, NDRange, Func}
 
-Kernel closure struct that is used to represent the backend
-kernel on the host. `WorkgroupSize` is the number of workitems
-in a workgroup.
+Host-side handle for a kernel specialized on a backend, workgroup size, and `ndrange`.
+
+Kernels are created by calling a [`@kernel`](@ref) function on a backend, for example
+`my_kernel(CUDABackend(), 256)`. The returned object is callable:
+
+```julia
+kernel = my_kernel(backend, 64)
+kernel(A, B, ndrange=length(A))   # launch asynchronously
+synchronize(backend)
+```
+
+Use [`workgroupsize`](@ref KernelAbstractions.workgroupsize), [`ndrange`](@ref KernelAbstractions.ndrange),
+and [`backend`](@ref KernelAbstractions.backend) to inspect a kernel's static configuration.
 
 !!! note
     Backend implementations **must** implement:
@@ -741,12 +814,40 @@ function Base.similar(kernel::Kernel{D, WS, ND}, f::F) where {D, WS, ND, F}
     return Kernel{D, WS, ND, F}(kernel.backend, f)
 end
 
-workgroupsize(::Kernel{D, WorkgroupSize}) where {D, WorkgroupSize} = WorkgroupSize
-ndrange(::Kernel{D, WorkgroupSize, NDRange}) where {D, WorkgroupSize, NDRange} = NDRange
-backend(kernel::Kernel) = kernel.backend
+"""
+    workgroupsize(kernel::Kernel)
+
+Return the static workgroup size type parameter of `kernel` (`StaticSize` or `DynamicSize`).
+"""
+function workgroupsize(::Kernel{D, WorkgroupSize}) where {D, WorkgroupSize}
+    return WorkgroupSize
+end
 
 """
-Partition a kernel for the given ndrange and workgroupsize.
+    ndrange(kernel::Kernel)
+
+Return the static `ndrange` type parameter of `kernel` (`StaticSize` or `DynamicSize`).
+"""
+function ndrange(::Kernel{D, WorkgroupSize, NDRange}) where {D, WorkgroupSize, NDRange}
+    return NDRange
+end
+
+"""
+    backend(kernel::Kernel)
+
+Return the [`Backend`](@ref) that `kernel` was constructed for.
+"""
+function backend(kernel::Kernel)
+    return kernel.backend
+end
+
+"""
+    partition(kernel, ndrange, workgroupsize)
+
+Partition the iteration space of `kernel` into workgroups.
+
+Returns the blocked iteration space and whether dynamic bounds-checking is required for the
+last (possibly partial) workgroup. Primarily used by backend implementations and tests.
 """
 @inline function partition(kernel, ndrange, workgroupsize)
     static_ndrange = KernelAbstractions.ndrange(kernel)
@@ -844,9 +945,12 @@ __size(args::Tuple) = Tuple{args...}
 __size(i::Int) = Tuple{i}
 
 """
-    argconvert(::Kernel, arg)
+    argconvert(kernel::Kernel, arg)
 
-Convert arguments to the device side representation.
+Convert `arg` to the device-side representation expected by `kernel`'s backend.
+
+Backend implementations define methods for their array and scalar types. This is called
+automatically when a kernel is launched.
 """
 argconvert(k::Kernel{T}, arg) where {T} =
     error("Don't know how to convert arguments for Kernel{$T}")
@@ -881,6 +985,31 @@ include("pocl/pocl.jl")
 using .POCL
 export POCLBackend
 
+"""
+    POCLBackend()
+
+CPU backend that compiles kernels to OpenCL via [POCL](https://portablecl.org/) and executes
+them on the host. This is the concrete type behind the [`CPU`](@ref) alias.
+"""
+POCLBackend
+
+"""
+    CPU
+
+Type alias for [`POCLBackend`](@ref), the CPU execution backend.
+
+Construct with `CPU()` (equivalent to `POCLBackend()`). Kernels run on the host via POCL/OpenCL
+using the same programming model as GPU backends, which is useful for debugging and for running
+kernel code without a GPU.
+
+# Example
+
+```julia
+A = ones(Float32, 1024)
+mul2_kernel(CPU(), 64)(A, ndrange=length(A))
+synchronize(CPU())
+```
+"""
 const CPU = POCLBackend
 
 # precompile
