@@ -27,8 +27,7 @@ steps:
                 using Pkg
                 Pkg.test("CUDA"; coverage=true, test_args=["core/kernelabstractions"])'
     agents:
-      queue: "juliagpu"
-      cuda: "*"
+      queue: "cuda"
     timeout_in_minutes: 120
     soft_fail:
       - exit_status: 3
@@ -61,8 +60,7 @@ steps:
   #               include("test/extensions/enzyme.jl")
   #               enzyme_testsuite(CUDABackend, CuArray, true)'
   #   agents:
-  #     queue: "juliagpu"
-  #     cuda: "*"
+  #     queue: "cuda"
   #   timeout_in_minutes: 120
   #   soft_fail:
   #     - exit_status: 3
@@ -92,14 +90,13 @@ steps:
                 using Pkg
                 Pkg.test("Metal"; coverage=true, test_args=["kernelabstractions"])'
     agents:
-      queue: "juliaecosystem"
-      os: "macos"
-      arch: "aarch64"
+      queue: "metal"
     timeout_in_minutes: 120
     soft_fail:
       - exit_status: 3
     env:
       JULIA_PROJECT: "@metal"
+
 
   - label: "oneAPI Julia {{matrix.version}}"
     matrix:
@@ -127,8 +124,7 @@ steps:
                 using Pkg
                 Pkg.test("oneAPI"; coverage=true, test_args=["kernelabstractions"])'
     agents:
-      queue: "juliagpu"
-      intel: "*"
+      queue: "oneapi"
     timeout_in_minutes: 120
     soft_fail:
       - exit_status: 3
@@ -162,8 +158,7 @@ steps:
                 using Pkg
                 Pkg.test("AMDGPU"; coverage=true, test_args=["kernelabstractions"])'
     agents:
-      queue: "juliagpu"
-      rocm: "*"
+      queue: "rocm"
     timeout_in_minutes: 120
     soft_fail:
       - exit_status: 3
@@ -197,8 +192,7 @@ steps:
                 using Pkg
                 Pkg.test("OpenCL"; coverage=true, test_args=`--platform=cuda kernelabstractions`)'
     agents:
-      queue: "juliagpu"
-      cuda: "*"
+      queue: "cuda"
     timeout_in_minutes: 120
     soft_fail:
       - exit_status: 3
