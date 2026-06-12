@@ -33,7 +33,7 @@ steps:
       - exit_status: 3
     env:
       JULIA_PROJECT: "@cuda"
-      JULIA_PKG_PRECOMPILE_AUTO: "0"
+      JULIA_PKG_PRECOMPILE_AUTO: false
 
   # - label: "CUDA Enzyme Julia {{matrix.version}}"
   #   matrix:
@@ -97,7 +97,7 @@ steps:
       - exit_status: 3
     env:
       JULIA_PROJECT: "@metal"
-      JULIA_PKG_PRECOMPILE_AUTO: "0"
+      JULIA_PKG_PRECOMPILE_AUTO: false
 
 
   - label: "oneAPI Julia {{matrix.version}}"
@@ -132,7 +132,7 @@ steps:
       - exit_status: 3
     env:
       JULIA_PROJECT: "@oneAPI"
-      JULIA_PKG_PRECOMPILE_AUTO: "0"
+      JULIA_PKG_PRECOMPILE_AUTO: false
 
   - label: "AMDGPU Julia {{matrix.version}}"
     matrix:
@@ -168,7 +168,7 @@ steps:
     env:
       JULIA_PROJECT: "@amdgpu"
       JULIA_NUM_THREADS: 4
-      JULIA_PKG_PRECOMPILE_AUTO: "0"
+      JULIA_PKG_PRECOMPILE_AUTO: false
 
   - label: "OpenCL Julia {{matrix.version}}"
     matrix:
@@ -203,7 +203,7 @@ steps:
     env:
       OCL_ICD_FILENAMES: "libnvidia-opencl.so.1"
       JULIA_PROJECT: "@OpenCL"
-      JULIA_PKG_PRECOMPILE_AUTO: "0"
+      JULIA_PKG_PRECOMPILE_AUTO: false
 
 env:
   JULIA_PKG_SERVER: "" # it often struggles with our large artifacts
