@@ -33,7 +33,6 @@ steps:
       - exit_status: 3
     env:
       JULIA_PROJECT: "@cuda"
-      JULIA_PKG_PRECOMPILE_AUTO: false
 
   # - label: "CUDA Enzyme Julia {{matrix.version}}"
   #   matrix:
@@ -97,8 +96,6 @@ steps:
       - exit_status: 3
     env:
       JULIA_PROJECT: "@metal"
-      JULIA_PKG_PRECOMPILE_AUTO: false
-
 
   - label: "oneAPI Julia {{matrix.version}}"
     matrix:
@@ -132,7 +129,6 @@ steps:
       - exit_status: 3
     env:
       JULIA_PROJECT: "@oneAPI"
-      JULIA_PKG_PRECOMPILE_AUTO: false
 
   - label: "AMDGPU Julia {{matrix.version}}"
     matrix:
@@ -168,7 +164,6 @@ steps:
     env:
       JULIA_PROJECT: "@amdgpu"
       JULIA_NUM_THREADS: 4
-      JULIA_PKG_PRECOMPILE_AUTO: false
 
   - label: "OpenCL Julia {{matrix.version}}"
     matrix:
@@ -203,8 +198,8 @@ steps:
     env:
       OCL_ICD_FILENAMES: "libnvidia-opencl.so.1"
       JULIA_PROJECT: "@OpenCL"
-      JULIA_PKG_PRECOMPILE_AUTO: false
 
 env:
+  JULIA_PKG_PRECOMPILE_AUTO: false
   JULIA_PKG_SERVER: "" # it often struggles with our large artifacts
   SECRET_CODECOV_TOKEN: "c5pjPUwULD2L8ss0gRtjCPiagRlTQ11TdbZP6gIhTPeA/gN5w5/7JvDCg36UpKER6FXnQDeBGGkQafHiLdBaH/FWQ2B2VKErtBarIBJa2zWvKu8mYs9PJzw/qLGT2sMXI9kcao63H6/HAwbslJcY0a5Mg+SwM3M05XqSHgnrHMnbBXysKP6VzFEIX7uoyEKOnoWDj8rGJKFYLW2DBRtd6Yc23ESfFXPAqbS7sgXxwQHKzz20FMQBJUmbiDIzPlk3k2n2TvgAWQ0VNK0e4/UooMbULL3UjY4oaMOF0XpJAnWlmvGgy8gEnZKSVp3ieXy/Ubu7BWwH/BT59wDy6LuDxA==;U2FsdGVkX18Wil69f7qJYu6yU5iNx+Zq8akUcOp+McU1CR4Jw4QBsrUKIF4W4uK+/752FQo40BwFsfnIC8CJ/Q=="
