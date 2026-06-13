@@ -6,6 +6,8 @@ export @index, @groupsize, @ndrange
 export @print
 export Backend, GPU, CPU
 export synchronize, get_backend, allocate
+export profiling_range_active, profiling_range_start, profiling_range_end
+export @profiling_range
 
 import PrecompileTools
 
@@ -193,6 +195,93 @@ After releasing the memory of an array, it should no longer be accessed.
 function unsafe_free! end
 
 unsafe_free!(::AbstractArray) = return
+
+"""
+    profiling_range_active(backend; domain = "KernelAbstractions") -> Bool
+
+Return `true` if `backend` supports profiler range annotations and a profiler
+is currently attached. Callers use this to skip building labels or handles when
+no profiler is listening.
+
+!!! note
+    Backend/profiler integrations **may** override this. The default returns `false`.
+"""
+profiling_range_active(::Any; domain = "KernelAbstractions") = false
+
+"""
+    profiling_range_start(backend, label; domain = "KernelAbstractions") -> id
+
+Start a named profiler range on `backend`. Returns an opaque handle that must
+be passed to [`profiling_range_end`](@ref).
+
+!!! note
+    Backend/profiler integrations **may** override this. The default is a no-op
+    that returns `nothing`.
+"""
+profiling_range_start(::Any, label; domain = "KernelAbstractions") = nothing
+
+"""
+    profiling_range_end(backend, id) -> nothing
+
+End a previously started profiler range identified by `id`.
+
+!!! note
+    Backend/profiler integrations **may** override this. The default is a no-op.
+"""
+profiling_range_end(::Any, id) = nothing
+
+"""
+    @profiling_range backend label [domain=...] expr
+
+Evaluate `expr` inside a profiler range named `label` on `backend`. The range
+is only started when [`profiling_range_active`](@ref) returns `true`, so the
+overhead is a single call when no profiler is attached. An optional `domain`
+keyword groups related ranges; it defaults to `"KernelAbstractions"`.
+
+```julia
+@profiling_range backend "volume integral" begin
+    volume_integral!(du, u, backend)
+end
+
+@profiling_range backend "volume integral" domain="Trixi" begin
+    volume_integral!(du, u, backend)
+end
+```
+"""
+macro profiling_range(args...)
+    length(args) >= 3 ||
+        error("@profiling_range requires at least `backend`, `label`, and an expression")
+    backend = args[1]
+    label = args[2]
+    expr = args[end]
+    domain = "KernelAbstractions"
+    for kw in args[3:(end - 1)]
+        if Meta.isexpr(kw, :(=)) && kw.args[1] === :domain
+            domain = kw.args[2]
+        else
+            error("@profiling_range: unexpected argument `$(kw)`; only `domain=...` is accepted")
+        end
+    end
+    backend_var = gensym(:backend)
+    domain_var = gensym(:domain)
+    active_var = gensym(:active)
+    id_var = gensym(:id)
+    return quote
+        local $backend_var = $(esc(backend))
+        local $domain_var = $(esc(domain))
+        local $active_var = $profiling_range_active($backend_var; domain = $domain_var)
+        local $id_var = $active_var ?
+            $profiling_range_start($backend_var, $(esc(label)); domain = $domain_var) :
+            nothing
+        try
+            $(esc(expr))
+        finally
+            if $active_var
+                $profiling_range_end($backend_var, $id_var)
+            end
+        end
+    end
+end
 
 """
 Abstract type for all KernelAbstractions backends.

@@ -35,6 +35,44 @@ struct NewBackend <: KernelAbstractions.GPU end
     @test KernelAbstractions.functional(backend) === missing
 end
 
+@testset "profiling_range defaults" begin
+    backend = NewBackend()
+
+    @test KernelAbstractions.profiling_range_active(backend) == false
+    @test KernelAbstractions.profiling_range_active(nothing) == false
+
+    @test KernelAbstractions.profiling_range_start(backend, "label") === nothing
+    @test KernelAbstractions.profiling_range_start(backend, "label"; domain = "X") === nothing
+
+    @test KernelAbstractions.profiling_range_end(backend, nothing) === nothing
+
+    @test (@profiling_range backend "label" 1 + 2) == 3
+    @test (@profiling_range backend "label" domain = "Custom" 1 + 2) == 3
+
+    @test_throws ErrorException (@profiling_range backend "label" error("boom"))
+end
+
+@testset "profiling_range IntelITT extension" begin
+    using IntelITT
+
+    cpu = CPU()
+
+    @test KernelAbstractions.profiling_range_active(cpu) isa Bool
+
+    m = which(KernelAbstractions.profiling_range_active, Tuple{CPU})
+    @test parentmodule(m) === Base.get_extension(KernelAbstractions, :IntelITTExt)
+
+    task = KernelAbstractions.profiling_range_start(cpu, "label")
+    @test task !== nothing
+    @test KernelAbstractions.profiling_range_end(cpu, task) === nothing
+
+    ext = Base.get_extension(KernelAbstractions, :IntelITTExt)
+    @test ext.domain_for("Trixi") === ext.domain_for("Trixi")
+
+    @test (@profiling_range cpu "label" 1 + 2) == 3
+    @test (@profiling_range cpu "vi" domain = "Trixi" 7) == 7
+end
+
 
 # include("extensions/enzyme.jl")
 # @static if VERSION >= v"1.7.0"
