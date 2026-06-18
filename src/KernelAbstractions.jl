@@ -665,6 +665,19 @@ function priority!(::Backend, prio::Symbol)
 end
 
 """
+    versioninfo(io::IO=stdout, backend::Backend)::Nothing
+
+Print information about `backend` to `io`. It is up to the backends to
+determine what is relevant.
+
+!!! note
+    Backend implementations **may** implement this function. If they do
+    so, they should implement `versioninfo(io::IO, ::Backend)::Nothing`
+"""
+versioninfo(io::IO, b::Backend) = println(io, "`versioninfo` is not implemented for $b")
+versioninfo(b::Backend) = versioninfo(stdout, b)
+
+"""
     device(::Backend)::Int
 
 Returns the ordinal number of the currently active device starting at one.
