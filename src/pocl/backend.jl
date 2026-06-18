@@ -29,7 +29,7 @@ function KA.versioninfo(io::IO, ::POCLBackend)
     println(io, " - Julia v$(VERSION)")
     for jll in [SPIRV_LLVM_Backend_jll, SPIRV_Tools_jll, cl.pocl_standalone_jll]
         name = string(jll)
-        println(io, " - $(name[1:end-4]): $(pkgversion(jll))")
+        println(io, " - $(name[1:(end - 4)]): $(pkgversion(jll))")
     end
     println(io)
 
