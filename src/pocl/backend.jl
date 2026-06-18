@@ -70,6 +70,7 @@ function KA.versioninfo(io::IO, ::POCLBackend)
             println(io)
         end
     end
+    return
 end
 
 ## Memory Operations
