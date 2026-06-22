@@ -11,8 +11,6 @@ import KernelAbstractions.KernelInterface as KI
 
 import SPIRVIntrinsics
 
-import StaticArrays
-
 import Adapt
 
 
