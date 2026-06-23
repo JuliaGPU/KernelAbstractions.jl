@@ -43,14 +43,14 @@ jobs:
           - os: windows-2022
             pocl: local
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: julia-actions/install-juliaup@v3
         with:
           channel: ${{ matrix.version }}
       - uses: julia-actions/cache@v3
       - name: Checkout pocl
         if: ${{ matrix.pocl == 'local' }}
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: pocl/pocl
           path: pocl
@@ -163,7 +163,7 @@ jobs:
     name: Documentation
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: julia-actions/setup-julia@v3
         with:
           version: '1'
@@ -177,7 +177,7 @@ jobs:
     name: Doctests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: julia-actions/setup-julia@v3
         with:
           version: '1'
