@@ -97,16 +97,12 @@ end
 # Inference barriers
 function __run(obj, ndrange, iterspace, args, dynamic, static_threads)
     N = length(iterspace)
-    Nthreads = Threads.nthreads()
-    if Nthreads == 1
-        len, rem = N, 0
+    nthreads = Threads.nthreads()
+    Nthreads, len, rem = if nthreads == 1
+        1, N, 0
     else
-        len, rem = divrem(N, Nthreads)
-    end
-    # not enough iterations for all the threads?
-    if len == 0
-        Nthreads = N
-        len, rem = 1, 0
+        l, r = divrem(N, nthreads)
+        l == 0 ? (N, 1, 0) : (nthreads, l, r)
     end
     if Nthreads == 1
         __thread_run(1, len, rem, obj, ndrange, iterspace, args, dynamic)

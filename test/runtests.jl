@@ -17,6 +17,11 @@ A = zeros(Int, Threads.nthreads())
 kern_static(CPU(static = true), (1,))(A, ndrange = length(A))
 @test A == 1:Threads.nthreads()
 
+@testset "__run does not box (no per-launch Core.Box)" begin
+    ci = only(code_lowered(KernelAbstractions.__run, NTuple{6, Any}))
+    @test !any(e -> occursin("Box", string(e)), ci.code)
+end
+
 @kernel cpu = false function my_no_cpu_kernel(a)
 end
 @test_throws ErrorException("This kernel is unavailable for backend CPU") my_no_cpu_kernel(CPU())
