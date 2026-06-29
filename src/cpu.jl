@@ -103,6 +103,7 @@ function __run(obj, ndrange, iterspace, args, dynamic, static_threads)
     else
         len, rem = divrem(N, Nthreads)
     end
+    # not enough iterations for all the threads?
     if len == 0
         Nthreads = N
         len, rem = 1, 0
