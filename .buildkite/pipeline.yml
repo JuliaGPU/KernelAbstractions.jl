@@ -21,8 +21,7 @@ steps:
                 using Pkg
                 Pkg.test("CUDA"; coverage=true, test_args=["base/kernelabstractions"])'
     agents:
-      queue: "juliagpu"
-      cuda: "*"
+      queue: "cuda"
     timeout_in_minutes: 120
     soft_fail:
       - exit_status: 3
@@ -53,11 +52,11 @@ steps:
                 include("test/extensions/enzyme.jl")
                 enzyme_testsuite(CUDABackend, CuArray, true)'
     agents:
-      queue: "juliagpu"
-      cuda: "*"
+      queue: "cuda"
     timeout_in_minutes: 120
     soft_fail:
       - exit_status: 3
+
 
   - label: "Metal Julia {{matrix.version}}"
     matrix:
@@ -65,6 +64,8 @@ steps:
         version:
           - "1.10"
           - "1.11"
+          - "1.12"
+          - "1.13"
     plugins:
       - JuliaCI/julia#v1:
           version: "{{matrix.version}}"
@@ -80,12 +81,13 @@ steps:
                 using Pkg
                 Pkg.test("Metal"; coverage=true, test_args=["kernelabstractions"])'
     agents:
-      queue: "juliaecosystem"
-      os: "macos"
-      arch: "aarch64"
+      queue: "metal"
     timeout_in_minutes: 120
     soft_fail:
       - exit_status: 3
+    env:
+      JULIA_PROJECT: "@metal"
+
 
   - label: "oneAPI Julia {{matrix.version}}"
     matrix:
@@ -93,6 +95,8 @@ steps:
         version:
           - "1.10"
           - "1.11"
+          - "1.12"
+          - "1.13"
     plugins:
       - JuliaCI/julia#v1:
           version: "{{matrix.version}}"
@@ -108,8 +112,7 @@ steps:
                 using Pkg
                 Pkg.test("oneAPI"; coverage=true, test_args=["kernelabstractions"])'
     agents:
-      queue: "juliagpu"
-      intel: "*"
+      queue: "oneapi"
     timeout_in_minutes: 120
     soft_fail:
       - exit_status: 3
@@ -120,6 +123,8 @@ steps:
         version:
           - "1.10"
           - "1.11"
+          - "1.12"
+          - "1.13"
     plugins:
       - JuliaCI/julia#v1:
           version: "{{matrix.version}}"
@@ -135,13 +140,43 @@ steps:
                 using Pkg
                 Pkg.test("AMDGPU"; coverage=true, test_args=["kernelabstractions"])'
     agents:
-      queue: "juliagpu"
-      rocm: "*"
+      queue: "rocm"
     timeout_in_minutes: 120
     soft_fail:
       - exit_status: 3
     env:
       JULIA_NUM_THREADS: 4
+
+  - label: "OpenCL Julia {{matrix.version}}"
+    matrix:
+      setup:
+        version:
+          - "1.10"
+          - "1.11"
+          - "1.12"
+          - "1.13"
+    plugins:
+      - JuliaCI/julia#v1:
+          version: "{{matrix.version}}"
+      - JuliaCI/julia-coverage#v1:
+          codecov: true
+    command: |
+      julia -e 'println("--- :julia: Instantiating project")
+                using Pkg
+                Pkg.develop(; path=pwd())
+                Pkg.develop(; name="OpenCL")' || exit 3
+
+      julia -e 'println("+++ :julia: Running tests")
+                using Pkg
+                Pkg.test("OpenCL"; coverage=true, test_args=`--platform=cuda kernelabstractions`)'
+    agents:
+      queue: "cuda"
+    timeout_in_minutes: 120
+    soft_fail:
+      - exit_status: 3
+    env:
+      OCL_ICD_FILENAMES: "libnvidia-opencl.so.1"
+      JULIA_PROJECT: "@OpenCL"
 
 env:
   JULIA_PKG_SERVER: "" # it often struggles with our large artifacts
