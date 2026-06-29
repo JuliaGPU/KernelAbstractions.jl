@@ -97,23 +97,28 @@ end
 # Inference barriers
 function __run(obj, ndrange, iterspace, args, dynamic, static_threads)
     N = length(iterspace)
-    nthreads = Threads.nthreads()
-    Nthreads, len, rem = if nthreads == 1
-        1, N, 0
+    Nthreads = Threads.nthreads()
+    if Nthreads == 1
+        len, rem = N, 0
     else
-        l, r = divrem(N, nthreads)
-        l == 0 ? (N, 1, 0) : (nthreads, l, r)
+        len, rem = divrem(N, Nthreads)
+    end
+    if len == 0
+        Nthreads = N
+        len, rem = 1, 0
     end
     if Nthreads == 1
         __thread_run(1, len, rem, obj, ndrange, iterspace, args, dynamic)
     else
-        if static_threads
-            Threads.@threads :static for tid in 1:Nthreads
-                __thread_run(tid, len, rem, obj, ndrange, iterspace, args, dynamic)
-            end
-        else
-            @sync for tid in 1:Nthreads
-                Threads.@spawn __thread_run(tid, len, rem, obj, ndrange, iterspace, args, dynamic)
+        let len = len, rem = rem, Nthreads = Nthreads
+            if static_threads
+                Threads.@threads :static for tid in 1:Nthreads
+                    __thread_run(tid, len, rem, obj, ndrange, iterspace, args, dynamic)
+                end
+            else
+                @sync for tid in 1:Nthreads
+                    Threads.@spawn __thread_run(tid, len, rem, obj, ndrange, iterspace, args, dynamic)
+                end
             end
         end
     end
