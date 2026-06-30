@@ -255,13 +255,12 @@ end
     @device_override @inline function KI.vload(::Val{N}, arr::MyDeviceArray{T}, idx::Integer) where {N, T}
     ```
 """
+@inline function vload(::Val{N}, arr::Array{T}, idx::Integer) where {N, T}
+    isprimitivetype(T) && N > 1 && return _vload_ptr(Val(N), pointer(arr, idx))
+    _vload_arr(Val(N), arr, idx)
+end
+
 @inline function vload(::Val{N}, arr::AbstractArray{T}, idx::Integer) where {N, T}
-    if isprimitivetype(T) && N > 1
-        p = pointer(arr, idx)
-        if p isa Ptr
-            return _vload_ptr(Val(N), p)
-        end
-    end
     _vload_arr(Val(N), arr, idx)
 end
 
@@ -286,14 +285,16 @@ The same `N`-must-be-`Val`, no-`@Const`, and alignment requirements as
     @device_override @inline function KI.vstore!(arr::MyDeviceArray{T}, idx::Integer, vals::NTuple{N, T}) where {N, T}
     ```
 """
-@inline function vstore!(arr::AbstractArray{T}, idx::Integer, vals::NTuple{N, T}) where {N, T}
+@inline function vstore!(arr::Array{T}, idx::Integer, vals::NTuple{N, T}) where {N, T}
     if isprimitivetype(T) && N > 1
-        p = pointer(arr, idx)
-        if p isa Ptr
-            _vstore_ptr!(p, Val(N), vals)
-            return nothing
-        end
+        _vstore_ptr!(pointer(arr, idx), Val(N), vals)
+        return nothing
     end
+    _vstore_arr!(arr, idx, Val(N), vals)
+    return nothing
+end
+
+@inline function vstore!(arr::AbstractArray{T}, idx::Integer, vals::NTuple{N, T}) where {N, T}
     _vstore_arr!(arr, idx, Val(N), vals)
     return nothing
 end
