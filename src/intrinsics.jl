@@ -156,6 +156,188 @@ end
 function _print end
 
 
+# ── Internal helpers for wide vector loads / stores ───────────────────────────
+#
+# CPU (Ptr{T}): cast pointer to Ptr{NTuple{N, VecElement{T}}} and call
+#   unsafe_load / unsafe_store!.  NTuple{N, VecElement{T}} is Julia's
+#   representation of LLVM's <N x T>; the Julia/LLVM compiler lowers this
+#   to a single wide memory op.
+#
+# GPU / non-Ptr (Core.LLVMPtr): reinterpret the scalar LLVMPtr as a
+#   LLVMPtr{NTuple{N, VecElement{T}}, AS} and issue a single unsafe_load /
+#   unsafe_store! with vector-width alignment.  The LLVM backend lowers this to:
+#     CUDA/NVPTX → ld.global.v4.f32 / st.global.v4.f32
+#     AMDGPU     → global_load_dwordx4 / global_store_dwordx4
+#     POCL/SPIR-V → OpLoad / OpStore on <N x T> — avoids Julia runtime calls
+#                   (pointerref / pointerset are not supported in SPIR-V)
+#   @generated is required to avoid closures — closures in GPU kernels
+#   require heap allocation which the GPU compiler cannot handle.
+#
+# Fallback (N=1, non-primitive types): scalar arr[idx+k] accesses via
+#   @generated to avoid closures.
+
+# CPU path ────────────────────────────────────────────────────────────────────
+
+@inline _vptr(p::Ptr{T}, ::Val{N}) where {T, N} =
+    Ptr{NTuple{N, Core.VecElement{T}}}(p)
+
+@inline function _vload_ptr(::Val{N}, p::Ptr{T}) where {N, T}
+    raw = unsafe_load(_vptr(p, Val(N)))
+    ntuple(i -> raw[i].value, Val(N))
+end
+
+@inline function _vstore_ptr!(p::Ptr{T}, ::Val{N}, vals::NTuple{N, T}) where {N, T}
+    unsafe_store!(_vptr(p, Val(N)), ntuple(i -> Core.VecElement{T}(vals[i]), Val(N)))
+end
+
+# GPU / non-Ptr path — single vector load / store via reinterpret ─────────────
+# Use reinterpret(LLVMPtr{<vector-type>, AS}, p) + unsafe_load/unsafe_store!.
+# This is the same pattern POCL's own CLDeviceArray uses internally.
+
+@generated function _vload_lptr(::Val{N}, p) where {N}
+    T  = p.parameters[1]
+    AS = p.parameters[2]
+    VT = NTuple{N, Core.VecElement{T}}
+    quote
+        p_vec = reinterpret(Core.LLVMPtr{$VT, $AS}, p)
+        raw = unsafe_load(p_vec, 1, Val($(N * sizeof(T))))
+        $(Expr(:tuple, [:(raw[$i].value) for i in 1:N]...))
+    end
+end
+
+@generated function _vstore_lptr!(p, ::Val{N}, vals::NTuple{N}) where {N}
+    T  = p.parameters[1]
+    AS = p.parameters[2]
+    VT = NTuple{N, Core.VecElement{T}}
+    quote
+        p_vec    = reinterpret(Core.LLVMPtr{$VT, $AS}, p)
+        vec_vals = $(Expr(:tuple, [:(Core.VecElement{$T}(vals[$i])) for i in 1:N]...))
+        unsafe_store!(p_vec, vec_vals, 1, Val($(N * sizeof(T))))
+        nothing
+    end
+end
+
+# Scalar fallback — used for N=1, non-primitive types ─────────────────────────
+
+@generated function _vload_arr(::Val{N}, arr::AbstractArray{T}, idx::Integer) where {N, T}
+    Expr(:tuple, [:(Base.@inbounds arr[idx + $(i - 1)]) for i in 1:N]...)
+end
+
+@generated function _vstore_arr!(arr::AbstractArray{T}, idx::Integer,
+                                 ::Val{N}, vals::NTuple{N, T}) where {N, T}
+    Expr(:block,
+        [:(Base.@inbounds arr[idx + $(i - 1)] = vals[$i]) for i in 1:N]...,
+        :nothing)
+end
+
+# ─── vload ───────────────────────────────────────────────────────────────────
+
+"""
+    vload(::Val{N}, arr::AbstractArray{T}, idx::Integer) → NTuple{N, T}
+
+Load `N` consecutive elements starting at 1-based index `idx` from `arr`.
+
+### How it works
+
+On **CPU** (`Ptr{T}` path), for primitive element types this casts
+`pointer(arr, idx)` to a `Ptr{NTuple{N, Core.VecElement{T}}}` and issues
+a single `unsafe_load`.  Julia lowers `NTuple{N, VecElement{T}}` to
+LLVM's `<N x T>` vector type — one wide memory op, no LoadStoreVectorizer.
+
+On **GPU** (and for all arrays whose `pointer` returns a non-CPU pointer),
+the pointer is reinterpreted as `LLVMPtr{NTuple{N, VecElement{T}}, AS}` and a
+single `unsafe_load` with `N*sizeof(T)` alignment is issued.  The backend LLVM
+pipeline lowers this to one wide instruction —
+`ld.global.v4.f32` (CUDA/NVPTX), `global_load_dwordx4` (AMDGPU), or
+`OpLoad <N x T>` (SPIR-V/POCL).
+
+For non-primitive element types or `N == 1` the fallback emits N plain scalar
+array accesses (`arr[idx]`, `arr[idx+1]`, …).
+
+### Requirements
+
+- `N` must be a **compile-time constant** — pass `Val(4)`, not a variable.
+- The array must **not** be annotated with `@Const`; `@Const` inserts `ldg`
+  (read-only cache) intrinsics whose pointer type differs from a plain global
+  load and cannot be widened into a vector load.
+- `idx` must be aligned to `N * sizeof(T)` bytes for the hardware vector
+  instruction to fire.  Julia's allocator guarantees ≥ 64-byte base alignment,
+  so `idx = 1 + k*N` for `k ≥ 0` is always valid.
+
+### Example
+
+```julia
+function reduce_kernel(dst, src)
+    g   = KI.get_global_id().x
+    idx = (g - 1) * 4 + 1
+    v0, v1, v2, v3 = KI.vload(Val(4), src, idx)   # single ld.global.v4.f32
+    KI.vstore!(dst, idx, (v0+1f0, v1+1f0, v2+1f0, v3+1f0))
+    return
+end
+```
+
+!!! note
+    Backends **may** provide an override with additional alignment hints or
+    cache-modifier control:
+    ```julia
+    @device_override @inline KI.vload(::Val{N}, arr::AbstractArray{T}, idx::Integer) where {N, T}
+    ```
+"""
+@inline function vload(::Val{N}, arr::AbstractArray{T}, idx::Integer) where {N, T}
+    if isprimitivetype(T) && N > 1
+        p = pointer(arr, idx)
+        if p isa Ptr
+            _vload_ptr(Val(N), p)
+        else
+            _vload_lptr(Val(N), p)
+        end
+    else
+        # N=1 or non-primitive: scalar loads
+        # (VecElement<1x> is invalid in SPIRV/OpenCL; non-primitive structs
+        #  don't have a simple LLVM vector representation)
+        _vload_arr(Val(N), arr, idx)
+    end
+end
+
+# ─── vstore! ─────────────────────────────────────────────────────────────────
+
+"""
+    vstore!(arr::AbstractArray{T}, idx::Integer, vals::NTuple{N, T})
+
+Store `N` consecutive elements from `vals` into `arr` starting at 1-based
+index `idx`.
+
+The write complement of [`vload`](@ref).  On CPU this wraps `vals` in a
+`<N x T>` LLVM vector and calls a single `unsafe_store!` (one wide store).
+On GPU the pointer is reinterpreted as `LLVMPtr{NTuple{N, VecElement{T}}, AS}`
+and a single `unsafe_store!` with `N*sizeof(T)` alignment issues one wide
+instruction — `st.global.v4.f32` (CUDA), `global_store_dwordx4` (AMDGPU),
+or `OpStore <N x T>` (SPIR-V/POCL).
+
+The same `N`-must-be-`Val`, no-`@Const`, and alignment requirements as
+[`vload`](@ref) apply.
+
+!!! note
+    Backends **may** provide an override:
+    ```julia
+    @device_override @inline KI.vstore!(arr::AbstractArray{T}, idx::Integer, vals::NTuple{N, T}) where {N, T}
+    ```
+"""
+@inline function vstore!(arr::AbstractArray{T}, idx::Integer, vals::NTuple{N, T}) where {N, T}
+    if isprimitivetype(T) && N > 1
+        p = pointer(arr, idx)
+        if p isa Ptr
+            _vstore_ptr!(p, Val(N), vals)
+        else
+            _vstore_lptr!(p, Val(N), vals)
+        end
+    else
+        _vstore_arr!(arr, idx, Val(N), vals)
+    end
+    return nothing
+end
+
+
 """
     Kernel{Backend, Kern}
 

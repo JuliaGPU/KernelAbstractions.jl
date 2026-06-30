@@ -24,6 +24,65 @@ function test_intrinsics_kernel(results)
     return
 end
 
+# ── vload / vstore! kernel helpers ──────────────────────────────────────────
+
+function vload_copy_kernel(dst, src, ::Val{N}) where {N}
+    g   = KI.get_global_id().x
+    idx = (g - 1) * N + 1
+    KI.vstore!(dst, idx, KI.vload(Val(N), src, idx))
+    return
+end
+
+function vload_scale_kernel(dst, src, scale::T, ::Val{N}) where {T, N}
+    g   = KI.get_global_id().x
+    idx = (g - 1) * N + 1
+    vals = KI.vload(Val(N), src, idx)
+    KI.vstore!(dst, idx, ntuple(i -> vals[i] * scale, Val(N)))
+    return
+end
+
+function vload_reduce_kernel(dst, src, ::Val{N}) where {N}
+    g    = KI.get_global_id().x
+    idx  = (g - 1) * N + 1
+    vals = KI.vload(Val(N), src, idx)
+    s    = vals[1]
+    for i in 2:N
+        s += vals[i]
+    end
+    @inbounds dst[g] = s
+    return
+end
+
+function vload_tail_kernel(dst, src, n, ::Val{N}) where {N}
+    g   = KI.get_global_id().x
+    idx = (g - 1) * N + 1
+    if idx + N - 1 <= n
+        KI.vstore!(dst, idx, KI.vload(Val(N), src, idx))
+    else
+        while idx <= n
+            @inbounds dst[idx] = src[idx]
+            idx += 1
+        end
+    end
+    return
+end
+
+function vload_store_load_kernel(arr, v0::T, v1::T, v2::T, v3::T) where {T}
+    KI.vstore!(arr, 1, (v0, v1, v2, v3))
+    loaded = KI.vload(Val(4), arr, 1)
+    KI.vstore!(arr, 5, loaded)
+    return
+end
+
+function vload_mt_copy_kernel(dst, src, ::Val{N}) where {N}
+    local_id  = KI.get_local_id().x
+    group_id  = KI.get_group_id().x
+    groupsize = KI.get_local_size().x
+    idx = ((group_id - 1) * groupsize + (local_id - 1)) * N + 1
+    KI.vstore!(dst, idx, KI.vload(Val(N), src, idx))
+    return
+end
+
 function intrinsics_testsuite(backend, AT)
     @testset "KernelIntrinsics Tests" begin
         @testset "Launch parameters" begin
@@ -121,6 +180,148 @@ function intrinsics_testsuite(backend, AT)
                 expected_local = ((i - 1) % workgroupsize) + 1
                 @test k_data.local_id == expected_local
             end
+        end
+
+        @testset "vload / vstore!" begin
+
+            # ── 1. Roundtrip for every supported (N, T) combination ─────────
+            @testset "roundtrip N=$N T=$T" for N in (1, 2, 4, 8),
+                                               T in (Float32, Float64, Int32, Int64)
+                n   = 64
+                src = AT(T.(1:n))
+                dst = AT(zeros(T, n))
+                KI.@kernel backend() numworkgroups = n ÷ N workgroupsize = 1 vload_copy_kernel(dst, src, Val(N))
+                KernelAbstractions.synchronize(backend())
+                @test Array(dst) == Array(src)
+            end
+
+            # ── 2. N=1 degenerate (scalar vload/vstore!) ────────────────────
+            @testset "N=1 scalar degenerate" begin
+                src = AT(Float32[42.0f0])
+                dst = AT(Float32[0.0f0])
+                KI.@kernel backend() numworkgroups = 1 workgroupsize = 1 vload_copy_kernel(dst, src, Val(1))
+                KernelAbstractions.synchronize(backend())
+                @test Array(dst) == Array(src)
+            end
+
+            # ── 3. Minimal array: size == N (one vload covers whole array) ──
+            @testset "minimal n=N=$N" for N in (1, 2, 4)
+                src = AT(Float32.(1:N))
+                dst = AT(zeros(Float32, N))
+                KI.@kernel backend() numworkgroups = 1 workgroupsize = 1 vload_copy_kernel(dst, src, Val(N))
+                KernelAbstractions.synchronize(backend())
+                @test Array(dst) == Array(src)
+            end
+
+            # ── 4. Arithmetic on loaded values ──────────────────────────────
+            @testset "scale by 2 N=4 Float32" begin
+                n   = 64
+                src = AT(Float32.(1:n))
+                dst = AT(zeros(Float32, n))
+                KI.@kernel backend() numworkgroups = n ÷ 4 workgroupsize = 1 vload_scale_kernel(dst, src, 2.0f0, Val(4))
+                KernelAbstractions.synchronize(backend())
+                @test Array(dst) ≈ 2.0f0 .* Float32.(1:n)
+            end
+
+            @testset "scale by 3 N=2 Float64" begin
+                n   = 64
+                src = AT(Float64.(1:n))
+                dst = AT(zeros(Float64, n))
+                KI.@kernel backend() numworkgroups = n ÷ 2 workgroupsize = 1 vload_scale_kernel(dst, src, 3.0, Val(2))
+                KernelAbstractions.synchronize(backend())
+                @test Array(dst) ≈ 3.0 .* Float64.(1:n)
+            end
+
+            # ── 5. Per-thread reduction: each thread sums its N elements ────
+            @testset "per-thread sum all-ones N=4" begin
+                n     = 64
+                src   = AT(ones(Float32, n))
+                result = AT(zeros(Float32, n ÷ 4))
+                KI.@kernel backend() numworkgroups = n ÷ 4 workgroupsize = 1 vload_reduce_kernel(result, src, Val(4))
+                KernelAbstractions.synchronize(backend())
+                @test all(Array(result) .== 4.0f0)
+            end
+
+            @testset "per-thread sum sequential N=4" begin
+                n      = 64
+                src    = AT(Float32.(1:n))
+                result = AT(zeros(Float32, n ÷ 4))
+                KI.@kernel backend() numworkgroups = n ÷ 4 workgroupsize = 1 vload_reduce_kernel(result, src, Val(4))
+                KernelAbstractions.synchronize(backend())
+                expected = [Float32(sum(4k+1:4k+4)) for k in 0:n÷4-1]
+                @test Array(result) == expected
+            end
+
+            # ── 6. Scalar tail: n not divisible by N ────────────────────────
+            @testset "scalar tail n=$n" for n in (65, 66, 67)
+                src = AT(Float32.(1:n))
+                dst = AT(zeros(Float32, n))
+                KI.@kernel backend() numworkgroups = cld(n, 4) workgroupsize = 1 vload_tail_kernel(dst, src, n, Val(4))
+                KernelAbstractions.synchronize(backend())
+                @test Array(dst) == Array(src)
+            end
+
+            # ── 7. vstore! → vload identity (store then read back) ──────────
+            @testset "vstore then vload identity" begin
+                arr = AT(zeros(Float32, 8))
+                KI.@kernel backend() numworkgroups = 1 workgroupsize = 1 vload_store_load_kernel(arr, 10.0f0, 20.0f0, 30.0f0, 40.0f0)
+                KernelAbstractions.synchronize(backend())
+                h = Array(arr)
+                @test h[1:4] == [10.0f0, 20.0f0, 30.0f0, 40.0f0]
+                @test h[5:8] == h[1:4]
+            end
+
+            # ── 8. All-zeros and all-ones arrays ────────────────────────────
+            @testset "all-zeros roundtrip N=4" begin
+                n   = 64
+                src = AT(zeros(Float32, n))
+                dst = AT(ones(Float32, n))
+                KI.@kernel backend() numworkgroups = n ÷ 4 workgroupsize = 1 vload_copy_kernel(dst, src, Val(4))
+                KernelAbstractions.synchronize(backend())
+                @test all(Array(dst) .== 0.0f0)
+            end
+
+            # ── 9. Large array ───────────────────────────────────────────────
+            @testset "large array n=1024 N=4" begin
+                n   = 1024
+                src = AT(Float32.(1:n))
+                dst = AT(zeros(Float32, n))
+                KI.@kernel backend() numworkgroups = n ÷ 4 workgroupsize = 1 vload_copy_kernel(dst, src, Val(4))
+                KernelAbstractions.synchronize(backend())
+                @test Array(dst) == Array(src)
+            end
+
+            # ── 10. Multi-thread (workgroupsize > 1) ─────────────────────────
+            @testset "multi-thread workgroupsize=4 N=4" begin
+                wgs = 4
+                n   = 128
+                src = AT(Float32.(1:n))
+                dst = AT(zeros(Float32, n))
+                KI.@kernel backend() numworkgroups = n ÷ (wgs * 4) workgroupsize = wgs vload_mt_copy_kernel(dst, src, Val(4))
+                KernelAbstractions.synchronize(backend())
+                @test Array(dst) == Array(src)
+            end
+
+            # ── 11. Integer types ────────────────────────────────────────────
+            @testset "Int32 N=4 arithmetic" begin
+                n   = 64
+                src = AT(Int32.(1:n))
+                dst = AT(zeros(Int32, n))
+                KI.@kernel backend() numworkgroups = n ÷ 4 workgroupsize = 1 vload_scale_kernel(dst, src, Int32(3), Val(4))
+                KernelAbstractions.synchronize(backend())
+                @test Array(dst) == 3 .* Int32.(1:n)
+            end
+
+            # ── 12. Type stability ───────────────────────────────────────────
+            @testset "type stability T=$T N=$N" for T in (Float32, Float64, Int32, Int64), N in (1, 4)
+                n   = N
+                src = AT(T.(1:n))
+                dst = AT(zeros(T, n))
+                KI.@kernel backend() numworkgroups = 1 workgroupsize = 1 vload_copy_kernel(dst, src, Val(N))
+                KernelAbstractions.synchronize(backend())
+                @test eltype(Array(dst)) === T
+            end
+
         end
     end
     return nothing
