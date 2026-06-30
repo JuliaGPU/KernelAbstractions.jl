@@ -241,4 +241,47 @@ end
 
 KA.argconvert(::KA.Kernel{POCLBackend}, arg) = clconvert(arg)
 
+
+## Vectorized memory operations — @device_override for CLDeviceArray
+#
+# These helpers live here (not in KI) because they are POCL-specific: they
+# operate on LLVMPtr with SPIR-V address spaces and use reinterpret +
+# unsafe_load/unsafe_store! to emit OpLoad/OpStore on <N x T> vectors.
+# CUDA.jl, AMDGPU.jl etc. provide analogous overrides for their array types.
+
+@generated function _vload_lptr(::Val{N}, p::Core.LLVMPtr{T, A}) where {N, T, A}
+    VT = NTuple{N, Core.VecElement{T}}
+    quote
+        p_vec = reinterpret(Core.LLVMPtr{$VT, $A}, p)
+        raw   = unsafe_load(p_vec, 1, Val($(N * sizeof(T))))
+        $(Expr(:tuple, [:(raw[$i].value) for i in 1:N]...))
+    end
+end
+
+@generated function _vstore_lptr!(p::Core.LLVMPtr{T, A}, ::Val{N}, vals::NTuple{N}) where {N, T, A}
+    VT = NTuple{N, Core.VecElement{T}}
+    quote
+        p_vec    = reinterpret(Core.LLVMPtr{$VT, $A}, p)
+        vec_vals = $(Expr(:tuple, [:(Core.VecElement{$T}(vals[$i])) for i in 1:N]...))
+        unsafe_store!(p_vec, vec_vals, 1, Val($(N * sizeof(T))))
+        nothing
+    end
+end
+
+@device_override @inline function KI.vload(::Val{N}, arr::CLDeviceArray{T}, idx::Integer) where {N, T}
+    if isprimitivetype(T) && N > 1
+        return _vload_lptr(Val(N), pointer(arr, idx))
+    end
+    KI._vload_arr(Val(N), arr, idx)
+end
+
+@device_override @inline function KI.vstore!(arr::CLDeviceArray{T}, idx::Integer, vals::NTuple{N, T}) where {N, T}
+    if isprimitivetype(T) && N > 1
+        _vstore_lptr!(pointer(arr, idx), Val(N), vals)
+        return nothing
+    end
+    KI._vstore_arr!(arr, idx, Val(N), vals)
+    return nothing
+end
+
 end
