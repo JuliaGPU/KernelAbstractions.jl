@@ -156,25 +156,11 @@ end
 function _print end
 
 
-# ── Internal helpers for wide vector loads / stores ───────────────────────────
-#
-# CPU (Ptr{T}): cast pointer to Ptr{NTuple{N, VecElement{T}}} and call
-#   unsafe_load / unsafe_store!.  NTuple{N, VecElement{T}} is Julia's
-#   representation of LLVM's <N x T>; the Julia/LLVM compiler lowers this
-#   to a single wide memory op.
-#
-# GPU backends: each backend registers a @device_override for its concrete
-#   device array type (e.g. CLDeviceArray in src/pocl/backend.jl,
-#   CuDeviceArray in CUDA.jl's KA extension).  The override uses
-#   reinterpret(LLVMPtr{NTuple{N,VecElement{T}},AS}, ptr) + unsafe_load to
-#   emit a single wide instruction — ld.global.v4.f32 (CUDA/NVPTX),
-#   global_load_dwordx4 (AMDGPU), OpLoad <N x T> (SPIR-V/POCL).
-#   Without an override, vload falls back to scalar indexing.
-#
-# Fallback (N=1, non-primitive types, or any array with no override):
-#   scalar arr[idx+k] accesses via @generated to avoid closures.
-
-# CPU path ────────────────────────────────────────────────────────────────────
+# ── vload / vstore! helpers ───────────────────────────────────────────────────
+# Three dispatch paths (in priority order):
+#   Array{T}         → Ptr cast to Ptr{NTuple{N,VecElement{T}}} + unsafe_load
+#   GPU device array → @device_override per backend (see e.g. pocl/backend.jl)
+#   AbstractArray{T} → N scalar reads/writes (@generated, no closures)
 
 @inline _vptr(p::Ptr{T}, ::Val{N}) where {T, N} =
     Ptr{NTuple{N, Core.VecElement{T}}}(p)
@@ -188,8 +174,6 @@ end
     unsafe_store!(_vptr(p, Val(N)), ntuple(i -> Core.VecElement{T}(vals[i]), Val(N)))
 end
 
-# Scalar fallback — used for N=1, non-primitive types, and GPU arrays
-# without a @device_override ──────────────────────────────────────────────────
 
 @generated function _vload_arr(::Val{N}, arr::AbstractArray{T}, idx::Integer) where {N, T}
     Expr(:tuple, [:(Base.@inbounds arr[idx + $(i - 1)]) for i in 1:N]...)
@@ -202,55 +186,27 @@ end
         :nothing)
 end
 
-# ─── vload ───────────────────────────────────────────────────────────────────
-
 """
     vload(::Val{N}, arr::AbstractArray{T}, idx::Integer) → NTuple{N, T}
 
-Load `N` consecutive elements starting at 1-based index `idx` from `arr`.
+Load `N` consecutive elements starting at 1-based index `idx`.
 
-### How it works
+Emits a single wide memory instruction for primitive `T` and `N > 1`: on CPU
+by casting the pointer to `Ptr{NTuple{N,VecElement{T}}}`, on GPU via a backend
+`@device_override` that reinterprets the `LLVMPtr` with `N*sizeof(T)` alignment
+(lowered to `ld.global.v4.f32` on NVPTX, `OpLoad <N x T>` on SPIR-V, etc.).
+Falls back to `N` scalar reads when no override is registered, `N == 1`, or `T`
+is not a primitive type.
 
-On **CPU** (`Ptr{T}` path), for primitive element types this casts
-`pointer(arr, idx)` to a `Ptr{NTuple{N, Core.VecElement{T}}}` and issues
-a single `unsafe_load`.  Julia lowers `NTuple{N, VecElement{T}}` to
-LLVM's `<N x T>` vector type — one wide memory op.
-
-On **GPU**, each backend registers a `@device_override` for its concrete
-device array type (e.g. `CLDeviceArray` for POCL, `CuDeviceArray` for
-CUDA.jl).  The override reinterprets the pointer as
-`LLVMPtr{NTuple{N, VecElement{T}}, AS}` and issues a single `unsafe_load`
-with `N*sizeof(T)` alignment, which the backend LLVM pipeline lowers to one
-wide instruction — `ld.global.v4.f32` (CUDA/NVPTX),
-`global_load_dwordx4` (AMDGPU), `OpLoad <N x T>` (SPIR-V/POCL).
-
-For non-primitive element types, `N == 1`, or any array type without a
-registered override, the fallback emits N plain scalar array accesses.
-
-### Requirements
-
-- `N` must be a **compile-time constant** — pass `Val(4)`, not a variable.
-- The array must **not** be annotated with `@Const`; `@Const` inserts `ldg`
-  (read-only cache) intrinsics whose pointer type differs from a plain global
-  load and cannot be widened into a vector load.
-- `idx` must be aligned to `N * sizeof(T)` bytes for the hardware vector
-  instruction to fire.  Julia's allocator guarantees ≥ 64-byte base alignment,
-  so `idx = 1 + k*N` for `k ≥ 0` is always valid.
-
-### Example
-
-```julia
-function reduce_kernel(dst, src)
-    g   = KI.get_global_id().x
-    idx = (g - 1) * 4 + 1
-    v0, v1, v2, v3 = KI.vload(Val(4), src, idx)   # single ld.global.v4.f32
-    KI.vstore!(dst, idx, (v0+1f0, v1+1f0, v2+1f0, v3+1f0))
-    return
-end
-```
+**Constraints:**
+- `N` must be a compile-time constant (`Val(4)`, not a variable).
+- `idx` must be `N*sizeof(T)`-aligned; `idx = 1 + k*N` for `k ≥ 0` satisfies
+  this for Julia-allocated arrays (≥ 64-byte base alignment).
+- Do not pass `@Const`-annotated arrays; the read-only-cache pointer type is
+  incompatible with wide loads.
 
 !!! note
-    GPU backends provide the vectorized path via:
+    GPU backends register the vectorized path as:
     ```julia
     @device_override @inline function KI.vload(::Val{N}, arr::MyDeviceArray{T}, idx::Integer) where {N, T}
     ```
@@ -264,23 +220,17 @@ end
     _vload_arr(Val(N), arr, idx)
 end
 
-# ─── vstore! ─────────────────────────────────────────────────────────────────
-
 """
     vstore!(arr::AbstractArray{T}, idx::Integer, vals::NTuple{N, T})
 
 Store `N` consecutive elements from `vals` into `arr` starting at 1-based
 index `idx`.
 
-The write complement of [`vload`](@ref).  On CPU this wraps `vals` in a
-`<N x T>` LLVM vector and issues a single `unsafe_store!`.  GPU backends
-provide wide store via `@device_override` on their device array type.
-
-The same `N`-must-be-`Val`, no-`@Const`, and alignment requirements as
-[`vload`](@ref) apply.
+Write counterpart of [`vload`](@ref); same dispatch logic and alignment
+constraints apply.
 
 !!! note
-    GPU backends provide the vectorized path via:
+    GPU backends register the vectorized path as:
     ```julia
     @device_override @inline function KI.vstore!(arr::MyDeviceArray{T}, idx::Integer, vals::NTuple{N, T}) where {N, T}
     ```

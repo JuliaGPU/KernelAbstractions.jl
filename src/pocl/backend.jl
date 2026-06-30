@@ -242,12 +242,9 @@ end
 KA.argconvert(::KA.Kernel{POCLBackend}, arg) = clconvert(arg)
 
 
-## Vectorized memory operations — @device_override for CLDeviceArray
-#
-# These helpers live here (not in KI) because they are POCL-specific: they
-# operate on LLVMPtr with SPIR-V address spaces and use reinterpret +
-# unsafe_load/unsafe_store! to emit OpLoad/OpStore on <N x T> vectors.
-# CUDA.jl, AMDGPU.jl etc. provide analogous overrides for their array types.
+## KI.vload / KI.vstore! — SPIR-V vector memory ops for CLDeviceArray
+# Reinterprets the LLVMPtr as LLVMPtr{NTuple{N,VecElement{T}},AS} with
+# N*sizeof(T) alignment to emit a single OpLoad/OpStore <N x T> instruction.
 
 @generated function _vload_lptr(::Val{N}, p::Core.LLVMPtr{T, A}) where {N, T, A}
     VT = NTuple{N, Core.VecElement{T}}
