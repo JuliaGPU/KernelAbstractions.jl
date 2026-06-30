@@ -184,9 +184,12 @@ function intrinsics_testsuite(backend, AT)
 
         @testset "vload / vstore!" begin
 
+            fp64 = KernelAbstractions.supports_float64(backend())
+
             # ── 1. Roundtrip for every supported (N, T) combination ─────────
+            vload_types = fp64 ? (Float32, Float64, Int32, Int64) : (Float32, Int32, Int64)
             @testset "roundtrip N=$N T=$T" for N in (1, 2, 4, 8),
-                                               T in (Float32, Float64, Int32, Int64)
+                                               T in vload_types
                 n   = 64
                 src = AT(T.(1:n))
                 dst = AT(zeros(T, n))
@@ -223,13 +226,15 @@ function intrinsics_testsuite(backend, AT)
                 @test Array(dst) ≈ 2.0f0 .* Float32.(1:n)
             end
 
-            @testset "scale by 3 N=2 Float64" begin
-                n   = 64
-                src = AT(Float64.(1:n))
-                dst = AT(zeros(Float64, n))
-                KI.@kernel backend() numworkgroups = n ÷ 2 workgroupsize = 1 vload_scale_kernel(dst, src, 3.0, Val(2))
-                KernelAbstractions.synchronize(backend())
-                @test Array(dst) ≈ 3.0 .* Float64.(1:n)
+            if fp64
+                @testset "scale by 3 N=2 Float64" begin
+                    n   = 64
+                    src = AT(Float64.(1:n))
+                    dst = AT(zeros(Float64, n))
+                    KI.@kernel backend() numworkgroups = n ÷ 2 workgroupsize = 1 vload_scale_kernel(dst, src, 3.0, Val(2))
+                    KernelAbstractions.synchronize(backend())
+                    @test Array(dst) ≈ 3.0 .* Float64.(1:n)
+                end
             end
 
             # ── 5. Per-thread reduction: each thread sums its N elements ────
@@ -313,7 +318,7 @@ function intrinsics_testsuite(backend, AT)
             end
 
             # ── 12. Type stability ───────────────────────────────────────────
-            @testset "type stability T=$T N=$N" for T in (Float32, Float64, Int32, Int64), N in (1, 4)
+            @testset "type stability T=$T N=$N" for T in vload_types, N in (1, 4)
                 n   = N
                 src = AT(T.(1:n))
                 dst = AT(zeros(T, n))
