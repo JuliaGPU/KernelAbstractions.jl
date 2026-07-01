@@ -120,6 +120,12 @@ function unittest_testsuite(Backend, backend_str, backend_mod, BackendArrayT; sk
         synchronize(backend)
         @test all(Array(A) .== LinearIndices(A))
 
+        # linear index for n > 1 dims
+        A = allocate(backend, Int, 40, 40, 40)
+        index_linear_global(backend)(A, ndrange = size(A))
+        synchronize(backend)
+        @test all(Array(A) .== LinearIndices(A))
+
         A = allocate(backend, Int, 8)
         index_linear_local(backend, 8)(A, ndrange = length(A))
         synchronize(backend)

@@ -497,7 +497,9 @@ end
 end
 
 @inline function __index_Global_Linear(ctx)
-    return KI.get_global_id().x
+    I = @inbounds expand(__iterspace(ctx), KI.get_group_id().x, KI.get_local_id().x)
+    # TODO: This is unfortunate, can we get the linear index cheaper
+    return @inbounds LinearIndices(__ndrange(ctx))[I]
 end
 
 @inline function __index_Local_Cartesian(ctx)
