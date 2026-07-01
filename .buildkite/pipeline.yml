@@ -189,7 +189,7 @@ steps:
 
       julia -e 'println("+++ :julia: Running tests")
                 using Pkg
-                Pkg.test("OpenCL"; coverage=true, test_args=`--platform=cuda kernelabstractions`)'
+                Pkg.test("OpenCL"; coverage=true, test_args=`--platform=nvidia nvidia/kernelabstractions`)'
     agents:
       queue: "cuda"
     timeout_in_minutes: 120
