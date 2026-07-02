@@ -156,6 +156,100 @@ end
 function _print end
 
 
+# ── vload / vstore! helpers ───────────────────────────────────────────────────
+# Three dispatch paths (in priority order):
+#   Array{T}         → Ptr cast to Ptr{NTuple{N,VecElement{T}}} + unsafe_load
+#   GPU device array → @device_override per backend (see e.g. pocl/backend.jl)
+#   AbstractArray{T} → N scalar reads/writes (@generated, no closures)
+
+@inline _vptr(p::Ptr{T}, ::Val{N}) where {T, N} =
+    Ptr{NTuple{N, Core.VecElement{T}}}(p)
+
+@inline function _vload_ptr(::Val{N}, p::Ptr{T}) where {N, T}
+    raw = unsafe_load(_vptr(p, Val(N)))
+    ntuple(i -> raw[i].value, Val(N))
+end
+
+@inline function _vstore_ptr!(p::Ptr{T}, ::Val{N}, vals::NTuple{N, T}) where {N, T}
+    unsafe_store!(_vptr(p, Val(N)), ntuple(i -> Core.VecElement{T}(vals[i]), Val(N)))
+end
+
+
+@generated function _vload_arr(::Val{N}, arr::AbstractArray{T}, idx::Integer) where {N, T}
+    Expr(:tuple, [:(Base.@inbounds arr[idx + $(i - 1)]) for i in 1:N]...)
+end
+
+@generated function _vstore_arr!(arr::AbstractArray{T}, idx::Integer,
+                                 ::Val{N}, vals::NTuple{N, T}) where {N, T}
+    Expr(:block,
+        [:(Base.@inbounds arr[idx + $(i - 1)] = vals[$i]) for i in 1:N]...,
+        :nothing)
+end
+
+"""
+    vload(::Val{N}, arr::AbstractArray{T}, idx::Integer) → NTuple{N, T}
+
+Load `N` consecutive elements starting at 1-based index `idx`.
+
+Emits a single wide memory instruction for primitive `T` and `N > 1`: on CPU
+by casting the pointer to `Ptr{NTuple{N,VecElement{T}}}`, on GPU via a backend
+`@device_override` that reinterprets the `LLVMPtr` with `N*sizeof(T)` alignment
+(lowered to `ld.global.v4.f32` on NVPTX, `OpLoad <N x T>` on SPIR-V, etc.).
+Falls back to `N` scalar reads when no override is registered, `N == 1`, or `T`
+is not a primitive type.
+
+**Constraints:**
+- `N` must be a compile-time constant (`Val(4)`, not a variable).
+- `idx` must be `N*sizeof(T)`-aligned; `idx = 1 + k*N` for `k ≥ 0` satisfies
+  this for Julia-allocated arrays (≥ 64-byte base alignment).
+- Do not pass `@Const`-annotated arrays; the read-only-cache pointer type is
+  incompatible with wide loads.
+
+!!! note
+    GPU backends register the vectorized path as:
+    ```julia
+    @device_override @inline function KI.vload(::Val{N}, arr::MyDeviceArray{T}, idx::Integer) where {N, T}
+    ```
+"""
+@inline function vload(::Val{N}, arr::Array{T}, idx::Integer) where {N, T}
+    isprimitivetype(T) && N > 1 && return _vload_ptr(Val(N), pointer(arr, idx))
+    _vload_arr(Val(N), arr, idx)
+end
+
+@inline function vload(::Val{N}, arr::AbstractArray{T}, idx::Integer) where {N, T}
+    _vload_arr(Val(N), arr, idx)
+end
+
+"""
+    vstore!(arr::AbstractArray{T}, idx::Integer, vals::NTuple{N, T})
+
+Store `N` consecutive elements from `vals` into `arr` starting at 1-based
+index `idx`.
+
+Write counterpart of [`vload`](@ref); same dispatch logic and alignment
+constraints apply.
+
+!!! note
+    GPU backends register the vectorized path as:
+    ```julia
+    @device_override @inline function KI.vstore!(arr::MyDeviceArray{T}, idx::Integer, vals::NTuple{N, T}) where {N, T}
+    ```
+"""
+@inline function vstore!(arr::Array{T}, idx::Integer, vals::NTuple{N, T}) where {N, T}
+    if isprimitivetype(T) && N > 1
+        _vstore_ptr!(pointer(arr, idx), Val(N), vals)
+        return nothing
+    end
+    _vstore_arr!(arr, idx, Val(N), vals)
+    return nothing
+end
+
+@inline function vstore!(arr::AbstractArray{T}, idx::Integer, vals::NTuple{N, T}) where {N, T}
+    _vstore_arr!(arr, idx, Val(N), vals)
+    return nothing
+end
+
+
 """
     Kernel{Backend, Kern}
 
