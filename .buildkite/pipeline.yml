@@ -27,8 +27,7 @@ steps:
                 using Pkg
                 Pkg.test("CUDA"; coverage=true, test_args=["core/kernelabstractions"])'
     agents:
-      queue: "juliagpu"
-      cuda: "*"
+      queue: "cuda"
     timeout_in_minutes: 120
     soft_fail:
       - exit_status: 3
@@ -61,8 +60,7 @@ steps:
   #               include("test/extensions/enzyme.jl")
   #               enzyme_testsuite(CUDABackend, CuArray, true)'
   #   agents:
-  #     queue: "juliagpu"
-  #     cuda: "*"
+  #     queue: "cuda"
   #   timeout_in_minutes: 120
   #   soft_fail:
   #     - exit_status: 3
@@ -92,9 +90,7 @@ steps:
                 using Pkg
                 Pkg.test("Metal"; coverage=true, test_args=["kernelabstractions"])'
     agents:
-      queue: "juliaecosystem"
-      os: "macos"
-      arch: "aarch64"
+      queue: "metal"
     timeout_in_minutes: 120
     soft_fail:
       - exit_status: 3
@@ -127,8 +123,7 @@ steps:
                 using Pkg
                 Pkg.test("oneAPI"; coverage=true, test_args=["kernelabstractions"])'
     agents:
-      queue: "juliagpu"
-      intel: "*"
+      queue: "oneapi"
     timeout_in_minutes: 120
     soft_fail:
       - exit_status: 3
@@ -162,8 +157,7 @@ steps:
                 using Pkg
                 Pkg.test("AMDGPU"; coverage=true, test_args=["kernelabstractions"])'
     agents:
-      queue: "juliagpu"
-      rocm: "*"
+      queue: "rocm"
     timeout_in_minutes: 120
     soft_fail:
       - exit_status: 3
@@ -171,7 +165,7 @@ steps:
       JULIA_PROJECT: "@amdgpu"
       JULIA_NUM_THREADS: 4
 
-  - label: "OpenCL Julia {{matrix.version}}"
+  - label: "OpenCL (CUDA) Julia {{matrix.version}}"
     matrix:
       setup:
         version:
@@ -195,10 +189,9 @@ steps:
 
       julia -e 'println("+++ :julia: Running tests")
                 using Pkg
-                Pkg.test("OpenCL"; coverage=true, test_args=`--platform=cuda kernelabstractions`)'
+                Pkg.test("OpenCL"; coverage=true, test_args=`--platform=nvidia nvidia/kernelabstractions`)'
     agents:
-      queue: "juliagpu"
-      cuda: "*"
+      queue: "cuda"
     timeout_in_minutes: 120
     soft_fail:
       - exit_status: 3
@@ -207,5 +200,6 @@ steps:
       JULIA_PROJECT: "@OpenCL"
 
 env:
+  JULIA_PKG_PRECOMPILE_AUTO: false
   JULIA_PKG_SERVER: "" # it often struggles with our large artifacts
   SECRET_CODECOV_TOKEN: "c5pjPUwULD2L8ss0gRtjCPiagRlTQ11TdbZP6gIhTPeA/gN5w5/7JvDCg36UpKER6FXnQDeBGGkQafHiLdBaH/FWQ2B2VKErtBarIBJa2zWvKu8mYs9PJzw/qLGT2sMXI9kcao63H6/HAwbslJcY0a5Mg+SwM3M05XqSHgnrHMnbBXysKP6VzFEIX7uoyEKOnoWDj8rGJKFYLW2DBRtd6Yc23ESfFXPAqbS7sgXxwQHKzz20FMQBJUmbiDIzPlk3k2n2TvgAWQ0VNK0e4/UooMbULL3UjY4oaMOF0XpJAnWlmvGgy8gEnZKSVp3ieXy/Ubu7BWwH/BT59wDy6LuDxA==;U2FsdGVkX18Wil69f7qJYu6yU5iNx+Zq8akUcOp+McU1CR4Jw4QBsrUKIF4W4uK+/752FQo40BwFsfnIC8CJ/Q=="

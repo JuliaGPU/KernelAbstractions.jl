@@ -230,9 +230,9 @@ synchronize(backend)
 """
 abstract type Backend end
 
-include("intrinsics.jl")
-import .KernelIntrinsics as KI
-export KernelIntrinsics
+include("interface.jl")
+import .KernelInterface as KI
+export KernelInterface
 
 ###
 # Kernel language
@@ -539,7 +539,9 @@ end
 end
 
 @inline function __index_Global_Linear(ctx)
-    return KI.get_global_id().x
+    I = @inbounds expand(__iterspace(ctx), KI.get_group_id().x, KI.get_local_id().x)
+    # TODO: This is unfortunate, can we get the linear index cheaper
+    return @inbounds LinearIndices(__ndrange(ctx))[I]
 end
 
 @inline function __index_Local_Cartesian(ctx)
@@ -703,6 +705,19 @@ function priority!(::Backend, prio::Symbol)
     end
     return nothing
 end
+
+"""
+    versioninfo(io::IO=stdout, backend::Backend)::Nothing
+
+Print information about `backend` to `io`. It is up to the backends to
+determine what is relevant.
+
+!!! note
+    Backend implementations **may** implement this function. If they do
+    so, they should implement `versioninfo(io::IO, ::Backend)::Nothing`
+"""
+versioninfo(io::IO, b::Backend) = println(io, "`versioninfo` is not implemented for $b")
+versioninfo(b::Backend) = versioninfo(stdout, b)
 
 """
     device(backend::Backend)::Int

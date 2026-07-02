@@ -4,8 +4,10 @@ using ..POCL
 using ..POCL: @device_override, cl, method_table
 using ..POCL: device, clconvert, clfunction
 
+using SPIRV_LLVM_Backend_jll, SPIRV_Tools_jll
+
 import KernelAbstractions as KA
-import KernelAbstractions.KernelIntrinsics as KI
+import KernelAbstractions.KernelInterface as KI
 
 import StaticArrays
 
@@ -19,6 +21,57 @@ export POCLBackend
 struct POCLBackend <: KA.GPU
 end
 
+function KA.versioninfo(io::IO, ::POCLBackend)
+    println(io, "KernelAbstractions.jl version $(pkgversion(@__MODULE__))")
+    println(io)
+
+    println(io, "Toolchain:")
+    println(io, " - Julia v$(VERSION)")
+    for jll in [SPIRV_LLVM_Backend_jll, SPIRV_Tools_jll, cl.pocl_standalone_jll]
+        name = string(jll)
+        println(io, " - $(name[1:(end - 4)]): $(pkgversion(jll))")
+    end
+    println(io)
+
+    println(io, "Julia packages:")
+    for name in [:GPUCompiler, :LLVM, :SPIRVIntrinsics]
+        mod = getfield(POCL, name)
+        println(io, "- $(name): $(Base.pkgversion(mod))")
+    end
+    println(io)
+
+    println(io, "POCL Version: ")
+    for platform in cl.platforms()
+        print(io, "  OpenCL $(platform.opencl_version.major).$(platform.opencl_version.minor)")
+        if !isempty(platform.version)
+            print(io, ", $(platform.version)")
+        end
+        println(io)
+
+        for device in cl.devices(platform)
+            print(io, "  · $(device.name)")
+
+            # show a list of tags
+            tags = []
+            ## relevant extensions
+            if in("cl_khr_fp16", device.extensions)
+                push!(tags, "fp16")
+            end
+            if in("cl_khr_fp64", device.extensions)
+                push!(tags, "fp64")
+            end
+            if in("cl_khr_il_program", device.extensions)
+                push!(tags, "il")
+            end
+            ## render
+            if !isempty(tags)
+                print(io, " (", join(tags, ", "), ")")
+            end
+            println(io)
+        end
+    end
+    return
+end
 
 ## Memory Operations
 

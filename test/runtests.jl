@@ -3,6 +3,7 @@ using Test
 
 include("testsuite.jl")
 
+KernelAbstractions.versioninfo(POCLBackend())
 @info "Configuration" pocl = KernelAbstractions.POCL.nanoOpenCL.pocl_standalone_jll.libpocl
 
 @testset "CPU back-end" begin

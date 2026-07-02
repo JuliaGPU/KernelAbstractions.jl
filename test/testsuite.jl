@@ -1,7 +1,7 @@
 module Testsuite
 
 using ..KernelAbstractions
-import ..KernelAbstractions.KernelIntrinsics as KI
+import ..KernelAbstractions.KernelInterface as KI
 using ..Test
 
 # We can't add test-dependencies withouth breaking backend packages
@@ -27,7 +27,7 @@ end
 
 
 include("test.jl")
-include("intrinsics.jl")
+include("interface.jl")
 include("localmem.jl")
 include("private.jl")
 include("unroll.jl")
@@ -39,6 +39,7 @@ include("reflection.jl")
 include("examples.jl")
 include("convert.jl")
 include("specialfunctions.jl")
+include("random.jl")
 
 function testsuite(backend, backend_str, backend_mod, AT, DAT; skip_tests = Set{String}())
     @conditional_testset "Unittests" skip_tests begin
@@ -49,8 +50,8 @@ function testsuite(backend, backend_str, backend_mod, AT, DAT; skip_tests = Set{
         specialfunctions_testsuite(backend)
     end
 
-    @conditional_testset "Intrinsics" skip_tests begin
-        intrinsics_testsuite(backend, AT)
+    @conditional_testset "Interface" skip_tests begin
+        interface_testsuite(backend, AT)
     end
 
     @conditional_testset "Localmem" skip_tests begin
@@ -91,6 +92,10 @@ function testsuite(backend, backend_str, backend_mod, AT, DAT; skip_tests = Set{
 
     @conditional_testset "Examples" skip_tests begin
         examples_testsuite(backend, backend_str)
+    end
+
+    @conditional_testset "Random" skip_tests begin
+        random_testsuite(backend)
     end
 
     return
