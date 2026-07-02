@@ -32,6 +32,7 @@ KernelAbstractions.copyto!
 KernelAbstractions.pagelock!
 KernelAbstractions.unsafe_free!
 KernelAbstractions.functional
+KernelAbstractions.versioninfo
 KernelAbstractions.supports_unified
 KernelAbstractions.supports_atomics
 KernelAbstractions.supports_float64
