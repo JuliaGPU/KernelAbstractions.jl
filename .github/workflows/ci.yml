@@ -182,7 +182,7 @@ jobs:
         run: |
           julia -e 'println("--- :julia: Developing OpenCL")
                 using Pkg
-                Pkg.add(url="https://github.com/christiangnrd/OpenCL.jl", rev="intrinsics")
+                Pkg.add(url="https://github.com/christiangnrd/OpenCL.jl", rev="intrinsicsnew")
                 Pkg.develop(; name="SPIRVIntrinsics")'
       - name: "Instantiating project"
         run: |
