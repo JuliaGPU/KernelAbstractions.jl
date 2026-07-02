@@ -165,7 +165,7 @@ steps:
       JULIA_PROJECT: "@amdgpu"
       JULIA_NUM_THREADS: 4
 
-  - label: "OpenCL Julia {{matrix.version}}"
+  - label: "OpenCL (CUDA) Julia {{matrix.version}}"
     matrix:
       setup:
         version:
