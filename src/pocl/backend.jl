@@ -5,7 +5,7 @@ using ..POCL: @device_override, cl, method_table
 using ..POCL: device, clconvert, clfunction
 
 import KernelAbstractions as KA
-import KernelAbstractions.KernelIntrinsics as KI
+import KernelAbstractions.KernelInterface as KI
 
 import StaticArrays
 

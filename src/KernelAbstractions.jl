@@ -199,9 +199,9 @@ Abstract type for all KernelAbstractions backends.
 """
 abstract type Backend end
 
-include("intrinsics.jl")
-import .KernelIntrinsics as KI
-export KernelIntrinsics
+include("interface.jl")
+import .KernelInterface as KI
+export KernelInterface
 
 ###
 # Kernel language

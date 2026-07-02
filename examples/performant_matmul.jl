@@ -1,5 +1,5 @@
 using KernelAbstractions
-import KernelAbstractions.KernelIntrinsics as KI
+import KernelAbstractions.KernelInterface as KI
 
 using StaticArrays
 using Test
