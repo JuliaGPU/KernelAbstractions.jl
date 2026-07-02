@@ -1,4 +1,4 @@
-import KernelAbstractions.KernelIntrinsics as KI
+import KernelAbstractions.KernelInterface as KI
 
 struct KernelData
     global_size::Int
@@ -8,7 +8,7 @@ struct KernelData
     num_groups::Int
     group_id::Int
 end
-function test_intrinsics_kernel(results)
+function test_interface_kernel(results)
     i = KI.get_global_id().x
 
     if i <= length(results)
@@ -24,8 +24,8 @@ function test_intrinsics_kernel(results)
     return
 end
 
-function intrinsics_testsuite(backend, AT)
-    @testset "KernelIntrinsics Tests" begin
+function interface_testsuite(backend, AT)
+    @testset "KernelInterface Tests" begin
         @testset "Launch parameters" begin
             # 1d
             function launch_kernel1d(arr)
@@ -80,7 +80,7 @@ function intrinsics_testsuite(backend, AT)
             @test_throws ArgumentError (KI.@kernel backend() numworkgroups = (2, 2, 2) workgroupsize = (2, 2, 2, 2) launch_kernel3d(arr3d))
         end
 
-        @testset "Basic intrinsics functionality" begin
+        @testset "Basic interface functionality" begin
 
             @test KI.max_work_group_size(backend()) isa Int
             @test KI.multiprocessor_count(backend()) isa Int
@@ -90,7 +90,7 @@ function intrinsics_testsuite(backend, AT)
             numworkgroups = 4
             N = workgroupsize * numworkgroups
             results = AT(Vector{KernelData}(undef, N))
-            kernel = KI.@kernel backend() launch = false test_intrinsics_kernel(results)
+            kernel = KI.@kernel backend() launch = false test_interface_kernel(results)
 
             @test KI.kernel_max_work_group_size(kernel) isa Int
             @test KI.kernel_max_work_group_size(kernel; max_work_items = 1) == 1

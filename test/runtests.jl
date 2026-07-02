@@ -8,6 +8,7 @@ include("testsuite.jl")
     quality_assurance_testsuite()
 end
 
+KernelAbstractions.versioninfo(POCLBackend())
 @info "Configuration" pocl = KernelAbstractions.POCL.nanoOpenCL.pocl_standalone_jll.libpocl
 
 @testset "CPU back-end" begin
