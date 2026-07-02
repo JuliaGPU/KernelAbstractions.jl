@@ -182,6 +182,7 @@ function interface_testsuite(backend, AT)
             end
         end
 
+    if !KI.supports_subgroups(backend())
         @testset "Sub-groups" begin
             @test KI.sub_group_size(backend()) isa Int
 
@@ -232,6 +233,7 @@ function interface_testsuite(backend, AT)
                 @test sum(a) ≈ b[1]
             end
         end
-    end
+    end # if !KI.supports_subgroups(backend())
+    end # @testset "KernelInterface Tests" begin
     return nothing
 end

@@ -648,6 +648,17 @@ function ones(backend::Backend, ::Type{T}, dims::Tuple; kwargs...) where {T}
 end
 
 """
+    supports_subgroups(::Backend)::Bool
+
+Returns whether subgroups are supported by the backend.
+
+!!! note
+    Backend implementations **should** implement this function
+    only if they **do not** support subgroups.
+"""
+supports_subgroups(::Backend) = true
+
+"""
     supports_unified(::Backend)::Bool
 
 Returns whether unified memory arrays are supported by the backend.
