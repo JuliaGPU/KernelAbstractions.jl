@@ -230,6 +230,9 @@ function KI.max_work_group_size(::POCLBackend)::Int
     return Int(device().max_work_group_size)
 end
 function KI.sub_group_size(::POCLBackend)::Int
+    # POCL can technically support any sub_group size.
+    #  Check for common values used on GPUs then
+    #  return 1 otherwise
     sg_sizes = cl.device().sub_group_sizes
     if 32 in sg_sizes
         return 32
