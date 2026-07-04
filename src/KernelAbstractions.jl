@@ -39,7 +39,8 @@ and then invoked on the arguments.
 
 After defining a kernel function `f`, call `f(backend[, workgroupsize[, ndrange]])` to obtain a
 [`Kernel`](@ref KernelAbstractions.Kernel) specialized for that backend. Workgroup size and `ndrange` can be fixed at
-construction time (for fewer runtime checks and less recompilation) or supplied at launch:
+construction time (enabling size-specific compile-time optimizations and fewer runtime checks,
+at the cost of recompilation when the sizes change) or supplied at launch:
 
 ```julia
 f(backend)                    # dynamic workgroup size and ndrange
@@ -309,9 +310,6 @@ For storage that only persists between `@synchronize` statements, an `MArray` ca
 instead.
 
 See also [`@uniform`](@ref).
-
-!!! note
-    `@private` is deprecated for KernelAbstractions 1.0
 """
 macro private(T, dims)
     if dims isa Integer
@@ -327,9 +325,6 @@ end
 
 Creates a private local of `mem` per item in the workgroup. This can be safely used
 across [`@synchronize`](@ref) statements.
-
-!!! note
-    `@private` is deprecated for KernelAbstractions 1.0
 """
 macro private(expr)
     return esc(expr)
@@ -340,9 +335,6 @@ end
 
 `expr` is evaluated outside the workitem scope. This is useful for variable declarations
 that span workitems, or are reused across `@synchronize` statements.
-
-!!! note
-    `@uniform` is deprecated for KernelAbstractions 1.0
 """
 macro uniform(value)
     return esc(value)
@@ -725,8 +717,9 @@ versioninfo(b::Backend) = versioninfo(stdout, b)
 Return the 1-based index of the currently active device for `backend`.
 
 !!! note
-    Backend implementations **may** implement `device(backend::Backend)::Int` if they support multiple devices.
-    They **must** implement [`ndevices`](@ref KernelAbstractions.ndevices) and [`device!`](@ref KernelAbstractions.device!).
+    The default implementation assumes a single device. Backends supporting multiple devices
+    **must** implement `device(backend::Backend)::Int`, [`ndevices`](@ref KernelAbstractions.ndevices),
+    and [`device!`](@ref KernelAbstractions.device!).
 """
 function device(::Backend)
     return 1
@@ -738,8 +731,9 @@ end
 Return the number of devices available to `backend`.
 
 !!! note
-    Backend implementations **must** implement `ndevices(backend::Backend)::Int` and [`device!`](@ref KernelAbstractions.device!).
-    They **may** also implement [`device`](@ref KernelAbstractions.device) if they support multiple devices.
+    The default implementation assumes a single device. Backends supporting multiple devices
+    **must** implement `ndevices(backend::Backend)::Int`, [`device`](@ref KernelAbstractions.device),
+    and [`device!`](@ref KernelAbstractions.device!).
 """
 function ndevices(::Backend)
     return 1
@@ -758,8 +752,9 @@ device!(CUDABackend(), 2)  # use the second CUDA device
 ```
 
 !!! note
-    Backend implementations **must** implement `devices!(backend::Backend, id::Int)` and [`ndevices`](@ref KernelAbstractions.ndevices).
-    They **may** also implement [`device`](@ref KernelAbstractions.device) if they support multiple devices.
+    The default implementation assumes a single device. Backends supporting multiple devices
+    **must** implement `device!(backend::Backend, id::Int)`, [`ndevices`](@ref KernelAbstractions.ndevices),
+    and [`device`](@ref KernelAbstractions.device).
 """
 function device!(backend::Backend, id::Int)
     if !(0 < id <= ndevices(backend))

@@ -10,7 +10,7 @@ the compiler that the memory accessed through that argument will not be written 
 the kernel, and that it does not alias any other memory in the kernel. If you are used to CUDA C,
 this is similar to `const restrict`.
 
-```julia
+```jldoctest
 using KernelAbstractions
 
 @kernel function saxpy!(a, @Const(X), Y)
@@ -21,7 +21,9 @@ end
 a = 2.0
 X = collect(1.0:8.0)
 Y = fill(1.0, 8)
-saxpy!(CPU(), 8, size(Y))(a, X, Y)
+backend = CPU()
+saxpy!(backend, 8, size(Y))(a, X, Y)
+synchronize(backend)
 Y
 
 # output
@@ -65,7 +67,9 @@ using KernelAbstractions
 end
 
 A = collect(reshape(1.0:16.0, 4, 4))
-fill_diagonal!(CPU(), 4, size(A))(A, 42)
+backend = CPU()
+fill_diagonal!(backend, 4, size(A))(A, 42)
+synchronize(backend)
 A
 
 # output
@@ -83,12 +87,14 @@ using KernelAbstractions
 @kernel function linear_example!(A)
     I = @index(Global, Linear)   # 1, 2, 3, ...
     g = @index(Group, Linear)    # workgroup id
-    l = @index(Local, Linear)    # lane within workgroup
+    l = @index(Local, Linear)    # work item within workgroup
     @inbounds A[I] = g + l
 end
 
 A = collect(1.0:16.0)
-linear_example!(CPU(), 4, size(A))(A)
+backend = CPU()
+linear_example!(backend, 4, size(A))(A)
+synchronize(backend)
 A
 
 # output
@@ -128,7 +134,9 @@ using KernelAbstractions
 end
 
 A = collect(1.0:16.0)
-scale!(CPU(), 8, size(A))(A, 2)
+backend = CPU()
+scale!(backend, 8, size(A))(A, 2)
+synchronize(backend)
 A
 
 # output
@@ -174,7 +182,9 @@ using KernelAbstractions
 end
 
 A = collect(1.0:16.0)
-reverse_block!(CPU(), 8, size(A))(A)
+backend = CPU()
+reverse_block!(backend, 8, size(A))(A)
+synchronize(backend)
 A
 
 # output
@@ -198,8 +208,10 @@ A
  1.0
 ```
 
-[`@private`](@ref) and [`@uniform`](@ref) are deprecated for KernelAbstractions 1.0. Prefer
-`MArray` for per-lane scratch storage that does not need to survive across `@synchronize`.
+[`@private`](@ref) declares per-work-item storage that survives across [`@synchronize`](@ref)
+statements, and [`@uniform`](@ref) evaluates an expression outside the work-item scope so it
+can be reused across `@synchronize` statements. For scratch storage that does not need to
+survive across `@synchronize`, an `MArray` can be used instead.
 
 ## Launching kernels
 
@@ -215,7 +227,7 @@ kernel(A, ndrange=size(A))
 kernel = my_kernel(backend, 256)
 kernel(A, ndrange=size(A))
 
-# static workgroup size and ndrange — fewer runtime checks, may reduce recompilation
+# static workgroup size and ndrange — fewer runtime checks, specialized per size
 kernel = my_kernel(backend, 32, size(A))
 kernel(A)
 ```

@@ -52,7 +52,7 @@ constructor to enable additional compile-time optimizations and avoid supplying 
 every launch:
 
 ```@example mul2_kernel
-# workgroup size 32, ndrange (128, 128) — fixed for this kernel object
+# workgroup size 32, ndrange size(A) — fixed for this kernel object
 kernel = mul2_kernel(dev, 32, size(A))
 kernel(A)  # ndrange inferred from construction
 synchronize(dev)
@@ -134,7 +134,7 @@ mymul(A, ones(size(A)))
 
 As shown in the [Synchronization](@ref) section above, multiple kernels can be enqueued on the
 same backend before a single [`synchronize`](@ref) call. The same pattern extends to Julia's
-task-based parallelism: launch kernels from [`Threads.@spawn`](https://docs.julialang.org/en/stable/base/multi-threading/#Base.Threads.@spawn)
+task-based parallelism: launch kernels from [`Threads.@spawn`](https://docs.julialang.org/en/v1/base/multi-threading/#Base.Threads.@spawn)
 tasks when you want to overlap kernel execution with other asynchronous host work.
 
 On GPU backends, [`synchronize`](@ref) is **cooperative** — it yields to the Julia scheduler

@@ -59,8 +59,8 @@ KernelAbstractions.backend
 
 ## Reflection
 
-These macros help inspect the generated kernel code. GPU LLVM reflection is only supported
-on the CPU backend via [`@ka_code_llvm`](@ref).
+These macros help inspect the generated kernel code. LLVM IR reflection via
+[`@ka_code_llvm`](@ref) is only supported on the CPU backend.
 
 ```@docs
 @ka_code_typed
