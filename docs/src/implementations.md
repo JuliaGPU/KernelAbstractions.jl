@@ -1,4 +1,4 @@
-# Notes for backend implementations
+# [Notes for backend implementations](@id implementations_notes)
 
 ## Semantics of `KernelAbstractions.synchronize`
 

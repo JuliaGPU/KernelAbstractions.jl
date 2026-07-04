@@ -96,23 +96,22 @@ end
 
 
 """
-Get the typed IR for a kernel
+    @ka_code_typed [kwargs...] kernel(args...; ndrange=..., workgroupsize=...)
+
+Return the typed IR for a kernel's device function, similar to `InteractiveUtils.code_typed`.
+
+Pass `interactive=true` to descend into the IR with [Cthulhu](https://github.com/JuliaDebug/Cthulhu.jl)
+(must be loaded in the session). If `ndrange` is fixed at kernel construction time, it can be
+omitted at the call site.
 
 # Examples
+
+```julia
+@ka_code_typed my_kernel(backend)(A, ndrange=length(A))
+@ka_code_typed my_kernel(backend, 64)(A, ndrange=length(A))
+@ka_code_typed optimize=false my_kernel(backend)(A, ndrange=length(A))
+@ka_code_typed interactive=true my_kernel(CPU())(A, ndrange=length(A))
 ```
-@ka_code_typed kernel(args. ndrange=...)
-@ka_code_typed kernel(args. ndrange=... workgroupsize=...)
-@ka_code_typed optimize=false kernel(args. ndrange=...)
-```
-To use interactive mode (with Cthulhu), call
-```
-@ka_code_typed interactive=true kernel(args. ndrange=...)
-```
-If ndrange is statically defined, then you could call
-```
-@ka_code_typed kernel(args.)
-```
-Works for CPU or CUDA kernels, with static or dynamic declarations
 """
 macro ka_code_typed(ex0...)
     ex, args, old_args, kern = format_ex(ex0)
@@ -133,19 +132,18 @@ end
 
 
 """
-Get the llvm code for a kernel
+    @ka_code_llvm [kwargs...] kernel(args...; ndrange=..., workgroupsize=...)
+
+Return the LLVM IR for a kernel's device function, similar to `InteractiveUtils.code_llvm`.
+
+Only supported on the CPU backend. GPU kernels will throw an error.
 
 # Examples
+
+```julia
+@ka_code_llvm my_kernel(CPU())(A, ndrange=length(A))
+@ka_code_llvm my_kernel(CPU(), 64)(A, ndrange=length(A))
 ```
-@ka_code_llvm kernel(args. ndrange=...)
-@ka_code_llvm kernel(args. ndrange=... workgroupsize=...)
-@ka_code_llvm optimize=false kernel(args. ndrange=...)
-```
-If ndrange is statically defined, then you could call
-```
-@ka_code_llvm kernel(args.)
-```
-Works for CPU kernels ONLY, with static or dynamic declarations
 """
 macro ka_code_llvm(ex0...)
     ex, args, old_args, kern = format_ex(ex0)
