@@ -27,6 +27,7 @@ end
 
 
 include("test.jl")
+include("atomics.jl")
 include("interface.jl")
 include("localmem.jl")
 include("private.jl")
@@ -44,6 +45,10 @@ include("random.jl")
 function testsuite(backend, backend_str, backend_mod, AT, DAT; skip_tests = Set{String}())
     @conditional_testset "Unittests" skip_tests begin
         unittest_testsuite(backend, backend_str, backend_mod, DAT; skip_tests)
+    end
+
+    @conditional_testset "Atomics" skip_tests begin
+        atomics_testsuite(backend, AT)
     end
 
     @conditional_testset "SpecialFunctions" skip_tests begin
