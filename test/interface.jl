@@ -182,58 +182,56 @@ function interface_testsuite(backend, AT)
             end
         end
 
-        if KernelAbstractions.supports_subgroups(backend())
-            @testset "Sub-groups" begin
-                @test KI.sub_group_size(backend()) isa Int
+        @testset "Sub-groups" begin
+            @test KI.sub_group_size(backend()) isa Int
 
-                # Test with small kernel
-                sg_size = KI.sub_group_size(backend())
-                sg_n = 2
-                workgroupsize = sg_size * sg_n
-                numworkgroups = 2
-                N = workgroupsize * numworkgroups
+            # Test with small kernel
+            sg_size = KI.sub_group_size(backend())
+            sg_n = 2
+            workgroupsize = sg_size * sg_n
+            numworkgroups = 2
+            N = workgroupsize * numworkgroups
 
-                results = AT(Vector{SubgroupData}(undef, N))
-                kernel = KI.@kernel backend() launch = false test_subgroup_kernel(results)
+            results = AT(Vector{SubgroupData}(undef, N))
+            kernel = KI.@kernel backend() launch = false test_subgroup_kernel(results)
 
-                kernel(results; workgroupsize, numworkgroups)
-                KernelAbstractions.synchronize(backend())
+            kernel(results; workgroupsize, numworkgroups)
+            KernelAbstractions.synchronize(backend())
 
-                host_results = Array(results)
+            host_results = Array(results)
 
-                # Verify results make sense
-                for (i, sg_data) in enumerate(host_results)
-                    @test sg_data.sub_group_size == sg_size
-                    @test sg_data.max_sub_group_size == sg_size
-                    @test sg_data.num_sub_groups == sg_n
+            # Verify results make sense
+            for (i, sg_data) in enumerate(host_results)
+                @test sg_data.sub_group_size == sg_size
+                @test sg_data.max_sub_group_size == sg_size
+                @test sg_data.num_sub_groups == sg_n
 
-                    # Group ID should be 1-based
-                    expected_sub_group = div(((i - 1) % workgroupsize), sg_size) + 1
-                    @test sg_data.sub_group_id == expected_sub_group
+                # Group ID should be 1-based
+                expected_sub_group = div(((i - 1) % workgroupsize), sg_size) + 1
+                @test sg_data.sub_group_id == expected_sub_group
 
-                    # Local ID should be 1-based within group
-                    expected_sg_local = ((i - 1) % sg_size) + 1
-                    @test sg_data.sub_group_local_id == expected_sg_local
-                end
+                # Local ID should be 1-based within group
+                expected_sg_local = ((i - 1) % sg_size) + 1
+                @test sg_data.sub_group_local_id == expected_sg_local
             end
-            @testset "shfl_down" begin
-                @test !isempty(KI.shfl_down_types(backend()))
-                types_to_test = setdiff(KI.shfl_down_types(backend()), [Bool])
-                @testset "$T" for T in types_to_test
-                    N = KI.sub_group_size(backend())
-                    a = zeros(T, N)
-                    rand!(a, (0:1))
+        end
+        @testset "shfl_down" begin
+            @test !isempty(KI.shfl_down_types(backend()))
+            types_to_test = setdiff(KI.shfl_down_types(backend()), [Bool])
+            @testset "$T" for T in types_to_test
+                N = KI.sub_group_size(backend())
+                a = zeros(T, N)
+                rand!(a, (0:1))
 
-                    dev_a = AT(a)
-                    dev_b = AT(zeros(T, N))
+                dev_a = AT(a)
+                dev_b = AT(zeros(T, N))
 
-                    KI.@kernel backend() workgroupsize = N shfl_down_test_kernel(dev_a, dev_b, Val(N))
+                KI.@kernel backend() workgroupsize = N shfl_down_test_kernel(dev_a, dev_b, Val(N))
 
-                    b = Array(dev_b)
-                    @test sum(a) ≈ b[1]
-                end
+                b = Array(dev_b)
+                @test sum(a) ≈ b[1]
             end
-        end # if !KernelAbstractions.supports_subgroups(backend())
+        end
     end # @testset "KernelInterface Tests" begin
     return nothing
 end
