@@ -46,7 +46,20 @@ end
     end
 end
 
-# UnsafeAtomics based kernels (CPU only, operating on raw pointers)
+@kernel function atomix_ordered!(A, B)
+    i = @index(Global, Linear)
+    T = eltype(A)
+    @inbounds begin
+        @atomic :release A[i] = T(i)
+        v = @atomic :acquire A[i]
+        @atomic :monotonic A[i] += one(T)
+        @atomic :acquire_release A[i] += one(T)
+        @atomic :sequentially_consistent A[i] += one(T)
+        B[i] = @atomicswap :acquire_release A[i] = v + T(3)
+    end
+end
+
+# UnsafeAtomics based kernels, operating on raw pointers
 
 @kernel function unsafe_atomics_add!(hist)
     i = @index(Global, Linear)
@@ -74,10 +87,45 @@ end
     B[i] = UnsafeAtomics.load(p)
 end
 
-@kernel function unsafe_atomics_ordering!(hist)
+@kernel function unsafe_atomics_add_ordered!(hist, ordering)
     i = @index(Global, Linear)
     j = (i - 1) % length(hist) + 1
-    UnsafeAtomics.add!(pointer(hist, j), one(eltype(hist)), UnsafeAtomics.seq_cst)
+    UnsafeAtomics.add!(pointer(hist, j), one(eltype(hist)), ordering)
+end
+
+@kernel function unsafe_atomics_load_store_ordered!(A, B)
+    i = @index(Global, Linear)
+    v = UnsafeAtomics.load(pointer(B, i), UnsafeAtomics.acquire)
+    UnsafeAtomics.store!(pointer(A, i), v, UnsafeAtomics.release)
+end
+
+# Non-blocking message passing: workitem 1 publishes data guarded by a flag
+# with release/acquire fences; observers must see the data if they see the flag.
+@kernel function unsafe_atomics_fence!(data, flag, observed)
+    i = @index(Global, Linear)
+    T = eltype(data)
+    @inbounds if i == 1
+        data[1] = T(42)
+        UnsafeAtomics.fence(UnsafeAtomics.release)
+        UnsafeAtomics.store!(pointer(flag, 1), one(T), UnsafeAtomics.monotonic)
+    else
+        f = UnsafeAtomics.load(pointer(flag, 1), UnsafeAtomics.monotonic)
+        UnsafeAtomics.fence(UnsafeAtomics.acquire)
+        observed[i] = f == one(T) ? data[1] : T(-1)
+    end
+end
+
+@kernel function unsafe_atomics_syncscope!(A, hist)
+    i = @index(Global, Linear)
+    T = eltype(A)
+    # contended, system scope
+    j = (i - 1) % length(hist) + 1
+    UnsafeAtomics.add!(pointer(hist, j), one(T), UnsafeAtomics.seq_cst, UnsafeAtomics.none)
+    # uncontended, singlethread scope
+    p = pointer(A, i)
+    UnsafeAtomics.store!(p, T(i), UnsafeAtomics.monotonic, UnsafeAtomics.singlethread)
+    UnsafeAtomics.fence(UnsafeAtomics.seq_cst, UnsafeAtomics.singlethread)
+    UnsafeAtomics.add!(p, one(T), UnsafeAtomics.monotonic, UnsafeAtomics.singlethread)
 end
 
 function atomics_testsuite(backend, ArrayT)
@@ -89,6 +137,7 @@ function atomics_testsuite(backend, ArrayT)
     @testset "Atomix" begin
         # Float32 is excluded since atomic float add requires the SPIR-V
         # extension SPV_EXT_shader_atomic_float_add, unavailable with PoCL.
+        # TODO: use CAS-based fallbacks, cf. JuliaGPU/GPUCompiler.jl#652
         @testset "atomic add ($T)" for T in (Int32, UInt32)
             hist = ArrayT(zeros(T, 32))
             atomix_add!(backend())(hist, ndrange = 1024)
@@ -133,14 +182,18 @@ function atomics_testsuite(backend, ArrayT)
             @test Array(A) == 1:256
             @test all(Array(success))
         end
+
+        @testset "orderings" begin
+            A = ArrayT(zeros(Int32, 256))
+            B = ArrayT(zeros(Int32, 256))
+            atomix_ordered!(backend())(A, B, ndrange = 256)
+            synchronize(backend())
+            @test Array(A) == (1:256) .+ 3
+            @test Array(B) == (1:256) .+ 3
+        end
     end
 
     @testset "UnsafeAtomics" begin
-        if !(backend() isa CPU)
-            @test_skip "UnsafeAtomics tests only run on the CPU backend"
-            return
-        end
-
         @testset "atomic add ($T)" for T in (Int32, UInt32)
             hist = ArrayT(zeros(T, 32))
             unsafe_atomics_add!(backend())(hist, ndrange = 1024)
@@ -165,10 +218,40 @@ function atomics_testsuite(backend, ArrayT)
             @test Array(B) == 1:256
         end
 
-        @testset "explicit ordering" begin
+        @testset "ordering $ordering" for ordering in (
+                UnsafeAtomics.monotonic, UnsafeAtomics.acquire, UnsafeAtomics.release,
+                UnsafeAtomics.acq_rel, UnsafeAtomics.seq_cst,
+            )
             hist = ArrayT(zeros(Int32, 32))
-            unsafe_atomics_ordering!(backend())(hist, ndrange = 1024)
+            unsafe_atomics_add_ordered!(backend())(hist, ordering, ndrange = 1024)
             synchronize(backend())
+            @test all(Array(hist) .== 32)
+        end
+
+        @testset "ordered load/store" begin
+            A = ArrayT(zeros(Int32, 256))
+            B = ArrayT(collect(Int32, 1:256))
+            unsafe_atomics_load_store_ordered!(backend())(A, B, ndrange = 256)
+            synchronize(backend())
+            @test Array(A) == 1:256
+        end
+
+        @testset "fences" begin
+            data = ArrayT(zeros(Int32, 1))
+            flag = ArrayT(zeros(Int32, 1))
+            observed = ArrayT(zeros(Int32, 1024))
+            unsafe_atomics_fence!(backend())(data, flag, observed, ndrange = 1024)
+            synchronize(backend())
+            # observers either did not see the flag (-1) or must see the data
+            @test all(x -> x == -1 || x == 42, Array(observed)[2:end])
+        end
+
+        @testset "syncscopes" begin
+            A = ArrayT(zeros(Int32, 1024))
+            hist = ArrayT(zeros(Int32, 32))
+            unsafe_atomics_syncscope!(backend())(A, hist, ndrange = 1024)
+            synchronize(backend())
+            @test Array(A) == (1:1024) .+ 1
             @test all(Array(hist) .== 32)
         end
     end
