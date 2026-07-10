@@ -39,6 +39,18 @@ function EnzymeCore.compiler_job_from_backend(
     )
 end
 
+import KernelAbstractions: POCLBackend
+import KernelAbstractions: POCL
+
+function EnzymeCore.compiler_job_from_backend(
+        ::POCLBackend,
+        @nospecialize(F::Type),
+        @nospecialize(TT::Type),
+    )
+    mi = POCL.GPUCompiler.methodinstance(F, TT)
+    return POCL.GPUCompiler.CompilerJob(mi, POCL.compiler_config(POCL.device()))
+end
+
 EnzymeRules.inactive(::Type{StaticSize}, x...) = nothing
 
 @static if isdefined(EnzymeCore, :set_runtime_activity)

@@ -13,7 +13,7 @@ function EnzymeRules.forward(
     )
     kernel = func.val
     f = kernel.f
-    fwd_kernel = similar(kernel, gpu_fwd)
+    fwd_kernel = similar(kernel, fwd)
 
     return fwd_kernel(config, f, args...; ndrange, workgroupsize)
 end
@@ -58,7 +58,7 @@ function _create_tape_kernel(
     return TapeType, subtape, aug_kernel
 end
 
-function fwd(
+function aug_fwd(
         ctx,
         f::FT,
         mode::Mode,
