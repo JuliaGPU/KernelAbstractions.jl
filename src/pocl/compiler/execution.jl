@@ -233,13 +233,16 @@ end
 # by `GPUCompiler.cached_results` (Julia's integrated code cache on 1.11+, which also
 # persists artifacts through precompilation; a session-local store on 1.10).
 #
-# `obj === nothing` identifies an `OpenCLResults` that hasn't been compiled yet. The
-# `compile_hook` check additionally forces the compile path so reflection-style
-# consumers (`@device_code_*`) observe the compilation even on a cache hit.
+# `cached_results` returns `nothing` until code exists for the job; `obj === nothing`
+# then identifies an `OpenCLResults` that hasn't been compiled yet. Compiling populates
+# Julia's code cache, so the post-compile `cached_results` re-fetch is guaranteed to
+# succeed. The `compile_hook` check additionally forces the compile path so
+# reflection-style consumers (`@device_code_*`) observe the compilation even on a hit.
 function compile_or_lookup(@nospecialize(job::CompilerJob))::OpenCLResults
     res = GPUCompiler.cached_results(OpenCLResults, job)
-    if res.obj === nothing || GPUCompiler.compile_hook[] !== nothing
+    if res === nothing || res.obj === nothing || GPUCompiler.compile_hook[] !== nothing
         compiled = compile_to_obj(job)
+        res = @something res GPUCompiler.cached_results(OpenCLResults, job)
         res.obj = compiled.obj
         res.entry = compiled.entry
         res.device_rng = compiled.device_rng
