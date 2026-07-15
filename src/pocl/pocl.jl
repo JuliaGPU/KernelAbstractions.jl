@@ -42,6 +42,7 @@ end
 
 using GPUCompiler
 using LLVM, LLVM.Interop
+import LLVM: LLVM, MDNode, ConstantInt, metadata
 using SPIRV_LLVM_Backend_jll, SPIRV_Tools_jll
 using Adapt
 
