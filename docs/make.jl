@@ -37,6 +37,7 @@ function main()
             "API" => "api.md",
             "Extras" => [
                 "extras/unrolling.md",
+                "extras/pocl_debugging.md",
             ], # Extras
             "Notes for implementations" => "implementations.md",
         ], # pages
