@@ -195,27 +195,59 @@ end
 const clfunction_lock = ReentrantLock()
 
 function clfunction(f::F, tt::TT = Tuple{}; kwargs...) where {F, TT}
-    ctx = context()
-    dev = device()
-
     Base.@lock clfunction_lock begin
-        # compile the function
-        cache = compiler_cache(ctx)
+        config = compiler_config(device(); kwargs...)::OpenCLCompilerConfig
         source = methodinstance(F, tt)
-        config = compiler_config(dev; kwargs...)::OpenCLCompilerConfig
-        linked = GPUCompiler.cached_compilation(cache, source, config, compile, link)
+        job = CompilerJob(source, config)
 
-        # create a callable object that captures the function instance. we don't need to think
-        # about world age here, as GPUCompiler already does and will return a different object
-        h = hash(linked.kernel, hash(f, hash(tt)))
-        kernel = get(_kernel_instances, h, nothing)
-        if kernel === nothing
-            # create the kernel state object
-            kernel = HostKernel{F, tt}(f, linked.kernel, linked.device_rng)
-            _kernel_instances[h] = kernel
+        res = compile_or_lookup(job)::OpenCLResults
+
+        # Resolve the cl.Kernel for the active context. Linear scan over the
+        # session-local cache; almost always n=1, so this is one `===` compare.
+        ctx = context()
+        kernel = nothing
+        @inbounds for (cached_ctx, cached_kernel) in res.kernels
+            if cached_ctx === ctx
+                kernel = cached_kernel
+                break
+            end
         end
-        return kernel::HostKernel{F, tt}
+        if kernel === nothing
+            kernel = link_kernel(job, res.obj::Vector{UInt8}, res.entry::String)
+            # Don't cache session-local kernel handles while precompiling: the
+            # results struct is serialized into the package image along with its
+            # CodeInstance, and the handles would come back dangling.
+            if ccall(:jl_generating_output, Cint, ()) != 1
+                push!(res.kernels, (ctx, kernel))
+            end
+        end
+
+        h = hash(kernel, hash(f, hash(tt)))
+        return get!(_kernel_instances, h) do
+            HostKernel{F, tt}(f, kernel, res.device_rng)
+        end::HostKernel{F, tt}
     end
+end
+
+# Look up cached compile artifacts for `job`, compiling on miss. Storage is managed
+# by `GPUCompiler.cached_results` (Julia's integrated code cache on 1.11+, which also
+# persists artifacts through precompilation; a session-local store on 1.10).
+#
+# `cached_results` returns `nothing` until code exists for the job; `obj === nothing`
+# then identifies an `OpenCLResults` that hasn't been compiled yet. Compiling populates
+# Julia's code cache, so the post-compile `cached_results` re-fetch is guaranteed to
+# succeed. The `compile_hook` check additionally forces the compile path so
+# reflection-style consumers (`@device_code_*`) observe the compilation even on a hit.
+function compile_or_lookup(@nospecialize(job::CompilerJob))::OpenCLResults
+    res = GPUCompiler.cached_results(OpenCLResults, job)
+    if res === nothing || res.obj === nothing || GPUCompiler.compile_hook[] !== nothing
+        compiled = compile_to_obj(job)
+        res = @something res GPUCompiler.cached_results(OpenCLResults, job)
+        res.obj = compiled.obj
+        res.entry = compiled.entry
+        res.device_rng = compiled.device_rng
+    end
+    return res
 end
 
 # cache of kernel instances
