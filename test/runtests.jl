@@ -11,6 +11,50 @@ end
 KernelAbstractions.versioninfo(POCLBackend())
 @info "Configuration" pocl = KernelAbstractions.POCL.nanoOpenCL.pocl_standalone_jll.libpocl
 
+import KernelAbstractions.POCL: POCL, @opencl, @device_code_llvm
+
+@testset "POCL compilation cache" begin
+    mod = @eval module $(gensym())
+    @noinline child() = return
+    kernel() = child()
+    end
+
+    count() = POCL.compilations[]
+    launch() = @opencl mod.kernel()
+
+    # the initial launch compiles
+    n = count()
+    Base.invokelatest(launch)
+    @test count() == n + 1
+
+    # a second launch hits the cache
+    Base.invokelatest(launch)
+    @test count() == n + 1
+
+    # jobs differing only in codegen-level settings get their own artifacts...
+    POCL.clfunction(mod.kernel, Tuple{}; name = "custom")
+    @test count() == n + 2
+    # ... which are cached as well
+    POCL.clfunction(mod.kernel, Tuple{}; name = "custom")
+    @test count() == n + 2
+
+    # reflection observes already-compiled kernels (by forcing recompilation,
+    # which must leave the cached entry in a usable state)
+    @test !isempty(sprint(io -> (@device_code_llvm io = io Base.invokelatest(launch))))
+    n = count()
+    Base.invokelatest(launch)
+    @test count() == n
+
+    # redefining the kernel recompiles...
+    @eval mod kernel() = (child(); child())
+    Base.invokelatest(launch)
+    @test count() == n + 1
+    # ... as does redefining a callee
+    @eval mod @noinline child() = nothing
+    Base.invokelatest(launch)
+    @test count() == n + 2
+end
+
 @testset "CPU back-end" begin
     struct CPUBackendArray{T, N, A} end # Fake and unused
     Testsuite.testsuite(CPU, "CPU", Base, Array, CPUBackendArray)

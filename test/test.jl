@@ -165,6 +165,22 @@ function unittest_testsuite(Backend, backend_str, backend_mod, BackendArrayT; sk
         @test all(Array(A) .== 1:5)
     end
 
+    @conditional_testset "2D ndrange with scalar workgroupsize" skip_tests begin
+        # A scalar workgroupsize combined with a 2D ndrange pads the first
+        # dimension of the iteration space to a multiple of the workgroupsize.
+        # The padded work items must be masked, otherwise their linear index
+        # reaches past `prod(dims)` (issue #613).
+        backend = Backend()
+        dims = (33, 32)
+        wgsize = 16
+        padding = cld(dims[1], wgsize) * wgsize - dims[1]
+        A = KernelAbstractions.zeros(backend, Int, prod(dims) + padding)
+        index_linear_global(backend, wgsize)(A, ndrange = dims)
+        synchronize(backend)
+        @test all(Array(A)[1:prod(dims)] .== 1:prod(dims))
+        @test all(Array(A)[(prod(dims) + 1):end] .== 0)
+    end
+
     @kernel function constarg(A, @Const(B))
         I = @index(Global)
         @inbounds A[I] = B[I]
