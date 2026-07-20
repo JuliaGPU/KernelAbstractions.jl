@@ -34,6 +34,7 @@ StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 KernelInterface = {path = "lib/KernelInterface"}
 
 [extensions]
+EnzymeExt = "EnzymeCore"
 LinearAlgebraExt = "LinearAlgebra"
 SparseArraysExt = "SparseArrays"
 StaticArraysExt = "StaticArrays"
