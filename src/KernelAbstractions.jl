@@ -230,8 +230,8 @@ synchronize(backend)
 """
 abstract type Backend end
 
-include("interface.jl")
-import .KernelInterface as KI
+import KernelInterface
+import KernelInterface as KI
 export KernelInterface
 
 ###
