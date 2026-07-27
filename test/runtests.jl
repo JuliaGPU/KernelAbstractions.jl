@@ -3,10 +3,15 @@ using Random
 using Test
 
 include("quality_assurance.jl")
+include("linenumbers.jl")
 include("testsuite.jl")
 
 @testset "Quality assurance" begin
     quality_assurance_testsuite()
+end
+
+@testset "Line numbers" begin
+    LineNumbers.linenumbers_testsuite()
 end
 
 KernelAbstractions.versioninfo(POCLBackend())
