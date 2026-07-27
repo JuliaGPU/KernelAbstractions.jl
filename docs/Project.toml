@@ -1,9 +1,11 @@
 [deps]
 Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
 KernelAbstractions = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
+KernelInterface = "4ee993da-d684-4d17-a7dd-4e58e78d92bf"
 
 [compat]
 Documenter = "1"
 
 [sources]
 KernelAbstractions = {path = ".."}
+KernelInterface = {path = "../lib/KernelInterface"}
