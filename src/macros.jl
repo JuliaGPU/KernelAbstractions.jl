@@ -9,8 +9,23 @@ function find_return(stmt)
     return result
 end
 
+# `quote` blocks insert `LineNumberNode`s pointing into this file. Rewriting them
+# to the `@kernel` call site keeps coverage and profiling pointed at the user's
+# code instead of at KernelAbstractions internals.
+relocate_lines(expr, source::LineNumberNode) =
+    postwalk(x -> x isa LineNumberNode ? source : x, expr)
+
+# `MacroTools.unblock` drops `LineNumberNode`s when it collapses a block down to
+# its single remaining statement. Only unwrap blocks that carry no line
+# information, so that we never discard it.
+function unblock_lines(ex)
+    isexpr(ex, :block) || return ex
+    length(ex.args) == 1 || return ex
+    return unblock_lines(ex.args[1])
+end
+
 # XXX: Proper errors
-function __kernel(expr, force_inbounds = false, unsafe_indices = false)
+function __kernel(expr, __source__::LineNumberNode, force_inbounds = false, unsafe_indices = false)
     def = splitdef(expr)
     name = def[:name]
     args = def[:args]
@@ -46,6 +61,7 @@ function __kernel(expr, force_inbounds = false, unsafe_indices = false)
             $name(dev, size::$_Size, range::$_Size) = $_name(dev, size, range)
         end
     end
+    constructors = relocate_lines(constructors, __source__)
 
     return Expr(:block, esc(gpu_function), esc(constructors))
 end
@@ -60,7 +76,8 @@ function transform_gpu!(def, constargs, force_inbounds, unsafe_indices)
         end
     end
     pushfirst!(def[:args], :__ctx__)
-    new_stmts = Expr[]
+    # `Any[]`, since `split` hands back `LineNumberNode`s alongside `Expr`s
+    new_stmts = Any[]
     body = MacroTools.flatten(def[:body])
     push!(new_stmts, Expr(:aliasscope))
     if !unsafe_indices
@@ -91,6 +108,7 @@ struct WorkgroupLoop
     stmts::Vector{Any}
     allocations::Vector{Any}
     terminated_in_sync::Bool
+    sync_line::Union{Nothing, LineNumberNode}
 end
 
 is_sync(expr) = @capture(expr, @synchronize() | @synchronize(a_))
@@ -109,21 +127,43 @@ function find_sync(stmt)
     return result
 end
 
-# TODO proper handling of LineInfo
 function split(stmts)
     # 1. Split the code into blocks separated by `@synchronize`
 
     current = Any[]
     allocations = Any[]
     new_stmts = Any[]
+    # `LineNumberNode` belonging to the statement currently being processed.
+    # Statements are moved between `current` and `allocations` and the two end
+    # up in different scopes of the emitted code, so instead of copying the line
+    # information over eagerly we attach it to whichever list the statement
+    # lands in. Otherwise hoisted allocations lose their source location.
+    line = nothing
+    # Flush the pending `LineNumberNode` into `stmts`.
+    function take_line!(stmts)
+        line === nothing && return
+        push!(stmts, line)
+        line = nothing
+        return
+    end
+
     for stmt in stmts
+        if stmt isa LineNumberNode
+            line = stmt
+            continue
+        end
+
         has_sync = find_sync(stmt)
         if has_sync
-            loop = WorkgroupLoop(current, allocations, is_sync(stmt))
+            loop = WorkgroupLoop(current, allocations, is_sync(stmt), line)
             push!(new_stmts, emit(loop))
             allocations = Any[]
             current = Any[]
-            is_sync(stmt) && continue
+            if is_sync(stmt)
+                # `emit` consumed `line` for the `@synchronize` itself
+                line = nothing
+                continue
+            end
 
             # Recurse into scope constructs
             # TODO: This currently implements hard scoping
@@ -131,26 +171,29 @@ function split(stmts)
             #       by not deepcopying the environment.
             recurse(x) = x
             function recurse(expr::Expr)
-                expr = unblock(expr)
+                expr = unblock_lines(expr)
                 if is_scope_construct(expr) && any(find_sync, expr.args)
-                    new_args = unblock(split(expr.args))
-                    return Expr(expr.head, new_args...)
+                    return Expr(expr.head, split(expr.args)...)
                 else
                     return Expr(expr.head, map(recurse, expr.args)...)
                 end
             end
+            take_line!(new_stmts)
             push!(new_stmts, recurse(stmt))
             continue
         end
 
         if @capture(stmt, @uniform x_)
+            take_line!(allocations)
             push!(allocations, stmt)
             continue
         elseif @capture(stmt, @private lhs_ = rhs_)
+            take_line!(allocations)
             push!(allocations, :($lhs = $rhs))
             continue
         elseif @capture(stmt, lhs_ = rhs_ | (vs__, lhs_ = rhs_))
             if @capture(rhs, @localmem(args__) | @uniform(args__))
+                take_line!(allocations)
                 push!(allocations, stmt)
                 continue
             elseif @capture(rhs, @private(T_, dims_))
@@ -161,36 +204,35 @@ function split(stmts)
                     dims = (dims,)
                 end
                 alloc = :($Scratchpad(__ctx__, $T, Val($dims)))
+                take_line!(allocations)
                 push!(allocations, :($lhs = $alloc))
                 continue
             end
         end
 
+        take_line!(current)
         push!(current, stmt)
     end
 
     # everything since the last `@synchronize`
     if !isempty(current)
-        loop = WorkgroupLoop(current, allocations, false)
+        loop = WorkgroupLoop(current, allocations, false, nothing)
         push!(new_stmts, emit(loop))
     end
     return new_stmts
 end
 
 function emit(loop)
+    # Note: built without `quote`, since that would splice `LineNumberNode`s
+    # pointing at this file into the middle of the user's kernel body.
     stmts = Any[]
 
-    body = Expr(:block, loop.stmts...)
-    loopexpr = quote
-        $(loop.allocations...)
-        if __active_lane__
-            $(unblock(body))
-        end
-    end
-    push!(stmts, loopexpr)
+    append!(stmts, loop.allocations)
+    push!(stmts, Expr(:if, :__active_lane__, Expr(:block, loop.stmts...)))
     if loop.terminated_in_sync
+        loop.sync_line === nothing || push!(stmts, loop.sync_line)
         push!(stmts, :($__synchronize()))
     end
 
-    return unblock(Expr(:block, stmts...))
+    return Expr(:block, stmts...)
 end

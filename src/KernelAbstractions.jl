@@ -66,7 +66,7 @@ synchronize(dev)
 ```
 """
 macro kernel(expr)
-    return __kernel(expr, #=force_inbounds=# false, #=unsafe_indices=# false)
+    return __kernel(expr, __source__, #=force_inbounds=# false, #=unsafe_indices=# false)
 end
 
 """
@@ -88,7 +88,7 @@ This allows for two different configurations:
 """
 macro kernel(ex...)
     if length(ex) == 1
-        return __kernel(ex[1], false, false)
+        return __kernel(ex[1], __source__, false, false)
     else
         unsafe_indices = false
         force_inbounds = false
@@ -112,7 +112,7 @@ macro kernel(ex...)
                 )
             end
         end
-        return __kernel(ex[end], force_inbounds, unsafe_indices)
+        return __kernel(ex[end], __source__, force_inbounds, unsafe_indices)
     end
 end
 
@@ -267,9 +267,7 @@ a tuple corresponding to kernel configuration. In order to get
 the total size you can use `prod(@groupsize())`.
 """
 macro groupsize()
-    return quote
-        $groupsize($(esc(:__ctx__)))
-    end
+    return :($groupsize($(esc(:__ctx__))))
 end
 
 """
@@ -279,9 +277,7 @@ Query the ndrange on the backend. This function returns
 a tuple corresponding to kernel configuration.
 """
 macro ndrange()
-    return quote
-        $size($ndrange($(esc(:__ctx__))))
-    end
+    return :($size($ndrange($(esc(:__ctx__)))))
 end
 
 """
@@ -293,9 +289,7 @@ macro localmem(T, dims)
     # Stay in sync with CUDAnative
     id = gensym("static_shmem")
 
-    return quote
-        $SharedMemory($(esc(T)), Val($(esc(dims))), Val($(QuoteNode(id))))
-    end
+    return :($SharedMemory($(esc(T)), Val($(esc(dims))), Val($(QuoteNode(id)))))
 end
 
 """
@@ -314,9 +308,7 @@ macro private(T, dims)
     if dims isa Integer
         dims = (dims,)
     end
-    return quote
-        $Scratchpad($(esc(:__ctx__)), $(esc(T)), Val($(esc(dims))))
-    end
+    return :($Scratchpad($(esc(:__ctx__)), $(esc(T)), Val($(esc(dims)))))
 end
 
 """
@@ -350,9 +342,7 @@ workgroup.
     `@synchronize()` must be encountered by all workitems of a work-group executing the kernel or by none at all.
 """
 macro synchronize()
-    return quote
-        $__synchronize()
-    end
+    return :($__synchronize())
 end
 
 """
@@ -372,9 +362,7 @@ workgroup. `cond` is not allowed to have any visible sideffects.
     Since v`0.9.34` this version of the macro is deprecated and lowers to `@synchronize()`
 """
 macro synchronize(cond)
-    return quote
-        $__synchronize()
-    end
+    return :($__synchronize())
 end
 
 """
@@ -458,9 +446,7 @@ macro print(items...)
         end
     end
 
-    return quote
-        $__print($(map(esc, args)...))
-    end
+    return :($__print($(map(esc, args)...)))
 end
 
 """
