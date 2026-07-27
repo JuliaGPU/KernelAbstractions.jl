@@ -4,6 +4,7 @@ using Test
 
 include("quality_assurance.jl")
 include("linenumbers.jl")
+include("coverage.jl")
 include("testsuite.jl")
 
 @testset "Quality assurance" begin
@@ -12,6 +13,10 @@ end
 
 @testset "Line numbers" begin
     LineNumbers.linenumbers_testsuite()
+end
+
+@testset "Coverage" begin
+    Coverage.coverage_testsuite()
 end
 
 KernelAbstractions.versioninfo(POCLBackend())
