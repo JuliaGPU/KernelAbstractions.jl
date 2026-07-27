@@ -205,26 +205,26 @@ function clfunction(f::F, tt::TT = Tuple{}; kwargs...) where {F, TT}
         # Resolve the cl.Kernel for the active context. Linear scan over the
         # session-local cache; almost always n=1, so this is one `===` compare.
         ctx = context()
-        kernel = nothing
+        kernel = Ref{nanoOpenCL.Kernel}()
         @inbounds for (cached_ctx, cached_kernel) in res.kernels
             if cached_ctx === ctx
-                kernel = cached_kernel
+                kernel[] = cached_kernel
                 break
             end
         end
-        if kernel === nothing
-            kernel = link_kernel(job, res.obj::Vector{UInt8}, res.entry::String)
+        if !isassigned(kernel)
+            kernel[] = link_kernel(job, res.obj::Vector{UInt8}, res.entry::String)
             # Don't cache session-local kernel handles while precompiling: the
             # results struct is serialized into the package image along with its
             # CodeInstance, and the handles would come back dangling.
             if ccall(:jl_generating_output, Cint, ()) != 1
-                push!(res.kernels, (ctx, kernel))
+                push!(res.kernels, (ctx, kernel[]))
             end
         end
 
-        h = hash(kernel, hash(f, hash(tt)))
+        h = hash(kernel[], hash(f, hash(tt)))
         return get!(_kernel_instances, h) do
-            HostKernel{F, tt}(f, kernel, res.device_rng)
+            HostKernel{F, tt}(f, kernel[], res.device_rng)
         end::HostKernel{F, tt}
     end
 end
