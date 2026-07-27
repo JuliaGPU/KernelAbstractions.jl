@@ -136,7 +136,44 @@ function GPUCompiler.finish_linked_module!(@nospecialize(job::OpenCLCompilerJob)
         )
         GPUCompiler.add_input_arguments!(job, mod, f, kernel_intrinsics)
     end
+
     return
+end
+
+function GPUCompiler.finish_ir!(
+        @nospecialize(job::OpenCLCompilerJob),
+        mod::LLVM.Module, entry::LLVM.Function
+    )
+    entry = invoke(
+        GPUCompiler.finish_ir!,
+        Tuple{CompilerJob{SPIRVCompilerTarget}, LLVM.Module, LLVM.Function},
+        job, mod, entry
+    )
+
+    # Deferred-codegen entrypoints -- notably the wrappers Enzyme generates -- are
+    # held externally live across `InternalizePass` so that linking can resolve
+    # them. Once linked and `alwaysinline`d they are dead, but external linkage
+    # keeps `GlobalDCEPass` from dropping them, so the SPIR-V backend still has to
+    # translate a function it cannot express: they take first-class aggregates
+    # containing `addrspace(1)` pointers, and extracting one back out miscompiles
+    # (the backend types the struct member as a pointer-to-uchar but the extract
+    # result as pointer-to-double, which fails `spirv-val`).
+    #
+    # Drop the bodies of unreferenced non-kernel definitions so only declarations
+    # remain. We empty rather than erase so the `finish_ir!` loop over the
+    # remaining deferred jobs can still look them up by name.
+    if job.config.kernel
+        for f in functions(mod)
+            f == entry && continue
+            isdeclaration(f) && continue
+            LLVM.isintrinsic(f) && continue
+            LLVM.callconv(f) == LLVM.API.LLVMSPIRKERNELCallConv && continue
+            isempty(uses(f)) || continue
+            empty!(f)
+        end
+    end
+
+    return entry
 end
 
 
