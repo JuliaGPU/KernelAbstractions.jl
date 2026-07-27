@@ -250,6 +250,11 @@ Declare memory that is local to a workgroup.
 """
 localmemory(::Type{T}, dims) where {T} = localmemory(T, Val(dims))
 
+# The `Val` form only exists in a backend's overlay method table, so off-device it
+# would otherwise fall back to the forwarding method above and recurse forever.
+localmemory(::Type{T}, ::Val) where {T} =
+    error("Local memory used outside kernel or not captured")
+
 """
     shfl_down(val::T, offset::Integer) where T
 
@@ -389,6 +394,15 @@ struct Kernel{B, Kern}
     kern::Kern
 end
 
+"""
+    check_launch_args(numworkgroups, workgroupsize)
+
+Validate the launch configuration passed to a [`Kernel`](@ref), throwing an
+`ArgumentError` if either argument has more than 3 dimensions.
+
+Backends may call this from their kernel-launch method instead of writing their
+own check.
+"""
 function check_launch_args(numworkgroups, workgroupsize)
     length(numworkgroups) <= 3 ||
         throw(ArgumentError("`numworkgroups` only accepts up to 3 dimensions"))
@@ -479,7 +493,8 @@ function argconvert end
     KI.kernel_function(::NewBackend, f::F, tt::TT=Tuple{}; name=nothing, kwargs...) where {F,TT}
 
 Low-level interface to compile a function invocation for the currently-active GPU, returning
-a callable kernel object. For a higher-level interface, use [`KI.@kernel`](@ref).
+a callable kernel object. For a higher-level interface, use
+[`KernelInterface.@kernel`](@ref).
 
 Currently, `kernel_function` only supports the `name` keyword argument as it is the only one
 by all backends.
