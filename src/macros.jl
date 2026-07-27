@@ -127,7 +127,7 @@ function split(stmts)
 
             # Recurse into scope constructs
             # TODO: This currently implements hard scoping
-            #       probably need to implemet soft scoping
+            #       probably need to implement soft scoping
             #       by not deepcopying the environment.
             recurse(x) = x
             function recurse(expr::Expr)
