@@ -343,8 +343,27 @@ end
     ```
     If the backend does not support printing,
     define it to return `nothing`.
+
+The generic fallback prints on the host, which keeps CPU backends working.
+`Val` arguments are unwrapped, since `KernelAbstractions.@print` uses them to
+pass literal strings through to backends that require compile-time format strings.
 """
-function _print end
+@generated function _print(items...)
+    args = []
+
+    for i in 1:length(items)
+        item = :(items[$i])
+        T = items[i]
+        if T <: Val
+            item = QuoteNode(T.parameters[1])
+        end
+        push!(args, item)
+    end
+
+    return quote
+        print($(args...))
+    end
+end
 
 
 """
