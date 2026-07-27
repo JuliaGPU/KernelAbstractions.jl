@@ -142,6 +142,29 @@ end
 
 ## compiler implementation (configure, compile, and link)
 
+"""
+    default_spirv_extensions(dev)
+
+SPIR-V extensions to permit for `dev`, as the `+`-prefixed, comma-separated string
+`SPIRVCompilerTarget` passes on to the backend via `-spirv-ext`.
+
+Listing an extension only *permits* it: nothing is emitted unless a module actually
+needs the instructions it guards, so this costs nothing for kernels that don't.
+"""
+function default_spirv_extensions(dev)
+    exts = String[]
+
+    # Atomic float add. Without this the backend refuses to translate the module at all:
+    #   LLVM ERROR: The atomic float instruction requires the following SPIR-V
+    #   extension: SPV_EXT_shader_atomic_float_add
+    # Enzyme's reverse mode hits this because it accumulates gradients with atomic fadd.
+    if "cl_ext_float_atomics" in dev.extensions
+        push!(exts, "+SPV_EXT_shader_atomic_float_add")
+    end
+
+    return join(exts, ",")
+end
+
 # cache of compiler configurations, per device (but additionally configurable via kwargs)
 const _toolchain = Ref{Any}()
 const _compiler_configs = Dict{UInt, OpenCLCompilerConfig}()
@@ -154,7 +177,11 @@ function compiler_config(dev::cl.Device; kwargs...)
     end
     return config
 end
-@noinline function _compiler_config(dev; kernel = true, name = nothing, always_inline = false, sub_group_size::Union{Nothing, Int} = 32, kwargs...)
+@noinline function _compiler_config(
+        dev; kernel = true, name = nothing, always_inline = false,
+        sub_group_size::Union{Nothing, Int} = 32,
+        extensions::Union{Nothing, String} = nothing, kwargs...
+    )
     supports_fp16 = "cl_khr_fp16" in dev.extensions
     supports_fp64 = "cl_khr_fp64" in dev.extensions
 
@@ -162,8 +189,12 @@ end
         error("$sub_group_size is not a valid sub-group size for this device.")
     end
 
+    if extensions === nothing
+        extensions = default_spirv_extensions(dev)
+    end
+
     # create GPUCompiler objects
-    target = SPIRVCompilerTarget(; supports_fp16, supports_fp64, validate = true, kwargs...)
+    target = SPIRVCompilerTarget(; supports_fp16, supports_fp64, extensions, validate = true, kwargs...)
     params = OpenCLCompilerParams(; sub_group_size)
     return CompilerConfig(target, params; kernel, name, always_inline)
 end
