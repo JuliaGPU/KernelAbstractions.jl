@@ -64,25 +64,6 @@ function shfl_down_test_kernel(a, b, ::Val{N}) where {N}
     return
 end
 
-function shfl_down_test_kernel(a, b, ::Val{N}) where {N}
-    idx = KI.get_sub_group_local_id()
-
-    val = a[idx]
-
-    offset = 0x00000001
-    while offset < N
-        val += KI.shfl_down(val, offset)
-        offset <<= 1
-    end
-
-    KI.sub_group_barrier()
-
-    if idx == 1
-        b[idx] = val
-    end
-    return
-end
-
 function interface_testsuite(backend, AT)
     @testset "KernelInterface Tests" begin
         @testset "Launch parameters" begin
