@@ -38,16 +38,16 @@ function nditeration_testsuite()
         Dim_y = 32
         let ndrange = NDRange{2, StaticSize{(4, 4)}, StaticSize{(Dim_x, Dim_y)}}()
             idx = linear_iteration(ndrange)
-            for (i, _I) in zip(1:length(blocks(ndrange)), blocks(ndrange))
-                I = Tuple(_I)
+            for (i, I) in zip(1:length(blocks(ndrange)), blocks(ndrange))
+                I = Tuple(I)
                 @test check(idx, i - 1, ntuple(i -> I[i] - 1, length(I))..., Dim_x, Dim_y)
             end
             @test ndims(ndrange) == 2
         end
         let ndrange = NDRange{2, DynamicSize, DynamicSize}(CartesianIndices((4, 4)), CartesianIndices((Dim_x, Dim_y)))
             idx = linear_iteration(ndrange)
-            for (i, _I) in zip(1:length(blocks(ndrange)), blocks(ndrange))
-                I = Tuple(_I)
+            for (i, I) in zip(1:length(blocks(ndrange)), blocks(ndrange))
+                I = Tuple(I)
                 @test check(idx, i - 1, ntuple(i -> I[i] - 1, length(I))..., Dim_x, Dim_y)
             end
             @test ndims(ndrange) == 2
@@ -57,16 +57,17 @@ function nditeration_testsuite()
         Dim_y = 1
         let ndrange = NDRange{2, StaticSize{(4, 4 * 32)}, StaticSize{(Dim_x, Dim_y)}}()
             idx = linear_iteration(ndrange)
-            for (i, _I) in zip(1:length(blocks(ndrange)), blocks(ndrange))
-                I = Tuple(_I)
+            N = length(workitems(ndrange))
+            for (i, I) in zip(1:length(blocks(ndrange)), blocks(ndrange))
+                I = Tuple(I)
                 @test check(idx, i - 1, ntuple(i -> I[i] - 1, length(I))..., Dim_x, Dim_y)
             end
             @test ndims(ndrange) == 2
         end
         let ndrange = NDRange{2, DynamicSize, DynamicSize}(CartesianIndices((4, 4 * 32)), CartesianIndices((Dim_x, Dim_y)))
             idx = linear_iteration(ndrange)
-            for (i, _I) in zip(1:length(blocks(ndrange)), blocks(ndrange))
-                I = Tuple(_I)
+            for (i, I) in zip(1:length(blocks(ndrange)), blocks(ndrange))
+                I = Tuple(I)
                 @test check(idx, i - 1, ntuple(i -> I[i] - 1, length(I))..., Dim_x, Dim_y)
             end
             @test ndims(ndrange) == 2
@@ -76,16 +77,17 @@ function nditeration_testsuite()
         Dim_y = 32
         let ndrange = NDRange{2, StaticSize{(4 * 32, 4)}, StaticSize{(Dim_x, Dim_y)}}()
             idx = linear_iteration(ndrange)
-            for (i, _I) in zip(1:length(blocks(ndrange)), blocks(ndrange))
-                I = Tuple(_I)
+            N = length(workitems(ndrange))
+            for (i, I) in zip(1:length(blocks(ndrange)), blocks(ndrange))
+                I = Tuple(I)
                 @test check(idx, i - 1, ntuple(i -> I[i] - 1, length(I))..., Dim_x, Dim_y)
             end
             @test ndims(ndrange) == 2
         end
         let ndrange = NDRange{2, DynamicSize, DynamicSize}(CartesianIndices((4 * 32, 4)), CartesianIndices((Dim_x, Dim_y)))
             idx = linear_iteration(ndrange)
-            for (i, _I) in zip(1:length(blocks(ndrange)), blocks(ndrange))
-                I = Tuple(_I)
+            for (i, I) in zip(1:length(blocks(ndrange)), blocks(ndrange))
+                I = Tuple(I)
                 @test check(idx, i - 1, ntuple(i -> I[i] - 1, length(I))..., Dim_x, Dim_y)
             end
             @test ndims(ndrange) == 2
