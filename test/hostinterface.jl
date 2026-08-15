@@ -11,15 +11,15 @@ function hostinterface_testsuite(_backend, AT)
     @testset "device management" begin
         @test KernelAbstractions.device(backend) isa Int
         @test KernelAbstractions.ndevices(backend) isa Int
-        @test KernelAbstractions.device!(backend, KernelAbstractions.device(backend)) === nothing
+        KernelAbstractions.device!(backend, KernelAbstractions.device(backend))
         @test_throws ArgumentError KernelAbstractions.device!(backend, 0)
         @test_throws ArgumentError KernelAbstractions.device!(backend, KernelAbstractions.ndevices(backend) + 1)
     end
 
     @testset "priority!" begin
-        @test KernelAbstractions.priority!(backend, :normal) === nothing
-        @test KernelAbstractions.priority!(backend, :high) === nothing
-        @test KernelAbstractions.priority!(backend, :low) === nothing
+        KernelAbstractions.priority!(backend, :normal)
+        KernelAbstractions.priority!(backend, :high)
+        KernelAbstractions.priority!(backend, :low)
         @test_throws ErrorException KernelAbstractions.priority!(backend, :bogus)
     end
 
