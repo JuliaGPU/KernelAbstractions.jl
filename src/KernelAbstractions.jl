@@ -168,7 +168,7 @@ this asynchronous version, which requires additional lifetime guarantees as docu
 function copyto! end
 
 """
-    pagelock!(::Backend, dest::AbstractArray)
+    pagelock!(::Backend, dest::AbstractArray)::Union{Nothing, Missing}
 
 Pagelock (pin) a host memory buffer for a backend device. This may be necessary for [`copyto!`](@ref)
 to perform asynchronously w.r.t to the host/
@@ -680,7 +680,7 @@ Returns whether `Float64` values are supported by the backend.
 supports_float64(::Backend) = true
 
 """
-    priority!(::Backend, prio::Symbol)
+    priority!(::Backend, prio::Symbol)::Nothing
 
 Set the priority for the backend stream/queue. This is an optional
 feature that backends may or may not implement. If a backend shall
@@ -739,7 +739,7 @@ function ndevices(::Backend)
 end
 
 """
-    device!(backend::Backend, id::Int)
+    device!(backend::Backend, id::Int)::Nothing
 
 Select the active device for `backend`. `id` is a 1-based device index and must satisfy
 `1 <= id <= ndevices(backend)`.
@@ -763,7 +763,7 @@ function device!(backend::Backend, id::Int)
 end
 
 """
-    functional(::Backend)
+    functional(::Backend)::Union{Bool, Missing}
 
 Queries if the provided backend is functional. This may mean different
 things for different backends, but generally should mean that the

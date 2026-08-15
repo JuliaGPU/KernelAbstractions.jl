@@ -28,6 +28,7 @@ end
 
 include("test.jl")
 include("interface.jl")
+include("hostinterface.jl")
 include("localmem.jl")
 include("private.jl")
 include("unroll.jl")
@@ -52,6 +53,10 @@ function testsuite(backend, backend_str, backend_mod, AT, DAT; skip_tests = Set{
 
     @conditional_testset "Interface" skip_tests begin
         interface_testsuite(backend, AT)
+    end
+
+    @conditional_testset "HostInterface" skip_tests begin
+        hostinterface_testsuite(backend, AT)
     end
 
     @conditional_testset "Localmem" skip_tests begin
