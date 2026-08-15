@@ -1,12 +1,12 @@
 import MacroTools: splitdef, combinedef, isexpr, postwalk
 
 function find_return(stmt)
-    result = false
+    result = Ref(false)
     postwalk(stmt) do expr
-        result |= @capture(expr, return x_)
+        result[] |= @capture(expr, return x_)
         expr
     end
-    return result
+    return result[]
 end
 
 # XXX: Proper errors
@@ -101,12 +101,12 @@ function is_scope_construct(expr::Expr)
 end
 
 function find_sync(stmt)
-    result = false
+    result = Ref(false)
     postwalk(stmt) do expr
-        result |= is_sync(expr)
+        result[] |= is_sync(expr)
         expr
     end
-    return result
+    return result[]
 end
 
 # TODO proper handling of LineInfo
@@ -127,7 +127,7 @@ function split(stmts)
 
             # Recurse into scope constructs
             # TODO: This currently implements hard scoping
-            #       probably need to implemet soft scoping
+            #       probably need to implement soft scoping
             #       by not deepcopying the environment.
             recurse(x) = x
             function recurse(expr::Expr)
