@@ -7,7 +7,7 @@ using ..POCL: device, clconvert, clfunction
 using SPIRV_LLVM_Backend_jll, SPIRV_Tools_jll
 
 import KernelAbstractions as KA
-import KernelAbstractions.KernelInterface as KI
+import KernelInterface as KI
 
 import SPIRVIntrinsics
 

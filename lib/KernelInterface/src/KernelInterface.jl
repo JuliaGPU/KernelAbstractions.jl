@@ -14,6 +14,8 @@ module KernelInterface
 
 include("utils.jl")
 
+include("backend.jl")
+
 """
     get_global_size()::@NamedTuple{x::Int, y::Int, z::Int}
 
@@ -223,7 +225,7 @@ Returns a vector of `DataType`s supported on `backend`
     Backend implementations **must** implement this function
     only if they support `shfl_down` for any types.
 """
-shfl_down_types(_) = DataType[]
+shfl_down_types(::Backend) = DataType[]
 
 
 """
@@ -410,7 +412,7 @@ Used for certain algorithm optimizations.
     ```
     As well as the on-device functionality.
 """
-multiprocessor_count(_) = 0
+multiprocessor_count(::Backend) = 0
 
 """
     argconvert(::NewBackend, arg)
