@@ -475,34 +475,6 @@ constify(arg) = adapt(ConstAdaptor(), arg)
 #   adapt_storage(::Backend, a::BackendArray) = a
 
 """
-    zeros(::Backend, Type, dims...; unified=false)::AbstractArray
-
-Allocate a storage array appropriate for the computational backend filled with zeros.
-`unified=true` allocates an array using unified memory if the backend supports it and
-throws otherwise.
-"""
-zeros(backend::Backend, T::Type, dims...; kwargs...) = zeros(backend, T, dims; kwargs...)
-function zeros(backend::Backend, ::Type{T}, dims::Tuple; kwargs...) where {T}
-    data = allocate(backend, T, dims...; kwargs...)
-    fill!(data, zero(T))
-    return data
-end
-
-"""
-    ones(::Backend, Type, dims...; unified=false)::AbstractArray
-
-Allocate a storage array appropriate for the computational backend filled with ones.
-`unified=true` allocates an array using unified memory if the backend supports it and
-throws otherwise.
-"""
-ones(backend::Backend, T::Type, dims...; kwargs...) = ones(backend, T, dims; kwargs...)
-function ones(backend::Backend, ::Type{T}, dims::Tuple; kwargs...) where {T}
-    data = allocate(backend, T, dims; kwargs...)
-    fill!(data, one(T))
-    return data
-end
-
-"""
     priority!(::Backend, prio::Symbol)::Nothing
 
 Set the priority for the backend stream/queue. This is an optional

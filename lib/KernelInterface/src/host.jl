@@ -94,6 +94,36 @@ function allocate(backend::Backend, T::Type, dims::Tuple; unified::Union{Nothing
     end
 end
 
+
+"""
+    zeros(::Backend, Type, dims...; unified=false)::AbstractArray
+
+Allocate a storage array appropriate for the computational backend filled with zeros.
+`unified=true` allocates an array using unified memory if the backend supports it and
+throws otherwise.
+"""
+zeros(backend::Backend, T::Type, dims...; kwargs...) = zeros(backend, T, dims; kwargs...)
+function zeros(backend::Backend, ::Type{T}, dims::Tuple; kwargs...) where {T}
+    data = allocate(backend, T, dims...; kwargs...)
+    fill!(data, zero(T))
+    return data
+end
+
+"""
+    ones(::Backend, Type, dims...; unified=false)::AbstractArray
+
+Allocate a storage array appropriate for the computational backend filled with ones.
+`unified=true` allocates an array using unified memory if the backend supports it and
+throws otherwise.
+"""
+ones(backend::Backend, T::Type, dims...; kwargs...) = ones(backend, T, dims; kwargs...)
+function ones(backend::Backend, ::Type{T}, dims::Tuple; kwargs...) where {T}
+    data = allocate(backend, T, dims; kwargs...)
+    fill!(data, one(T))
+    return data
+end
+
+
 """
     copyto!(::Backend, dest::AbstractArray, src::AbstractArray)
 
