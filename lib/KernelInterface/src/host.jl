@@ -39,6 +39,116 @@ Synchronize the current backend.
 function synchronize end
 
 
+# Define:
+#   adapt_storage(::Backend, a::Array) = adapt(BackendArray, a)
+#   adapt_storage(::Backend, a::BackendArray) = a
+
+"""
+    priority!(::Backend, prio::Symbol)::Nothing
+
+Set the priority for the backend stream/queue. This is an optional
+feature that backends may or may not implement. If a backend shall
+support priorities it must accept `:high`, `:normal`, `:low`.
+Where `:normal` is the default.
+
+!!! note
+    Backend implementations **may** implement this function.
+"""
+function priority!(::Backend, prio::Symbol)
+    if !(prio in (:high, :normal, :low))
+        error("priority must be one of :high, :normal, :low")
+    end
+    return nothing
+end
+
+"""
+    device(backend::Backend)::Int
+
+Return the 1-based index of the currently active device for `backend`.
+
+!!! note
+    The default implementation assumes a single device. Backends supporting multiple devices
+    **must** implement `device(backend::Backend)::Int`, [`ndevices`](@ref KernelAbstractions.ndevices),
+    and [`device!`](@ref KernelAbstractions.device!).
+"""
+function device(::Backend)
+    return 1
+end
+
+"""
+    ndevices(backend::Backend)::Int
+
+Return the number of devices available to `backend`.
+
+!!! note
+    The default implementation assumes a single device. Backends supporting multiple devices
+    **must** implement `ndevices(backend::Backend)::Int`, [`device`](@ref KernelAbstractions.device),
+    and [`device!`](@ref KernelAbstractions.device!).
+"""
+function ndevices(::Backend)
+    return 1
+end
+
+"""
+    device!(backend::Backend, id::Int)::Nothing
+
+Select the active device for `backend`. `id` is a 1-based device index and must satisfy
+`1 <= id <= ndevices(backend)`.
+
+# Example
+
+```julia
+device!(CUDABackend(), 2)  # use the second CUDA device
+```
+
+!!! note
+    The default implementation assumes a single device. Backends supporting multiple devices
+    **must** implement `device!(backend::Backend, id::Int)`, [`ndevices`](@ref KernelAbstractions.ndevices),
+    and [`device`](@ref KernelAbstractions.device).
+"""
+function device!(backend::Backend, id::Int)
+    if !(0 < id <= ndevices(backend))
+        throw(ArgumentError("Device id $id out of bounds."))
+    end
+    return nothing
+end
+
+"""
+    pagelock!(::Backend, dest::AbstractArray)::Union{Nothing, Missing}
+
+Pagelock (pin) a host memory buffer for a backend device. This may be necessary for [`copyto!`](@ref)
+to perform asynchronously w.r.t to the host/
+
+This function should return `nothing`; or `missing` if not implemented.
+
+
+!!! note
+    Backends **may** implement this function.
+"""
+function pagelock!(::Backend, x)
+    return missing
+end
+
+"""
+    unsafe_free!(x::AbstractArray)
+
+Release the memory of an array for reuse by future allocations
+and reduce pressure on the allocator.
+After releasing the memory of an array, it should no longer be accessed.
+
+!!! note
+    On CPU backend this is always a no-op.
+
+!!! note
+    Backend implementations **may** implement this function.
+    If not implemented for a particular backend, default action is a no-op.
+    Otherwise, it should be defined for backend's array type.
+"""
+function unsafe_free! end
+
+unsafe_free!(::AbstractArray) = return
+
+
 """
     supports_unified(::Backend)::Bool
 
