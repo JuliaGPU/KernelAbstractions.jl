@@ -14,7 +14,7 @@ import Atomix: @atomic, @atomicswap, @atomicreplace
 using MacroTools
 using Adapt
 
-using KernelInterface: KernelInterface, Backend, GPU, get_backend
+using KernelInterface: KernelInterface, Backend, GPU, get_backend, functional, synchronize
 import KernelInterface as KI
 export KernelInterface
 
@@ -184,16 +184,6 @@ This function should return `nothing`; or `missing` if not implemented.
     Backends **may** implement this function.
 """
 function pagelock! end
-
-"""
-    synchronize(::Backend)
-
-Synchronize the current backend.
-
-!!! note
-    Backend implementations **must** implement this function.
-"""
-function synchronize end
 
 """
     unsafe_free!(x::AbstractArray)
@@ -685,22 +675,6 @@ function device!(backend::Backend, id::Int)
         throw(ArgumentError("Device id $id out of bounds."))
     end
     return nothing
-end
-
-"""
-    functional(::Backend)::Union{Bool, Missing}
-
-Queries if the provided backend is functional. This may mean different
-things for different backends, but generally should mean that the
-necessary drivers and a compute device are available.
-
-This function should return a `Bool` or `missing` if not implemented.
-
-!!! compat "KernelAbstractions v0.9.22"
-    This function was added in KernelAbstractions v0.9.22
-"""
-function functional(::Backend)
-    return missing
 end
 
 function pagelock!(::Backend, x)

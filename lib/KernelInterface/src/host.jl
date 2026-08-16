@@ -1,5 +1,32 @@
 
 """
+    functional(::Backend)::Union{Bool, Missing}
+
+Queries if the provided backend is functional. This may mean different
+things for different backends, but generally should mean that the
+necessary drivers and a compute device are available.
+
+This function should return a `Bool` or `missing` if not implemented.
+
+!!! compat "KernelAbstractions v0.9.22"
+    This function was added in KernelAbstractions v0.9.22
+"""
+function functional(::Backend)
+    return missing
+end
+
+"""
+    synchronize(::Backend)
+
+Synchronize the current backend.
+
+!!! note
+    Backend implementations **must** implement this function.
+"""
+function synchronize end
+
+
+"""
     Kernel{Backend, Kern}
 
 Kernel closure struct that is used to represent the backend
