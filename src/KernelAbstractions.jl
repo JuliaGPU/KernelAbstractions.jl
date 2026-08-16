@@ -14,7 +14,7 @@ import Atomix: @atomic, @atomicswap, @atomicreplace
 using MacroTools
 using Adapt
 
-using KernelInterface: KernelInterface, Backend, GPU, get_backend, functional, synchronize
+using KernelInterface: KernelInterface, Backend, GPU, get_backend, functional, synchronize, versioninfo, supports_unified, supports_float64, supports_atomics, copyto!, allocate
 import KernelInterface as KI
 export KernelInterface
 
@@ -134,42 +134,6 @@ any other memory in the kernel.
     allowed to call the kernel with `kernel(A, A)` or `kernel(A, view(A, :))`.
 """
 macro Const end
-
-"""
-    copyto!(::Backend, dest::AbstractArray, src::AbstractArray)
-
-Perform an asynchronous `copyto!` operation that is execution ordered with respect to the back-end.
-
-For most users, `Base.copyto!` should suffice, performance a simple, synchronous copy.
-Only when you know you need asynchronicity w.r.t. the host, you should consider using
-this asynchronous version, which requires additional lifetime guarantees as documented below.
-
-!!! warning
-
-    Because of the asynchronous nature of this operation, the user is required to guarantee that the lifetime
-    of the source extends past the *completion* of the copy operation as to avoid a use-after-free. It is not
-    sufficient to simply use `GC.@preserve` around the call to `copyto!`, because that only extends the
-    lifetime past the operation getting queued. Instead, it may be required to `synchronize()`,
-    or otherwise guarantee that the source will still be around when the copy is executed:
-
-    ```julia
-    arr = zeros(64)
-    GC.@preserve arr begin
-        copyto!(backend, arr, ...)
-        # other operations
-        synchronize(backend)
-    end
-    ```
-
-!!! note
-
-    On some back-ends it may be necessary to first call [`pagelock!`](@ref) on host memory
-    to enable fully asynchronous behavior w.r.t to the host.
-
-!!! note
-    Backends **must** implement this function.
-"""
-function copyto! end
 
 """
     pagelock!(::Backend, dest::AbstractArray)::Union{Nothing, Missing}
@@ -511,29 +475,6 @@ constify(arg) = adapt(ConstAdaptor(), arg)
 #   adapt_storage(::Backend, a::BackendArray) = a
 
 """
-    allocate(::Backend, Type, dims...; unified=false)::AbstractArray
-
-Allocate a storage array appropriate for the computational backend. `unified=true`
-allocates an array using unified memory if the backend supports it and throws otherwise.
-Use [`supports_unified`](@ref) to determine whether it is supported by a backend.
-
-!!! note
-    Backend implementations **must** implement `allocate(::NewBackend, T, dims::Tuple)`
-    Backend implementations **should** implement `allocate(::NewBackend, T, dims::Tuple; unified::Bool=false)`
-"""
-allocate(backend::Backend, T::Type, dims...; kwargs...) = allocate(backend, T, dims; kwargs...)
-function allocate(backend::Backend, T::Type, dims::Tuple; unified::Union{Nothing, Bool} = nothing)
-    if isnothing(unified)
-        throw(MethodError(allocate, (backend, T, dims)))
-    elseif unified
-        throw(ArgumentError("`$(typeof(backend))` does not support unified memory. If you believe it does, please open a github issue."))
-    else
-        return allocate(backend, T, dims)
-    end
-end
-
-
-"""
     zeros(::Backend, Type, dims...; unified=false)::AbstractArray
 
 Allocate a storage array appropriate for the computational backend filled with zeros.
@@ -562,39 +503,6 @@ function ones(backend::Backend, ::Type{T}, dims::Tuple; kwargs...) where {T}
 end
 
 """
-    supports_unified(::Backend)::Bool
-
-Returns whether unified memory arrays are supported by the backend.
-
-!!! note
-    Backend implementations **should** implement this function
-    only if they **do** support unified memory.
-"""
-supports_unified(::Backend) = false
-
-"""
-    supports_atomics(::Backend)::Bool
-
-Returns whether `@atomic` operations are supported by the backend.
-
-!!! note
-    Backend implementations **must** implement this function
-    only if they **do not** support atomic operations with Atomix.
-"""
-supports_atomics(::Backend) = true
-
-"""
-    supports_float64(::Backend)::Bool
-
-Returns whether `Float64` values are supported by the backend.
-
-!!! note
-    Backend implementations **must** implement this function
-    only if they **do not** support `Float64`.
-"""
-supports_float64(::Backend) = true
-
-"""
     priority!(::Backend, prio::Symbol)::Nothing
 
 Set the priority for the backend stream/queue. This is an optional
@@ -611,19 +519,6 @@ function priority!(::Backend, prio::Symbol)
     end
     return nothing
 end
-
-"""
-    versioninfo(io::IO=stdout, backend::Backend)::Nothing
-
-Print information about `backend` to `io`. It is up to the backends to
-determine what is relevant.
-
-!!! note
-    Backend implementations **may** implement this function. If they do
-    so, they should implement `versioninfo(io::IO, ::Backend)::Nothing`
-"""
-versioninfo(io::IO, b::Backend) = println(io, "`versioninfo` is not implemented for $b")
-versioninfo(b::Backend) = versioninfo(stdout, b)
 
 """
     device(backend::Backend)::Int

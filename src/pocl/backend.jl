@@ -21,7 +21,7 @@ export POCLBackend
 struct POCLBackend <: KA.GPU
 end
 
-function KA.versioninfo(io::IO, ::POCLBackend)
+function KI.versioninfo(io::IO, ::POCLBackend)
     println(io, "KernelAbstractions.jl version $(pkgversion(@__MODULE__))")
     println(io)
 
@@ -75,23 +75,23 @@ end
 
 ## Memory Operations
 
-KA.allocate(::POCLBackend, ::Type{T}, dims::Tuple; unified::Bool = false) where {T} = Array{T}(undef, dims)
+KI.allocate(::POCLBackend, ::Type{T}, dims::Tuple; unified::Bool = false) where {T} = Array{T}(undef, dims)
 
-function KA.zeros(backend::POCLBackend, ::Type{T}, dims::Tuple; kwargs...) where {T}
-    arr = KA.allocate(backend, T, dims; kwargs...)
+function KI.zeros(backend::POCLBackend, ::Type{T}, dims::Tuple; kwargs...) where {T}
+    arr = KI.allocate(backend, T, dims; kwargs...)
     kernel = KA.init_kernel(backend)
     kernel(arr, zero, T, ndrange = length(arr))
     return arr
 end
-function KA.ones(backend::POCLBackend, ::Type{T}, dims::Tuple; kwargs...) where {T}
-    arr = KA.allocate(backend, T, dims; kwargs...)
+function KI.ones(backend::POCLBackend, ::Type{T}, dims::Tuple; kwargs...) where {T}
+    arr = KI.allocate(backend, T, dims; kwargs...)
     kernel = KA.init_kernel(backend)
     kernel(arr, one, T; ndrange = length(arr))
     return arr
 end
 
-function KA.copyto!(backend::POCLBackend, A, B)
-    if KA.get_backend(A) == KA.get_backend(B) && KA.get_backend(A) isa POCLBackend
+function KI.copyto!(backend::POCLBackend, A, B)
+    if KI.get_backend(A) == KI.get_backend(B) && KI.get_backend(A) isa POCLBackend
         if length(A) != length(B)
             error("Arrays must match in length")
         end
@@ -106,10 +106,10 @@ function KA.copyto!(backend::POCLBackend, A, B)
     end
 end
 
-KA.functional(::POCLBackend) = true
+KI.functional(::POCLBackend) = true
 KA.pagelock!(::POCLBackend, x) = nothing
 
-KA.get_backend(::Array) = POCLBackend()
+KI.get_backend(::Array) = POCLBackend()
 
 ## Implementation note:
 ## The POCL backend uses `Base.Array` as it's array type, so the external operations
@@ -117,9 +117,9 @@ KA.get_backend(::Array) = POCLBackend()
 ## to provide the same memory synchronization semantics as other backends, we
 ## must synchronize upon kernel launch and can't rely on synchronization upon
 ## array access. Therefore, `synchronize` is a no-op.
-KA.synchronize(::POCLBackend) = nothing
-KA.supports_float64(::POCLBackend) = true
-KA.supports_unified(::POCLBackend) = true
+KI.synchronize(::POCLBackend) = nothing
+KI.supports_float64(::POCLBackend) = true
+KI.supports_unified(::POCLBackend) = true
 
 
 ## Kernel Launch
