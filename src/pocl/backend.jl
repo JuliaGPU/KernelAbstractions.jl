@@ -77,15 +77,29 @@ end
 
 KI.allocate(::POCLBackend, ::Type{T}, dims::Tuple; unified::Bool = false) where {T} = Array{T}(undef, dims)
 
+
+# Initialized
+
+KA.@kernel function init_kernel(arr, f::F, ::Type{T}) where {F, T}
+    I = KA.@index(Global)
+    @inbounds arr[I] = f(T)
+end
+
+KA.@kernel function copy_kernel(A, @Const(B))
+    I = KA.@index(Global)
+    @inbounds A[I] = B[I]
+end
+
+
 function KI.zeros(backend::POCLBackend, ::Type{T}, dims::Tuple; kwargs...) where {T}
     arr = KI.allocate(backend, T, dims; kwargs...)
-    kernel = KA.init_kernel(backend)
+    kernel = init_kernel(backend)
     kernel(arr, zero, T, ndrange = length(arr))
     return arr
 end
 function KI.ones(backend::POCLBackend, ::Type{T}, dims::Tuple; kwargs...) where {T}
     arr = KI.allocate(backend, T, dims; kwargs...)
-    kernel = KA.init_kernel(backend)
+    kernel = init_kernel(backend)
     kernel(arr, one, T; ndrange = length(arr))
     return arr
 end
@@ -98,7 +112,7 @@ function KI.copyto!(backend::POCLBackend, A, B)
         if Base.mightalias(A, B)
             error("Arrays may not alias")
         end
-        kernel = KA.copy_kernel(backend)
+        kernel = copy_kernel(backend)
         kernel(A, B, ndrange = length(A))
         return A
     else

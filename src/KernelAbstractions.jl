@@ -743,18 +743,6 @@ include("extras/extras.jl")
 
 include("reflection.jl")
 
-# Initialized
-
-@kernel function init_kernel(arr, f::F, ::Type{T}) where {F, T}
-    I = @index(Global)
-    @inbounds arr[I] = f(T)
-end
-
-@kernel function copy_kernel(A, @Const(B))
-    I = @index(Global)
-    @inbounds A[I] = B[I]
-end
-
 # CPU backend
 include("pocl/pocl.jl")
 using .POCL
