@@ -36,6 +36,8 @@ end
         KI.shfl_down,
         KI.kernel_max_work_group_size, KI.max_work_group_size, KI.sub_group_size,
         KI.argconvert, KI.kernel_function,
+        # Host-side stubs: required backend methods with no sensible fallback.
+        KI.synchronize, KI.copyto!,
     ]
     for stub in stubs
         @test isempty(methods(stub))
@@ -43,6 +45,21 @@ end
 end
 
 struct StubBackend <: KI.Backend end
+
+# An array type with a known backend, for exercising the `get_backend` fallback
+# that unwraps wrapper arrays.
+struct BackedArray{T, N} <: AbstractArray{T, N}
+    data::Array{T, N}
+end
+Base.size(A::BackedArray) = size(A.data)
+Base.getindex(A::BackedArray{T, N}, i::Vararg{Int, N}) where {T, N} = A.data[i...]
+KI.get_backend(::BackedArray) = StubBackend()
+
+# A backend implementing only `allocate`, as the interface requires.
+struct AllocBackend <: KI.Backend end
+function KI.allocate(::AllocBackend, ::Type{T}, dims::Tuple; unified::Bool = false) where {T}
+    return Array{T}(undef, dims)
+end
 
 @testset "host fallbacks" begin
     # Barriers are meaningless off-device and must say so rather than no-op.
@@ -58,6 +75,72 @@ struct StubBackend <: KI.Backend end
     # back into the forwarding method.
     @test_throws "used outside kernel" KI.localmemory(Float32, (2, 2))
     @test_throws "used outside kernel" KI.localmemory(Float32, Val((2, 2)))
+end
+
+@testset "get_backend" begin
+    @test KI.GPU <: KI.Backend
+
+    # The fallback finds the backend of wrapper arrays by walking `parent`.
+    arr = BackedArray([1, 2, 3])
+    @test KI.get_backend(arr) === StubBackend()
+    @test KI.get_backend(view(arr, 1:2)) === StubBackend()
+    @test KI.get_backend(reshape(arr, 3, 1)) === StubBackend()
+    @test KI.get_backend(reinterpret(UInt, arr)) === StubBackend()
+
+    # An array that is its own parent has no wrapped backend to find; the
+    # fallback must error rather than recurse.
+    @test_throws ArgumentError KI.get_backend([1, 2, 3])
+end
+
+@testset "backend queries" begin
+    b = StubBackend()
+
+    # `versioninfo` falls back to printing a notice, defaulting to `stdout`.
+    @test occursin("not implemented", sprint(KI.versioninfo, b))
+    @test occursin("not implemented", capture_stdout(() -> KI.versioninfo(b)))
+
+    # `missing` distinguishes "not implemented" from a definite yes/no.
+    @test KI.functional(b) === missing
+
+    # Single-device defaults; `device!` still bounds-checks the id.
+    @test KI.device(b) == 1
+    @test KI.ndevices(b) == 1
+    @test KI.device!(b, 1) === nothing
+    @test_throws ArgumentError KI.device!(b, 0)
+    @test_throws ArgumentError KI.device!(b, 2)
+
+    # `priority!` validates the symbol even when the backend ignores it.
+    for prio in (:high, :normal, :low)
+        @test KI.priority!(b, prio) === nothing
+    end
+    @test_throws "priority must be one of" KI.priority!(b, :bogus)
+
+    # Capability defaults: pessimistic for unified memory, optimistic otherwise.
+    @test KI.supports_unified(b) === false
+    @test KI.supports_atomics(b) === true
+    @test KI.supports_float64(b) === true
+
+    # Pinning is optional and freeing is a no-op unless a backend does better.
+    @test KI.pagelock!(b, zeros(2)) === missing
+    @test KI.unsafe_free!(zeros(2)) === nothing
+end
+
+@testset "allocate / zeros / ones" begin
+    b = AllocBackend()
+
+    # Dims given as varargs are forwarded to the tuple method backends implement.
+    @test KI.allocate(b, Float32, (2,)) isa Vector{Float32}
+    @test size(KI.allocate(b, Float32, 2, 3)) == (2, 3)
+
+    @test KI.zeros(b, Float64, 2, 3) == zeros(2, 3)
+    @test KI.ones(b, Int, (4,)) == ones(Int, 4)
+
+    # A backend without `allocate` yields a MethodError pointing at the missing
+    # method — including via the keyword form — and a clear error when unified
+    # memory is requested but not supported.
+    @test_throws MethodError KI.allocate(StubBackend(), Float32, (2,))
+    @test_throws MethodError KI.allocate(StubBackend(), Float32, (2,); unified = false)
+    @test_throws ArgumentError KI.allocate(StubBackend(), Float32, (2,); unified = true)
 end
 
 @testset "_print" begin
