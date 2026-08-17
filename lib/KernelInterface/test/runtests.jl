@@ -42,14 +42,16 @@ end
     end
 end
 
+struct StubBackend <: KI.Backend end
+
 @testset "host fallbacks" begin
     # Barriers are meaningless off-device and must say so rather than no-op.
     @test_throws "used outside kernel" KI.barrier()
     @test_throws "used outside kernel" KI.sub_group_barrier()
 
     # Permissive defaults: a backend only implements these if it can do better.
-    @test KI.shfl_down_types(nothing) == DataType[]
-    @test KI.multiprocessor_count(nothing) == 0
+    @test KI.shfl_down_types(StubBackend()) == DataType[]
+    @test KI.multiprocessor_count(StubBackend()) == 0
 
     # `localmemory` forwards the untyped `dims` to the `Val` form backends override.
     # Off-device that form is unimplemented, and must error rather than recurse
