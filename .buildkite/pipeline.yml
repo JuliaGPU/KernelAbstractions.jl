@@ -25,7 +25,7 @@ steps:
 
       julia -e 'println("+++ :julia: Running tests")
                 using Pkg
-                Pkg.test("CUDA"; coverage=true, test_args=["core/kernelabstractions"])'
+                Pkg.test("CUDA"; coverage=true, test_args=["core/kernelabstractions", "core/kernelinterface"])'
     agents:
       queue: "cuda"
     timeout_in_minutes: 120
@@ -82,13 +82,13 @@ steps:
       julia -e 'println("--- :julia: Developing Metal")
                 using Pkg
                 Pkg.add([(; url="https://github.com/JuliaGPU/Metal.jl", rev="kaintr"),
-                          (;url ="https://github.com/JuliaGPU/KernelAbstractions.jl", rev="vc/kernelinterface-sibling", subdir="lib/KernelInterface")])'
+                          (;url ="https://github.com/JuliaGPU/KernelAbstractions.jl", rev="kiautosize", subdir="lib/KernelInterface")])'
       julia -e 'println("--- :julia: Instantiating project")
                 using Pkg
                 Pkg.develop(; path=pwd())' || exit 3
       julia -e 'println("+++ :julia: Running tests")
                 using Pkg
-                Pkg.test("Metal"; coverage=true, test_args=["kernelabstractions"])'
+                Pkg.test("Metal"; coverage=true, test_args=["kernelabstractions", "kernelinterface"])'
     agents:
       queue: "metal"
     timeout_in_minutes: 120
@@ -121,7 +121,7 @@ steps:
 
       julia -e 'println("+++ :julia: Running tests")
                 using Pkg
-                Pkg.test("oneAPI"; coverage=true, test_args=["kernelabstractions"])'
+                Pkg.test("oneAPI"; coverage=true, test_args=["kernelabstractions", "kernelinterface"])'
     agents:
       queue: "oneapi"
     timeout_in_minutes: 120
@@ -155,7 +155,7 @@ steps:
 
       julia -e 'println("+++ :julia: Running tests")
                 using Pkg
-                Pkg.test("AMDGPU"; coverage=true, test_args=["kernelabstractions"])'
+                Pkg.test("AMDGPU"; coverage=true, test_args=["kernelabstractions", "kernelinterface"])'
     agents:
       queue: "rocm"
     timeout_in_minutes: 120
@@ -189,7 +189,7 @@ steps:
 
       julia -e 'println("+++ :julia: Running tests")
                 using Pkg
-                Pkg.test("OpenCL"; coverage=true, test_args=`--platform=nvidia nvidia/kernelabstractions`)'
+                Pkg.test("OpenCL"; coverage=true, test_args=`--platform=nvidia nvidia/kernelabstractions nvidia/kernelinterface`)'
     agents:
       queue: "cuda"
     timeout_in_minutes: 120
