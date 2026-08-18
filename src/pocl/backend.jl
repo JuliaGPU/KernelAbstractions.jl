@@ -220,8 +220,11 @@ function KI.kernel_function(::POCLBackend, f::F, tt::TT = Tuple{}; name = nothin
     return KI.Kernel{POCLBackend, typeof(kern)}(POCLBackend(), kern)
 end
 
-function (obj::KI.Kernel{POCLBackend})(args...; numworkgroups=(), workgroupsize=(), ndrange=())
+function (obj::KI.Kernel{POCLBackend})(args...; numworkgroups = (), workgroupsize = (), ndrange = ())
     KI.check_launch_args(numworkgroups, workgroupsize, ndrange)
+
+    # zero-sized ndrange: nothing to launch
+    prod(ndrange) == 0 && return nothing
 
     numworkgroups, workgroupsize = KI.auto_launch_sizes(obj, numworkgroups, workgroupsize, ndrange)
 

@@ -177,6 +177,11 @@ end
     @test KI.threads_to_workgroupsize(1024, (5, 5, 5)) == (5, 5, 5)
     @test KI.threads_to_workgroupsize(4, (3, 3)) == (3, 1)
     @test prod(KI.threads_to_workgroupsize(256, (100, 50))) <= 256
+
+    # Zero-sized dimensions are clamped to 1 so the launch math stays defined.
+    @test KI.threads_to_workgroupsize(256, (0, 4)) == (1, 4)
+    @test KI.threads_to_workgroupsize(256, (4, 0)) == (4, 1)
+    @test KI.threads_to_workgroupsize(0, (5,)) == (1,)
 end
 
 @testset "Kernel" begin
@@ -212,6 +217,11 @@ end
 
     # An explicit workgroupsize is kept as-is.
     @test KI.auto_launch_sizes(kernel, (), (16,), (100,)) === ((7,), (16,))
+
+    # A zero-sized ndrange yields zero workgroups; backends skip the launch.
+    @test KI.auto_launch_sizes(kernel, (), (), (0,)) === ((0,), (1,))
+    @test KI.auto_launch_sizes(kernel, (), (), (0, 4)) === ((0, 4), (1, 1))
+    @test KI.auto_launch_sizes(kernel, (), (), 0) === (0, 1)
 end
 
 @testset "split_kwargs" begin

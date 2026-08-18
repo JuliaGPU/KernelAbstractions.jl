@@ -17,6 +17,9 @@ kernel on the host.
     The helper function `KI.check_launch_args(numworkgroups, workgroupsize, ndrange)` can be
     used by the backend or a custom check can be implemented.
 
+    An `ndrange` with a zero-sized dimension, as when launching over an empty array, is
+    not an error: the call must be a no-op and return `nothing` instead of launching.
+
     By default, kernels must launch with 1 workgroup containing 1 workitem.
 
     Backends must also implement the on-device kernel launch functionality.
@@ -51,7 +54,8 @@ end
 function threads_to_workgroupsize(threads, ndrange)
     total = Ref(1)
     return map(ndrange) do n
-        x = min(div(threads, total[]), n)
+        # each dimension must be at least 1, even for a zero-sized ndrange
+        x = max(min(div(threads, total[]), n), 1)
         total[] *= x
         return x
     end
@@ -62,8 +66,12 @@ end
 
 Returns a suggested `numworkgroups` and `workgroupsize` based on
 the input arguments. This function assumes arguments have been
-validated by `check_launch_args`. This function tries to organize sizes
-such that grid size is never >= 2^32 as that is problematic on some backends
+validated by `check_launch_args`.
+
+If any `ndrange` dimension is zero, the returned `numworkgroups` is zero in
+that dimension; backends should skip the launch in that case. Note that very
+large `ndrange`s can produce total grid sizes >= 2^32, which is problematic
+on some backends.
 
 Backends may call this from their kernel-launch method instead of
 writing their own heuristic for calculating launch size.
