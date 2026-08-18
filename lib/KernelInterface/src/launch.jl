@@ -9,13 +9,17 @@ kernel on the host.
 !!! note
     Backend implementations **must** implement:
     ```
-    (kernel::Kernel{<:NewBackend})(args...; numworkgroups=(), workgroupsize=(), ndrange=())
+    (kernel::Kernel{<:NewBackend})(args...; numworkgroups=(), workgroupsize=(), ndrange=(), max_work_group_size=typemax(Int))
     ```
     `numworkgroups`, `workgroupsize`, and `ndrange` must accept a scalar Integer, a 1, 2,
     or 3 Integer tuple, or an empty tuple. Otherwise, it must throw an `ArgumentError`. An
     `ArgumentError` must also be thrown if `ndrange` and `numworkgroups` are both specified.
     The helper function `KI.check_launch_args(numworkgroups, workgroupsize, ndrange)` can be
     used by the backend or a custom check can be implemented.
+
+    `max_work_group_size` is to allow algorithms to request a max workgroupsize with `ndrange`.
+    This is a maximum value because a kernel's maximum workitems per workgroup may be lower than
+    requested.
 
     An `ndrange` with a zero-sized dimension, as when launching over an empty array, is
     not an error: the call must be a no-op and return `nothing` instead of launching.
@@ -62,7 +66,7 @@ function threads_to_workgroupsize(threads, ndrange)
 end
 
 """
-    auto_launch_sizes(kernel::KI.Kernel, numworkgroups, workgroupsize, ndrange)
+    auto_launch_sizes(kernel::KI.Kernel, numworkgroups, workgroupsize, ndrange, [max_work_items])
 
 Returns a suggested `numworkgroups` and `workgroupsize` based on
 the input arguments. This function assumes arguments have been
@@ -76,11 +80,11 @@ on some backends.
 Backends may call this from their kernel-launch method instead of
 writing their own heuristic for calculating launch size.
 """
-@inline function auto_launch_sizes(kernel::Kernel, numworkgroups, workgroupsize, ndrange)
+@inline function auto_launch_sizes(kernel::Kernel, numworkgroups, workgroupsize, ndrange, max_work_items = typemax(Int))
     numworkgroups, workgroupsize = if ndrange == ()
         numworkgroups == () ? 1 : numworkgroups, workgroupsize == () ? 1 : workgroupsize
     else
-        max_wgs = kernel_max_work_group_size(kernel; max_work_items = prod(ndrange))
+        max_wgs = kernel_max_work_group_size(kernel; max_work_items = min(prod(ndrange), max_work_items))
         workgroupsize = if workgroupsize == ()
             threads_to_workgroupsize(max_wgs, ndrange)
         else
@@ -194,7 +198,7 @@ function kernel_function end
 
 const MACRO_KWARGS = [:launch]
 const COMPILER_KWARGS = [:name]
-const LAUNCH_KWARGS = [:numworkgroups, :workgroupsize, :ndrange]
+const LAUNCH_KWARGS = [:numworkgroups, :workgroupsize, :ndrange, :max_work_group_size]
 
 """
     KI.@kernel backend [workgroupsize=... numworkgroups=... ndrange=...] [kwargs...] func(args...)
