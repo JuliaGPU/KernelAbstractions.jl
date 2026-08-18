@@ -14,7 +14,7 @@ kernel on the host.
     `numworkgroups`, `workgroupsize`, and `ndrange` must accept a scalar Integer, a 1, 2,
     or 3 Integer tuple, or an empty tuple. Otherwise, it must throw an `ArgumentError`. An
     `ArgumentError` must also be thrown if `ndrange` and `numworkgroups` are both specified.
-    The helper function `KI.check_launch_args(; numworkgroups, workgroupsize, ndrange)` can be
+    The helper function `KI.check_launch_args(numworkgroups, workgroupsize, ndrange)` can be
     used by the backend or a custom check can be implemented.
 
     By default, kernels must launch with 1 workgroup containing 1 workitem.
@@ -45,7 +45,7 @@ function check_launch_args(numworkgroups, workgroupsize, ndrange)
         throw(ArgumentError("`workgroupsize` only accepts up to 3 dimensions"))
     length(ndrange) <= 3 ||
         throw(ArgumentError("`ndrange` only accepts up to 3 dimensions"))
-    return numworkgroups == () ? 1 : numworkgroups, workgroupsize == () ? 1 : workgroupsize, ndrange
+    return
 end
 
 function threads_to_workgroupsize(threads, ndrange)
@@ -69,9 +69,8 @@ Backends may call this from their kernel-launch method instead of
 writing their own heuristic for calculating launch size.
 """
 @inline function auto_launch_sizes(kernel::Kernel, numworkgroups, workgroupsize, ndrange)
-# @inline function auto_launch_sizes(wgs, numworkgroups, workgroupsize, ndrange)
     numworkgroups, workgroupsize = if ndrange == ()
-        _numworkgroups, _workgroupsize
+        numworkgroups == () ? 1 : numworkgroups, workgroupsize == () ? 1 : workgroupsize
     else
         max_wgs = kernel_max_work_group_size(kernel; max_work_items = prod(ndrange))
         workgroupsize = if workgroupsize == ()
