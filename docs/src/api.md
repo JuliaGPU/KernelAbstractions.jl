@@ -17,7 +17,19 @@
 
 ## Host language
 
-### Backends and arrays
+!!! note
+    The [`Backend`](@ref) type hierarchy and most of the host-side management
+    functions below ([`get_backend`](@ref), [`allocate`](@ref KernelAbstractions.allocate),
+    [`synchronize`](@ref), device selection, …) are defined in the
+    [KernelInterface](@ref kernelinterface) sibling package and re-exported by
+    `KernelAbstractions`, so `KernelAbstractions.allocate` and
+    `KernelInterface.allocate` are the same function. User code can keep calling
+    them through `KernelAbstractions` as before. Note that this only applies to
+    KernelAbstractions 0.10 and later: KernelAbstractions 0.9 defines its own
+    versions of these functions, which are distinct from the `KernelInterface`
+    ones.
+
+### [Backends and arrays](@id api_backends_arrays)
 
 ```@docs
 Backend

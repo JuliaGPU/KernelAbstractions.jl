@@ -8,7 +8,7 @@
 
 Abstract supertype for all KernelAbstractions backends.
 
-Concrete backends (for example `CUDABackend` from CUDA.jl or [`CPU`](@ref) from this package)
+Concrete backends (for example `CUDABackend` from CUDA.jl or `CPU` from KernelAbstractions)
 determine where arrays are allocated and where kernels execute. Use [`get_backend`](@ref) to
 obtain the backend for an array and [`allocate`](@ref) to create storage on a backend.
 

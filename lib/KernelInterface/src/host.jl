@@ -68,8 +68,8 @@ Return the 1-based index of the currently active device for `backend`.
 
 !!! note
     The default implementation assumes a single device. Backends supporting multiple devices
-    **must** implement `device(backend::Backend)::Int`, [`ndevices`](@ref KernelAbstractions.ndevices),
-    and [`device!`](@ref KernelAbstractions.device!).
+    **must** implement `device(backend::Backend)::Int`, [`ndevices`](@ref),
+    and [`device!`](@ref).
 """
 function device(::Backend)
     return 1
@@ -82,8 +82,8 @@ Return the number of devices available to `backend`.
 
 !!! note
     The default implementation assumes a single device. Backends supporting multiple devices
-    **must** implement `ndevices(backend::Backend)::Int`, [`device`](@ref KernelAbstractions.device),
-    and [`device!`](@ref KernelAbstractions.device!).
+    **must** implement `ndevices(backend::Backend)::Int`, [`device`](@ref),
+    and [`device!`](@ref).
 """
 function ndevices(::Backend)
     return 1
@@ -103,8 +103,8 @@ device!(CUDABackend(), 2)  # use the second CUDA device
 
 !!! note
     The default implementation assumes a single device. Backends supporting multiple devices
-    **must** implement `device!(backend::Backend, id::Int)`, [`ndevices`](@ref KernelAbstractions.ndevices),
-    and [`device`](@ref KernelAbstractions.device).
+    **must** implement `device!(backend::Backend, id::Int)`, [`ndevices`](@ref),
+    and [`device`](@ref).
 """
 function device!(backend::Backend, id::Int)
     if !(0 < id <= ndevices(backend))

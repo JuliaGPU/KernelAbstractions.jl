@@ -18,16 +18,44 @@ const KI = KernelInterface
 ```
 
 `KernelAbstractions` re-exports it, so `KernelAbstractions.KernelInterface` and
-`KernelAbstractions.KI` refer to the same module.
+`KernelAbstractions.KI` refer to the same module. This includes the
+[`Backend`](@ref) type hierarchy and the host-side management API: these are
+defined here in `KernelInterface`, and `KernelAbstractions.Backend`,
+`KernelAbstractions.allocate`, `KernelAbstractions.synchronize` and so on are
+the same objects, so user code keeps using them through `KernelAbstractions`
+unchanged.
+
+!!! compat "KernelAbstractions 0.10"
+    This only holds for KernelAbstractions 0.10 and later. KernelAbstractions
+    0.9 predates `KernelInterface` and defines its own `Backend`, `allocate`,
+    `synchronize`, etc. — those are **different** functions and types from the
+    `KernelInterface` ones. Methods added to one are not seen by the other, so
+    a backend targeting both must implement both. KernelAbstractions 0.10 is
+    based on KernelInterface, so any KernelInterface functionality does not need
+    to be reimplemented for KernelAbstractions.
 
 !!! note
-    Most of the functions below are stubs with no methods. They exist so that
-    backends can add device-side implementations with
+    Most of the device-side functions below are stubs with no methods. They
+    exist so that backends can add device-side implementations with
     `GPUCompiler.@device_override`, and so kernels can call them generically.
     Calling one without a backend that implements it is a `MethodError`.
 
 ```@docs
 KernelInterface
+```
+
+## Backend hierarchy
+
+A backend package subtypes [`GPU`](@ref) (or [`Backend`](@ref) directly for
+non-GPU backends), and everything else in the interface dispatches on that
+type. These types and the host-side management functions below are re-exported
+by `KernelAbstractions`, so their canonical docstrings are on the
+[API page](@ref api_backends_arrays).
+
+```@docs; canonical=false
+Backend
+GPU
+get_backend
 ```
 
 ## Device-side API
@@ -96,6 +124,45 @@ what makes [`KernelAbstractions.@print`](@ref) usable outside of a kernel.
 
 ## Host-side API
 
+Several of these have generic fallbacks. Each docstring notes which methods
+a backend **must** implement and which ones are optional.
+
+### Memory
+
+```@docs; canonical=false
+allocate
+KernelInterface.zeros
+KernelInterface.ones
+copyto!
+pagelock!
+unsafe_free!
+```
+
+### Execution
+
+```@docs; canonical=false
+synchronize
+priority!
+```
+
+### Device management
+
+```@docs; canonical=false
+device
+ndevices
+device!
+```
+
+### Capability queries
+
+```@docs; canonical=false
+functional
+versioninfo
+supports_unified
+supports_atomics
+supports_float64
+```
+
 ### Backend queries
 
 ```@docs
@@ -110,7 +177,6 @@ multiprocessor_count
 Kernel
 kernel_function
 kernel_max_work_group_size
-check_launch_args
 argconvert
 KernelInterface.@kernel
 ```
@@ -126,15 +192,22 @@ KernelInterface.@kernel
 
 A backend must, at minimum:
 
-1. `@device_override` the device-side functions it supports. The indexing
+1. Define a backend type subtyping [`GPU`](@ref) (or [`Backend`](@ref) for
+   non-GPU backends), and implement [`get_backend`](@ref) for its array type.
+2. Implement the host-side management functions for that type:
+   [`allocate`](@ref), [`copyto!`](@ref), [`synchronize`](@ref) and
+   [`unsafe_free!`](@ref) are required; the remaining functions under
+   [Host-side API](@ref) have fallbacks that only need overriding when the
+   defaults don't apply.
+3. `@device_override` the device-side functions it supports. The indexing
    queries and [`barrier`](@ref) are required; sub-group and
    [`shfl_down`](@ref) support is optional.
-2. Implement [`argconvert`](@ref) and [`kernel_function`](@ref) for its backend
+4. Implement [`argconvert`](@ref) and [`kernel_function`](@ref) for its backend
    type, returning a [`Kernel`](@ref).
-3. Make that `Kernel` callable, accepting `numworkgroups` and `workgroupsize` as
+5. Make that `Kernel` callable, accepting `numworkgroups` and `workgroupsize` as
    a scalar `Integer` or a 1-, 2- or 3-element tuple. Use
-   [`check_launch_args`](@ref) to validate them, or check them directly.
-4. Report its limits through [`kernel_max_work_group_size`](@ref) and, where
+   `KI.check_launch_args` to validate them, or check them directly.
+6. Report its limits through [`kernel_max_work_group_size`](@ref) and, where
    applicable, [`max_work_group_size`](@ref), [`sub_group_size`](@ref) and
    [`multiprocessor_count`](@ref).
 
