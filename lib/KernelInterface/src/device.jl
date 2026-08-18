@@ -1,4 +1,3 @@
-
 """
     get_global_size()::@NamedTuple{x::Int, y::Int, z::Int}
 
