@@ -156,10 +156,11 @@ end
 end
 
 @testset "check_launch_args" begin
-    @test KI.check_launch_args(1, 1, ()) === (1, 1, ())
-    @test KI.check_launch_args((1, 2, 3), (1, 2, 3), ()) === ((1, 2, 3), (1, 2, 3), ())
-    @test KI.check_launch_args((), 1, 1) === (1, 1, 1)
-    @test KI.check_launch_args((), (), ()) === (1, 1, ())
+    # Validation only: valid configurations pass through without normalization.
+    @test KI.check_launch_args(1, 1, ()) === nothing
+    @test KI.check_launch_args((1, 2, 3), (1, 2, 3), ()) === nothing
+    @test KI.check_launch_args((), 1, 1) === nothing
+    @test KI.check_launch_args((), (), ()) === nothing
 
     @test_throws ArgumentError KI.check_launch_args((1, 2, 3, 4), 1, ())
     @test_throws ArgumentError KI.check_launch_args(1, (1, 2, 3, 4), ())
@@ -168,10 +169,49 @@ end
     @test_throws ArgumentError KI.check_launch_args(2, (), 2) # both numworkgroupsize and ndrange defined
 end
 
+@testset "threads_to_workgroupsize" begin
+    # Fills dimensions left to right without exceeding the thread budget.
+    @test KI.threads_to_workgroupsize(256, (1000,)) == (256,)
+    @test KI.threads_to_workgroupsize(256, (100,)) == (100,)
+    @test KI.threads_to_workgroupsize(256, (100, 50)) == (100, 2)
+    @test KI.threads_to_workgroupsize(1024, (5, 5, 5)) == (5, 5, 5)
+    @test KI.threads_to_workgroupsize(4, (3, 3)) == (3, 1)
+    @test prod(KI.threads_to_workgroupsize(256, (100, 50))) <= 256
+end
+
 @testset "Kernel" begin
     kernel = KI.Kernel(:backend, :kern)
     @test kernel.backend === :backend
     @test kernel.kern === :kern
+end
+
+# A backend reporting a fixed workgroup-size limit, for exercising the
+# auto-sizing helper.
+struct SizedBackend <: KI.Backend
+    maxThreads::Int
+end
+function KI.kernel_max_work_group_size(k::KI.Kernel{SizedBackend}; max_work_items::Int = typemax(Int))
+    return min(k.backend.maxThreads, max_work_items)
+end
+
+@testset "auto_launch_sizes" begin
+    kernel = KI.Kernel(SizedBackend(256), nothing)
+
+    # Without an ndrange the sizes pass through, defaulting to 1.
+    @test KI.auto_launch_sizes(kernel, (), (), ()) === (1, 1)
+    @test KI.auto_launch_sizes(kernel, 4, (), ()) === (4, 1)
+    @test KI.auto_launch_sizes(kernel, (), (2, 2), ()) === (1, (2, 2))
+    @test KI.auto_launch_sizes(kernel, (4, 4), (2, 2), ()) === ((4, 4), (2, 2))
+
+    # With an ndrange and no workgroupsize, the workgroupsize is derived from
+    # the kernel's limit and the workgroup count covers the ndrange.
+    @test KI.auto_launch_sizes(kernel, (), (), (1000,)) === ((4,), (256,))
+    @test KI.auto_launch_sizes(kernel, (), (), (10,)) === ((1,), (10,))
+    @test KI.auto_launch_sizes(kernel, (), (), (100, 50)) === ((1, 25), (100, 2))
+    @test KI.auto_launch_sizes(kernel, (), (), 1000) === (4, 256)
+
+    # An explicit workgroupsize is kept as-is.
+    @test KI.auto_launch_sizes(kernel, (), (16,), (100,)) === ((7,), (16,))
 end
 
 @testset "split_kwargs" begin
