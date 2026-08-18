@@ -9,12 +9,15 @@ kernel on the host.
 !!! note
     Backend implementations **must** implement:
     ```
-    (kernel::Kernel{<:NewBackend})(args...; numworkgroups=1, workgroupsize=1)
+    (kernel::Kernel{<:NewBackend})(args...; numworkgroups=(), workgroupsize=(), ndrange=())
     ```
-    With the `numworkgroups` and `workgroupsize` arguments accepting a scalar Integer
-    or or a 1, 2, or 3 Integer tuple and throwing an `ArgumentError` otherwise. The
-    helper function `KI.check_launch_args(numworkgroups, workgroupsize)` can be used
-    by the backend or a custom check can be implemented.
+    `numworkgroups`, `workgroupsize`, and `ndrange` must accept a scalar Integer, a 1, 2,
+    or 3 Integer tuple, or an empty tuple. Otherwise, it must throw an `ArgumentError`. An
+    `ArgumentError` must also be thrown if `ndrange` and `numworkgroups` are both specified.
+    The helper function `KI.check_launch_args(; numworkgroups, workgroupsize, ndrange)` can be
+    used by the backend or a custom check can be implemented.
+
+    By default, kernels must launch with 1 workgroup containing 1 workitem.
 
     Backends must also implement the on-device kernel launch functionality.
 """
@@ -24,20 +27,26 @@ struct Kernel{B, Kern}
 end
 
 """
-    check_launch_args(numworkgroups, workgroupsize)
+    check_launch_args(numworkgroups, workgroupsize, ndrange)
 
 Validate the launch configuration passed to a [`Kernel`](@ref), throwing an
 `ArgumentError` if either argument has more than 3 dimensions.
 
+If valid, returns default values (empty tuple to 1)
+
 Backends may call this from their kernel-launch method instead of writing their
 own check.
 """
-function check_launch_args(numworkgroups, workgroupsize)
+function check_launch_args(numworkgroups, workgroupsize, ndrange)
+    length(ndrange) > 0 && length(numworkgroups) > 0 &&
+        throw(ArgumentError("Only one of `numworkgroups` and `ndrange` can be used"))
     length(numworkgroups) <= 3 ||
         throw(ArgumentError("`numworkgroups` only accepts up to 3 dimensions"))
     length(workgroupsize) <= 3 ||
         throw(ArgumentError("`workgroupsize` only accepts up to 3 dimensions"))
-    return
+    length(ndrange) <= 3 ||
+        throw(ArgumentError("`ndrange` only accepts up to 3 dimensions"))
+    return numworkgroups == () ? 1 : numworkgroups, workgroupsize == () ? 1 : workgroupsize, ndrange
 end
 
 """

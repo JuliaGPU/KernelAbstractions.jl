@@ -156,10 +156,16 @@ end
 end
 
 @testset "check_launch_args" begin
-    @test KI.check_launch_args(1, 1) === nothing
-    @test KI.check_launch_args((1, 2, 3), (1, 2, 3)) === nothing
-    @test_throws ArgumentError KI.check_launch_args((1, 2, 3, 4), 1)
-    @test_throws ArgumentError KI.check_launch_args(1, (1, 2, 3, 4))
+    @test KI.check_launch_args(1, 1, ()) === (1, 1, ())
+    @test KI.check_launch_args((1, 2, 3), (1, 2, 3), ()) === ((1, 2, 3), (1, 2, 3), ())
+    @test KI.check_launch_args((), 1, 1) === (1, 1, 1)
+    @test KI.check_launch_args((), (), ()) === (1, 1, ())
+
+    @test_throws ArgumentError KI.check_launch_args((1, 2, 3, 4), 1, ())
+    @test_throws ArgumentError KI.check_launch_args(1, (1, 2, 3, 4), ())
+    @test_throws ArgumentError KI.check_launch_args((), 1, (1, 2, 3, 4))
+    @test_throws ArgumentError KI.check_launch_args(2, 4, 2) # both numworkgroupsize and ndrange defined
+    @test_throws ArgumentError KI.check_launch_args(2, (), 2) # both numworkgroupsize and ndrange defined
 end
 
 @testset "Kernel" begin
