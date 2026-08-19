@@ -1,4 +1,4 @@
-# KernelInterface
+# KernelInterface.jl
 
 [![Documentation](https://img.shields.io/badge/docs-dev-blue.svg)](https://juliagpu.github.io/KernelAbstractions.jl/dev/kernelinterface/)
 
