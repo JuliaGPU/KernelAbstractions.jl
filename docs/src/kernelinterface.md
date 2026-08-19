@@ -204,9 +204,11 @@ A backend must, at minimum:
    [`shfl_down`](@ref) support is optional.
 4. Implement [`argconvert`](@ref) and [`kernel_function`](@ref) for its backend
    type, returning a [`Kernel`](@ref).
-5. Make that `Kernel` callable, accepting `numworkgroups` and `workgroupsize` as
-   a scalar `Integer` or a 1-, 2- or 3-element tuple. Use
-   `KI.check_launch_args` to validate them, or check them directly.
+5. Make that `Kernel` callable, accepting `numworkgroups`, `workgroupsize` and
+   `ndrange` as a scalar `Integer` or a 1-, 2- or 3-element tuple. Use
+   `KI.check_launch_args` to validate them, or check them directly. A zero-sized
+   `ndrange` — launching over an empty array is not uncommon — must be a no-op
+   returning `nothing`, not an error.
 6. Report its limits through [`kernel_max_work_group_size`](@ref) and, where
    applicable, [`max_work_group_size`](@ref), [`sub_group_size`](@ref) and
    [`multiprocessor_count`](@ref).

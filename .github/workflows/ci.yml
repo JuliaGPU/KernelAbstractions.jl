@@ -217,7 +217,7 @@ jobs:
         run: |
           julia -e 'println("+++ :julia: Running tests")
                 using Pkg
-                Pkg.test("OpenCL"; coverage=true, test_args=`--platform=pocl pocl/kernelabstractions poclc/kernelabstractions`)'
+                Pkg.test("OpenCL"; coverage=true, test_args=`--platform=pocl pocl/kernelabstractions poclc/kernelabstractions pocl/kernelintrinsics poclc/kernelintrinsics`)'
       - uses: julia-actions/julia-processcoverage@v1
       - uses: codecov/codecov-action@v7
         with:

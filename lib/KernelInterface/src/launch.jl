@@ -9,12 +9,22 @@ kernel on the host.
 !!! note
     Backend implementations **must** implement:
     ```
-    (kernel::Kernel{<:NewBackend})(args...; numworkgroups=1, workgroupsize=1)
+    (kernel::Kernel{<:NewBackend})(args...; numworkgroups=(), workgroupsize=(), ndrange=(), max_work_group_size=typemax(Int))
     ```
-    With the `numworkgroups` and `workgroupsize` arguments accepting a scalar Integer
-    or or a 1, 2, or 3 Integer tuple and throwing an `ArgumentError` otherwise. The
-    helper function `KI.check_launch_args(numworkgroups, workgroupsize)` can be used
-    by the backend or a custom check can be implemented.
+    `numworkgroups`, `workgroupsize`, and `ndrange` must accept a scalar Integer, a 1, 2,
+    or 3 Integer tuple, or an empty tuple. Otherwise, it must throw an `ArgumentError`. An
+    `ArgumentError` must also be thrown if `ndrange` and `numworkgroups` are both specified.
+    The helper function `KI.check_launch_args(numworkgroups, workgroupsize, ndrange)` can be
+    used by the backend or a custom check can be implemented.
+
+    `max_work_group_size` is to allow algorithms to request a max workgroupsize with `ndrange`.
+    This is a maximum value because a kernel's maximum workitems per workgroup may be lower than
+    requested.
+
+    An `ndrange` with a zero-sized dimension, as when launching over an empty array, is
+    not an error: the call must be a no-op and return `nothing` instead of launching.
+
+    By default, kernels must launch with 1 workgroup containing 1 workitem.
 
     Backends must also implement the on-device kernel launch functionality.
 """
@@ -24,20 +34,67 @@ struct Kernel{B, Kern}
 end
 
 """
-    check_launch_args(numworkgroups, workgroupsize)
+    check_launch_args(numworkgroups, workgroupsize, ndrange)
 
 Validate the launch configuration passed to a [`Kernel`](@ref), throwing an
-`ArgumentError` if either argument has more than 3 dimensions.
+`ArgumentError` if either argument has more than 3 dimensions, or if `ndrange`
+and `numworkgroups` are both defined.
 
 Backends may call this from their kernel-launch method instead of writing their
 own check.
 """
-function check_launch_args(numworkgroups, workgroupsize)
+function check_launch_args(numworkgroups, workgroupsize, ndrange)
+    length(ndrange) > 0 && length(numworkgroups) > 0 &&
+        throw(ArgumentError("Only one of `numworkgroups` and `ndrange` can be used"))
     length(numworkgroups) <= 3 ||
         throw(ArgumentError("`numworkgroups` only accepts up to 3 dimensions"))
     length(workgroupsize) <= 3 ||
         throw(ArgumentError("`workgroupsize` only accepts up to 3 dimensions"))
+    length(ndrange) <= 3 ||
+        throw(ArgumentError("`ndrange` only accepts up to 3 dimensions"))
     return
+end
+
+function threads_to_workgroupsize(threads, ndrange)
+    total = Ref(1)
+    return map(ndrange) do n
+        # each dimension must be at least 1, even for a zero-sized ndrange
+        x = max(min(div(threads, total[]), n), 1)
+        total[] *= x
+        return x
+    end
+end
+
+"""
+    auto_launch_sizes(kernel::KI.Kernel, numworkgroups, workgroupsize, ndrange, [max_work_items])
+
+Returns a suggested `numworkgroups` and `workgroupsize` based on
+the input arguments. This function assumes arguments have been
+validated by `check_launch_args`.
+
+If any `ndrange` dimension is zero, the returned `numworkgroups` is zero in
+that dimension; backends should skip the launch in that case. Note that very
+large `ndrange`s can produce total grid sizes >= 2^32, which is problematic
+on some backends.
+
+Backends may call this from their kernel-launch method instead of
+writing their own heuristic for calculating launch size.
+"""
+@inline function auto_launch_sizes(kernel::Kernel, numworkgroups, workgroupsize, ndrange, max_work_items = typemax(Int))
+    numworkgroups, workgroupsize = if ndrange == ()
+        numworkgroups == () ? 1 : numworkgroups, workgroupsize == () ? 1 : workgroupsize
+    else
+        max_wgs = kernel_max_work_group_size(kernel; max_work_items = min(prod(ndrange), max_work_items))
+        workgroupsize = if workgroupsize == ()
+            threads_to_workgroupsize(max_wgs, ndrange)
+        else
+            workgroupsize
+        end
+        numworkgroups = cld.(ndrange, workgroupsize)
+        Int.(numworkgroups), Int.(workgroupsize)
+    end
+
+    return numworkgroups, workgroupsize
 end
 
 """
@@ -141,10 +198,10 @@ function kernel_function end
 
 const MACRO_KWARGS = [:launch]
 const COMPILER_KWARGS = [:name]
-const LAUNCH_KWARGS = [:numworkgroups, :workgroupsize]
+const LAUNCH_KWARGS = [:numworkgroups, :workgroupsize, :ndrange, :max_work_group_size]
 
 """
-    KI.@kernel backend workgroupsize=... numworkgroups=... [kwargs...] func(args...)
+    KI.@kernel backend [workgroupsize=... numworkgroups=... ndrange=...] [kwargs...] func(args...)
 
 High-level interface for executing code on a GPU.
 
