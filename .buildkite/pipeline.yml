@@ -81,11 +81,11 @@ steps:
     command: |
       julia -e 'println("--- :julia: Developing Metal")
                 using Pkg
-                Pkg.add(url="https://github.com/JuliaGPU/Metal.jl", rev="kaintr")'
+                Pkg.add([(; url="https://github.com/JuliaGPU/Metal.jl", rev="kaintr"),
+                          (;url ="https://github.com/JuliaGPU/KernelAbstractions.jl", rev="vc/kernelinterface-sibling", subdir="lib/KernelInterface")])'
       julia -e 'println("--- :julia: Instantiating project")
                 using Pkg
                 Pkg.develop(; path=pwd())' || exit 3
-
       julia -e 'println("+++ :julia: Running tests")
                 using Pkg
                 Pkg.test("Metal"; coverage=true, test_args=["kernelabstractions"])'

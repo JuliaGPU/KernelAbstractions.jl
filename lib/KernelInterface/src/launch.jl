@@ -1,289 +1,4 @@
-"""
-# `KernelInterface`
-
-The `KernelInterface` (or `KI`) module defines the API interface for backends to define various lower-level device and
-host-side functionality. The `KI` interface is used to define the higher-level device-side
-functionality in `KernelAbstractions`.
-
-Both provide APIs for host and device-side functionality, but `KI` focuses on on lower-level
-functionality that is shared amongst backends, while `KernelAbstractions` provides higher-level functionality
-such as writing kernels that work on arrays with an arbitrary number of dimensions, or convenience functions
-like allocating arrays on a backend.
-"""
-module KernelInterface
-
-import ..KernelAbstractions: Backend
-import GPUCompiler: split_kwargs, assign_args!
-
-"""
-    get_global_size()::@NamedTuple{x::Int, y::Int, z::Int}
-
-Return the number of global work-items specified.
-
-!!! note
-    Backend implementations **must** implement:
-    ```
-    @device_override get_global_size()::@NamedTuple{x::Int, y::Int, z::Int}
-    ```
-"""
-function get_global_size end
-
-"""
-    get_global_id()::@NamedTuple{x::Int, y::Int, z::Int}
-
-Returns the unique global work-item ID.
-
-!!! note
-    1-based.
-
-!!! note
-    Backend implementations **must** implement:
-    ```
-    @device_override get_global_id()::@NamedTuple{x::Int, y::Int, z::Int}
-    ```
-"""
-function get_global_id end
-
-"""
-    get_local_size()::@NamedTuple{x::Int, y::Int, z::Int}
-
-Return the number of local work-items specified.
-
-!!! note
-    Backend implementations **must** implement:
-    ```
-    @device_override get_local_size()::@NamedTuple{x::Int, y::Int, z::Int}
-    ```
-"""
-function get_local_size end
-
-"""
-    get_local_id()::@NamedTuple{x::Int, y::Int, z::Int}
-
-Returns the unique local work-item ID.
-
-!!! note
-    1-based.
-
-!!! note
-    Backend implementations **must** implement:
-    ```
-    @device_override get_local_id()::@NamedTuple{x::Int, y::Int, z::Int}
-    ```
-"""
-function get_local_id end
-
-"""
-    get_num_groups()::@NamedTuple{x::Int, y::Int, z::Int}
-
-Returns the number of groups.
-
-!!! note
-    Backend implementations **must** implement:
-    ```
-    @device_override get_num_groups()::@NamedTuple{x::Int, y::Int, z::Int}
-    ```
-"""
-function get_num_groups end
-
-"""
-    get_group_id()::@NamedTuple{x::Int, y::Int, z::Int}
-
-Returns the unique group ID.
-
-!!! note
-    1-based.
-
-!!! note
-    Backend implementations **must** implement:
-    ```
-    @device_override get_group_id()::@NamedTuple{x::Int, y::Int, z::Int}
-    ```
-"""
-function get_group_id end
-
-"""
-    get_sub_group_size()::UInt32
-
-Returns the number of work-items in the sub-group.
-
-!!! note
-    Backend implementations **must** implement:
-    ```
-    @device_override get_sub_group_size()::UInt32
-    ```
-"""
-function get_sub_group_size end
-
-"""
-    get_max_sub_group_size()::UInt32
-
-Returns the maximum sub-group size for sub-groups in the current workgroup.
-
-!!! note
-    Backend implementations **must** implement:
-    ```
-    @device_override get_max_sub_group_size()::UInt32
-    ```
-"""
-function get_max_sub_group_size end
-
-"""
-    get_num_sub_groups()::UInt32
-
-Returns the number of sub-groups in the current workgroup.
-
-!!! note
-    Backend implementations **must** implement:
-    ```
-    @device_override get_num_sub_groups()::UInt32
-    ```
-"""
-function get_num_sub_groups end
-
-"""
-    get_sub_group_id()::UInt32
-
-Returns the sub-group ID within the work-group.
-
-!!! note
-    1-based.
-
-!!! note
-    Backend implementations **must** implement:
-    ```
-    @device_override get_sub_group_id()::UInt32
-    ```
-"""
-function get_sub_group_id end
-
-"""
-    get_sub_group_local_id()::UInt32
-
-Returns the work-item ID within the current sub-group.
-
-!!! note
-    1-based.
-
-!!! note
-    Backend implementations **must** implement:
-    ```
-    @device_override get_sub_group_local_id()::UInt32
-    ```
-"""
-function get_sub_group_local_id end
-
-
-"""
-    localmemory(::Type{T}, dims)
-
-Declare memory that is local to a workgroup.
-
-!!! note
-    Backend implementations **must** implement:
-    ```
-    @device_override localmemory(::Type{T}, ::Val{Dims}) where {T, Dims}
-    ```
-    As well as the on-device functionality.
-"""
-localmemory(::Type{T}, dims) where {T} = localmemory(T, Val(dims))
-
-"""
-    shfl_down(val::T, offset::Integer) where T
-
-Read `val` from a lane with higher id given by `offset`.
-
-!!! note
-    `shfl_down` must be encountered by all workitems of a sub-group executing the kernel or by none at all.
-
-!!! note
-    Backend implementations **must** implement:
-    ```
-    @device_override shfl_down(val::T, offset::Integer) where T
-    ```
-    As well as the on-device functionality.
-
-    This implementation **must** be synchronizing.
-    That is, kernels using this function can safely assume that
-    they do **not** need a `sub_group_barrier` before calling
-    this function.
-"""
-function shfl_down end
-
-"""
-    shfl_down_types(::Backend)::Vector{DataType}
-
-Returns a vector of `DataType`s supported on `backend`
-
-!!! note
-    Backend implementations **must** implement this function
-    only if they support `shfl_down` for any types.
-"""
-shfl_down_types(::Backend) = DataType[]
-
-
-"""
-    barrier()
-
-After a `barrier()` call, all read and writes to global and local memory
-from each thread in the workgroup are visible in from all other threads in the
-workgroup.
-
-This does **not** guarantee that a write from a thread in a certain workgroup will
-be visible to a thread in a different workgroup.
-
-!!! note
-    `barrier()` must be encountered by all workitems of a work-group executing the kernel or by none at all.
-
-!!! note
-    Backend implementations **must** implement:
-    ```
-    @device_override barrier()
-    ```
-"""
-function barrier()
-    error("Group barrier used outside kernel or not captured")
-end
-
-"""
-    sub_group_barrier()
-
-After a `sub_group_barrier()` call, all read and writes to global and local memory
-from each thread in the sub-group are visible in from all other threads in the
-sub-group.
-
-This does **not** guarantee that a write from a thread in a certain sub-group will
-be visible to a thread in a different sub-group.
-
-!!! note
-    `sub_group_barrier()` must be encountered by all workitems of a sub-group executing the kernel or by none at all.
-
-!!! note
-    Backend implementations **must** implement:
-    ```
-    @device_override sub_group_barrier()
-    ```
-"""
-function sub_group_barrier()
-    error("Sub-group barrier used outside kernel or not captured")
-end
-
-"""
-    _print(args...)
-
-    Overloaded by backends to enable `KernelAbstractions.@print`
-    functionality.
-
-!!! note
-    Backend implementations **must** implement:
-    ```
-    @device_override _print(args...)
-    ```
-    If the backend does not support printing,
-    define it to return `nothing`.
-"""
-function _print end
-
+# host-side operations related to kernel launches
 
 """
     Kernel{Backend, Kern}
@@ -308,6 +23,15 @@ struct Kernel{B, Kern}
     kern::Kern
 end
 
+"""
+    check_launch_args(numworkgroups, workgroupsize)
+
+Validate the launch configuration passed to a [`Kernel`](@ref), throwing an
+`ArgumentError` if either argument has more than 3 dimensions.
+
+Backends may call this from their kernel-launch method instead of writing their
+own check.
+"""
 function check_launch_args(numworkgroups, workgroupsize)
     length(numworkgroups) <= 3 ||
         throw(ArgumentError("`numworkgroups` only accepts up to 3 dimensions"))
@@ -378,7 +102,7 @@ Used for certain algorithm optimizations.
     ```
     As well as the on-device functionality.
 """
-multiprocessor_count(_) = 0
+multiprocessor_count(::Backend) = 0
 
 """
     argconvert(::NewBackend, arg)
@@ -398,7 +122,8 @@ function argconvert end
     KI.kernel_function(::NewBackend, f::F, tt::TT=Tuple{}; name=nothing, kwargs...) where {F,TT}
 
 Low-level interface to compile a function invocation for the currently-active GPU, returning
-a callable kernel object. For a higher-level interface, use [`KI.@kernel`](@ref).
+a callable kernel object. For a higher-level interface, use
+[`KernelInterface.@kernel`](@ref).
 
 Currently, `kernel_function` only supports the `name` keyword argument as it is the only one
 by all backends.
@@ -515,6 +240,4 @@ macro kernel(backend, ex...)
             end
         end
     )
-end
-
 end

@@ -1,11 +1,12 @@
 using KernelAbstractions
+using KernelInterface
 using Documenter
 
 function main()
     ci = get(ENV, "CI", "") == "true"
 
     makedocs(;
-        modules = [KernelAbstractions],
+        modules = [KernelAbstractions, KernelInterface],
         authors = "JuliaGPU and contributors",
         repo = "https://github.com/JuliaGPU/KernelAbstractions.jl/blob/{commit}{path}#L{line}",
         sitename = "KernelAbstractions.jl",
@@ -35,6 +36,7 @@ function main()
                 "examples/atomix.md",
             ], # Examples
             "API" => "api.md",
+            "KernelInterface" => "kernelinterface.md",
             "Extras" => [
                 "extras/unrolling.md",
                 "extras/pocl_debugging.md",

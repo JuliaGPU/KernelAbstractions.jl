@@ -164,6 +164,30 @@ jobs:
         with:
           files: lcov.info
 
+  KernelInterface:
+    name: KernelInterface
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ['1.10', '1.11', '1.12', '1.13-nightly']
+        os: [ubuntu-24.04, macOS-15, windows-2022]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: julia-actions/install-juliaup@v3
+        with:
+          channel: ${{ matrix.version }}
+      - uses: julia-actions/cache@v3
+      # Tested on its own, without KernelAbstractions, to keep the sibling
+      # package standalone and dependency-free.
+      - uses: julia-actions/julia-buildpkg@v1
+        with:
+          project: lib/KernelInterface
+      - uses: julia-actions/julia-runtest@v1
+        with:
+          project: lib/KernelInterface
+          annotate: true
+
   OpenCL:
     name: OpenCL (POCL)
     runs-on: ubuntu-latest
