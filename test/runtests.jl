@@ -1,3 +1,8 @@
+@static if Sys.iswindows() && haskey(ENV, "CI")
+    using Pkg
+    Pkg.develop(; path = "../lib/KernelInterface")
+end
+
 using KernelAbstractions
 using Test
 
