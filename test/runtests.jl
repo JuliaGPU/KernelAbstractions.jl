@@ -1,4 +1,4 @@
-@static if Sys.iswindows() && haskey(ENV, "CI")
+@static if VERSION < v"1.11" && Sys.iswindows() && haskey(ENV, "CI")
     using Pkg
     Pkg.develop(; path = "../lib/KernelInterface")
 end
