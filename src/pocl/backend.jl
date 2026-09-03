@@ -34,7 +34,7 @@ function KI.versioninfo(io::IO, ::POCLBackend)
     println(io)
 
     println(io, "Julia packages:")
-    for name in [:GPUCompiler, :LLVM, :SPIRVIntrinsics]
+    for name in [:GPUCompiler, :LLVM, :KernelInterface, :SPIRVIntrinsics]
         mod = getfield(POCL, name)
         println(io, "- $(name): $(Base.pkgversion(mod))")
     end
