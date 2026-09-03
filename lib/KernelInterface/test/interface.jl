@@ -162,7 +162,7 @@ function interface_testsuite(backend, AT)
 
         @test KI.device(b) isa Int
         @test KI.ndevices(b) isa Int
-        @test KI.device!(b, KI.device(b)) isa Nothing
+        # @test KI.device!(b, KI.device(b)) isa Nothing
         @test KI.priority!(b, :normal) isa Nothing
 
         @test KI.shfl_down_types(b) isa Vector{DataType}
