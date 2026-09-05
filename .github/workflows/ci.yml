@@ -143,6 +143,12 @@ jobs:
       #       end
       #     '
       - uses: julia-actions/julia-buildpkg@v1
+      - name: Dev KernelInterface
+        if: runner.os != 'Windows'
+        run: |
+            julia -e 'using Pkg
+                      Pkg.activate(".")
+                      Pkg.develop(; path="lib/KernelInterface")'
       - uses: julia-actions/julia-runtest@v1
         if: runner.os != 'Windows'
         with:
@@ -202,17 +208,18 @@ jobs:
           channel: ${{ matrix.version }}
       - uses: julia-actions/cache@v3
       - uses: julia-actions/julia-buildpkg@v1
-      - name: "Developing OpenCL"
-        run: |
-          julia -e 'println("--- :julia: Developing OpenCL")
-                using Pkg
-                Pkg.add(url="https://github.com/christiangnrd/OpenCL.jl", rev="intrinsics")
-                Pkg.develop(; name="SPIRVIntrinsics")'
       - name: "Instantiating project"
         run: |
           julia -e 'println("--- :julia: Instantiating project")
                 using Pkg
-                Pkg.develop(; path=pwd())' || exit 3
+                Pkg.develop([PackageSpec(; name="KernelAbstractions", path=pwd()),
+                PackageSpec(; name="KernelInterface", path=joinpath(pwd(), "lib", "KernelInterface"))])' || exit 3
+      - name: "Developing OpenCL"
+        run: |
+          julia -e 'println("--- :julia: Developing OpenCL")
+                using Pkg
+                Pkg.add(url="https://github.com/JuliaGPU/OpenCL.jl", rev="intrinsics")
+                Pkg.develop(; name="SPIRVIntrinsics")'
       - name: "Developing OpenCL"
         run: |
           julia -e 'println("+++ :julia: Running tests")

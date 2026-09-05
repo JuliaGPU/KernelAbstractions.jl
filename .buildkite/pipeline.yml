@@ -13,15 +13,16 @@ steps:
       - JuliaCI/julia-coverage#v1:
           codecov: true
     command: |
+      julia -e 'println("--- :julia: Instantiating project")
+                using Pkg
+                Pkg.develop([PackageSpec(; name="KernelAbstractions", path=pwd()),
+                PackageSpec(; name="KernelInterface", path=joinpath(pwd(), "lib", "KernelInterface"))])' || exit 3
       julia -e 'println("--- :julia: Developing CUDA")
                 using Pkg
                 url="https://github.com/christiangnrd/CUDA.jl"
                 rev="intrinsics"
                 subdirs = ["CUDACore", "CUDATools", "lib/cusolver", "lib/curand", "lib/cublas", "lib/cufft", "lib/cusparse", "lib/cupti", "lib/nvml", "lib/custatevec", "lib/cudnn", "lib/cutensor", "lib/cutensornet"]
                 Pkg.add([(;url, rev); [(; url, rev, subdir) for subdir in subdirs]])'
-      julia -e 'println("--- :julia: Instantiating project")
-                using Pkg
-                Pkg.develop(; path=pwd())' || exit 3
 
       julia -e 'println("+++ :julia: Running tests")
                 using Pkg
@@ -79,13 +80,13 @@ steps:
       - JuliaCI/julia-coverage#v1:
           codecov: true
     command: |
-      julia -e 'println("--- :julia: Developing Metal")
-                using Pkg
-                Pkg.add([(; url="https://github.com/JuliaGPU/Metal.jl", rev="kaintr"),
-                          (;url ="https://github.com/JuliaGPU/KernelAbstractions.jl", rev="main", subdir="lib/KernelInterface")])'
       julia -e 'println("--- :julia: Instantiating project")
                 using Pkg
-                Pkg.develop(; path=pwd())' || exit 3
+                Pkg.develop([PackageSpec(; name="KernelAbstractions", path=pwd()),
+                PackageSpec(; name="KernelInterface", path=joinpath(pwd(), "lib", "KernelInterface"))])' || exit 3
+      julia -e 'println("--- :julia: Developing Metal")
+                using Pkg
+                Pkg.add([(; url="https://github.com/JuliaGPU/Metal.jl", rev="kaintr")])'
       julia -e 'println("+++ :julia: Running tests")
                 using Pkg
                 Pkg.test("Metal"; coverage=true, test_args=["kernelabstractions", "kernelinterface"])'
@@ -111,13 +112,14 @@ steps:
       - JuliaCI/julia-coverage#v1:
           codecov: true
     command: |
+      julia -e 'println("--- :julia: Instantiating project")
+                using Pkg
+                Pkg.develop([PackageSpec(; name="KernelAbstractions", path=pwd()),
+                PackageSpec(; name="KernelInterface", path=joinpath(pwd(), "lib", "KernelInterface"))])' || exit 3
       julia -e 'println("--- :julia: Developing oneAPI")
                 using Pkg
                 Pkg.add(url="https://github.com/christiangnrd/oneAPI.jl", rev="intrinsics")
                 Pkg.add(url="https://github.com/JuliaGPU/AcceleratedKernels.jl", rev="main")'
-      julia -e 'println("--- :julia: Instantiating project")
-                using Pkg
-                Pkg.develop(; path=pwd())' || exit 3
 
       julia -e 'println("+++ :julia: Running tests")
                 using Pkg
@@ -144,14 +146,15 @@ steps:
       - JuliaCI/julia-coverage#v1:
           codecov: true
     command: |
-      julia -e 'println("--- :julia: Developing AMDGPU")
-                using Pkg
-                Pkg.add(url="https://github.com/JuliaGPU/AcceleratedKernels.jl", rev="main")'
       julia -e '
                 using Pkg
-                Pkg.add(url="https://github.com/christiangnrd/AMDGPU.jl", rev="intrinsics")
                 println("--- :julia: Instantiating project")
-                Pkg.develop(; path=pwd())' || exit 3
+                Pkg.develop([PackageSpec(; name="KernelAbstractions", path=pwd()),
+                PackageSpec(; name="KernelInterface", path=joinpath(pwd(), "lib", "KernelInterface"))])' || exit 3
+      julia -e 'println("--- :julia: Developing AMDGPU")
+                using Pkg
+                Pkg.add(url="https://github.com/JuliaGPU/AcceleratedKernels.jl", rev="main")
+                Pkg.add(url="https://github.com/christiangnrd/AMDGPU.jl", rev="intrinsics")'
 
       julia -e 'println("+++ :julia: Running tests")
                 using Pkg
@@ -179,13 +182,14 @@ steps:
       - JuliaCI/julia-coverage#v1:
           codecov: true
     command: |
-      julia -e 'println("--- :julia: Developing OpenCL")
-                using Pkg
-                Pkg.add(url="https://github.com/christiangnrd/OpenCL.jl", rev="intrinsics")
-                Pkg.develop(; name="SPIRVIntrinsics")'
       julia -e 'println("--- :julia: Instantiating project")
                 using Pkg
-                Pkg.develop(; path=pwd())' || exit 3
+                Pkg.develop([PackageSpec(; name="KernelAbstractions", path=pwd()),
+                PackageSpec(; name="KernelInterface", path=joinpath(pwd(), "lib", "KernelInterface"))])' || exit 3
+      julia -e 'println("--- :julia: Developing OpenCL")
+                using Pkg
+                Pkg.add(url="https://github.com/JuliaGPU/OpenCL.jl", rev="intrinsics")
+                Pkg.develop(; name="SPIRVIntrinsics")'
 
       julia -e 'println("+++ :julia: Running tests")
                 using Pkg

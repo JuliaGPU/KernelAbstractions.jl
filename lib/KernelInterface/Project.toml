@@ -1,7 +1,7 @@
 name = "KernelInterface"
 uuid = "4ee993da-d684-4d17-a7dd-4e58e78d92bf"
 authors = ["Valentin Churavy <v.churavy@gmail.com> and contributors"]
-version = "0.1.0"
+version = "0.1.1"
 
 [compat]
 julia = "1.10"
