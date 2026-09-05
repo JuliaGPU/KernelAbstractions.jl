@@ -1,7 +1,7 @@
-@static if VERSION < v"1.11" && Sys.iswindows() && haskey(ENV, "CI")
-    using Pkg
-    Pkg.develop(; path = "../lib/KernelInterface")
-end
+# @static if VERSION < v"1.11" && Sys.iswindows() && haskey(ENV, "CI")
+#     using Pkg
+#     Pkg.develop(; path = "../lib/KernelInterface")
+# end
 
 using KernelAbstractions
 using Test
