@@ -118,8 +118,8 @@ steps:
                 PackageSpec(; name="KernelInterface", path=joinpath(pwd(), "lib", "KernelInterface"))])' || exit 3
       julia -e 'println("--- :julia: Developing oneAPI")
                 using Pkg
-                Pkg.add([(; url="https://github.com/christiangnrd/oneAPI.jl", rev="intrinsics"),
-                         (; url="https://github.com/JuliaGPU/AcceleratedKernels.jl", rev="main")])'
+                Pkg.add(url="https://github.com/christiangnrd/oneAPI.jl", rev="intrinsics")
+                Pkg.add(url="https://github.com/JuliaGPU/AcceleratedKernels.jl", rev="main")'
 
       julia -e 'println("+++ :julia: Running tests")
                 using Pkg
