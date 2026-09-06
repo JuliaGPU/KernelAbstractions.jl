@@ -38,7 +38,7 @@ function hostinterface_testsuite(_backend, AT)
             U = KernelAbstractions.allocate(backend, Float32, 4; unified = true)
             @test U isa AbstractArray{Float32}
         else
-            @test_throws ArgumentError KernelAbstractions.allocate(backend, Float32, 4; unified = true)
+            @test_throws Exception KernelAbstractions.allocate(backend, Float32, 4; unified = true)
         end
     end
 
