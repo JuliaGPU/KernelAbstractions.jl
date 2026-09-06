@@ -68,6 +68,7 @@ function Adapt.adapt_storage(to::KernelAdaptor, xs::Array{T, N}) where {T, N}
     return CLDeviceArray{T, N, AS.CrossWorkgroup}(size(xs), reinterpret(LLVMPtr{T, AS.CrossWorkgroup}, pointer(xs)))
 end
 
+import KernelInterface
 include("backend.jl")
 import .POCLKernels: POCLBackend
 export POCLBackend
