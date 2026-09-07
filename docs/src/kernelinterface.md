@@ -8,10 +8,9 @@ CurrentModule = KernelInterface
 backends implement, and that `KernelAbstractions` builds its higher-level kernel
 language on top of.
 
-It ships as a standalone package under `lib/KernelInterface` whose **only
-dependency outside the standard library is
-[Adapt.jl](https://github.com/JuliaGPU/Adapt.jl)**, so a backend can implement
-the interface without taking on `KernelAbstractions` or its compiler stack:
+It ships as a standalone package under `lib/KernelInterface` with **no
+dependencies outside the standard library**, so a backend can implement the
+interface without taking on `KernelAbstractions` or its compiler stack:
 
 ```julia
 using KernelInterface
@@ -139,16 +138,6 @@ pagelock!
 unsafe_free!
 ```
 
-### Data movement
-
-`adapt(backend, x)` moves the arrays in `x` to `backend`; it is
-[Adapt.jl](https://github.com/JuliaGPU/Adapt.jl)'s `adapt`, dispatching to an
-`Adapt.adapt_storage` method the backend supplies.
-
-```@docs; canonical=false
-Adapt.adapt_storage(::Backend, ::Any)
-```
-
 ### Execution
 
 ```@docs; canonical=false
@@ -213,7 +202,9 @@ A backend must, at minimum:
 3. Extend `Adapt.adapt_storage(::NewBackend, x)` so that
    [`adapt(backend, x)`](@ref Adapt.adapt_storage(::Backend, ::Any)) moves
    data to the backend, preferably by delegating to its array type:
-   `Adapt.adapt_storage(::NewBackend, x) = adapt(NewArray, x)`.
+   `Adapt.adapt_storage(::NewBackend, x) = adapt(NewArray, x)`. This is
+   required by `KernelAbstractions` rather than by `KernelInterface`, which
+   does not depend on Adapt.jl.
 4. `@device_override` the device-side functions it supports. The indexing
    queries and [`barrier`](@ref) are required; sub-group and
    [`shfl_down`](@ref) support is optional.

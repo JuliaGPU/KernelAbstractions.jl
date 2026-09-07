@@ -185,7 +185,7 @@ jobs:
           channel: ${{ matrix.version }}
       - uses: julia-actions/cache@v3
       # Tested on its own, without KernelAbstractions, to keep the sibling
-      # package standalone (Adapt.jl is its only dependency).
+      # package standalone and dependency-free.
       - uses: julia-actions/julia-buildpkg@v1
         with:
           project: lib/KernelInterface
