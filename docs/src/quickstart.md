@@ -134,34 +134,34 @@ mymul(A, ones(size(A)))
 
 As shown in the [Synchronization](@ref) section above, multiple kernels can be enqueued on the
 same backend before a single [`synchronize`](@ref) call. The same pattern extends to Julia's
-task-based parallelism: launch kernels from [`Threads.@spawn`](https://docs.julialang.org/en/v1/base/multi-threading/#Base.Threads.@spawn)
-tasks when you want to overlap kernel execution with other asynchronous host work.
+task-based parallelism: launch kernels from tasks when you want to overlap kernel execution
+with other asynchronous host work, or with each other.
+
+Some backends give each Julia task its own queue, so kernels launched from two tasks are not
+ordered with respect to each other, and `wait(task)` on its own says nothing about whether
+the kernels that task launched have finished. Use [`KernelAbstractions.@spawn`](@ref) instead
+of `Threads.@spawn` to launch kernels from a task. It orders the new task's work after the
+work the spawning task has already queued, runs it on the same device, and synchronizes the
+backend before the task finishes, so that `wait(task)` and `fetch(task)` guarantee its
+results are ready:
+
+```julia
+function exchange_and_compute!(backend, A, B)
+    recv = KernelAbstractions.@spawn backend begin
+        mul2_kernel(backend, 64)(A, ndrange=length(A))
+    end
+    send = KernelAbstractions.@spawn backend begin
+        mul2_kernel(backend, 64)(B, ndrange=length(B))
+    end
+    wait(recv)
+    wait(send)
+end
+```
 
 On GPU backends, [`synchronize`](@ref) is **cooperative** — it yields to the Julia scheduler
 rather than blocking inside a driver call, so other tasks can make progress while a kernel runs.
-See [Notes for backend implementations](@ref implementations_notes) for the contract backend authors must follow.
-
-```julia
-function cooperative_wait(task::Task)
-    while !Base.istaskdone(task)
-        yield()
-    end
-    return wait(task)
-end
-
-function exchange_and_compute!(backend, A, B)
-    recv = Threads.@spawn begin
-        mul2_kernel(backend, 64)(A, ndrange=length(A))
-        synchronize(backend)  # cooperative on GPU backends
-    end
-    send = Threads.@spawn begin
-        mul2_kernel(backend, 64)(B, ndrange=length(B))
-        synchronize(backend)
-    end
-    cooperative_wait(recv)
-    cooperative_wait(send)
-end
-```
+See [Notes for backend implementations](@ref implementations_notes) for the contract backend
+authors must follow, and for how a backend can make `@spawn` cheaper than a full synchronization.
 
 A full MPI example that overlaps communication with device copies is in
 [`examples/mpi.jl`](https://github.com/JuliaGPU/KernelAbstractions.jl/blob/master/examples/mpi.jl).

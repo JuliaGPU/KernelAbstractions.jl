@@ -139,6 +139,29 @@ end
     @test KI.unsafe_free!(zeros(2)) === nothing
 end
 
+# A backend implementing only `synchronize`, for exercising the event fallbacks.
+struct SyncBackend <: KI.Backend
+    synchronizations::Base.RefValue{Int}
+end
+SyncBackend() = SyncBackend(Ref(0))
+KI.synchronize(b::SyncBackend) = (b.synchronizations[] += 1; nothing)
+
+@testset "record_event / wait_event" begin
+    b = SyncBackend()
+
+    # Without an event type of its own, a backend records by synchronizing fully, and
+    # the resulting `nothing` handle is a no-op to wait on.
+    @test KI.record_event(b) === nothing
+    @test b.synchronizations[] == 1
+    @test KI.wait_event(b, nothing) === nothing
+    @test b.synchronizations[] == 1
+
+    # A backend that does not implement `synchronize` cannot record either.
+    @test_throws MethodError KI.record_event(StubBackend())
+    # Only events a backend defines `wait_event` for are accepted.
+    @test_throws MethodError KI.wait_event(b, :bogus)
+end
+
 @testset "allocate / zeros / ones" begin
     b = AllocBackend()
 
