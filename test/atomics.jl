@@ -134,27 +134,29 @@ function atomics_testsuite(backend, ArrayT)
         return
     end
 
+    # Float atomics on the CPU backend need the SPV_EXT_shader_atomic_float_{add,min_max}
+    # extensions, which the POCL compiler permits based on cl_ext_float_atomics
+    eltypes = [Int32, UInt32, Float32]
+    KernelAbstractions.supports_float64(backend()) && push!(eltypes, Float64)
+
     @testset "Atomix" begin
-        # Float32 is excluded since atomic float add requires the SPIR-V
-        # extension SPV_EXT_shader_atomic_float_add, unavailable with PoCL.
-        # TODO: use CAS-based fallbacks, cf. JuliaGPU/GPUCompiler.jl#652
-        @testset "atomic add ($T)" for T in (Int32, UInt32)
+        @testset "atomic add ($T)" for T in eltypes
             hist = ArrayT(zeros(T, 32))
             atomix_add!(backend())(hist, ndrange = 1024)
             synchronize(backend())
             @test all(Array(hist) .== T(1024 ÷ 32))
         end
 
-        @testset "atomic max/min" begin
-            A = ArrayT(zeros(Int32, 1))
+        @testset "atomic max/min ($T)" for T in eltypes
+            A = ArrayT(zeros(T, 1))
             atomix_max!(backend())(A, ndrange = 1024)
             synchronize(backend())
-            @test Array(A)[1] == 1024
+            @test Array(A)[1] == T(1024)
 
-            A = ArrayT(fill(typemax(Int32), 1))
+            A = ArrayT(fill(typemax(T), 1))
             atomix_min!(backend())(A, ndrange = 1024)
             synchronize(backend())
-            @test Array(A)[1] == 1
+            @test Array(A)[1] == T(1)
         end
 
         @testset "atomic load/store" begin
@@ -194,18 +196,18 @@ function atomics_testsuite(backend, ArrayT)
     end
 
     @testset "UnsafeAtomics" begin
-        @testset "atomic add ($T)" for T in (Int32, UInt32)
+        @testset "atomic add ($T)" for T in eltypes
             hist = ArrayT(zeros(T, 32))
             unsafe_atomics_add!(backend())(hist, ndrange = 1024)
             synchronize(backend())
             @test all(Array(hist) .== T(1024 ÷ 32))
         end
 
-        @testset "atomic max/min" begin
-            A = ArrayT(Int32[0, typemax(Int32)])
+        @testset "atomic max/min ($T)" for T in eltypes
+            A = ArrayT(T[0, typemax(T)])
             unsafe_atomics_minmax!(backend())(A, ndrange = 1024)
             synchronize(backend())
-            @test Array(A) == [1024, 1]
+            @test Array(A) == T[1024, 1]
         end
 
         @testset "store/modify/cas/xchg/load" begin
