@@ -299,6 +299,25 @@ const CL_DEVICE_NON_UNIFORM_WORK_GROUP_SUPPORT = 0x1065
 
 const CL_DEVICE_OPENCL_C_ALL_VERSIONS = 0x1066
 
+# cl_ext_float_atomics
+const CL_DEVICE_SINGLE_FP_ATOMIC_CAPABILITIES_EXT = 0x4231
+
+const CL_DEVICE_DOUBLE_FP_ATOMIC_CAPABILITIES_EXT = 0x4232
+
+const CL_DEVICE_HALF_FP_ATOMIC_CAPABILITIES_EXT = 0x4233
+
+const CL_DEVICE_GLOBAL_FP_ATOMIC_LOAD_STORE_EXT = UInt64(1) << 0
+
+const CL_DEVICE_GLOBAL_FP_ATOMIC_ADD_EXT = UInt64(1) << 1
+
+const CL_DEVICE_GLOBAL_FP_ATOMIC_MIN_MAX_EXT = UInt64(1) << 2
+
+const CL_DEVICE_LOCAL_FP_ATOMIC_LOAD_STORE_EXT = UInt64(1) << 16
+
+const CL_DEVICE_LOCAL_FP_ATOMIC_ADD_EXT = UInt64(1) << 17
+
+const CL_DEVICE_LOCAL_FP_ATOMIC_MIN_MAX_EXT = UInt64(1) << 18
+
 const CL_DEVICE_PREFERRED_WORK_GROUP_SIZE_MULTIPLE = 0x1067
 
 const CL_DEVICE_WORK_GROUP_COLLECTIVE_FUNCTIONS_SUPPORT = 0x1068
@@ -922,6 +941,18 @@ devices(p::Platform) = devices(p, CL_DEVICE_TYPE_ALL)
         clGetDeviceInfo(d, CL_DEVICE_EXTENSIONS, size[], result, C_NULL)
         bs = GC.@preserve result unsafe_string(pointer(result))
         return String[string(s) for s in split(bs)]
+    end
+
+    # cl_ext_float_atomics: per-precision bitfields of natively supported floating-point
+    # atomic operations (zero when the device does not expose the extension)
+    if s == :single_fp_atomic_capabilities || s == :double_fp_atomic_capabilities || s == :half_fp_atomic_capabilities
+        "cl_ext_float_atomics" in d.extensions || return zero(UInt64)
+        prop = s == :single_fp_atomic_capabilities ? CL_DEVICE_SINGLE_FP_ATOMIC_CAPABILITIES_EXT :
+            s == :double_fp_atomic_capabilities ? CL_DEVICE_DOUBLE_FP_ATOMIC_CAPABILITIES_EXT :
+            CL_DEVICE_HALF_FP_ATOMIC_CAPABILITIES_EXT
+        caps = Ref{UInt64}(0)
+        clGetDeviceInfo(d, prop, sizeof(UInt64), caps, C_NULL)
+        return caps[]
     end
 
     if s == :platform

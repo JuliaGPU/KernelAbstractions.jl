@@ -143,6 +143,19 @@ end
 ## compiler implementation (configure, compile, and link)
 
 """
+    supports_fp_atomics(caps::UInt64, ops::UInt64)
+
+Whether the `cl_ext_float_atomics` capability bitfield `caps` (see
+`dev.single_fp_atomic_capabilities` and friends) natively supports all of `ops`.
+Kernels perform atomics on both global and local memory, so callers should
+require both the `GLOBAL` and `LOCAL` bit of an operation.
+"""
+supports_fp_atomics(caps::UInt64, ops::UInt64) = caps & ops == ops
+
+const fp_atomic_add = cl.CL_DEVICE_GLOBAL_FP_ATOMIC_ADD_EXT | cl.CL_DEVICE_LOCAL_FP_ATOMIC_ADD_EXT
+const fp_atomic_min_max = cl.CL_DEVICE_GLOBAL_FP_ATOMIC_MIN_MAX_EXT | cl.CL_DEVICE_LOCAL_FP_ATOMIC_MIN_MAX_EXT
+
+"""
     default_spirv_extensions(dev)
 
 SPIR-V extensions to permit for `dev`, as the `+`-prefixed, comma-separated string
@@ -154,12 +167,20 @@ needs the instructions it guards, so this costs nothing for kernels that don't.
 function default_spirv_extensions(dev)
     exts = String[]
 
-    # Atomic float add. Without this the backend refuses to translate the module at all:
+    # Floating-point atomics. Atomix/UnsafeAtomics lower `@atomic A[i] += x` and
+    # `@atomic max(A[i], x)` on floats to LLVM `atomicrmw fadd`/`fmin`/`fmax`, which the
+    # SPIR-V backend only translates when the corresponding extension is permitted:
     #   LLVM ERROR: The atomic float instruction requires the following SPIR-V
     #   extension: SPV_EXT_shader_atomic_float_add
-    # Enzyme's reverse mode hits this because it accumulates gradients with atomic fadd.
-    if "cl_ext_float_atomics" in dev.extensions
+    # Enzyme's reverse mode hits this too, as it accumulates gradients with atomic fadd.
+    # The device reports native support per precision through cl_ext_float_atomics.
+    fp32 = dev.single_fp_atomic_capabilities
+    fp64 = dev.double_fp_atomic_capabilities
+    if supports_fp_atomics(fp32, fp_atomic_add) || supports_fp_atomics(fp64, fp_atomic_add)
         push!(exts, "+SPV_EXT_shader_atomic_float_add")
+    end
+    if supports_fp_atomics(fp32, fp_atomic_min_max) || supports_fp_atomics(fp64, fp_atomic_min_max)
+        push!(exts, "+SPV_EXT_shader_atomic_float_min_max")
     end
 
     return join(exts, ",")
