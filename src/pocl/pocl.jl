@@ -75,6 +75,4 @@ export POCLBackend
 
 import KernelAbstractions as KA
 
-Adapt.adapt_storage(::POCLBackend, a::Array) = a
-
 end

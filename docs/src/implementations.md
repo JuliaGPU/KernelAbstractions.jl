@@ -11,3 +11,20 @@ scheduling slice to the Julia runtime.
 
 This is of particular import to allow for overlapping of communication and
 computation with MPI.
+
+## Moving data with `adapt`
+
+KernelAbstractions extends [Adapt.jl](https://github.com/JuliaGPU/Adapt.jl) so
+that [`adapt(backend, x)`](@ref Adapt.adapt_storage(::Backend, ::Any)) moves the
+arrays in `x` to `backend`, without the caller having to know the backend's
+array type. Every backend **must** support this by extending
+`Adapt.adapt_storage` for its backend type. The recommended definition delegates
+to the backend's array type, so that `adapt(backend, x)` and
+`adapt(BackendArray, x)` agree:
+
+```julia
+Adapt.adapt_storage(::CUDABackend, x) = adapt(CuArray, x)
+```
+
+Adapt.jl's fallback `adapt_storage` is the identity, so a backend without this
+method silently leaves data where it is.

@@ -39,9 +39,39 @@ Synchronize the current backend.
 """
 function synchronize end
 
-# Define:
-#   adapt_storage(::Backend, a::Array) = adapt(BackendArray, a)
-#   adapt_storage(::Backend, a::BackendArray) = a
+"""
+    adapt(backend::Backend, x)
+
+Convert `x` such that its array storage lives on `backend`. This is an extension of
+[Adapt.jl](https://github.com/JuliaGPU/Adapt.jl), and lets code move data to a backend
+without knowing the backend's array type:
+
+```julia
+using Adapt
+x = adapt(CUDABackend(), rand(Float32, 8))  # a CuArray
+y = adapt(CPU(), x)                         # an Array again
+```
+
+`adapt` walks `x` with `Adapt.adapt_structure` — through tuples, named tuples, views and
+the other wrappers Adapt.jl knows about, as well as any struct that extends it (see
+`Adapt.@adapt_structure`) — and passes each leaf to `Adapt.adapt_storage(backend, leaf)`.
+Scalars pass through unchanged.
+
+!!! note
+    Backend implementations **must** implement `Adapt.adapt_storage(::NewBackend, x)`.
+    Adapt.jl's fallback is the identity, so a backend that omits this method silently
+    leaves data where it is. The recommended definition delegates to the backend's array
+    type, so that `adapt(backend, x)` behaves exactly like `adapt(BackendArray, x)`:
+
+    ```julia
+    Adapt.adapt_storage(::CUDABackend, x) = adapt(CuArray, x)
+    ```
+
+!!! compat "KernelAbstractions 0.10"
+    `adapt(backend, x)` has been supported by the GPU backends since KernelAbstractions
+    0.9, but is only documented, and required of every backend, since 0.10.
+"""
+Adapt.adapt_storage(::Backend, x)
 
 """
     priority!(::Backend, prio::Symbol)::Nothing

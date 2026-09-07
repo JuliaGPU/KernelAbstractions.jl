@@ -77,6 +77,12 @@ end
 
 KI.allocate(::POCLBackend, ::Type{T}, dims::Tuple; unified::Bool = false) where {T} = Array{T}(undef, dims)
 
+# `Array` is the CPU array type, so `adapt(CPU(), x)` moves data into plain `Array`s and
+# brings device arrays back to the host through their `convert(Array, ...)`. Adapt.jl's
+# `Array` rule flattens every `AbstractArray` leaf; `isbits` arrays (ranges, view indices)
+# are already usable on every backend and are kept as they are, like the GPU array types do.
+Adapt.adapt_storage(::POCLBackend, x::AbstractArray) = isbits(x) ? x : Adapt.adapt(Array, x)
+
 
 # Initialized
 

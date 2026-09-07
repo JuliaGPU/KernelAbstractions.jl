@@ -1,7 +1,9 @@
 # These are the standalone tests for KernelInterface
 
 using KernelInterface
+using Adapt
 using Aqua
+using TOML
 using Test
 
 const KI = KernelInterface
@@ -17,10 +19,11 @@ end
 
 @testset "standalone" begin
     # KernelInterface is what backends implement against, so it must stay loadable
-    # without dragging in KernelAbstractions or a compiler stack.
-    toml = read(joinpath(pkgdir(KernelInterface), "Project.toml"), String)
-    @test !occursin("[deps]", toml)
-    @test !occursin("[sources]", toml)
+    # without dragging in KernelAbstractions or a compiler stack. Adapt.jl, which
+    # `adapt(backend, x)` extends, is the one dependency it takes on.
+    project = TOML.parsefile(joinpath(pkgdir(KernelInterface), "Project.toml"))
+    @test collect(keys(project["deps"])) == ["Adapt"]
+    @test !haskey(project, "sources")
 end
 
 # NOTE: this runs before the mock backend below defines methods on `argconvert`
@@ -56,6 +59,17 @@ end
 Base.size(A::BackedArray) = size(A.data)
 Base.getindex(A::BackedArray{T, N}, i::Vararg{Int, N}) where {T, N} = A.data[i...]
 KI.get_backend(::BackedArray) = StubBackend()
+
+# The recommended `adapt(backend, x)` implementation: delegate to the array type.
+Adapt.adapt_storage(::Type{BackedArray}, x::Array) = BackedArray(x)
+Adapt.adapt_storage(::Type{BackedArray}, x::BackedArray) = x
+Adapt.adapt_storage(::StubBackend, x) = adapt(BackedArray, x)
+
+# A user struct opted into `adapt`, as data passed to backends often is.
+struct Wrapper{T}
+    x::T
+end
+Adapt.@adapt_structure Wrapper
 
 # A backend implementing only `allocate`, as the interface requires.
 struct AllocBackend <: KI.Backend end
@@ -125,6 +139,31 @@ end
     # Pinning is optional and freeing is a no-op unless a backend does better.
     @test KI.pagelock!(b, zeros(2)) === missing
     @test KI.unsafe_free!(zeros(2)) === nothing
+end
+
+@testset "adapt" begin
+    b = StubBackend()
+
+    # Array leaves move to the backend's array type, and stay there.
+    arr = adapt(b, [1, 2, 3])
+    @test arr isa BackedArray
+    @test KI.get_backend(arr) === b
+    @test arr == [1, 2, 3]
+    @test adapt(b, arr) === arr
+
+    # Scalars, and leaves the array type has no rule for, pass through unchanged.
+    @test adapt(b, 1.0) === 1.0
+    @test adapt(b, 1:3) === 1:3
+
+    # Adapt.jl traverses the structure around the leaves.
+    nt = adapt(b, (a = [1, 2], b = 2.0))
+    @test nt.a isa BackedArray
+    @test nt.b === 2.0
+    @test adapt(b, Wrapper([1, 2])).x isa BackedArray
+    v = adapt(b, view([1, 2, 3], 2:3))
+    @test v isa SubArray
+    @test parent(v) isa BackedArray
+    @test v == [2, 3]
 end
 
 @testset "allocate / zeros / ones" begin

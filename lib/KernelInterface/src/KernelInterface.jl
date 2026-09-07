@@ -12,6 +12,8 @@ like allocating arrays on a backend.
 """
 module KernelInterface
 
+import Adapt
+
 include("utils.jl")
 
 include("backend.jl")

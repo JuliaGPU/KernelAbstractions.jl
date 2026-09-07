@@ -37,6 +37,7 @@ GPU
 CPU
 POCLBackend
 get_backend
+Adapt.adapt_storage(::Backend, ::Any)
 KernelAbstractions.allocate
 KernelAbstractions.zeros
 KernelAbstractions.ones
