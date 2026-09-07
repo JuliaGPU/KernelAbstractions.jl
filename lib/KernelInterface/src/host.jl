@@ -32,12 +32,61 @@ end
 """
     synchronize(::Backend)
 
-Synchronize the current backend.
+Synchronize the current backend: block the calling task until all work it has queued on
+`backend` has completed.
 
 !!! note
     Backend implementations **must** implement this function.
+
+!!! note "Cooperative synchronization"
+    Backend implementations **should** make `synchronize` cooperative rather than blocking.
+    That is, instead of blocking inside a driver call, it should poll or wait on a
+    completion signal while calling `yield` so that other Julia tasks can run in the
+    meantime. A blocking implementation stalls every task scheduled on the same thread,
+    which defeats overlapping kernels with host work or communication, and makes
+    [`KernelAbstractions.@spawn`](@ref)'s trailing `synchronize` serialize otherwise
+    independent tasks.
 """
 function synchronize end
+
+"""
+    record_event(backend::Backend)
+
+Capture the work the calling task has queued on `backend` so far, and return a handle
+that another task can hand to [`wait_event`](@ref) to order its own work after it.
+
+The handle is only meaningful for the pair `record_event`/`wait_event`; do not use it for
+anything else. This is the primitive [`KernelAbstractions.@spawn`](@ref) is built on: the
+spawning task records, the spawned task waits.
+
+!!! note
+    The default implementation calls [`synchronize`](@ref) and returns `nothing`, which is
+    correct for every backend since all queued work is complete when it returns.
+
+    Backends whose queue is task-local (for example one stream per Julia task) **may**
+    override this to return an event recorded on the current task's queue instead, without
+    blocking the host. Such a backend **must** then also implement
+    `wait_event(::NewBackend, event)` for the returned type.
+"""
+function record_event(backend::Backend)
+    synchronize(backend)
+    return nothing
+end
+
+"""
+    wait_event(backend::Backend, event)
+
+Order all work the calling task subsequently queues on `backend` after the work captured by
+`event`, which was returned by [`record_event`](@ref) on another task.
+
+!!! note
+    `wait_event(::Backend, ::Nothing)` is a no-op, matching the default `record_event`.
+    A backend that overrides `record_event` **must** implement this for the event type it
+    returns. The implementation may either enqueue a dependency on the current task's queue
+    or block the host until the event completes; a blocking implementation should be
+    cooperative, as described for [`synchronize`](@ref).
+"""
+wait_event(::Backend, ::Nothing) = nothing
 
 """
     priority!(::Backend, prio::Symbol)::Nothing
