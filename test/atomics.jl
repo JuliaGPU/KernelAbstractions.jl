@@ -123,8 +123,8 @@ end
     UnsafeAtomics.add!(pointer(hist, j), one(T), UnsafeAtomics.seq_cst, UnsafeAtomics.none)
     # uncontended, singlethread scope
     p = pointer(A, i)
+    # (no single-thread fence: NVPTX rejects a seq_cst fence at that scope)
     UnsafeAtomics.store!(p, T(i), UnsafeAtomics.monotonic, UnsafeAtomics.singlethread)
-    UnsafeAtomics.fence(UnsafeAtomics.seq_cst, UnsafeAtomics.singlethread)
     UnsafeAtomics.add!(p, one(T), UnsafeAtomics.monotonic, UnsafeAtomics.singlethread)
 end
 
