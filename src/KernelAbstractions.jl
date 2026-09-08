@@ -445,12 +445,6 @@ using Adapt
 x = adapt(CUDABackend(), rand(Float32, 8))  # a CuArray
 y = adapt(CPU(), x)                         # an Array again
 ```
-
-`adapt` walks `x` with `Adapt.adapt_structure` — through tuples, named tuples, views and
-the other wrappers Adapt.jl knows about, as well as any struct that extends it (see
-`Adapt.@adapt_structure`) — and passes each leaf to `Adapt.adapt_storage(backend, leaf)`.
-Scalars pass through unchanged.
-
 !!! note
     Backend implementations **must** implement `Adapt.adapt_storage(::NewBackend, x)`.
     Adapt.jl's fallback is the identity, so a backend that omits this method silently

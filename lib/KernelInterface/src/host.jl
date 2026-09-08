@@ -39,10 +39,6 @@ Synchronize the current backend.
 """
 function synchronize end
 
-# KernelAbstractions additionally requires `Adapt.adapt_storage(::Backend, x)`, so that
-# `adapt(backend, x)` moves data to the backend; see its documentation. KernelInterface
-# itself stays free of that dependency.
-
 """
     priority!(::Backend, prio::Symbol)::Nothing
 
