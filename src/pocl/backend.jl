@@ -285,10 +285,6 @@ end
 
 ## Indexing Functions
 
-# NOTE: these use checked conversions rather than `% T` on purpose. With a plain
-# truncation, LLVM folds the `<3 x i64>` builtin load and the truncated extracts
-# into a `<6 x i32>` load, which SPIR-V does not allow.
-
 @device_override @inline function KI.get_local_id(::Type{T}) where {T}
     return (; x = T(get_local_id(1)), y = T(get_local_id(2)), z = T(get_local_id(3)))
 end

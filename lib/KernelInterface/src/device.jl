@@ -11,7 +11,6 @@ Return the number of global work-items specified as a tuple of type `T`.
     ```
     The zero-argument form forwards to `get_global_size(Int)`.
 """
-function get_global_size end
 get_global_size() = get_global_size(Int)
 
 """
@@ -29,7 +28,6 @@ Returns the unique global work-item ID as a tuple of type `T`. `T` defaults to `
     ```
     The zero-argument form forwards to `get_global_id(Int)`.
 """
-function get_global_id end
 get_global_id() = get_global_id(Int)
 
 """
@@ -45,7 +43,6 @@ Return the number of local work-items specified as a tuple of type `T`.
     ```
     The zero-argument form forwards to `get_local_size(Int)`.
 """
-function get_local_size end
 get_local_size() = get_local_size(Int)
 
 """
@@ -63,7 +60,6 @@ Returns the unique local work-item ID as a tuple of type `T`. `T` defaults to `I
     ```
     The zero-argument form forwards to `get_local_id(Int)`.
 """
-function get_local_id end
 get_local_id() = get_local_id(Int)
 
 """
@@ -78,7 +74,6 @@ Returns the number of groups as a tuple of type `T`. `T` defaults to `Int`.
     ```
     The zero-argument form forwards to `get_num_groups(Int)`.
 """
-function get_num_groups end
 get_num_groups() = get_num_groups(Int)
 
 """
@@ -96,7 +91,6 @@ Returns the unique group ID as a tuple of type `T`. `T` defaults to `Int`.
     ```
     The zero-argument form forwards to `get_group_id(Int)`.
 """
-function get_group_id end
 get_group_id() = get_group_id(Int)
 
 """
