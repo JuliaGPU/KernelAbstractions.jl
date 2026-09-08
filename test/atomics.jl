@@ -115,17 +115,19 @@ end
     end
 end
 
+# Explicit system ("none") syncscope. The only other UnsafeAtomics scope, `singlethread`,
+# is not tested: NVPTX rejects atomics and seq_cst fences at that scope.
 @kernel function unsafe_atomics_syncscope!(A, hist)
     i = @index(Global, Linear)
     T = eltype(A)
-    # contended, system scope
+    # contended
     j = (i - 1) % length(hist) + 1
     UnsafeAtomics.add!(pointer(hist, j), one(T), UnsafeAtomics.seq_cst, UnsafeAtomics.none)
-    # uncontended, singlethread scope
+    # uncontended
     p = pointer(A, i)
-    # (no single-thread fence: NVPTX rejects a seq_cst fence at that scope)
-    UnsafeAtomics.store!(p, T(i), UnsafeAtomics.monotonic, UnsafeAtomics.singlethread)
-    UnsafeAtomics.add!(p, one(T), UnsafeAtomics.monotonic, UnsafeAtomics.singlethread)
+    UnsafeAtomics.store!(p, T(i), UnsafeAtomics.monotonic, UnsafeAtomics.none)
+    UnsafeAtomics.fence(UnsafeAtomics.seq_cst, UnsafeAtomics.none)
+    UnsafeAtomics.add!(p, one(T), UnsafeAtomics.monotonic, UnsafeAtomics.none)
 end
 
 function atomics_testsuite(backend, ArrayT)
