@@ -84,8 +84,8 @@ writing their own heuristic for calculating launch size.
     numworkgroups, workgroupsize = if ndrange == ()
         numworkgroups == () ? 1 : numworkgroups, workgroupsize == () ? 1 : workgroupsize
     else
-        max_wgs = kernel_max_work_group_size(kernel; max_work_items = min(prod(ndrange), max_work_items))
         workgroupsize = if workgroupsize == ()
+            max_wgs = kernel_max_work_group_size(kernel; max_work_items = min(prod(ndrange), max_work_items))
             threads_to_workgroupsize(max_wgs, ndrange)
         else
             workgroupsize
