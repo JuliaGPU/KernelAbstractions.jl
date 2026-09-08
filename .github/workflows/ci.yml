@@ -220,11 +220,11 @@ jobs:
                 using Pkg
                 Pkg.add(url="https://github.com/JuliaGPU/OpenCL.jl", rev="intrinsics")
                 Pkg.develop(; name="SPIRVIntrinsics")'
-      - name: "Developing OpenCL"
+      - name: "Running tests"
         run: |
           julia -e 'println("+++ :julia: Running tests")
                 using Pkg
-                Pkg.test("OpenCL"; coverage=true, test_args=`--platform=pocl pocl/kernelabstractions poclc/kernelabstractions pocl/kernelintrinsics poclc/kernelintrinsics`)'
+                Pkg.test("OpenCL"; coverage=true, test_args=`--platform=pocl pocl/kernelabstractions poclc/kernelabstractions pocl/kernelinterface poclc/kernelinterface`)'
       - uses: julia-actions/julia-processcoverage@v1
       - uses: codecov/codecov-action@v7
         with:
