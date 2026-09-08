@@ -41,7 +41,7 @@ StaticArraysExt = "StaticArrays"
 
 [compat]
 Adapt = "0.4, 1.0, 2.0, 3.0, 4"
-Atomix = "0.1, 1"
+Atomix = "1.2"
 EnzymeCore = "0.7, 0.8.1"
 GPUCompiler = "2"
 InteractiveUtils = "1.6"

@@ -80,25 +80,13 @@ supported on every backend that reports `KernelAbstractions.supports_atomics(bac
 |:-----------------------------------------------|:------------------------------------:|:------------------------:|
 | `@atomic A[i] += x`, `@atomic A[i] -= x`       | ✓                                    | ✓                        |
 | `@atomic A[i] &= x`, `@atomic A[i] \|= x`, `@atomic A[i] ⊻= x` | ✓                     |                          |
-| `@atomic max(A[i], x)`, `@atomic min(A[i], x)` | ✓                                    | backend-dependent        |
+| `@atomic max(A[i], x)`, `@atomic min(A[i], x)` | ✓                                    | ✓                        |
 | `@atomicreplace A[i] expected => desired`      | ✓                                    | ✓                        |
 
 [^1]: `Float64` additionally requires `KernelAbstractions.supports_float64(backend) == true`.
 
-Floating-point `max`/`min` are not portable. The CUDA backend has no native
-floating-point min/max atomics and fails to compile kernels that use them, whereas
-the CPU, POCL, AMDGPU, Metal and oneAPI backends support them. Portable code should
-either restrict atomic min/max to integer element types, or implement it with
-`@atomicreplace` in a compare-and-swap loop:
-
-```julia
-@kernel function atomic_fmax!(A, x)
-    i = @index(Global, Linear)
-    old = A[i]
-    while true
-        new = max(old, x)
-        (; old, success) = @atomicreplace A[i] old => new
-        success && break
-    end
-end
-```
+Not every backend has a native instruction for every entry in this table; for
+example, CUDA has no floating-point atomic `max`/`min`. Atomix 1.2 and later fill
+those gaps with a compare-and-swap loop, so the operations above work everywhere,
+but expect the emulated ones to be slower under contention. Other update functions,
+`@atomic f(A[i], x)` for an arbitrary binary `f`, take the same compare-and-swap path.
