@@ -38,8 +38,12 @@ function spawn_testsuite(Backend, AT)
         task = KernelAbstractions.@spawn backend KernelAbstractions.device(backend)
         @test fetch(task) == dev
 
+        # `Threads.@spawn` only honors a pool that has threads, and falls back to
+        # `:default` otherwise, which is the case unless Julia was started with
+        # interactive threads (the default from 1.12 on).
+        interactive = Threads.nthreads(:interactive) > 0 ? :interactive : :default
         task = KernelAbstractions.@spawn :interactive backend Threads.threadpool()
-        @test fetch(task) === :interactive
+        @test fetch(task) === interactive
 
         pool = :default
         task = KernelAbstractions.@spawn pool backend Threads.threadpool()
