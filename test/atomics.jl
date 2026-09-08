@@ -197,12 +197,13 @@ function atomics_testsuite(backend, ArrayT)
 
     @testset "UnsafeAtomics" begin
         # UnsafeAtomics emits the LLVM atomic instruction directly, with no fallback
-        # where the target lacks one. Floating-point `atomicrmw fmin`/`fmax` is such a
-        # case (e.g. the SPIR-V min/max extension is unavailable on OpenCL's C backend),
-        # so only the integer min/max are tested here; Atomix covers floats above.
+        # where the target lacks one. Floating-point `atomicrmw fadd`/`fmin`/`fmax` are
+        # such cases: they need SPIR-V extensions that e.g. NVIDIA's OpenCL driver and
+        # OpenCL's C program backend do not provide. Only integers are tested here;
+        # Atomix, which falls back to compare-and-swap, covers floats above.
         inttypes = filter(T -> T <: Integer, eltypes)
 
-        @testset "atomic add ($T)" for T in eltypes
+        @testset "atomic add ($T)" for T in inttypes
             hist = ArrayT(zeros(T, 32))
             unsafe_atomics_add!(backend())(hist, ndrange = 1024)
             synchronize(backend())
