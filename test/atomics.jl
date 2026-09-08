@@ -116,7 +116,9 @@ end
 end
 
 # Explicit system ("none") syncscope. The only other UnsafeAtomics scope, `singlethread`,
-# is not tested: NVPTX rejects atomics and seq_cst fences at that scope.
+# is not tested: NVPTX rejects atomics and seq_cst fences at that scope. Fences are
+# covered by the "fences" test; a seq_cst fence here trips the SPIR-V backend on
+# Julia versions where UnsafeAtomics emits it through inline assembly.
 @kernel function unsafe_atomics_syncscope!(A, hist)
     i = @index(Global, Linear)
     T = eltype(A)
@@ -126,7 +128,6 @@ end
     # uncontended
     p = pointer(A, i)
     UnsafeAtomics.store!(p, T(i), UnsafeAtomics.monotonic, UnsafeAtomics.none)
-    UnsafeAtomics.fence(UnsafeAtomics.seq_cst, UnsafeAtomics.none)
     UnsafeAtomics.add!(p, one(T), UnsafeAtomics.monotonic, UnsafeAtomics.none)
 end
 
