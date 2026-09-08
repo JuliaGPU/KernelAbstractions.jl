@@ -48,16 +48,50 @@ end
 
 # The interface documents a concrete return type for each device-side function;
 # these kernels record whether the backend honors them.
-const WorkItemNT = @NamedTuple{x::Int, y::Int, z::Int}
+const WorkItemNT{T} = @NamedTuple{x::T, y::T, z::T}
 
 function typecheck_kernel(results)
     @inbounds begin
-        results[1] = KI.get_global_size() isa WorkItemNT
-        results[2] = KI.get_global_id() isa WorkItemNT
-        results[3] = KI.get_local_size() isa WorkItemNT
-        results[4] = KI.get_local_id() isa WorkItemNT
-        results[5] = KI.get_num_groups() isa WorkItemNT
-        results[6] = KI.get_group_id() isa WorkItemNT
+        results[1] = KI.get_global_size() isa WorkItemNT{Int}
+        results[2] = KI.get_global_id() isa WorkItemNT{Int}
+        results[3] = KI.get_local_size() isa WorkItemNT{Int}
+        results[4] = KI.get_local_id() isa WorkItemNT{Int}
+        results[5] = KI.get_num_groups() isa WorkItemNT{Int}
+        results[6] = KI.get_group_id() isa WorkItemNT{Int}
+    end
+    return
+end
+
+# The indexing queries take an element type; the result must use it.
+function typed_typecheck_kernel(results, ::Type{T}) where {T}
+    @inbounds begin
+        results[1] = KI.get_global_size(T) isa WorkItemNT{T}
+        results[2] = KI.get_global_id(T) isa WorkItemNT{T}
+        results[3] = KI.get_local_size(T) isa WorkItemNT{T}
+        results[4] = KI.get_local_id(T) isa WorkItemNT{T}
+        results[5] = KI.get_num_groups(T) isa WorkItemNT{T}
+        results[6] = KI.get_group_id(T) isa WorkItemNT{T}
+    end
+    return
+end
+
+# Records the typed indexing queries for every work-item, so the host can check
+# that they agree with the default `Int` form across all three dimensions.
+# `results` is `(work-items, 18)`: one row per work-item, holding the `x`, `y`
+# and `z` components of each of the six queries in turn.
+function typed_index_kernel(results, ::Type{T}) where {T}
+    i, j, k = KI.get_global_id(T)
+    ni, nj, _ = KI.get_global_size(T)
+    lin = (k - one(T)) * ni * nj + (j - one(T)) * ni + i
+
+    if lin <= size(results, 1)
+        vals = (
+            KI.get_global_size(T)..., KI.get_global_id(T)..., KI.get_local_size(T)...,
+            KI.get_local_id(T)..., KI.get_num_groups(T)..., KI.get_group_id(T)...,
+        )
+        for q in 1:18
+            @inbounds results[lin, q] = vals[q]
+        end
     end
     return
 end
@@ -180,6 +214,41 @@ function interface_testsuite(backend, AT)
         KI.@kernel backend() typecheck_kernel(results)
         KI.synchronize(backend())
         @test all(Array(results))
+
+        @testset "$T" for T in (Int32, Int64, UInt32, UInt64)
+            typed_results = KI.zeros(backend(), Bool, 6)
+            KI.@kernel backend() typed_typecheck_kernel(typed_results, T)
+            KI.synchronize(backend())
+            @test all(Array(typed_results))
+        end
+    end
+
+    @testset "Typed indexing" begin
+        workgroupsize = (2, 2, 2)
+        numworkgroups = (3, 2, 1)
+        N = prod(workgroupsize) * prod(numworkgroups)
+
+        # `Int` is the reference: it is what the zero-argument form returns.
+        function run_typed(::Type{T}) where {T}
+            results = KI.zeros(backend(), T, N, 18)
+            KI.@kernel backend() workgroupsize = workgroupsize numworkgroups = numworkgroups typed_index_kernel(results, T)
+            KI.synchronize(backend())
+            return Array(results)
+        end
+        reference = run_typed(Int)
+
+        global_size = workgroupsize .* numworkgroups
+        @test all(eachrow(reference[:, 1:3]) .== Ref(collect(global_size)))
+        @test all(eachrow(reference[:, 7:9]) .== Ref(collect(workgroupsize)))
+        @test all(eachrow(reference[:, 13:15]) .== Ref(collect(numworkgroups)))
+        # every global id is seen exactly once
+        @test sort(Tuple.(eachrow(reference[:, 4:6]))) == sort(vec(Tuple.(CartesianIndices(global_size))))
+
+        @testset "$T" for T in (Int32, UInt32, UInt64)
+            typed = run_typed(T)
+            @test typed isa AbstractMatrix{T}
+            @test typed == reference
+        end
     end
 
     @testset "Basic interface functionality" begin

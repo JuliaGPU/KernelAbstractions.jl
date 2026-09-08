@@ -29,9 +29,6 @@ end
     # These have no fallback on purpose: a backend that forgets to `@device_override`
     # them should get a MethodError rather than silently wrong behaviour.
     stubs = [
-        KI.get_global_size, KI.get_global_id,
-        KI.get_local_size, KI.get_local_id,
-        KI.get_num_groups, KI.get_group_id,
         KI.get_sub_group_size, KI.get_max_sub_group_size,
         KI.get_num_sub_groups, KI.get_sub_group_id,
         KI.get_sub_group_local_id,
@@ -43,6 +40,21 @@ end
     ]
     for stub in stubs
         @test isempty(methods(stub))
+    end
+
+    # The indexing queries take an element type; only the zero-argument form has a
+    # (forwarding) method, and it must reach the typed stub rather than recurse.
+    indexing = [
+        KI.get_global_size, KI.get_global_id,
+        KI.get_local_size, KI.get_local_id,
+        KI.get_num_groups, KI.get_group_id,
+    ]
+    for f in indexing
+        @test length(methods(f)) == 1
+        @test hasmethod(f, Tuple{})
+        @test !hasmethod(f, Tuple{Type{Int}})
+        @test_throws MethodError f()
+        @test_throws MethodError f(Int32)
     end
 end
 
