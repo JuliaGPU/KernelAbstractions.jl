@@ -305,15 +305,15 @@ end
     return (; x = Int(get_global_size(1)), y = Int(get_global_size(2)), z = Int(get_global_size(3)))
 end
 
-@device_override KI.get_sub_group_size() = get_sub_group_size()
+@device_override KI.get_sub_group_size() = get_sub_group_size() % UInt32
 
-@device_override KI.get_max_sub_group_size() = get_max_sub_group_size()
+@device_override KI.get_max_sub_group_size() = get_max_sub_group_size() % UInt32
 
-@device_override KI.get_num_sub_groups() = get_num_sub_groups()
+@device_override KI.get_num_sub_groups() = get_num_sub_groups() % UInt32
 
-@device_override KI.get_sub_group_id() = get_sub_group_id()
+@device_override KI.get_sub_group_id() = get_sub_group_id() % UInt32
 
-@device_override KI.get_sub_group_local_id() = get_sub_group_local_id()
+@device_override KI.get_sub_group_local_id() = get_sub_group_local_id() % UInt32
 
 @device_override @inline function KA.__validindex(ctx)
     if KA.__dynamic_checkbounds(ctx)
