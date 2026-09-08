@@ -69,3 +69,36 @@ simshow(out_fixed)
 This image is free of artifacts.
 
 ![Resulting image is correct.](../assets/atomix_correct.png)
+
+## Supported operations
+
+`@atomic` is lowered to the atomic intrinsics of the backend in use, so which
+operations and element types work depends on the backend. The following are
+supported on every backend that reports `KernelAbstractions.supports_atomics(backend) == true`:
+
+| Operation                                      | `Int32`, `UInt32`, `Int64`, `UInt64` | `Float32`, `Float64`[^1] |
+|:-----------------------------------------------|:------------------------------------:|:------------------------:|
+| `@atomic A[i] += x`, `@atomic A[i] -= x`       | ✓                                    | ✓                        |
+| `@atomic A[i] &= x`, `@atomic A[i] \|= x`, `@atomic A[i] ⊻= x` | ✓                     |                          |
+| `@atomic max(A[i], x)`, `@atomic min(A[i], x)` | ✓                                    | backend-dependent        |
+| `@atomicreplace A[i] expected => desired`      | ✓                                    | ✓                        |
+
+[^1]: `Float64` additionally requires `KernelAbstractions.supports_float64(backend) == true`.
+
+Floating-point `max`/`min` are not portable. The CUDA backend has no native
+floating-point min/max atomics and fails to compile kernels that use them, whereas
+the CPU, POCL, AMDGPU, Metal and oneAPI backends support them. Portable code should
+either restrict atomic min/max to integer element types, or implement it with
+`@atomicreplace` in a compare-and-swap loop:
+
+```julia
+@kernel function atomic_fmax!(A, x)
+    i = @index(Global, Linear)
+    old = A[i]
+    while true
+        new = max(old, x)
+        (; old, success) = @atomicreplace A[i] old => new
+        success && break
+    end
+end
+```

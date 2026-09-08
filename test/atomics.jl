@@ -24,7 +24,8 @@ function atomics_testsuite(backend, ArrayT)
         return
     end
 
-    eltypes = [Int32, UInt32, Float32]
+    inttypes = [Int32, UInt32]
+    eltypes = [inttypes; Float32]
     KernelAbstractions.supports_float64(backend()) && push!(eltypes, Float64)
 
     @testset "atomic add ($T)" for T in eltypes
@@ -34,7 +35,9 @@ function atomics_testsuite(backend, ArrayT)
         @test all(Array(hist) .== T(1024 ÷ 32))
     end
 
-    @testset "atomic max/min ($T)" for T in eltypes
+    # Atomic min/max is only portable for integers: the CUDA backend has no native
+    # floating-point min/max atomics and Atomix does not fall back to a CAS loop there.
+    @testset "atomic max/min ($T)" for T in inttypes
         A = ArrayT(zeros(T, 1))
         atomic_max_kernel!(backend())(A; ndrange = 1024)
         synchronize(backend())
