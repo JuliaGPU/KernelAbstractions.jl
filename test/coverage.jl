@@ -68,7 +68,14 @@ function run_covered(dir)
     # coverage report when the suite itself runs under `Pkg.test(coverage=true)`.
     tracefile = joinpath(dir, "lcov.info")
 
-    cmd = `$(Base.julia_cmd()) --startup-file=no --code-coverage=$tracefile
+    # `Base.julia_cmd()` forwards the parent's `--code-coverage` flags. Under
+    # `Pkg.test(coverage=true)` that is `--code-coverage=@<pkgroot>`, which would
+    # keep the subprocess in path-tracking mode: the script lives outside the
+    # package root and, more importantly, GPUCompiler only records device
+    # coverage in `user` and `all` mode. Drop the inherited flags so the
+    # subprocess tracks in `user` mode regardless of how the suite is run.
+    julia = Cmd(filter(arg -> !startswith(arg, "--code-coverage"), Base.julia_cmd().exec))
+    cmd = `$julia --startup-file=no --code-coverage=user --code-coverage=$tracefile
         --project=$(Base.active_project()) $script`
     proc = run(pipeline(ignorestatus(cmd); stdout = log, stderr = log))
     if !success(proc)
