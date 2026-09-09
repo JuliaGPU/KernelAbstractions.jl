@@ -78,6 +78,8 @@ supported on every backend that reports `KernelAbstractions.supports_atomics(bac
 
 | Operation                                      | `Int32`, `UInt32`, `Int64`, `UInt64` | `Float32`, `Float64`[^1] |
 |:-----------------------------------------------|:------------------------------------:|:------------------------:|
+| `@atomic A[i]`, `@atomic A[i] = x`             | ✓                                    | ✓                        |
+| `@atomicswap A[i] = x`                         | ✓                                    | ✓                        |
 | `@atomic A[i] += x`, `@atomic A[i] -= x`       | ✓                                    | ✓                        |
 | `@atomic A[i] &= x`, `@atomic A[i] \|= x`, `@atomic A[i] ⊻= x` | ✓                     |                          |
 | `@atomic max(A[i], x)`, `@atomic min(A[i], x)` | ✓                                    | ✓                        |
@@ -86,7 +88,13 @@ supported on every backend that reports `KernelAbstractions.supports_atomics(bac
 [^1]: `Float64` additionally requires `KernelAbstractions.supports_float64(backend) == true`.
 
 Not every backend has a native instruction for every entry in this table; for
-example, CUDA has no floating-point atomic `max`/`min`. Atomix 1.2 and later fill
-those gaps with a compare-and-swap loop, so the operations above work everywhere,
-but expect the emulated ones to be slower under contention. Other update functions,
-`@atomic f(A[i], x)` for an arbitrary binary `f`, take the same compare-and-swap path.
+example, CUDA has no floating-point atomic `max`/`min`. Atomix 1.2.1 and later,
+which KernelAbstractions requires, fill those gaps with a compare-and-swap loop, so
+the operations above work everywhere, but expect the emulated ones to be slower
+under contention. Other update functions, `@atomic f(A[i], x)` for an arbitrary
+binary `f`, take the same compare-and-swap path.
+
+A memory ordering such as `@atomic :monotonic A[i] += x` is accepted everywhere.
+On the CPU backend it is honored throughout; on GPU backends the read-modify-write
+operations run with the backend's default ordering, and only atomic loads and
+stores follow the requested one.
