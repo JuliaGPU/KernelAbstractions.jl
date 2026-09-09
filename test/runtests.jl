@@ -13,6 +13,19 @@ KernelAbstractions.versioninfo(POCLBackend())
 
 import KernelAbstractions.POCL: POCL, @opencl, @device_code_llvm
 
+@testset "POCL float atomics" begin
+    # pocl's CPU device natively supports float add and min/max atomics in both global
+    # and local memory, so the SPIR-V extensions guarding them must be permitted
+    dev = POCL.device()
+    exts = split(POCL.default_spirv_extensions(dev), ",")
+    @test "+SPV_EXT_shader_atomic_float_add" in exts
+    @test "+SPV_EXT_shader_atomic_float_min_max" in exts
+    @test dev.half_fp_atomic_capabilities == 0
+    # an explicit list overrides the device-derived default
+    config = POCL.compiler_config(dev; extensions = "+SPV_KHR_expect_assume")
+    @test config.target.extensions == "+SPV_KHR_expect_assume"
+end
+
 @testset "POCL compilation cache" begin
     mod = @eval module $(gensym())
     @noinline child() = return
