@@ -145,12 +145,12 @@ jobs:
       # Nightly tracks the next Julia release; don't fail CI on it
       - uses: julia-actions/julia-buildpkg@v1
         continue-on-error: ${{ matrix.version == 'nightly' }}
+      # Julia 1.10 ignores the `[sources]` entry in Project.toml, so it would resolve
+      # KernelInterface from the registry instead of the copy in this repo. Needed on
+      # every platform, including Windows, whose tests run de-escalated below.
       - name: Dev KernelInterface
-        if: runner.os != 'Windows'
-        run: |
-            julia -e 'using Pkg
-                      Pkg.activate(".")
-                      Pkg.develop(; path="lib/KernelInterface")'
+        shell: bash
+        run: julia -e 'using Pkg; Pkg.activate("."); Pkg.develop(; path="lib/KernelInterface")'
       - uses: julia-actions/julia-runtest@v1
         if: runner.os != 'Windows'
         continue-on-error: ${{ matrix.version == 'nightly' }}
