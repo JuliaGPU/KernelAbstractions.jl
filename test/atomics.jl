@@ -2,7 +2,9 @@ using KernelAbstractions
 using KernelAbstractions: @atomic, @atomicswap, @atomicreplace
 using Test
 
-import UnsafeAtomics
+# Loaded through its UUID like Pkg in testsuite.jl: it is a dependency of Atomix and
+# hence in every backend's manifest, but not in their test environments.
+const UnsafeAtomics = Base.require(Base.PkgId(Base.UUID("013be700-e6cd-48c3-b4a1-df204f14c38f"), "UnsafeAtomics"))
 
 # Atomix based kernels
 
@@ -12,14 +14,13 @@ import UnsafeAtomics
     @inbounds @atomic hist[j] += one(eltype(hist))
 end
 
-@kernel function atomix_max!(A)
+@kernel function atomix_minmax!(A)
     i = @index(Global, Linear)
-    @inbounds @atomic max(A[1], eltype(A)(i))
-end
-
-@kernel function atomix_min!(A)
-    i = @index(Global, Linear)
-    @inbounds @atomic min(A[1], eltype(A)(i))
+    T = eltype(A)
+    @inbounds begin
+        @atomic max(A[1], T(i))
+        @atomic min(A[2], T(i))
+    end
 end
 
 @kernel function atomix_load_store!(A, B)
@@ -61,10 +62,18 @@ end
 
 # UnsafeAtomics based kernels, operating on raw pointers
 
+# Contended adds with the default and each explicit ordering, one column of `hist` each
 @kernel function unsafe_atomics_add!(hist)
     i = @index(Global, Linear)
-    j = (i - 1) % length(hist) + 1
-    UnsafeAtomics.add!(pointer(hist, j), one(eltype(hist)))
+    T = eltype(hist)
+    n = size(hist, 1)
+    j = (i - 1) % n + 1
+    UnsafeAtomics.add!(pointer(hist, j), one(T))
+    UnsafeAtomics.add!(pointer(hist, n + j), one(T), UnsafeAtomics.monotonic)
+    UnsafeAtomics.add!(pointer(hist, 2n + j), one(T), UnsafeAtomics.acquire)
+    UnsafeAtomics.add!(pointer(hist, 3n + j), one(T), UnsafeAtomics.release)
+    UnsafeAtomics.add!(pointer(hist, 4n + j), one(T), UnsafeAtomics.acq_rel)
+    UnsafeAtomics.add!(pointer(hist, 5n + j), one(T), UnsafeAtomics.seq_cst)
 end
 
 @kernel function unsafe_atomics_minmax!(A)
@@ -82,15 +91,9 @@ end
     old, new = UnsafeAtomics.modify!(p, +, T(1))
     (; success) = UnsafeAtomics.cas!(p, new, T(2) * new)
     if success
-        old = UnsafeAtomics.xchg!(p, old)
+        UnsafeAtomics.xchg!(p, old)
     end
     B[i] = UnsafeAtomics.load(p)
-end
-
-@kernel function unsafe_atomics_add_ordered!(hist, ordering)
-    i = @index(Global, Linear)
-    j = (i - 1) % length(hist) + 1
-    UnsafeAtomics.add!(pointer(hist, j), one(eltype(hist)), ordering)
 end
 
 @kernel function unsafe_atomics_load_store_ordered!(A, B)
@@ -115,10 +118,8 @@ end
     end
 end
 
-# Explicit system ("none") syncscope. The only other UnsafeAtomics scope, `singlethread`,
-# is not tested: NVPTX rejects atomics and seq_cst fences at that scope. Fences are
-# covered by the "fences" test; a seq_cst fence here trips the SPIR-V backend on
-# Julia versions where UnsafeAtomics emits it through inline assembly.
+# The five-argument forms with an explicit system (`none`) syncscope. The only other
+# scope, `singlethread`, is not tested: NVPTX rejects atomics at that scope.
 @kernel function unsafe_atomics_syncscope!(A, hist)
     i = @index(Global, Linear)
     T = eltype(A)
@@ -137,8 +138,6 @@ function atomics_testsuite(backend, ArrayT)
         return
     end
 
-    # Float atomics on the CPU backend need the SPV_EXT_shader_atomic_float_{add,min_max}
-    # extensions, which the POCL compiler permits based on cl_ext_float_atomics
     eltypes = [Int32, UInt32, Float32]
     KernelAbstractions.supports_float64(backend()) && push!(eltypes, Float64)
 
@@ -151,20 +150,15 @@ function atomics_testsuite(backend, ArrayT)
         end
 
         @testset "atomic max/min ($T)" for T in eltypes
-            A = ArrayT(zeros(T, 1))
-            atomix_max!(backend())(A, ndrange = 1024)
+            A = ArrayT(T[0, typemax(T)])
+            atomix_minmax!(backend())(A, ndrange = 1024)
             synchronize(backend())
-            @test Array(A)[1] == T(1024)
-
-            A = ArrayT(fill(typemax(T), 1))
-            atomix_min!(backend())(A, ndrange = 1024)
-            synchronize(backend())
-            @test Array(A)[1] == T(1)
+            @test Array(A) == T[1024, 1]
         end
 
         @testset "atomic load/store" begin
             A = ArrayT(zeros(Int32, 256))
-            B = ArrayT{Int32}(collect(Int32, 1:256))
+            B = ArrayT(collect(Int32, 1:256))
             atomix_load_store!(backend())(A, B, ndrange = 256)
             synchronize(backend())
             @test Array(A) == 1:256
@@ -203,14 +197,15 @@ function atomics_testsuite(backend, ArrayT)
         # where the target lacks one. Floating-point `atomicrmw fadd`/`fmin`/`fmax` are
         # such cases: they need SPIR-V extensions that e.g. NVIDIA's OpenCL driver and
         # OpenCL's C program backend do not provide. Only integers are tested here;
-        # Atomix, which falls back to compare-and-swap, covers floats above.
+        # floats are covered above through Atomix, whose backend extensions fall back
+        # to compare-and-swap where an instruction is missing.
         inttypes = filter(T -> T <: Integer, eltypes)
 
         @testset "atomic add ($T)" for T in inttypes
-            hist = ArrayT(zeros(T, 32))
+            hist = ArrayT(zeros(T, 32, 6))
             unsafe_atomics_add!(backend())(hist, ndrange = 1024)
             synchronize(backend())
-            @test all(Array(hist) .== T(1024 ÷ 32))
+            @test all(==(T(1024 ÷ 32)), Array(hist))
         end
 
         @testset "atomic max/min ($T)" for T in inttypes
@@ -228,16 +223,6 @@ function atomics_testsuite(backend, ArrayT)
             # store i, modify + 1, cas to 2(i + 1), xchg back to i
             @test Array(A) == 1:256
             @test Array(B) == 1:256
-        end
-
-        @testset "ordering $ordering" for ordering in (
-                UnsafeAtomics.monotonic, UnsafeAtomics.acquire, UnsafeAtomics.release,
-                UnsafeAtomics.acq_rel, UnsafeAtomics.seq_cst,
-            )
-            hist = ArrayT(zeros(Int32, 32))
-            unsafe_atomics_add_ordered!(backend())(hist, ordering, ndrange = 1024)
-            synchronize(backend())
-            @test all(Array(hist) .== 32)
         end
 
         @testset "ordered load/store" begin
