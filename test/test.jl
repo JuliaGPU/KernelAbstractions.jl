@@ -89,6 +89,38 @@ function unittest_testsuite(Backend, backend_str, backend_mod, BackendArrayT; sk
             @test length(blocks(iterspace)) == 2
             @test iterspace.mapping === nothing
         end
+        let kernel = KernelAbstractions.Kernel{typeof(backend), StaticSize{(4,)}, DynamicSize, typeof(identity)}(backend, identity)
+            map = [CartesianIndex(i, j) for i in 1:3 for j in 1:5]
+            iterspace, dynamic = KernelAbstractions.partition(kernel, map, nothing)
+            @test iterspace isa MappedNDRange
+            @test length(blocks(iterspace)) == 4
+            @test dynamic isa DynamicCheck
+            @test ndims(iterspace) == 1
+
+            iterspace, dynamic = KernelAbstractions.partition(kernel, map[1:8], (4,))
+            @test length(blocks(iterspace)) == 2
+            @test dynamic isa NoDynamicCheck
+
+            iterspace, dynamic = KernelAbstractions.partition(kernel, CartesianIndex{2}[], nothing)
+            @test length(blocks(iterspace)) == 0
+
+            @test_throws ErrorException KernelAbstractions.partition(kernel, map, (8,))
+            @test_throws ArgumentError KernelAbstractions.partition(kernel, [1, 2, 3], nothing)
+        end
+        let kernel = KernelAbstractions.Kernel{typeof(backend), DynamicSize, DynamicSize, typeof(identity)}(backend, identity)
+            map = [CartesianIndex(i, j) for i in 1:3 for j in 1:5]
+            iterspace, dynamic = KernelAbstractions.partition(kernel, map, (4,))
+            @test length(blocks(iterspace)) == 4
+            @test length(workitems(iterspace)) == 4
+
+            @test_throws ErrorException KernelAbstractions.partition(kernel, map, nothing)
+            @test_throws ErrorException KernelAbstractions.partition(kernel, map, map)
+            @test_throws ErrorException KernelAbstractions.partition(kernel, map, (2, 2))
+        end
+        let kernel = KernelAbstractions.Kernel{typeof(backend), StaticSize{(4,)}, StaticSize{(15,)}, typeof(identity)}(backend, identity)
+            map = [CartesianIndex(i, j) for i in 1:3 for j in 1:5]
+            @test_throws ErrorException KernelAbstractions.partition(kernel, map, nothing)
+        end
     end
 
     @kernel function index_linear_global(A)

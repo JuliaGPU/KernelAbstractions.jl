@@ -3,9 +3,11 @@ module NDIteration
 export _Size, StaticSize, DynamicSize, get
 export NDRange, blocks, workitems, expand
 export StaticOffset, DynamicOffset, offsets, extents, linear_index
+export IndexMap, MappedNDRange
 export DynamicCheck, NoDynamicCheck
 
 import Base.@pure
+import Adapt
 
 struct DynamicCheck end
 struct NoDynamicCheck end
@@ -31,6 +33,7 @@ extents(t::Tuple) = map(extent, t)
 extents(ci::CartesianIndices) = size(ci)
 extents(r::AbstractUnitRange) = (length(r),)
 extents(n::Integer) = (Int(n),)
+extents(v::AbstractVector) = (length(v),)
 
 """
     offsets(ndrange)
@@ -40,25 +43,53 @@ Offset of the first index along each axis of `ndrange` relative to 1.
 offsets(t::Tuple) = map(axis_offset, t)
 
 """
+    IndexMap{N}(map::AbstractVector)
+
+Iteration space given by the indices listed in `map`, whose elements are `CartesianIndex{N}`
+or `NTuple{N, <:Integer}`. Work item `p` handles the index `map[p]`.
+"""
+struct IndexMap{N, A <: AbstractVector}
+    map::A
+    IndexMap{N}(map::AbstractVector) where {N} = new{N, typeof(map)}(map)
+end
+IndexMap(map::AbstractVector) = IndexMap{mapdims(eltype(map))}(map)
+
+mapdims(::Type{CartesianIndex{N}}) where {N} = N
+mapdims(::Type{<:NTuple{N, Integer}}) where {N} = N
+mapdims(::Type{T}) where {T} = throw(ArgumentError("an index map must have elements of type `CartesianIndex{N}` or `NTuple{N, Integer}`, got `$T`"))
+
+Base.length(m::IndexMap) = length(m.map)
+extents(m::IndexMap) = (length(m),)
+Base.@propagate_inbounds Base.getindex(m::IndexMap{N}, i::Integer) where {N} = mapindex(Val(N), m.map[i])
+mapindex(::Val{N}, I::CartesianIndex{N}) where {N} = I
+mapindex(::Val{N}, I::Tuple) where {N} = CartesianIndex{N}(I)
+
+Adapt.adapt_structure(to, m::IndexMap{N}) where {N} = IndexMap{N}(Adapt.adapt(to, m.map))
+
+"""
     normalize_ndrange(ndrange)
 
-Canonical form of a launch `ndrange`: `nothing`, or a tuple of `Int` extents and
-`UnitRange{Int}` axes.
+Canonical form of a launch `ndrange`: `nothing`, a tuple of `Int` extents and
+`UnitRange{Int}` axes, or an [`IndexMap`](@ref).
 """
 normalize_ndrange(::Nothing) = nothing
 normalize_ndrange(n::Integer) = (Int(n),)
 normalize_ndrange(r::AbstractUnitRange) = (axis(r),)
 normalize_ndrange(ci::CartesianIndices) = map(axis, ci.indices)
 normalize_ndrange(t::Tuple) = map(axis, t)
+normalize_ndrange(m::IndexMap) = m
+normalize_ndrange(v::AbstractVector) = IndexMap(v)
 
 """
     normalize_workgroupsize(workgroupsize)
 
 Canonical form of a launch `workgroupsize`: `nothing`, or a tuple of `Int` extents.
+Anything else is passed through to be rejected by `partition`.
 """
 normalize_workgroupsize(::Nothing) = nothing
 normalize_workgroupsize(n::Integer) = (Int(n),)
 normalize_workgroupsize(t::Tuple) = extents(t)
+normalize_workgroupsize(x) = x
 
 # Two ndranges denote the same indices.
 same_axes(a::Tuple, b::Tuple) = extents(a) == extents(b) && offsets(a) == offsets(b)
@@ -132,8 +163,9 @@ end
     NDRange
 
 Encodes a blocked iteration space. The `mapping` field relates blocked indices to
-`ndrange` indices: `nothing` for the identity, or a [`StaticOffset`](@ref)/[`DynamicOffset`](@ref)
-for an `ndrange` whose indices do not start at 1.
+`ndrange` indices: `nothing` for the identity, a [`StaticOffset`](@ref)/[`DynamicOffset`](@ref)
+for an `ndrange` whose indices do not start at 1, or an [`IndexMap`](@ref) for a 1-D
+blocked space whose work items look up their index in a list.
 
 # Example
 ```
@@ -176,6 +208,16 @@ static_mapping(::Tuple{Vararg{Int}}) = nothing
 static_mapping(t::Tuple) = StaticOffset{offsets(t)}()
 dynamic_mapping(::Tuple{Vararg{Int}}) = nothing
 dynamic_mapping(t::Tuple) = DynamicOffset(offsets(t))
+
+"""
+    MappedNDRange
+
+A 1-D blocked iteration space whose `mapping` is an [`IndexMap`](@ref).
+"""
+const MappedNDRange = NDRange{1, <:Any, <:Any, <:Any, <:Any, <:IndexMap}
+
+Adapt.adapt_structure(to, range::NDRange{N, B, W}) where {N, B, W} =
+    NDRange{N, B, W}(Adapt.adapt(to, range.blocks), Adapt.adapt(to, range.workitems), Adapt.adapt(to, range.mapping))
 
 import Base.iterate
 @inline iterate(range::NDRange) = iterate(blocks(range))
@@ -245,6 +287,21 @@ end
 Base.@propagate_inbounds function expand(ndrange::NDRange{N}, groupidx::Integer, idx::CartesianIndex{N}) where {N}
     return expand(ndrange, blocks(ndrange)[groupidx], idx)
 end
+
+"""
+    linear_index(ndrange::MappedNDRange, groupidx, idx)
+
+Position in the index map of work item `idx` of workgroup `groupidx`.
+"""
+@inline linear_index(ndrange::MappedNDRange, groupidx::Integer, idx::Integer) = (groupidx - 1) * length(workitems(ndrange)) + idx
+@inline linear_index(ndrange::MappedNDRange, groupidx::CartesianIndex{1}, idx::CartesianIndex{1}) = linear_index(ndrange, groupidx.I[1], idx.I[1])
+@inline linear_index(ndrange::MappedNDRange, groupidx::CartesianIndex{1}, idx::Integer) = linear_index(ndrange, groupidx.I[1], idx)
+@inline linear_index(ndrange::MappedNDRange, groupidx::Integer, idx::CartesianIndex{1}) = linear_index(ndrange, groupidx, idx.I[1])
+
+Base.@propagate_inbounds expand(ndrange::MappedNDRange, groupidx::Integer, idx::Integer) = ndrange.mapping[linear_index(ndrange, groupidx, idx)]
+Base.@propagate_inbounds expand(ndrange::MappedNDRange, groupidx::CartesianIndex{1}, idx::CartesianIndex{1}) = ndrange.mapping[linear_index(ndrange, groupidx, idx)]
+Base.@propagate_inbounds expand(ndrange::MappedNDRange, groupidx::CartesianIndex{1}, idx::Integer) = ndrange.mapping[linear_index(ndrange, groupidx, idx)]
+Base.@propagate_inbounds expand(ndrange::MappedNDRange, groupidx::Integer, idx::CartesianIndex{1}) = ndrange.mapping[linear_index(ndrange, groupidx, idx)]
 
 """
     partition(ndrange, workgroupsize)
