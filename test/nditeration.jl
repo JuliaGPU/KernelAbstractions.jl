@@ -47,6 +47,30 @@ function nditeration_testsuite()
         end
     end
 
+    @testset "index map" begin
+        indices = [CartesianIndex(i, j) for i in 1:3 for j in 1:5]
+        m = IndexMap(indices)
+        @test m isa IndexMap{2}
+        @test length(m) == 15
+        @test m[7] == indices[7]
+        @test IndexMap(Tuple.(indices))[7] == indices[7]
+        @test IndexMap([Int32.(Tuple(I)) for I in indices])[7] == indices[7]
+        @test_throws ArgumentError IndexMap([1, 2, 3])
+
+        let ndrange = NDRange{1, DynamicSize, StaticSize{(4,)}}(CartesianIndices((4,)), nothing, m)
+            @test ndrange isa MappedNDRange
+            @test length(ndrange) == 4
+            @test linear_index(ndrange, 2, 3) == 7
+            @test linear_index(ndrange, CartesianIndex(2), CartesianIndex(3)) == 7
+            @test expand(ndrange, 2, 3) == indices[7]
+            @test expand(ndrange, CartesianIndex(2), CartesianIndex(3)) == indices[7]
+            @test expand(ndrange, 4, 3) == indices[15]
+        end
+        let ndrange = NDRange{1, DynamicSize, DynamicSize}(CartesianIndices((4,)), CartesianIndices((4,)), m)
+            @test expand(ndrange, 2, 3) == indices[7]
+        end
+    end
+
     # GPU scenario where we get a linear index into workitems/blocks
     function linear_iteration(ndrange)
         idx = Array{CartesianIndex{2}}(undef, length(blocks(ndrange)) * length(workitems(ndrange)))

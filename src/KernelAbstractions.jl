@@ -412,9 +412,7 @@ end
 end
 
 @inline function __index_Global_Linear(ctx)
-    I = @inbounds expand(__iterspace(ctx), KI.get_group_id().x, KI.get_local_id().x)
-    # TODO: This is unfortunate, can we get the linear index cheaper
-    return linear_index(__ndrange(ctx), I)
+    return __global_linear(__iterspace(ctx), __ndrange(ctx), KI.get_group_id().x, KI.get_local_id().x)
 end
 
 @inline function __index_Local_Cartesian(ctx)
@@ -547,6 +545,10 @@ last (possibly partial) workgroup. Primarily used by backend implementations and
     ndrange = NDIteration.normalize_ndrange(ndrange)
     workgroupsize = NDIteration.normalize_workgroupsize(workgroupsize)
 
+    if ndrange isa IndexMap
+        return mapped_partition(kernel, ndrange, workgroupsize)
+    end
+
     if ndrange === nothing && static_ndrange <: DynamicSize ||
             workgroupsize === nothing && static_workgroupsize <: DynamicSize
         errmsg = """
@@ -602,6 +604,39 @@ last (possibly partial) workgroup. Primarily used by backend implementations and
     return iterspace, dynamic
 end
 
+# Partition of an index map: a 1-D blocked space over the positions in the map.
+@inline function mapped_partition(kernel, map::IndexMap, workgroupsize)
+    static_ndrange = KernelAbstractions.ndrange(kernel)
+    static_workgroupsize = KernelAbstractions.workgroupsize(kernel)
+
+    if static_ndrange <: StaticSize
+        error("An index map is a runtime iteration space; construct the kernel with a dynamic ndrange")
+    end
+    if static_workgroupsize <: StaticSize
+        if workgroupsize !== nothing && workgroupsize != get(static_workgroupsize)
+            error("Static WorkgroupSize ($static_workgroupsize) and launch WorkgroupSize $(workgroupsize) differ")
+        end
+        workgroupsize = get(static_workgroupsize)
+    elseif !(workgroupsize isa Tuple)
+        error("An index map requires a workgroup size, either static or given with `workgroupsize`")
+    end
+    if length(workgroupsize) != 1
+        error("An index map requires a 1-D workgroup size, got $(workgroupsize)")
+    end
+
+    blocks, workgroupsize, dynamic = NDIteration.partition((length(map),), workgroupsize)
+
+    if static_workgroupsize <: StaticSize
+        static_workgroupsize = StaticSize{workgroupsize}
+        workgroupsize = nothing
+    else
+        workgroupsize = CartesianIndices(workgroupsize)
+    end
+
+    iterspace = NDRange{1, DynamicSize, static_workgroupsize}(CartesianIndices(blocks), workgroupsize, map)
+    return iterspace, dynamic
+end
+
 function construct(backend::Backend, ::S, ::NDRange, xpu_name::XPUName) where {Backend <: GPU, S <: _Size, NDRange <: _Size, XPUName}
     return Kernel{Backend, S, NDRange, XPUName}(backend, xpu_name)
 end
@@ -617,7 +652,37 @@ include("compiler.jl")
 ###
 
 function __workitems_iterspace end
-function __validindex end
+
+"""
+    __validindex(ctx, groupidx, idx)
+
+Whether work item `idx` of workgroup `groupidx` has an index within the `ndrange`.
+Both indices are linear or `CartesianIndex` positions within the blocked iteration space.
+"""
+@inline function __validindex(ctx, groupidx, idx)
+    if __dynamic_checkbounds(ctx)
+        return __inrange(__iterspace(ctx), __ndrange(ctx), groupidx, idx)
+    else
+        return true
+    end
+end
+
+@inline function __validindex(ctx)
+    return __validindex(ctx, KI.get_group_id().x, KI.get_local_id().x)
+end
+
+@inline function __inrange(iterspace::NDRange, ndrange, groupidx, idx)
+    I = @inbounds expand(iterspace, groupidx, idx)
+    return I in ndrange
+end
+@inline __inrange(iterspace::MappedNDRange, ndrange, groupidx, idx) = linear_index(iterspace, groupidx, idx) <= length(iterspace.mapping)
+
+# Global linear index of work item `idx` of workgroup `groupidx`.
+@inline function __global_linear(iterspace::NDRange, ndrange, groupidx, idx)
+    I = @inbounds expand(iterspace, groupidx, idx)
+    return linear_index(ndrange, I)
+end
+@inline __global_linear(iterspace::MappedNDRange, ndrange, groupidx, idx) = linear_index(iterspace, groupidx, idx)
 
 # for reflection
 function mkcontext end

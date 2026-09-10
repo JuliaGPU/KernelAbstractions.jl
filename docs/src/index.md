@@ -136,6 +136,10 @@ end
 - `ndrange` entries may be index ranges, given statically (`kernel(backend, workgroupsize, (-2:N+3, 0:M+1))`)
   or at launch (`ndrange=(-2:N+3, 0:M+1)`, a single range, or a `CartesianIndices`).
   `@index(Global, Cartesian)` and `@index(Global, NTuple)` return the shifted indices.
+- `ndrange` may be a device vector of `CartesianIndex`/`NTuple` indices, running one work item per
+  listed index (`kernel(A, ndrange=active_cells)`).
+- Index validity is decided by the generic `__validindex(ctx, groupidx, idx)`, so backends only
+  supply the hardware indices.
 
 ## Semantic differences
 

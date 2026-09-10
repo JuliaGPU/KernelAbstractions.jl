@@ -253,5 +253,23 @@ Inside the kernel `@index(Global, Cartesian)` and `@index(Global, NTuple)` retur
 indices, `@index(Global, Linear)` counts the indices of the region from 1 in column-major order,
 and `@ndrange()` returns the extents.
 
+### Index maps
+
+`ndrange` can be a vector of indices (`CartesianIndex{N}` or `NTuple{N, <:Integer}` elements,
+stored on the backend's device) to run one work item per listed index, for example over the
+active cells of a masked domain:
+
+```julia
+active = CuArray([CartesianIndex(i, j, k) for (i, j, k) in cells if mask[i, j, k]])
+kernel = my_kernel(backend, 256)          # 1-D workgroup size is required
+kernel(A, ndrange=active)
+```
+
+Inside the kernel `@index(Global, Cartesian)` and `@index(Global, NTuple)` return the listed
+index, `@index(Global, Linear)` its position in the vector, and `@ndrange()` the length of
+the vector. The kernel must be constructed with a dynamic `ndrange`, and the workgroup size
+must be static or given with `workgroupsize`. With `@kernel unsafe_indices=true` the work
+items of a partial last workgroup have no valid index.
+
 Obtain the backend from an array with [`get_backend`](@ref) and always call [`synchronize`](@ref) before reading results on the host.
 See the [Quickstart](@ref) for a full walkthrough and the Examples section of the manual for larger patterns.
