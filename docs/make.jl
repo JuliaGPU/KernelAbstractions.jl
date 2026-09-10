@@ -1,5 +1,6 @@
 using KernelAbstractions
 using KernelInterface
+using Adapt
 using Documenter
 
 function main()

@@ -11,6 +11,12 @@ identity(x) = x
 struct UnknownAbstractVector <: AbstractVector{Float32}  # issue #588
 end
 
+# A user struct opted into `adapt`, as data passed to backends often is.
+struct AdaptWrapper{T}
+    x::T
+end
+Adapt.@adapt_structure AdaptWrapper
+
 function unittest_testsuite(Backend, backend_str, backend_mod, BackendArrayT; skip_tests = Set{String}())
     @conditional_testset "partition" skip_tests begin
         backend = Backend()
@@ -119,10 +125,29 @@ function unittest_testsuite(Backend, backend_str, backend_mod, BackendArrayT; sk
 
     @conditional_testset "adapt" skip_tests begin
         backend = Backend()
+        backendT = typeof(backend).name.wrapper # To look through CUDABackend{true, false}
         x = allocate(backend, Float32, 5)
         @test adapt(CPU(), x) isa Array
         y = adapt(backend, Array{Float32}(undef, 5))
         @test typeof(y) == typeof(x)
+
+        # Data round-trips between the host and the backend.
+        host = rand(Float32, 5)
+        dev = adapt(backend, host)
+        @test KernelAbstractions.get_backend(dev) isa backendT
+        @test Array(dev) == host
+        @test adapt(CPU(), dev) == host
+        @test adapt(backend, dev) === dev
+
+        # Scalars pass through, and Adapt.jl traverses the structure around the arrays.
+        @test adapt(backend, 1.0f0) === 1.0f0
+        nt = adapt(backend, (a = host, b = 1.0f0))
+        @test typeof(nt.a) == typeof(dev)
+        @test nt.b === 1.0f0
+        @test typeof(adapt(backend, AdaptWrapper(host)).x) == typeof(dev)
+        v = adapt(backend, view(host, 2:4))
+        @test v isa SubArray
+        @test typeof(parent(v)) == typeof(dev)
     end
 
     # TODO: add test for _group and _local_cartesian

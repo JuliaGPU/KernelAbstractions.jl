@@ -39,10 +39,6 @@ Synchronize the current backend.
 """
 function synchronize end
 
-# Define:
-#   adapt_storage(::Backend, a::Array) = adapt(BackendArray, a)
-#   adapt_storage(::Backend, a::BackendArray) = a
-
 """
     priority!(::Backend, prio::Symbol)::Nothing
 
