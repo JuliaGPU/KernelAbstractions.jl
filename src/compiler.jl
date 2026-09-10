@@ -5,20 +5,23 @@ struct CompilerMetadata{StaticNDRange, CheckBounds, I, NDRange, Iterspace}
 
     # CPU variant
     function CompilerMetadata{NDRange, CB}(idx, ndrange, iterspace) where {NDRange, CB}
-        if ndrange !== nothing
-            ndrange = CartesianIndices(ndrange)
-        end
+        ndrange = cartesian(ndrange)
         return new{NDRange, CB, typeof(idx), typeof(ndrange), typeof(iterspace)}(idx, ndrange, iterspace)
     end
 
     # GPU variante: index is given implicit
     function CompilerMetadata{NDRange, CB}(ndrange, iterspace) where {NDRange, CB}
-        if ndrange !== nothing
-            ndrange = CartesianIndices(ndrange)
-        end
+        ndrange = cartesian(ndrange)
         return new{NDRange, CB, Nothing, typeof(ndrange), typeof(iterspace)}(nothing, ndrange, iterspace)
     end
 end
+
+# `CartesianIndices` covering a launch `ndrange` (any form accepted by `partition`).
+cartesian(::Nothing) = nothing
+cartesian(ci::CartesianIndices) = ci
+cartesian(n::Integer) = CartesianIndices((Int(n),))
+cartesian(r::AbstractUnitRange) = CartesianIndices((r,))
+cartesian(t::Tuple) = CartesianIndices(t)
 
 @inline __iterspace(cm::CompilerMetadata) = cm.iterspace
 @inline __groupindex(cm::CompilerMetadata) = cm.groupindex

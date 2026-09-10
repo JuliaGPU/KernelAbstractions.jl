@@ -232,5 +232,26 @@ kernel = my_kernel(backend, 32, size(A))
 kernel(A)
 ```
 
+### Index ranges
+
+Each entry of `ndrange` is either an extent (indices `1:n`) or a range of indices, so a kernel
+can iterate over a region whose indices do not start at 1. `ndrange` can also be given as a
+single range or as a `CartesianIndices`:
+
+```julia
+# static ndrange over the indices -2:N+3 along x and 0:M+1 along y
+kernel = my_kernel(backend, (16, 16), (-2:N+3, 0:M+1))
+kernel(A)
+
+# dynamic ndrange
+kernel = my_kernel(backend, (16, 16))
+kernel(A, ndrange=(-2:N+3, 0:M+1))
+kernel(A, ndrange=CartesianIndices(A))   # e.g. for an OffsetArray
+```
+
+Inside the kernel `@index(Global, Cartesian)` and `@index(Global, NTuple)` return the shifted
+indices, `@index(Global, Linear)` counts the indices of the region from 1 in column-major order,
+and `@ndrange()` returns the extents.
+
 Obtain the backend from an array with [`get_backend`](@ref) and always call [`synchronize`](@ref) before reading results on the host.
 See the [Quickstart](@ref) for a full walkthrough and the Examples section of the manual for larger patterns.
