@@ -22,10 +22,12 @@ jobs:
   CI:
     name: CI
     runs-on: ${{ matrix.os }}
+    # Nightly tracks the next Julia release; don't fail CI on it.
+    continue-on-error: ${{ matrix.version == 'nightly' }}
     strategy:
       fail-fast: false
       matrix:
-        version: ['1.10', '1.11', '1.12', '1.13-nightly']
+        version: ['1.10', '1.11', '1.12', '1.13', 'nightly']
         os: [ubuntu-24.04, ubuntu-24.04-arm, macOS-15-intel, macOS-15, windows-2022]
         arch: [x64, arm64]
         pocl: [jll, local]
@@ -173,10 +175,11 @@ jobs:
   KernelInterface:
     name: KernelInterface
     runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.version == 'nightly' }}
     strategy:
       fail-fast: false
       matrix:
-        version: ['1.10', '1.11', '1.12', '1.13-nightly']
+        version: ['1.10', '1.11', '1.12', '1.13', 'nightly']
         os: [ubuntu-24.04, macOS-15, windows-2022]
     steps:
       - uses: actions/checkout@v7
@@ -197,10 +200,11 @@ jobs:
   OpenCL:
     name: OpenCL (POCL)
     runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.version == 'nightly' }}
     strategy:
       fail-fast: false
       matrix:
-        version: ['1.10', '1.11', '1.12', '1.13']
+        version: ['1.10', '1.11', '1.12', '1.13', 'nightly']
     steps:
       - uses: actions/checkout@v7
       - uses: julia-actions/install-juliaup@v3
