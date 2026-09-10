@@ -9,16 +9,13 @@ using Random
 
 if !haskey(ENV, "KA_BACKEND")
     const BACKEND = CPU()
-    const Ts = (Float32, Float64)
 else
     backend = ENV["KA_BACKEND"]
     if backend == "CPU"
         const BACKEND = CPU()
-        const Ts = (Float32, Float64)
     elseif backend == "CUDA"
         using CUDA
         const BACKEND = CUDABackend()
-        const Ts = (Float16, Float32, Float64)
     else
         error("Backend $backend not recognized")
     end
@@ -34,7 +31,7 @@ end
 SUITE["saxpy"] = BenchmarkGroup()
 
 let static = BenchmarkGroup()
-    for T in Ts
+    for T in (Float16, Float32, Float64)
         dtype = BenchmarkGroup()
         for N in (64, 256, 512, 1024, 2048, 4096, 16384, 32768, 65536, 262144, 1048576)
             dtype[N] = @benchmarkable begin
@@ -52,7 +49,7 @@ let static = BenchmarkGroup()
 end
 
 let default = BenchmarkGroup()
-    for T in Ts
+    for T in (Float16, Float32, Float64)
         dtype = BenchmarkGroup()
         for N in (64, 256, 512, 1024, 2048, 4096, 16384, 32768, 65536, 262144, 1048576)
             dtype[N] = @benchmarkable begin
