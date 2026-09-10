@@ -132,6 +132,11 @@ but users must avoid the use of `@index(Global)` and instead use their own deriv
 end
 ```
 
+### 0.10
+- `ndrange` entries may be index ranges, given statically (`kernel(backend, workgroupsize, (-2:N+3, 0:M+1))`)
+  or at launch (`ndrange=(-2:N+3, 0:M+1)`, a single range, or a `CartesianIndices`).
+  `@index(Global, Cartesian)` and `@index(Global, NTuple)` return the shifted indices.
+
 ## Semantic differences
 
 ### To CUDA.jl/AMDGPU.jl

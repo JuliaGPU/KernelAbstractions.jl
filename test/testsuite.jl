@@ -33,6 +33,7 @@ include("localmem.jl")
 include("private.jl")
 include("unroll.jl")
 include("nditeration.jl")
+include("offsets.jl")
 include("copyto.jl")
 include("devices.jl")
 include("print_test.jl")
@@ -73,6 +74,10 @@ function testsuite(backend, backend_str, backend_mod, AT, DAT; skip_tests = Set{
 
     @testset "NDIteration" begin
         nditeration_testsuite()
+    end
+
+    @conditional_testset "Offsets" skip_tests begin
+        offsets_testsuite(backend, AT)
     end
 
     @conditional_testset "copyto!" skip_tests begin

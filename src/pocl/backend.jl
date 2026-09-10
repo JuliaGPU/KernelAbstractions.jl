@@ -196,7 +196,7 @@ function (obj::KA.Kernel{POCLBackend})(args...; ndrange = nothing, workgroupsize
     # figure out the optimal workgroupsize automatically
     if KA.workgroupsize(obj) <: KA.DynamicSize && workgroupsize === nothing
         wg_info = cl.work_group_info(kernel.fun, device())
-        wg_size_nd = threads_to_workgroupsize(wg_info.size, ndrange)
+        wg_size_nd = threads_to_workgroupsize(wg_info.size, KA.NDIteration.extents(ndrange))
         iterspace, dynamic = KA.partition(obj, ndrange, wg_size_nd)
         ctx = KA.mkcontext(obj, ndrange, iterspace)
     end

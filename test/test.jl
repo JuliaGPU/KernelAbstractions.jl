@@ -48,6 +48,47 @@ function unittest_testsuite(Backend, backend_str, backend_mod, BackendArrayT; sk
             @test_throws ErrorException KernelAbstractions.partition(kernel, (129,), nothing)
             @test KernelAbstractions.backend(kernel) == backend
         end
+        let kernel = KernelAbstractions.Kernel{typeof(backend), StaticSize{(64,)}, DynamicSize, typeof(identity)}(backend, identity)
+            iterspace, dynamic = KernelAbstractions.partition(kernel, (-63:64,), nothing)
+            @test length(blocks(iterspace)) == 2
+            @test dynamic isa NoDynamicCheck
+            @test offsets(iterspace) == (-64,)
+            @test iterspace.mapping isa DynamicOffset
+
+            iterspace, dynamic = KernelAbstractions.partition(kernel, CartesianIndices((0:128,)), (64,))
+            @test length(blocks(iterspace)) == 3
+            @test dynamic isa DynamicCheck
+            @test offsets(iterspace) == (-1,)
+
+            iterspace, dynamic = KernelAbstractions.partition(kernel, 0:127, nothing)
+            @test length(blocks(iterspace)) == 2
+            @test offsets(iterspace) == (-1,)
+
+            iterspace, dynamic = KernelAbstractions.partition(kernel, (128,), nothing)
+            @test iterspace.mapping === nothing
+
+            # a range in place of the workgroup size is taken as its length
+            iterspace, dynamic = KernelAbstractions.partition(kernel, (-63:64,), (-63:0,))
+            @test length(blocks(iterspace)) == 2
+        end
+        let kernel = KernelAbstractions.Kernel{typeof(backend), StaticSize{(64,)}, StaticSize{(-63:64,)}, typeof(identity)}(backend, identity)
+            iterspace, dynamic = KernelAbstractions.partition(kernel, nothing, nothing)
+            @test length(blocks(iterspace)) == 2
+            @test dynamic isa NoDynamicCheck
+            @test offsets(iterspace) == (-64,)
+            @test iterspace.mapping isa StaticOffset
+
+            iterspace, dynamic = KernelAbstractions.partition(kernel, (-63:64,), nothing)
+            @test length(blocks(iterspace)) == 2
+
+            @test_throws ErrorException KernelAbstractions.partition(kernel, (128,), nothing)
+            @test_throws ErrorException KernelAbstractions.partition(kernel, (-62:65,), nothing)
+        end
+        let kernel = KernelAbstractions.Kernel{typeof(backend), StaticSize{(64,)}, StaticSize{(128,)}, typeof(identity)}(backend, identity)
+            iterspace, dynamic = KernelAbstractions.partition(kernel, (1:128,), nothing)
+            @test length(blocks(iterspace)) == 2
+            @test iterspace.mapping === nothing
+        end
     end
 
     @kernel function index_linear_global(A)
