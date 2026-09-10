@@ -202,9 +202,7 @@ A backend must, at minimum:
 3. Extend `Adapt.adapt_storage(::NewBackend, x)` so that
    [`adapt(backend, x)`](@ref Adapt.adapt_storage(::Backend, ::Any)) moves
    data to the backend, preferably by delegating to its array type:
-   `Adapt.adapt_storage(::NewBackend, x) = adapt(NewArray, x)`. This is
-   required by `KernelAbstractions` rather than by `KernelInterface`, which
-   does not depend on Adapt.jl.
+   `Adapt.adapt_storage(::NewBackend, x) = adapt(NewArray, x)`.
 4. `@device_override` the device-side functions it supports. The indexing
    queries and [`barrier`](@ref) are required; sub-group and
    [`shfl_down`](@ref) support is optional.
