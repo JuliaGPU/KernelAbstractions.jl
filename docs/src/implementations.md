@@ -26,5 +26,3 @@ to the backend's array type, so that `adapt(backend, x)` and
 Adapt.adapt_storage(::CUDABackend, x) = adapt(CuArray, x)
 ```
 
-Adapt.jl's fallback `adapt_storage` is the identity, so a backend without this
-method silently leaves data where it is.
