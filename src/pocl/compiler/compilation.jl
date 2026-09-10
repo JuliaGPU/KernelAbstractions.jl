@@ -200,6 +200,7 @@ function compiler_config(dev::cl.Device; kwargs...)
 end
 @noinline function _compiler_config(
         dev; kernel = true, name = nothing, always_inline = false,
+        debug_level = Base.JLOptions().debug_level,
         sub_group_size::Union{Nothing, Int} = 32,
         extensions::Union{Nothing, String} = nothing, kwargs...
     )
@@ -217,7 +218,7 @@ end
     # create GPUCompiler objects
     target = SPIRVCompilerTarget(; supports_fp16, supports_fp64, extensions, validate = true, kwargs...)
     params = OpenCLCompilerParams(; sub_group_size)
-    return CompilerConfig(target, params; kernel, name, always_inline)
+    return CompilerConfig(target, params; kernel, name, always_inline, debug_level)
 end
 
 # run inference + LLVM codegen + SPIR-V emission. returns `(obj, entry, device_rng)`,

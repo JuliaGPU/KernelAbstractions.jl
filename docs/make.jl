@@ -41,6 +41,7 @@ function main()
             "Extras" => [
                 "extras/unrolling.md",
                 "extras/pocl_debugging.md",
+                "extras/device_exceptions.md",
             ], # Extras
             "Notes for implementations" => "implementations.md",
         ], # pages

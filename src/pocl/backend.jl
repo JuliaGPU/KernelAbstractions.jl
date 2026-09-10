@@ -2,7 +2,7 @@ module POCLKernels
 
 using ..POCL
 using ..POCL: @device_override, cl, method_table
-using ..POCL: device, clconvert, clfunction
+using ..POCL: device, clconvert, clfunction, check_exceptions
 
 using SPIRV_LLVM_Backend_jll, SPIRV_Tools_jll
 
@@ -134,8 +134,9 @@ KI.get_backend(::Array) = POCLBackend()
 ## `broadcast`, `*` and other high-level operations are handled by Julia. In order
 ## to provide the same memory synchronization semantics as other backends, we
 ## must synchronize upon kernel launch and can't rely on synchronization upon
-## array access. Therefore, `synchronize` is a no-op.
-KI.synchronize(::POCLBackend) = nothing
+## array access. Therefore, `synchronize` only has to surface device-side exceptions
+## from kernels that were launched outside of the paths below.
+KI.synchronize(::POCLBackend) = check_exceptions()
 KI.supports_float64(::POCLBackend) = true
 KI.supports_unified(::POCLBackend) = true
 
@@ -214,6 +215,8 @@ function (obj::KA.Kernel{POCLBackend})(args...; ndrange = nothing, workgroupsize
     event = kernel(ctx, args...; global_size, local_size)
     wait(event)
     cl.clReleaseEvent(event)
+    # the launch is synchronous, so report any device-side exception right away
+    check_exceptions()
     return nothing
 end
 
@@ -240,6 +243,8 @@ function (obj::KI.Kernel{POCLBackend})(args...; numworkgroups = (), workgroupsiz
     event = obj.kern(args...; local_size, global_size)
     wait(event)
     cl.clReleaseEvent(event)
+    # the launch is synchronous, so report any device-side exception right away
+    check_exceptions()
     return nothing
 end
 

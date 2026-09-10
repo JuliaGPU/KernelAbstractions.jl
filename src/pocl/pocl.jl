@@ -60,9 +60,13 @@ include("compiler/reflection.jl")
 import Core: LLVMPtr
 
 include("device/array.jl")
-include("device/quirks.jl")
+# `runtime.jl` defines `@gputhrow`, which `quirks.jl` uses
 include("device/runtime.jl")
+include("device/quirks.jl")
 include("device/random.jl")
+
+# host-side exception reporting, built on the mailbox layout in `device/runtime.jl`
+include("compiler/exceptions.jl")
 
 function Adapt.adapt_storage(to::KernelAdaptor, xs::Array{T, N}) where {T, N}
     return CLDeviceArray{T, N, AS.CrossWorkgroup}(size(xs), reinterpret(LLVMPtr{T, AS.CrossWorkgroup}, pointer(xs)))
