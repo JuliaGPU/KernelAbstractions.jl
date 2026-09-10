@@ -414,7 +414,7 @@ end
 @inline function __index_Global_Linear(ctx)
     I = @inbounds expand(__iterspace(ctx), KI.get_group_id().x, KI.get_local_id().x)
     # TODO: This is unfortunate, can we get the linear index cheaper
-    return @inbounds LinearIndices(__ndrange(ctx))[I]
+    return linear_index(__ndrange(ctx), I)
 end
 
 @inline function __index_Local_Cartesian(ctx)
@@ -544,6 +544,8 @@ last (possibly partial) workgroup. Primarily used by backend implementations and
 @inline function partition(kernel, ndrange, workgroupsize)
     static_ndrange = KernelAbstractions.ndrange(kernel)
     static_workgroupsize = KernelAbstractions.workgroupsize(kernel)
+    ndrange = NDIteration.normalize_ndrange(ndrange)
+    workgroupsize = NDIteration.normalize_workgroupsize(workgroupsize)
 
     if ndrange === nothing && static_ndrange <: DynamicSize ||
             workgroupsize === nothing && static_workgroupsize <: DynamicSize
@@ -562,7 +564,7 @@ last (possibly partial) workgroup. Primarily used by backend implementations and
     end
 
     if static_ndrange <: StaticSize
-        if ndrange !== nothing && ndrange != get(static_ndrange)
+        if ndrange !== nothing && !NDIteration.same_axes(ndrange, get(static_ndrange))
             error("Static NDRange ($static_ndrange) and launch NDRange ($ndrange) differ")
         end
         ndrange = get(static_ndrange)
@@ -577,14 +579,16 @@ last (possibly partial) workgroup. Primarily used by backend implementations and
 
     @assert workgroupsize !== nothing
     @assert ndrange !== nothing
-    blocks, workgroupsize, dynamic = NDIteration.partition(ndrange, workgroupsize)
+    blocks, workgroupsize, dynamic = NDIteration.partition(extents(ndrange), workgroupsize)
 
     if static_ndrange <: StaticSize
         static_blocks = StaticSize{blocks}
         blocks = nothing
+        mapping = NDIteration.static_mapping(ndrange)
     else
         static_blocks = DynamicSize
         blocks = CartesianIndices(blocks)
+        mapping = NDIteration.dynamic_mapping(ndrange)
     end
 
     if static_workgroupsize <: StaticSize
@@ -594,7 +598,7 @@ last (possibly partial) workgroup. Primarily used by backend implementations and
         workgroupsize = CartesianIndices(workgroupsize)
     end
 
-    iterspace = NDRange{length(ndrange), static_blocks, static_workgroupsize}(blocks, workgroupsize)
+    iterspace = NDRange{length(ndrange), static_blocks, static_workgroupsize}(blocks, workgroupsize, mapping)
     return iterspace, dynamic
 end
 
