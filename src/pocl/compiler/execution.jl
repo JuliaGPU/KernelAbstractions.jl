@@ -204,8 +204,9 @@ end
 # `HostKernel{F, tt}` instances keyed by their type
 const _kernel_fastpath = Dict{DataType, ResolvedKernel}()
 
-# Reading a `ScopedValue` allocates; outside of any dynamic scope it holds its default.
-@static if VERSION >= v"1.11"
+# On Julia 1.11 to 1.13 reading a `ScopedValue` allocates; outside of any dynamic scope it
+# holds its default, so the read is skipped there.
+@static if v"1.11" <= VERSION < v"1.14-"
     @inline compile_hook_set() = Core.current_scope() !== nothing && GPUCompiler.compile_hook[] !== nothing
 else
     @inline compile_hook_set() = GPUCompiler.compile_hook[] !== nothing
