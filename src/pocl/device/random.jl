@@ -232,8 +232,11 @@ end
     end
 end
 
-@device_override @inline function Random.randn(rng::AbstractRNG, ::Type{T}) where {T <: Union{Float16, Float32}}
-    @invoke Random.randn(rng::AbstractRNG, T::Type{<:AbstractFloat})
+# Use the table-free fallback, but compute it in Float32 because its polar transform can
+# overflow in Float16. Keep this scoped to our RNG: overlay methods take precedence over
+# regular dispatch and an AbstractRNG method would shadow methods for other device RNGs.
+@device_override @inline function Random.randn(rng::Philox2x32, ::Type{T}) where {T <: Union{Float16, Float32}}
+    return T(@invoke Random.randn(rng::AbstractRNG, Float32::Type{<:AbstractFloat}))
 end
 
 ## randexp
@@ -257,8 +260,9 @@ end
     end
 end
 
-@device_override @inline function Random.randexp(rng::AbstractRNG, ::Type{T}) where {T <: Union{Float16, Float32}}
-    @invoke Random.randexp(rng::AbstractRNG, T::Type{<:AbstractFloat})
+# Compute through Float32 to avoid requiring Float16 `log1p` support.
+@device_override @inline function Random.randexp(rng::Philox2x32, ::Type{T}) where {T <: Union{Float16, Float32}}
+    return T(@invoke Random.randexp(rng::AbstractRNG, Float32::Type{<:AbstractFloat}))
 end
 
 @device_override Random.Sampler(

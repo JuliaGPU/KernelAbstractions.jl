@@ -1,4 +1,5 @@
 using KernelAbstractions
+using Random
 using Test
 
 include("quality_assurance.jl")
@@ -24,6 +25,29 @@ import KernelAbstractions.POCL: POCL, @opencl, @device_code_llvm
     # an explicit list overrides the device-derived default
     config = POCL.compiler_config(dev; extensions = "+SPV_KHR_expect_assume")
     @test config.target.extensions == "+SPV_KHR_expect_assume"
+end
+
+# `randn`/`randexp` for Float16 route through Random's table-free fallback, whose polar
+# transform overflows in Float16 and whose `log1p` isn't available for Float16 on the
+# device. The device overlays compute in Float32 and convert, so results stay finite.
+if "cl_khr_fp16" in POCL.device().extensions
+    @testset "POCL device RNG: Float16" begin
+        @kernel function f16_rng_kernel(A, B)
+            i = @index(Global, Linear)
+            @inbounds A[i] = Random.randn(Float16)
+            @inbounds B[i] = Random.randexp(Float16)
+        end
+
+        # the overflow this guards against hits a few hundred values in 2^20 draws,
+        # so a small sample would not catch a regression
+        len = 2^20
+        a = KernelAbstractions.zeros(POCLBackend(), Float16, len)
+        b = KernelAbstractions.zeros(POCLBackend(), Float16, len)
+        f16_rng_kernel(POCLBackend())(a, b; ndrange = len)
+        KernelAbstractions.synchronize(POCLBackend())
+        @test all(isfinite, a)
+        @test all(isfinite, b)
+    end
 end
 
 @testset "POCL compilation cache" begin
