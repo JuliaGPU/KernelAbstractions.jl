@@ -4,7 +4,7 @@ export @opencl, clfunction, clconvert
 ## high-level @opencl interface
 
 const MACRO_KWARGS = [:launch]
-const COMPILER_KWARGS = [:kernel, :name, :always_inline, :validate, :sub_group_size]
+const COMPILER_KWARGS = [:kernel, :name, :always_inline, :debug_level, :validate, :sub_group_size]
 const LAUNCH_KWARGS = [:global_size, :local_size, :queue]
 
 macro opencl(ex...)
@@ -169,14 +169,19 @@ pass_arg(@nospecialize dt) = !(GPUCompiler.isghosttype(dt) || Core.Compiler.isco
     end
 
     pushfirst!(call_t, KernelState)
-    pushfirst!(call_args, :(KernelState(kernel.rng_state ? Base.rand(UInt32) : UInt32(0))))
 
     # finalize types
     call_tt = Base.to_tuple_type(call_t)
 
+    # the kernel state carries the address of the device-side exception mailbox, which is
+    # assigned by the launch itself (it also has to record the queue as a possible writer)
     return quote
         svm_pointers = Ptr{Cvoid}[]
-        $cl.clcall(kernel.fun, $call_tt, $(call_args...); svm_pointers, kernel.rng_state, call_kwargs...)
+        random_seed = kernel.rng_state ? Base.rand(UInt32) : UInt32(0)
+        launch_with_exception_mailbox(
+            kernel.fun, $call_tt, random_seed, $(call_args...);
+            svm_pointers, kernel.rng_state, call_kwargs...
+        )
     end
 end
 

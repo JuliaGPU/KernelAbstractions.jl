@@ -92,6 +92,76 @@ end
     @test count() == n + 2
 end
 
+@testset "POCL debug level" begin
+    # `debug_level` selects how much exception-reporting code a kernel carries,
+    # independent of the session's `-g` level
+    oob(a) = (a[2] = 1.0f0; return)
+    a = zeros(Float32, 1)
+    ir(dl) = sprint(io -> (@device_code_llvm io = io @opencl launch = false debug_level = dl oob(a)))
+    @test !occursin("gpu_report_exception", ir(0))
+    @test occursin("gpu_report_exception", ir(1))
+    @test !occursin("gpu_report_exception_frame", ir(1))
+    @test occursin("gpu_report_exception_frame", ir(2))
+end
+
+@testset "POCL device-side exceptions" begin
+    # a kernel that throws must not wedge the device: it should complete, and surface on
+    # the host as a `KernelException`. POCL launches synchronously, so the exception is
+    # reported by the launch itself.
+    @kernel function throwing_kernel(a)
+        i = @index(Global, Linear)
+        a[i + 1] = 1.0f0      # out-of-bounds store on a length-1 array
+    end
+    @kernel function fill_one(a)
+        i = @index(Global, Linear)
+        @inbounds a[i] = 1.0f0
+    end
+
+    a = KernelAbstractions.zeros(POCLBackend(), Float32, 1)
+    @test_throws POCL.KernelException throwing_kernel(POCLBackend())(a; ndrange = 1)
+
+    # the mailbox is reset on read, so the device stays usable
+    KernelAbstractions.synchronize(POCLBackend())
+    b = KernelAbstractions.zeros(POCLBackend(), Float32, 4)
+    fill_one(POCLBackend())(b; ndrange = 4)
+    KernelAbstractions.synchronize(POCLBackend())
+    @test b == ones(Float32, 4)
+
+    # `@opencl` does not wait for its event, so the report is consumed by the next check
+    oob(a) = (a[2] = 1.0f0; return)
+    @opencl oob(a)
+    @test_throws POCL.KernelException POCL.check_exceptions()
+    POCL.check_exceptions()
+
+    # an exception whose argument needs boxing (a runtime value) must not have its throw
+    # path deleted by the device compiler (JuliaGPU/GPUCompiler.jl#919)
+    function boxed(a)
+        x = a[1]
+        x == 0 && throw(DomainError(x))
+        return
+    end
+    @test occursin(
+        "gpu_signal_exception",
+        sprint(io -> (@device_code_llvm io = io @opencl launch = false boxed(a)))
+    )
+    @opencl boxed(a)
+    @test_throws POCL.KernelException POCL.check_exceptions()
+
+    # a quirk records its own name and reason, from debug level 1 on
+    exc = try
+        throwing_kernel(POCLBackend())(a; ndrange = 1)
+        nothing
+    catch err
+        err
+    end
+    @test exc isa POCL.KernelException
+    if Base.JLOptions().debug_level >= 1
+        @test exc.name == "BoundsError"
+        @test exc.reason == "Out-of-bounds array access"
+        @test occursin("BoundsError", sprint(showerror, exc))
+    end
+end
+
 @testset "CPU back-end" begin
     struct CPUBackendArray{T, N, A} end # Fake and unused
     Testsuite.testsuite(CPU, "CPU", Base, Array, CPUBackendArray)
