@@ -70,7 +70,12 @@ Column-major position of `I` within `ndrange`, counted from 1.
 """
 @inline function linear_index(ndrange::CartesianIndices{N}, I::CartesianIndex{N}) where {N}
     lo = map(first, ndrange.indices)
-    return @inbounds LinearIndices(size(ndrange))[CartesianIndex(I.I .- lo .+ 1)]
+    sz = size(ndrange)
+    idx = I.I[N] - lo[N]
+    for d in (N - 1):-1:1
+        idx = idx * sz[d] + (I.I[d] - lo[d])
+    end
+    return idx + 1
 end
 
 abstract type _Size end
