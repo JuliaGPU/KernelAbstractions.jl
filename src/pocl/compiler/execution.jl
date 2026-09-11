@@ -86,7 +86,7 @@ end
 ## argument conversion
 
 struct KernelAdaptor
-    svm_pointers::Vector{Ptr{Cvoid}}
+    svm_pointers::Union{Nothing, Vector{Ptr{Cvoid}}}
 end
 
 # # assume directly-passed pointers are SVM pointers
@@ -137,7 +137,7 @@ register methods for the the `OpenCL.KernelAdaptor` type.
 The `pointers` argument is used to collect pointers to indirect SVM buffers, which need to
 be registered with OpenCL before invoking the kernel.
 """
-function clconvert(arg, pointers::Vector{Ptr{Cvoid}} = Ptr{Cvoid}[])
+function clconvert(arg, pointers::Union{Nothing, Vector{Ptr{Cvoid}}} = nothing)
     return adapt(KernelAdaptor(pointers), arg)
 end
 
@@ -149,11 +149,11 @@ abstract type AbstractKernel{F, TT} end
 pass_arg(@nospecialize dt) = !(GPUCompiler.isghosttype(dt) || Core.Compiler.isconstType(dt))
 
 @inline @generated function (kernel::AbstractKernel{F, TT})(
-        args...;
-        call_kwargs...
-    ) where {F, TT}
+        args::Vararg{Any, N};
+        global_size = (1,), local_size = nothing
+    ) where {F, TT, N}
     sig = Tuple{F, TT.parameters...}    # Base.signature_type with a function type
-    args = (:(kernel.f), (:(clconvert(args[$i], svm_pointers)) for i in 1:length(args))...)
+    args = (:(kernel.f), (:(clconvert(args[$i])) for i in 1:length(args))...)
 
     # filter out ghost arguments that shouldn't be passed
     to_pass = map(pass_arg, sig.parameters)
@@ -175,8 +175,7 @@ pass_arg(@nospecialize dt) = !(GPUCompiler.isghosttype(dt) || Core.Compiler.isco
     call_tt = Base.to_tuple_type(call_t)
 
     return quote
-        svm_pointers = Ptr{Cvoid}[]
-        $cl.clcall(kernel.fun, $call_tt, $(call_args...); svm_pointers, kernel.rng_state, call_kwargs...)
+        $cl.clcall(kernel.fun, $call_tt, $(call_args...); global_size, local_size, kernel.rng_state)
     end
 end
 
