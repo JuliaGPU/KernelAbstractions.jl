@@ -22,6 +22,11 @@ cartesian(ci::CartesianIndices) = ci
 cartesian(n::Integer) = CartesianIndices((Int(n),))
 cartesian(r::AbstractUnitRange) = CartesianIndices((r,))
 cartesian(t::Tuple) = CartesianIndices(t)
+cartesian(v::AbstractVector) = CartesianIndices((length(v),))
+cartesian(m::IndexMap) = CartesianIndices((length(m),))
+
+Adapt.adapt_structure(to, cm::CompilerMetadata{NDRange, CB}) where {NDRange, CB} =
+    CompilerMetadata{NDRange, CB}(cm.groupindex, cm.ndrange, Adapt.adapt(to, cm.iterspace))
 
 @inline __iterspace(cm::CompilerMetadata) = cm.iterspace
 @inline __groupindex(cm::CompilerMetadata) = cm.groupindex
