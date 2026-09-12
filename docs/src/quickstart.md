@@ -137,13 +137,13 @@ same backend before a single [`synchronize`](@ref) call. The same pattern extend
 task-based parallelism: launch kernels from tasks when you want to overlap kernel execution
 with other asynchronous host work, or with each other.
 
-Some backends give each Julia task its own queue, so kernels launched from two tasks are not
-ordered with respect to each other, and `wait(task)` on its own says nothing about whether
-the kernels that task launched have finished. Use [`KernelAbstractions.@spawn`](@ref) instead
-of `Threads.@spawn` to launch kernels from a task. It orders the new task's work after the
-work the spawning task has already queued, runs it on the same device, and synchronizes the
-backend before the task finishes, so that `wait(task)` and `fetch(task)` guarantee its
-results are ready:
+Backends may give each Julia task its own queue, so kernels launched from different tasks
+can run concurrently, but are not ordered with respect to each other. Use
+[`KernelAbstractions.@spawn`](@ref) in place of `Threads.@spawn` to launch kernels from a
+task. It behaves like `Threads.@spawn`, and additionally guarantees that the task runs on
+the same device as the spawning task, that its kernels run after everything the spawning
+task had already queued, and that once `wait(task)` or `fetch(task)` returns, its results
+are ready to use:
 
 ```julia
 function exchange_and_compute!(backend, A, B)
@@ -158,10 +158,8 @@ function exchange_and_compute!(backend, A, B)
 end
 ```
 
-On GPU backends, [`synchronize`](@ref) is **cooperative** — it yields to the Julia scheduler
-rather than blocking inside a driver call, so other tasks can make progress while a kernel runs.
-See [Notes for backend implementations](@ref implementations_notes) for the contract backend
-authors must follow, and for how a backend can make `@spawn` cheaper than a full synchronization.
+Waiting on a backend, whether with [`synchronize`](@ref) or at the end of a spawned task,
+yields to the Julia scheduler, so other tasks keep making progress while a kernel runs.
 
 A full MPI example that overlaps communication with device copies is in
 [`examples/mpi.jl`](https://github.com/JuliaGPU/KernelAbstractions.jl/blob/master/examples/mpi.jl).

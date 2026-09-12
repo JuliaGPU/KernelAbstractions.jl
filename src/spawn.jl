@@ -1,24 +1,19 @@
 """
     @spawn [threadpool] backend expr
 
-Run `expr` on a new Julia task, like `Threads.@spawn`, while keeping the work queued on
-`backend` correctly ordered between the two tasks. Returns the `Task`.
+Run `expr` on a new Julia task, like `Threads.@spawn`, and return the `Task`. Use it in
+place of `Threads.@spawn` to launch kernels from a task. It guarantees that
 
-Backends may keep a separate queue (stream) per Julia task, so a kernel launched from one
-task is not automatically ordered with respect to a kernel launched from another. `@spawn`
-encodes the protocol that makes this safe:
+- the task runs on the device that was active in the spawning task;
+- the work the task queues on `backend` runs after the work the spawning task had queued on
+  `backend` before calling `@spawn`;
+- once `wait(task)` or `fetch(task)` returns, all work the task queued on `backend` has
+  completed, so its results may be used from any task. `fetch(task)` returns the value of
+  `expr`.
 
-1. Before the task starts, the work the spawning task has queued on `backend` is captured
-   with [`record_event`](@ref KernelAbstractions.record_event). By default this is a full
-   [`synchronize`](@ref); backends may instead record an event without blocking.
-2. The new task selects the same device as the spawning task, then orders its own queue
-   after the captured work with [`wait_event`](@ref KernelAbstractions.wait_event).
-3. After `expr` returns, the task calls [`synchronize`](@ref) on `backend`, so that once
-   `wait(task)` returns, all work the task queued has completed and its results may be used
-   from any task. `fetch(task)` returns the value of `expr`.
-
-The optional `threadpool` argument (`:default` or `:interactive`) is forwarded to
-`Threads.@spawn`.
+Everything else works as for `Threads.@spawn`: the optional `threadpool` argument
+(`:default` or `:interactive`) is forwarded, `\$x` captures the value of `x` at spawn time,
+and an enclosing `@sync` waits for the task.
 
 # Example
 
@@ -37,11 +32,9 @@ fetch(task) == 4 * length(A)
     `expr` should not rely on data that the spawning task queues *after* `@spawn` returns.
     Order later work by waiting on the task, or by spawning again.
 
-!!! note
-    Steps 1 and 3 call [`synchronize`](@ref) on backends that have not opted into events.
-    Backends should implement `synchronize` cooperatively, yielding to the Julia scheduler
-    instead of blocking inside a driver call, so that spawned tasks can make progress
-    concurrently. See [Notes for backend implementations](@ref implementations_notes).
+Backend authors: see the [notes for backend implementations](@ref implementations_notes)
+for the protocol behind these guarantees, and for how to support it without a full
+[`synchronize`](@ref).
 """
 macro spawn(args...)
     if length(args) == 2
