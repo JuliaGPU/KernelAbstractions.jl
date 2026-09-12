@@ -32,12 +32,52 @@ end
 """
     synchronize(::Backend)
 
-Synchronize the current backend.
+Synchronize the current backend: block the calling task until all work it has queued on
+`backend` has completed.
 
 !!! note
-    Backend implementations **must** implement this function.
+    Backend implementations **must** implement this function, and it **must** be
+    cooperative: it may not block inside a driver call, but has to yield to the Julia
+    scheduler while waiting. See the
+    [notes for backend implementations](@ref implementations_notes) for why.
 """
 function synchronize end
+
+"""
+    record_event(backend::Backend)
+
+Capture the work the calling task has queued on `backend` so far, and return a handle
+that another task can hand to [`wait_event`](@ref) to order its own work after it.
+
+The handle is only meaningful for the pair `record_event`/`wait_event`; do not use it for
+anything else.
+
+!!! note
+    The default implementation calls [`synchronize`](@ref) and returns `nothing`.
+    Backends whose queue is task-local **may** override this to return an event recorded
+    on the current task's queue instead, without blocking the host. Such a backend
+    **must** then also implement [`wait_event`](@ref) for the returned type. See the
+    [notes for backend implementations](@ref implementations_notes).
+"""
+function record_event(backend::Backend)
+    synchronize(backend)
+    return nothing
+end
+
+"""
+    wait_event(backend::Backend, event)
+
+Order all work the calling task subsequently queues on `backend` after the work captured by
+`event`, which was returned by [`record_event`](@ref) on another task.
+
+!!! note
+    `wait_event(::Backend, ::Nothing)` is a no-op, matching the default `record_event`.
+    A backend that implements [`record_event`](@ref) **must** implement this for the event
+    type it returns, either by enqueuing a dependency on the current task's queue, or by
+    waiting cooperatively as [`synchronize`](@ref) does. See the
+    [notes for backend implementations](@ref implementations_notes).
+"""
+wait_event(::Backend, ::Nothing) = nothing
 
 """
     priority!(::Backend, prio::Symbol)::Nothing
