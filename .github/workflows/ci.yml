@@ -165,7 +165,17 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          Invoke-WebRequest https://frippery.org/files/busybox/busybox64.exe -OutFile C:\Windows\drop.exe
+          $attempts = 5
+          for ($i = 1; $i -le $attempts; $i++) {
+            try {
+              Invoke-WebRequest https://frippery.org/files/busybox/busybox64.exe -OutFile C:\Windows\drop.exe
+              break
+            } catch {
+              if ($i -eq $attempts) { throw }
+              Write-Host "Download failed (attempt $i/$attempts): $($_.Exception.Message). Retrying in 10s..."
+              Start-Sleep -Seconds 10
+            }
+          }
       - name: Test KernelAbstractions.jl (de-escalated)
         if: runner.os == 'Windows'
         continue-on-error: ${{ matrix.version == 'nightly' }}
