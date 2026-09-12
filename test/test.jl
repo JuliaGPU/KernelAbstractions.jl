@@ -444,5 +444,30 @@ function unittest_testsuite(Backend, backend_str, backend_mod, BackendArrayT; sk
         @test adapt(Array, output) == reference
     end
 
+    # from https://github.com/JuliaGPU/KernelAbstractions.jl/issues/760
+    @kernel function ifelse_pick!(out, x, y, flag)
+        i = @index(Global, Linear)
+        @inbounds out[i] = ifelse(flag[i], x[i], y[i])
+    end
+
+    @testset "ifelse on aggregate types" begin
+        backend = Backend()
+        eltypes = [ComplexF32]
+        KernelAbstractions.supports_float64(backend) && push!(eltypes, ComplexF64)
+        @testset "$T" for T in eltypes
+            n = 8
+            x = rand(T, n)
+            y = rand(T, n)
+            flag = rand(Bool, n)
+            dx = adapt(backend, x)
+            dy = adapt(backend, y)
+            dflag = adapt(backend, flag)
+            out = KernelAbstractions.zeros(backend, T, n)
+            ifelse_pick!(backend, 4)(out, dx, dy, dflag; ndrange = n)
+            synchronize(backend)
+            @test Array(out) == ifelse.(flag, x, y)
+        end
+    end
+
     return
 end
