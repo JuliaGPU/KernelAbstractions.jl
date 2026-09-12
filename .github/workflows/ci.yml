@@ -145,12 +145,17 @@ jobs:
       # Nightly tracks the next Julia release; don't fail CI on it
       - uses: julia-actions/julia-buildpkg@v1
         continue-on-error: ${{ matrix.version == 'nightly' }}
+      # Known limitation: `[sources]` is only supported from Julia 1.11 on, so on 1.10
+      # the `KernelInterface = {path = "lib/KernelInterface"}` entry in Project.toml is
+      # silently ignored and Pkg resolves KernelInterface from the registry instead --
+      # a stale release that need not have the features this repo's copy adds. Dev it
+      # explicitly so 1.10 tests the copy in this repo, like 1.11+ already do.
+      #
+      # Required on every platform. Windows runs its tests de-escalated below, but that
+      # applies to the test run only, not to `Pkg.develop`.
       - name: Dev KernelInterface
-        if: runner.os != 'Windows'
-        run: |
-            julia -e 'using Pkg
-                      Pkg.activate(".")
-                      Pkg.develop(; path="lib/KernelInterface")'
+        shell: bash
+        run: julia -e 'using Pkg; Pkg.activate("."); Pkg.develop(; path="lib/KernelInterface")'
       - uses: julia-actions/julia-runtest@v1
         if: runner.os != 'Windows'
         continue-on-error: ${{ matrix.version == 'nightly' }}
@@ -215,6 +220,8 @@ jobs:
       - uses: julia-actions/cache@v3
       - uses: julia-actions/julia-buildpkg@v1
         continue-on-error: ${{ matrix.version == 'nightly' }}
+      # KernelInterface is dev'ed explicitly here for the same reason as in the CI job
+      # above: Julia 1.10 does not support `[sources]`.
       - name: "Instantiating project"
         run: |
           julia -e 'println("--- :julia: Instantiating project")
