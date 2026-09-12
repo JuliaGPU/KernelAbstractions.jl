@@ -9,7 +9,8 @@ place of `Threads.@spawn` to launch kernels from a task. It guarantees that
   `backend` before calling `@spawn`;
 - once `wait(task)` or `fetch(task)` returns, all work the task queued on `backend` has
   completed, so its results may be used from any task. `fetch(task)` returns the value of
-  `expr`.
+  `expr`. If `expr` throws, the task is not synchronized: its queued work may still be
+  running when the exception surfaces.
 
 Everything else works as for `Threads.@spawn`: the optional `threadpool` argument
 (`:default` or `:interactive`) is forwarded, `\$x` captures the value of `x` at spawn time,
