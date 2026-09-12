@@ -16,10 +16,9 @@ thread instead of letting independent tasks run concurrently.
 
 ## Task-local queues and `KernelAbstractions.@spawn`
 
-Backends are free to give each Julia task its own queue (stream), so that kernels
-launched from different tasks can execute concurrently. The price is that work queued
-from two tasks is not ordered with respect to each other, and that a task waiting on
-another task with `wait` learns nothing about the state of that task's queue.
+Backends should give each Julia task its own queue/stream, so that kernels
+launched from different tasks can execute concurrently. This implies that work queued
+from two tasks is not ordered with respect to each other.
 
 [`KernelAbstractions.@spawn`](@ref) hides this from users by following a fixed protocol,
 which backends can support with two optional functions:
@@ -37,8 +36,10 @@ which backends can support with two optional functions:
   `wait(task)` in any other task implies that all work queued by the spawned task has
   completed.
 
-A backend with a single, global queue needs no changes: the defaults are exactly the
-"synchronize before, synchronize after" discipline users would otherwise write by hand.
+A new Julia task does not necessarily inherit the device of the task that spawned it.
+Backends with more than one device therefore **must** implement the device interface
+([`device`](@ref KernelAbstractions.device), [`ndevices`](@ref KernelAbstractions.ndevices),
+[`device!`](@ref KernelAbstractions.device!)) for `@spawn` to run on the right device.
 
 
 ## Moving data with `adapt`
