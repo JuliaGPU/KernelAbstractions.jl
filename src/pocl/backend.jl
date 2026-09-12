@@ -285,28 +285,28 @@ end
 
 ## Indexing Functions
 
-@device_override @inline function KI.get_local_id()
-    return (; x = Int(get_local_id(1)), y = Int(get_local_id(2)), z = Int(get_local_id(3)))
+@device_override @inline function KI.get_local_id(::Type{T}) where {T}
+    return (; x = T(get_local_id(1)), y = T(get_local_id(2)), z = T(get_local_id(3)))
 end
 
-@device_override @inline function KI.get_group_id()
-    return (; x = Int(get_group_id(1)), y = Int(get_group_id(2)), z = Int(get_group_id(3)))
+@device_override @inline function KI.get_group_id(::Type{T}) where {T}
+    return (; x = T(get_group_id(1)), y = T(get_group_id(2)), z = T(get_group_id(3)))
 end
 
-@device_override @inline function KI.get_global_id()
-    return (; x = Int(get_global_id(1)), y = Int(get_global_id(2)), z = Int(get_global_id(3)))
+@device_override @inline function KI.get_global_id(::Type{T}) where {T}
+    return (; x = T(get_global_id(1)), y = T(get_global_id(2)), z = T(get_global_id(3)))
 end
 
-@device_override @inline function KI.get_local_size()
-    return (; x = Int(get_local_size(1)), y = Int(get_local_size(2)), z = Int(get_local_size(3)))
+@device_override @inline function KI.get_local_size(::Type{T}) where {T}
+    return (; x = T(get_local_size(1)), y = T(get_local_size(2)), z = T(get_local_size(3)))
 end
 
-@device_override @inline function KI.get_num_groups()
-    return (; x = Int(get_num_groups(1)), y = Int(get_num_groups(2)), z = Int(get_num_groups(3)))
+@device_override @inline function KI.get_num_groups(::Type{T}) where {T}
+    return (; x = T(get_num_groups(1)), y = T(get_num_groups(2)), z = T(get_num_groups(3)))
 end
 
-@device_override @inline function KI.get_global_size()
-    return (; x = Int(get_global_size(1)), y = Int(get_global_size(2)), z = Int(get_global_size(3)))
+@device_override @inline function KI.get_global_size(::Type{T}) where {T}
+    return (; x = T(get_global_size(1)), y = T(get_global_size(2)), z = T(get_global_size(3)))
 end
 
 @device_override KI.get_sub_group_size() = get_sub_group_size() % UInt32

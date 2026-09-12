@@ -63,7 +63,7 @@ get_backend
 These are called from inside a kernel. A backend provides each one with
 
 ```julia
-@device_override KI.get_global_id() = ...
+@device_override KI.get_global_id(::Type{T}) where {T} = ...
 ```
 
 along with the corresponding on-device functionality.
@@ -71,7 +71,9 @@ along with the corresponding on-device functionality.
 ### Indexing
 
 All index queries are **1-based** and return a named tuple of `x`, `y` and `z`
-components.
+components. They take an optional element type `T` for the components, defaulting
+to `Int`, so a kernel can request e.g. `Int32` indices with
+`KI.get_global_id(Int32)`.
 
 ```@docs
 get_global_size

@@ -1,20 +1,22 @@
 """
-    get_global_size()::@NamedTuple{x::Int, y::Int, z::Int}
+    get_global_size([::Type{T}=Int])::@NamedTuple{x::T, y::T, z::T}
 
-Return the number of global work-items specified.
+Return the number of global work-items specified as a tuple of type `T`.
+`T` defaults to `Int`.
 
 !!! note
     Backend implementations **must** implement:
     ```
-    @device_override get_global_size()::@NamedTuple{x::Int, y::Int, z::Int}
+    @device_override get_global_size(::Type{T})::@NamedTuple{x::T, y::T, z::T} where {T}
     ```
+    The zero-argument form forwards to `get_global_size(Int)`.
 """
-function get_global_size end
+get_global_size() = get_global_size(Int)
 
 """
-    get_global_id()::@NamedTuple{x::Int, y::Int, z::Int}
+    get_global_id([::Type{T}=Int])::@NamedTuple{x::T, y::T, z::T}
 
-Returns the unique global work-item ID.
+Returns the unique global work-item ID as a tuple of type `T`. `T` defaults to `Int`.
 
 !!! note
     1-based.
@@ -22,28 +24,31 @@ Returns the unique global work-item ID.
 !!! note
     Backend implementations **must** implement:
     ```
-    @device_override get_global_id()::@NamedTuple{x::Int, y::Int, z::Int}
+    @device_override get_global_id(::Type{T})::@NamedTuple{x::T, y::T, z::T} where {T}
     ```
+    The zero-argument form forwards to `get_global_id(Int)`.
 """
-function get_global_id end
+get_global_id() = get_global_id(Int)
 
 """
-    get_local_size()::@NamedTuple{x::Int, y::Int, z::Int}
+    get_local_size([::Type{T}=Int])::@NamedTuple{x::T, y::T, z::T}
 
-Return the number of local work-items specified.
+Return the number of local work-items specified as a tuple of type `T`.
+`T` defaults to `Int`.
 
 !!! note
     Backend implementations **must** implement:
     ```
-    @device_override get_local_size()::@NamedTuple{x::Int, y::Int, z::Int}
+    @device_override get_local_size(::Type{T})::@NamedTuple{x::T, y::T, z::T} where {T}
     ```
+    The zero-argument form forwards to `get_local_size(Int)`.
 """
-function get_local_size end
+get_local_size() = get_local_size(Int)
 
 """
-    get_local_id()::@NamedTuple{x::Int, y::Int, z::Int}
+    get_local_id([::Type{T}=Int])::@NamedTuple{x::T, y::T, z::T}
 
-Returns the unique local work-item ID.
+Returns the unique local work-item ID as a tuple of type `T`. `T` defaults to `Int`.
 
 !!! note
     1-based.
@@ -51,28 +56,30 @@ Returns the unique local work-item ID.
 !!! note
     Backend implementations **must** implement:
     ```
-    @device_override get_local_id()::@NamedTuple{x::Int, y::Int, z::Int}
+    @device_override get_local_id(::Type{T})::@NamedTuple{x::T, y::T, z::T} where {T}
     ```
+    The zero-argument form forwards to `get_local_id(Int)`.
 """
-function get_local_id end
+get_local_id() = get_local_id(Int)
 
 """
-    get_num_groups()::@NamedTuple{x::Int, y::Int, z::Int}
+    get_num_groups([::Type{T}=Int])::@NamedTuple{x::T, y::T, z::T}
 
-Returns the number of groups.
+Returns the number of groups as a tuple of type `T`. `T` defaults to `Int`.
 
 !!! note
     Backend implementations **must** implement:
     ```
-    @device_override get_num_groups()::@NamedTuple{x::Int, y::Int, z::Int}
+    @device_override get_num_groups(::Type{T})::@NamedTuple{x::T, y::T, z::T} where {T}
     ```
+    The zero-argument form forwards to `get_num_groups(Int)`.
 """
-function get_num_groups end
+get_num_groups() = get_num_groups(Int)
 
 """
-    get_group_id()::@NamedTuple{x::Int, y::Int, z::Int}
+    get_group_id([::Type{T}=Int])::@NamedTuple{x::T, y::T, z::T}
 
-Returns the unique group ID.
+Returns the unique group ID as a tuple of type `T`. `T` defaults to `Int`.
 
 !!! note
     1-based.
@@ -80,10 +87,11 @@ Returns the unique group ID.
 !!! note
     Backend implementations **must** implement:
     ```
-    @device_override get_group_id()::@NamedTuple{x::Int, y::Int, z::Int}
+    @device_override get_group_id(::Type{T})::@NamedTuple{x::T, y::T, z::T} where {T}
     ```
+    The zero-argument form forwards to `get_group_id(Int)`.
 """
-function get_group_id end
+get_group_id() = get_group_id(Int)
 
 """
     get_sub_group_size()::UInt32
