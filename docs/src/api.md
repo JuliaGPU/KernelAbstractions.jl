@@ -91,4 +91,10 @@ KernelAbstractions.@context
 KernelAbstractions.argconvert
 KernelAbstractions.NDIteration.DynamicSize
 KernelAbstractions.NDIteration.StaticSize
+KernelAbstractions.NDIteration.NDRange
+KernelAbstractions.NDIteration.StaticOffset
+KernelAbstractions.NDIteration.DynamicOffset
+KernelAbstractions.NDIteration.extents
+KernelAbstractions.NDIteration.offsets
+KernelAbstractions.NDIteration.linear_index
 ```
