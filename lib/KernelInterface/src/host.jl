@@ -50,17 +50,14 @@ Capture the work the calling task has queued on `backend` so far, and return a h
 that another task can hand to [`wait_event`](@ref) to order its own work after it.
 
 The handle is only meaningful for the pair `record_event`/`wait_event`; do not use it for
-anything else. This is the primitive [`KernelAbstractions.@spawn`](@ref) is built on: the
-spawning task records, the spawned task waits.
+anything else.
 
 !!! note
-    The default implementation calls [`synchronize`](@ref) and returns `nothing`, which is
-    correct for every backend since all queued work is complete when it returns.
-
-    Backends whose queue is task-local (for example one stream per Julia task) **may**
-    override this to return an event recorded on the current task's queue instead, without
-    blocking the host. Such a backend **must** then also implement
-    `wait_event(::NewBackend, event)` for the returned type.
+    The default implementation calls [`synchronize`](@ref) and returns `nothing`.
+    Backends whose queue is task-local **may** override this to return an event recorded
+    on the current task's queue instead, without blocking the host. Such a backend
+    **must** then also implement [`wait_event`](@ref) for the returned type. See the
+    [notes for backend implementations](@ref implementations_notes).
 """
 function record_event(backend::Backend)
     synchronize(backend)
@@ -75,10 +72,10 @@ Order all work the calling task subsequently queues on `backend` after the work 
 
 !!! note
     `wait_event(::Backend, ::Nothing)` is a no-op, matching the default `record_event`.
-    A backend that overrides `record_event` **must** implement this for the event type it
-    returns. The implementation may either enqueue a dependency on the current task's queue
-    or block the host until the event completes; a blocking implementation should be
-    cooperative, as described for [`synchronize`](@ref).
+    A backend that implements [`record_event`](@ref) **must** implement this for the event
+    type it returns, either by enqueuing a dependency on the current task's queue, or by
+    waiting cooperatively as [`synchronize`](@ref) does. See the
+    [notes for backend implementations](@ref implementations_notes).
 """
 wait_event(::Backend, ::Nothing) = nothing
 
