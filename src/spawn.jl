@@ -53,26 +53,30 @@ macro spawn(args...)
         throw(ArgumentError("@spawn expects `@spawn [threadpool] backend expr`"))
     end
 
+    # The whole expansion is escaped so that `Threads.@spawn` is expanded in the caller's
+    # scope: that is what lets an enclosing `@sync` see the task, and what makes `$x`
+    # interpolation in `expr` work. Our own temporaries are gensyms so they cannot clash
+    # with the user's variables.
+    b, dev, event, result = gensym(:backend), gensym(:dev), gensym(:event), gensym(:result)
     body = quote
-        KI.device!(backend, dev)
-        KI.wait_event(backend, event)
-        local result = $(esc(expr))
-        KI.synchronize(backend)
-        result
+        $KI.device!($b, $dev)
+        $KI.wait_event($b, $event)
+        local $result = $expr
+        $KI.synchronize($b)
+        $result
     end
     task = if threadpool === nothing
         :(Threads.@spawn $body)
     else
-        # `Threads.@spawn` inspects a literal `:default`/`:interactive`, so it must not be
-        # escaped; anything else is an expression evaluated in the caller's scope.
-        threadpool isa QuoteNode || (threadpool = esc(threadpool))
         :(Threads.@spawn $threadpool $body)
     end
 
-    return quote
-        local backend = $(esc(backend))
-        local dev = KI.device(backend)
-        local event = KI.record_event(backend)
-        $task
-    end
+    return esc(
+        quote
+            local $b = $backend
+            local $dev = $KI.device($b)
+            local $event = $KI.record_event($b)
+            $task
+        end
+    )
 end

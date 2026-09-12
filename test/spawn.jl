@@ -58,6 +58,30 @@ function spawn_testsuite(Backend, AT)
         # Errors propagate through `wait`/`fetch` like they do for `Threads.@spawn`.
         task = KernelAbstractions.@spawn backend error("boom")
         @test_throws TaskFailedException wait(task)
+
+        # `$x` captures the value at spawn time, like it does for `Threads.@spawn`.
+        x = Ref(1)
+        task = KernelAbstractions.@spawn backend $(x[]) + 1
+        x[] = 10
+        @test fetch(task) == 2
+    end
+
+    @testset "@sync" begin
+        # An enclosing `@sync` waits for the task, and sees its errors.
+        A = KernelAbstractions.zeros(backend, Float32, 256)
+        fill = spawn_fill_kernel(backend, 32)
+        done = Ref(false)
+        @sync begin
+            KernelAbstractions.@spawn backend begin
+                fill(A, 5.0f0, ndrange = length(A))
+                done[] = true
+            end
+        end
+        @test done[]
+        @test all(==(5.0f0), Array(A))
+        @test_throws CompositeException @sync begin
+            KernelAbstractions.@spawn backend error("boom")
+        end
     end
 
     @testset "many tasks" begin
