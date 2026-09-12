@@ -36,16 +36,10 @@ Synchronize the current backend: block the calling task until all work it has qu
 `backend` has completed.
 
 !!! note
-    Backend implementations **must** implement this function.
-
-!!! note "Cooperative synchronization"
-    Backend implementations **should** make `synchronize` cooperative rather than blocking.
-    That is, instead of blocking inside a driver call, it should poll or wait on a
-    completion signal while calling `yield` so that other Julia tasks can run in the
-    meantime. A blocking implementation stalls every task scheduled on the same thread,
-    which defeats overlapping kernels with host work or communication, and makes
-    [`KernelAbstractions.@spawn`](@ref)'s trailing `synchronize` serialize otherwise
-    independent tasks.
+    Backend implementations **must** implement this function, and it **must** be
+    cooperative: it may not block inside a driver call, but has to yield to the Julia
+    scheduler while waiting. See the
+    [notes for backend implementations](@ref implementations_notes) for why.
 """
 function synchronize end
 
