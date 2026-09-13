@@ -6,6 +6,7 @@ export @index, @groupsize, @ndrange
 export @print
 export Backend, CPU
 export synchronize, get_backend, allocate
+export foreach_index
 
 import PrecompileTools
 
@@ -614,6 +615,7 @@ end
 
 include("macros.jl")
 include("spawn.jl")
+include("foreach_index.jl")
 
 ###
 # Backends/Interface

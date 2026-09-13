@@ -72,6 +72,12 @@ KernelAbstractions.ndrange
 KernelAbstractions.backend
 ```
 
+### Index loops
+
+```@docs
+foreach_index
+```
+
 ## Reflection
 
 To look at the code a backend actually generates, wrap a kernel launch in one of the
