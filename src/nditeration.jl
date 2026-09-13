@@ -3,7 +3,7 @@ module NDIteration
 export _Size, StaticSize, DynamicSize, get
 export NDRange, blocks, workitems, expand
 export StaticOffset, DynamicOffset, offsets, extents, linear_index
-export IndexMap, MappedNDRange
+export IndexMap, MappedNDRange, MappedIndices, invalid_index
 export DynamicCheck, NoDynamicCheck
 
 import Base.@pure
@@ -65,6 +65,36 @@ mapindex(::Val{N}, I::CartesianIndex{N}) where {N} = I
 mapindex(::Val{N}, I::Tuple) where {N} = CartesianIndex{N}(I)
 
 Adapt.adapt_structure(to, m::IndexMap{N}) where {N} = IndexMap{N}(Adapt.adapt(to, m.map))
+
+"""
+    invalid_index(Val(N))
+
+`CartesianIndex{N}` returned by [`expand`](@ref) for a work item past the end of an
+[`IndexMap`](@ref): `typemin(Int)` along every axis.
+"""
+@inline invalid_index(::Val{N}) where {N} = CartesianIndex(ntuple(_ -> typemin(Int), Val(N)))
+
+# Entry `p` of the map, or `invalid_index` for a position past its end.
+@inline function mapped_index(m::IndexMap{N}, p::Integer) where {N}
+    return p <= length(m) ? (@inbounds m[p]) : invalid_index(Val(N))
+end
+
+"""
+    MappedIndices{N}
+
+The `ndrange` of a launch over an [`IndexMap`](@ref) with `CartesianIndex{N}` entries.
+`size` and `length` give the number of listed indices, and a `CartesianIndex{N}` is `in`
+it unless it is the [`invalid_index`](@ref), so that backends can check the validity of a
+work item as `expand(iterspace, groupidx, idx) in ndrange` for every kind of `ndrange`.
+"""
+struct MappedIndices{N}
+    length::Int
+end
+MappedIndices(m::IndexMap{N}) where {N} = MappedIndices{N}(length(m))
+MappedIndices(v::AbstractVector) = MappedIndices{mapdims(eltype(v))}(length(v))
+Base.length(r::MappedIndices) = r.length
+Base.size(r::MappedIndices) = (r.length,)
+@inline Base.in(I::CartesianIndex{N}, r::MappedIndices{N}) where {N} = I != invalid_index(Val(N))
 
 """
     normalize_ndrange(ndrange)
@@ -217,7 +247,9 @@ dynamic_mapping(t::Tuple) = DynamicOffset(offsets(t))
 """
     MappedNDRange
 
-A 1-D blocked iteration space whose `mapping` is an [`IndexMap`](@ref).
+A 1-D blocked iteration space whose `mapping` is an [`IndexMap`](@ref). [`expand`](@ref)
+looks up the index listed for a work item, and the `ndrange` of such a launch is a
+[`MappedIndices`](@ref).
 """
 const MappedNDRange = NDRange{1, <:Any, <:Any, <:Any, <:Any, <:IndexMap}
 
@@ -303,10 +335,11 @@ Position in the index map of work item `idx` of workgroup `groupidx`.
 @inline linear_index(ndrange::MappedNDRange, groupidx::CartesianIndex{1}, idx::Integer) = linear_index(ndrange, groupidx.I[1], idx)
 @inline linear_index(ndrange::MappedNDRange, groupidx::Integer, idx::CartesianIndex{1}) = linear_index(ndrange, groupidx, idx.I[1])
 
-Base.@propagate_inbounds expand(ndrange::MappedNDRange, groupidx::Integer, idx::Integer) = ndrange.mapping[linear_index(ndrange, groupidx, idx)]
-Base.@propagate_inbounds expand(ndrange::MappedNDRange, groupidx::CartesianIndex{1}, idx::CartesianIndex{1}) = ndrange.mapping[linear_index(ndrange, groupidx, idx)]
-Base.@propagate_inbounds expand(ndrange::MappedNDRange, groupidx::CartesianIndex{1}, idx::Integer) = ndrange.mapping[linear_index(ndrange, groupidx, idx)]
-Base.@propagate_inbounds expand(ndrange::MappedNDRange, groupidx::Integer, idx::CartesianIndex{1}) = ndrange.mapping[linear_index(ndrange, groupidx, idx)]
+# The listed index of a work item, or `invalid_index` for a work item past the end of the map.
+@inline expand(ndrange::MappedNDRange, groupidx::Integer, idx::Integer) = mapped_index(ndrange.mapping, linear_index(ndrange, groupidx, idx))
+@inline expand(ndrange::MappedNDRange, groupidx::CartesianIndex{1}, idx::CartesianIndex{1}) = mapped_index(ndrange.mapping, linear_index(ndrange, groupidx, idx))
+@inline expand(ndrange::MappedNDRange, groupidx::CartesianIndex{1}, idx::Integer) = mapped_index(ndrange.mapping, linear_index(ndrange, groupidx, idx))
+@inline expand(ndrange::MappedNDRange, groupidx::Integer, idx::CartesianIndex{1}) = mapped_index(ndrange.mapping, linear_index(ndrange, groupidx, idx))
 
 """
     partition(ndrange, workgroupsize)

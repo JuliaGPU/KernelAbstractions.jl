@@ -65,6 +65,11 @@ function nditeration_testsuite()
             @test expand(ndrange, 2, 3) == indices[7]
             @test expand(ndrange, CartesianIndex(2), CartesianIndex(3)) == indices[7]
             @test expand(ndrange, 4, 3) == indices[15]
+            @test expand(ndrange, 4, 4) == invalid_index(Val(2))
+            @test expand(ndrange, 4, 3) in MappedIndices(m)
+            @test !(expand(ndrange, 4, 4) in MappedIndices(m))
+            @test size(MappedIndices(m)) == (15,)
+            @test length(MappedIndices(indices)) == 15
         end
         let ndrange = NDRange{1, DynamicSize, DynamicSize}(CartesianIndices((4,)), CartesianIndices((4,)), m)
             @test expand(ndrange, 2, 3) == indices[7]

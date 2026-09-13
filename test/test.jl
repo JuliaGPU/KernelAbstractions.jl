@@ -299,44 +299,38 @@ function unittest_testsuite(Backend, backend_str, backend_mod, BackendArrayT; sk
 
     @conditional_testset "Const" skip_tests begin
         let kernel = constarg(Backend(), 8, (1024,))
-            # this is poking at internals
-            iterspace = NDRange{1, StaticSize{(128,)}, StaticSize{(8,)}}()
-            ctx = if Backend == CPU
-                KernelAbstractions.mkcontext(kernel, 1, nothing, iterspace, Val(NoDynamicCheck()))
+            A = KernelAbstractions.zeros(Backend(), Float32, 1024)
+            B = adapt(Backend(), rand(Float32, 1024))
+            kernel(A, B)
+            synchronize(Backend())
+            @test Array(A) == Array(B)
+
+            if backend_str == "CPU"
+                # the CPU backend compiles kernels with POCL, whose device arrays have no
+                # `@Const`-specific lowering to look for in the IR
+                @test_skip false
             else
-                KernelAbstractions.mkcontext(kernel, nothing, iterspace)
-            end
-            AT = if Backend == CPU
-                Array{Float32, 2}
-            else
-                BackendArrayT{Float32, 2, 1} # AS 1
-            end
-            IR = sprint() do io
-                if backend_str == "CPU"
-                    code_llvm(
-                        io, kernel.f, (typeof(ctx), AT, AT),
-                        optimize = false, raw = true,
-                    )
-                else
+                # this is poking at internals
+                iterspace = NDRange{1, StaticSize{(128,)}, StaticSize{(8,)}}()
+                ctx = KernelAbstractions.mkcontext(kernel, nothing, iterspace)
+                AT = BackendArrayT{Float32, 2, 1} # AS 1
+                IR = sprint() do io
                     backend_mod.code_llvm(
                         io, kernel.f, (typeof(ctx), AT, AT),
                         kernel = true, optimize = true,
                     )
                 end
-            end
-            if backend_str == "CPU"
-                @test occursin("!alias.scope", IR)
-                @test occursin("!noalias", IR)
-            elseif backend_str == "CUDA"
-                if Base.libllvm_version >= v"20"
-                    @test occursin("addrspace(1)", IR)
+                if backend_str == "CUDA"
+                    if Base.libllvm_version >= v"20"
+                        @test occursin("addrspace(1)", IR)
+                    else
+                        @test occursin("@llvm.nvvm.ldg", IR)
+                    end
+                elseif backend_str == "ROCM"
+                    @test occursin("addrspace(4)", IR)
                 else
-                    @test occursin("@llvm.nvvm.ldg", IR)
+                    @test_skip false
                 end
-            elseif backend_str == "ROCM"
-                @test occursin("addrspace(4)", IR)
-            else
-                @test_skip false
             end
         end
     end

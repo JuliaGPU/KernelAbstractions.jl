@@ -269,7 +269,7 @@ Inside the kernel `@index(Global, Cartesian)` and `@index(Global, NTuple)` retur
 index, `@index(Global, Linear)` its position in the vector, and `@ndrange()` the length of
 the vector. The kernel must be constructed with a dynamic `ndrange`, and the workgroup size
 must be static or given with `workgroupsize`. With `@kernel unsafe_indices=true` the work
-items of a partial last workgroup have no valid index.
+items of a partial last workgroup get an index of `typemin(Int)` along every axis.
 
 Obtain the backend from an array with [`get_backend`](@ref) and always call [`synchronize`](@ref) before reading results on the host.
 See the [Quickstart](@ref) for a full walkthrough and the Examples section of the manual for larger patterns.

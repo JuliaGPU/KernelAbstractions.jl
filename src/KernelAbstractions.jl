@@ -671,6 +671,8 @@ end
     return __validindex(ctx, KI.get_group_id().x, KI.get_local_id().x)
 end
 
+# Backends may override `__validindex(ctx)` with this same check, so `expand` yields an
+# index `in` `__ndrange(ctx)` exactly for the valid work items of every kind of `ndrange`.
 @inline function __inrange(iterspace::NDRange, ndrange, groupidx, idx)
     I = @inbounds expand(iterspace, groupidx, idx)
     return I in ndrange

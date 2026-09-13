@@ -16,14 +16,15 @@ struct CompilerMetadata{StaticNDRange, CheckBounds, I, NDRange, Iterspace}
     end
 end
 
-# `CartesianIndices` covering a launch `ndrange` (any form accepted by `partition`).
+# `CartesianIndices` or `MappedIndices` covering a launch `ndrange` (any form accepted by `partition`).
 cartesian(::Nothing) = nothing
 cartesian(ci::CartesianIndices) = ci
+cartesian(r::MappedIndices) = r
 cartesian(n::Integer) = CartesianIndices((Int(n),))
 cartesian(r::AbstractUnitRange) = CartesianIndices((r,))
 cartesian(t::Tuple) = CartesianIndices(t)
-cartesian(v::AbstractVector) = CartesianIndices((length(v),))
-cartesian(m::IndexMap) = CartesianIndices((length(m),))
+cartesian(v::AbstractVector) = MappedIndices(v)
+cartesian(m::IndexMap) = MappedIndices(m)
 
 Adapt.adapt_structure(to, cm::CompilerMetadata{NDRange, CB}) where {NDRange, CB} =
     CompilerMetadata{NDRange, CB}(cm.groupindex, cm.ndrange, Adapt.adapt(to, cm.iterspace))
