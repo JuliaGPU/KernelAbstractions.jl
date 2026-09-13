@@ -161,23 +161,42 @@ end
 Waiting on a backend, whether with [`synchronize`](@ref) or at the end of a spawned task,
 yields to the Julia scheduler, so other tasks keep making progress while a kernel runs.
 
-`@spawn` selects the spawning task's device before the task runs any user code. If the task
-then switches to another device with [`device!`](@ref KernelAbstractions.device!), that
-switch carries no ordering of its own: work queued on the new device is not ordered with
-respect to what `@spawn` had already waited for, or with respect to anything the task queued
-before the switch. Order it explicitly with
-[`record_event`](@ref KernelAbstractions.record_event) and
+### Which device a task runs on
+
+Backends keep the active device in task-local state, and Julia does not copy that state into
+a child task. A task started with plain `Threads.@spawn` therefore runs on the backend's
+*default* device, whichever device the spawning task was using — a silent surprise if the
+arrays it captured live elsewhere. `KernelAbstractions.@spawn` selects the device explicitly:
+by default the one active in the spawning task, or the one named by `device`, a 1-based index
+into `1:ndevices(backend)`:
+
+```julia
+function compute_on_both!(backend, A, B)
+    here = KernelAbstractions.@spawn backend begin
+        mul2_kernel(backend, 64)(A, ndrange=length(A))
+    end
+    there = KernelAbstractions.@spawn backend device=2 begin
+        mul2_kernel(backend, 64)(B, ndrange=length(B))
+    end
+    wait(here)
+    wait(there)
+end
+```
+
+The ordering guarantee holds across the switch: the second task's work on device 2 is still
+ordered after what the spawning task had queued on its own device.
+
+Prefer `device=` over calling [`device!`](@ref KernelAbstractions.device!) inside the body.
+`device!` is not a synchronization point — work queued after it is ordered neither against
+the spawning task nor against what the body queued before the switch. If you do switch by
+hand, order it with [`record_event`](@ref KernelAbstractions.record_event) and
 [`wait_event`](@ref KernelAbstractions.wait_event), which apply to the device that is active
 when each is called:
 
 ```julia
-task = KernelAbstractions.@spawn backend begin
-    mul2_kernel(backend, 64)(A, ndrange=length(A))    # device of the spawning task
-    event = KernelAbstractions.record_event(backend)
-    KernelAbstractions.device!(backend, 2)
-    KernelAbstractions.wait_event(backend, event)     # device 2 waits for the kernel above
-    mul2_kernel(backend, 64)(B, ndrange=length(B))
-end
+event = KernelAbstractions.record_event(backend)   # captures work on the current device
+KernelAbstractions.device!(backend, 2)
+KernelAbstractions.wait_event(backend, event)      # device 2 waits for that work
 ```
 
 A plain [`synchronize`](@ref) before the `device!` works too, at the cost of blocking the
