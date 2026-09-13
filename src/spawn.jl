@@ -33,6 +33,13 @@ fetch(task) == 4 * length(A)
     `expr` should not rely on data that the spawning task queues *after* `@spawn` returns.
     Order later work by waiting on the task, or by spawning again.
 
+!!! note
+    The ordering guarantee is per device. If `expr` switches devices with
+    [`device!`](@ref KernelAbstractions.device!), work it queues afterwards is not ordered
+    against the spawning task's work; bracket the switch with
+    [`record_event`](@ref KernelAbstractions.record_event) and
+    [`wait_event`](@ref KernelAbstractions.wait_event) to order it.
+
 Backend authors: see the [notes for backend implementations](@ref implementations_notes)
 for the protocol behind these guarantees, and for how to support it without a full
 [`synchronize`](@ref).
@@ -52,6 +59,8 @@ macro spawn(args...)
     # interpolation in `expr` work. Our own temporaries are gensyms so they cannot clash
     # with the user's variables.
     b, dev, event, result = gensym(:backend), gensym(:dev), gensym(:event), gensym(:result)
+    # `device!` comes first because `wait_event` acts on the queue of the device that is
+    # active when it is called: selecting the device afterwards would leave it unordered.
     body = quote
         $KI.device!($b, $dev)
         $KI.wait_event($b, $event)
