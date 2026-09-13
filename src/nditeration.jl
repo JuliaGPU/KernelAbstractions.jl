@@ -262,6 +262,14 @@ import Base.iterate
 
 Base.length(range::NDRange) = length(blocks(range))
 
+"""
+    expand(ndrange::NDRange, groupidx, idx)
+
+Index of the `ndrange` handled by work item `idx` of workgroup `groupidx`, both given as
+`CartesianIndex` or linear positions in the blocked iteration space. For a
+[`MappedNDRange`](@ref) this is the entry of the index map for that work item, or the
+[`invalid_index`](@ref) for a work item past its end.
+"""
 @inline function expand(ndrange::NDRange{N}, groupidx::CartesianIndex{N}, idx::CartesianIndex{N}) where {N}
     offset = offsets(ndrange)
     nI = ntuple(Val(N)) do I

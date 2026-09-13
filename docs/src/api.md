@@ -96,6 +96,7 @@ KernelAbstractions.NDIteration.StaticOffset
 KernelAbstractions.NDIteration.DynamicOffset
 KernelAbstractions.NDIteration.extents
 KernelAbstractions.NDIteration.offsets
+KernelAbstractions.NDIteration.expand
 KernelAbstractions.NDIteration.linear_index
 KernelAbstractions.NDIteration.IndexMap
 KernelAbstractions.NDIteration.MappedNDRange
