@@ -6,6 +6,7 @@ export @index, @groupsize, @ndrange
 export @print
 export Backend, GPU, CPU
 export synchronize, get_backend, allocate
+export foreach_index
 
 import PrecompileTools
 
@@ -689,6 +690,7 @@ function mkcontext end
 function launch_config end
 
 include("macros.jl")
+include("foreach_index.jl")
 
 ###
 # Backends/Interface

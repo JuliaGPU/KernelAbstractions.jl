@@ -140,6 +140,7 @@ end
   listed index (`kernel(A, ndrange=active_cells)`).
 - Index validity is decided by the generic `__validindex(ctx, groupidx, idx)`, so backends only
   supply the hardware indices.
+- `foreach_index(f, itr)` runs `f` once per index of `itr` without writing a kernel out.
 
 ## Semantic differences
 
