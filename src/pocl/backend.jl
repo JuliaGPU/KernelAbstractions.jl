@@ -319,15 +319,6 @@ end
 
 @device_override KI.get_sub_group_local_id() = get_sub_group_local_id() % UInt32
 
-@device_override @inline function KA.__validindex(ctx)
-    if KA.__dynamic_checkbounds(ctx)
-        I = @inbounds KA.expand(KA.__iterspace(ctx), get_group_id(1), get_local_id(1))
-        return I in KA.__ndrange(ctx)
-    else
-        return true
-    end
-end
-
 
 ## Shared and Scratch Memory
 

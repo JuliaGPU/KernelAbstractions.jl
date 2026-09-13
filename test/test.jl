@@ -89,6 +89,38 @@ function unittest_testsuite(Backend, backend_str, backend_mod, BackendArrayT; sk
             @test length(blocks(iterspace)) == 2
             @test iterspace.mapping === nothing
         end
+        let kernel = KernelAbstractions.Kernel{typeof(backend), StaticSize{(4,)}, DynamicSize, typeof(identity)}(backend, identity)
+            map = [CartesianIndex(i, j) for i in 1:3 for j in 1:5]
+            iterspace, dynamic = KernelAbstractions.partition(kernel, map, nothing)
+            @test iterspace isa MappedNDRange
+            @test length(blocks(iterspace)) == 4
+            @test dynamic isa DynamicCheck
+            @test ndims(iterspace) == 1
+
+            iterspace, dynamic = KernelAbstractions.partition(kernel, map[1:8], (4,))
+            @test length(blocks(iterspace)) == 2
+            @test dynamic isa NoDynamicCheck
+
+            iterspace, dynamic = KernelAbstractions.partition(kernel, CartesianIndex{2}[], nothing)
+            @test length(blocks(iterspace)) == 0
+
+            @test_throws ErrorException KernelAbstractions.partition(kernel, map, (8,))
+            @test_throws ArgumentError KernelAbstractions.partition(kernel, [1, 2, 3], nothing)
+        end
+        let kernel = KernelAbstractions.Kernel{typeof(backend), DynamicSize, DynamicSize, typeof(identity)}(backend, identity)
+            map = [CartesianIndex(i, j) for i in 1:3 for j in 1:5]
+            iterspace, dynamic = KernelAbstractions.partition(kernel, map, (4,))
+            @test length(blocks(iterspace)) == 4
+            @test length(workitems(iterspace)) == 4
+
+            @test_throws ErrorException KernelAbstractions.partition(kernel, map, nothing)
+            @test_throws ErrorException KernelAbstractions.partition(kernel, map, map)
+            @test_throws ErrorException KernelAbstractions.partition(kernel, map, (2, 2))
+        end
+        let kernel = KernelAbstractions.Kernel{typeof(backend), StaticSize{(4,)}, StaticSize{(15,)}, typeof(identity)}(backend, identity)
+            map = [CartesianIndex(i, j) for i in 1:3 for j in 1:5]
+            @test_throws ErrorException KernelAbstractions.partition(kernel, map, nothing)
+        end
     end
 
     @kernel function index_linear_global(A)
@@ -267,44 +299,38 @@ function unittest_testsuite(Backend, backend_str, backend_mod, BackendArrayT; sk
 
     @conditional_testset "Const" skip_tests begin
         let kernel = constarg(Backend(), 8, (1024,))
-            # this is poking at internals
-            iterspace = NDRange{1, StaticSize{(128,)}, StaticSize{(8,)}}()
-            ctx = if Backend == CPU
-                KernelAbstractions.mkcontext(kernel, 1, nothing, iterspace, Val(NoDynamicCheck()))
+            A = KernelAbstractions.zeros(Backend(), Float32, 1024)
+            B = adapt(Backend(), rand(Float32, 1024))
+            kernel(A, B)
+            synchronize(Backend())
+            @test Array(A) == Array(B)
+
+            if backend_str == "CPU"
+                # the CPU backend compiles kernels with POCL, whose device arrays have no
+                # `@Const`-specific lowering to look for in the IR
+                @test_skip false
             else
-                KernelAbstractions.mkcontext(kernel, nothing, iterspace)
-            end
-            AT = if Backend == CPU
-                Array{Float32, 2}
-            else
-                BackendArrayT{Float32, 2, 1} # AS 1
-            end
-            IR = sprint() do io
-                if backend_str == "CPU"
-                    code_llvm(
-                        io, kernel.f, (typeof(ctx), AT, AT),
-                        optimize = false, raw = true,
-                    )
-                else
+                # this is poking at internals
+                iterspace = NDRange{1, StaticSize{(128,)}, StaticSize{(8,)}}()
+                ctx = KernelAbstractions.mkcontext(kernel, nothing, iterspace)
+                AT = BackendArrayT{Float32, 2, 1} # AS 1
+                IR = sprint() do io
                     backend_mod.code_llvm(
                         io, kernel.f, (typeof(ctx), AT, AT),
                         kernel = true, optimize = true,
                     )
                 end
-            end
-            if backend_str == "CPU"
-                @test occursin("!alias.scope", IR)
-                @test occursin("!noalias", IR)
-            elseif backend_str == "CUDA"
-                if Base.libllvm_version >= v"20"
-                    @test occursin("addrspace(1)", IR)
+                if backend_str == "CUDA"
+                    if Base.libllvm_version >= v"20"
+                        @test occursin("addrspace(1)", IR)
+                    else
+                        @test occursin("@llvm.nvvm.ldg", IR)
+                    end
+                elseif backend_str == "ROCM"
+                    @test occursin("addrspace(4)", IR)
                 else
-                    @test occursin("@llvm.nvvm.ldg", IR)
+                    @test_skip false
                 end
-            elseif backend_str == "ROCM"
-                @test occursin("addrspace(4)", IR)
-            else
-                @test_skip false
             end
         end
     end
