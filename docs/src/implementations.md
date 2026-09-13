@@ -30,8 +30,10 @@ which backends can support with two optional functions:
   current task's queue and return it, so that the spawning task does not have to wait.
 - The new task first selects the spawning task's device with [`device!`](@ref KernelAbstractions.device!),
   then calls [`wait_event`](@ref KernelAbstractions.wait_event) with the recorded handle.
-  A backend that overrides `record_event` **must** implement `wait_event` for its event
-  type, typically by making the current task's queue wait on the event.
+  The order matters: `wait_event` makes the queue of the *currently active* device wait, so
+  the device has to be selected first. A backend that overrides `record_event` **must**
+  implement `wait_event` for its event type, typically by making the current task's queue
+  wait on the event.
 - After the user's code returns, the new task calls [`synchronize`](@ref), so that
   `wait(task)` in any other task implies that all work queued by the spawned task has
   completed.
@@ -40,6 +42,20 @@ A new Julia task does not necessarily inherit the device of the task that spawne
 Backends with more than one device therefore **must** implement the device interface
 ([`device`](@ref KernelAbstractions.device), [`ndevices`](@ref KernelAbstractions.ndevices),
 [`device!`](@ref KernelAbstractions.device!)) for `@spawn` to run on the right device.
+
+Because `device!` selects the queue that `wait_event` acts on, the same two functions are
+what lets users order work across a device switch:
+
+```julia
+event = KernelAbstractions.record_event(backend)
+KernelAbstractions.device!(backend, 2)
+KernelAbstractions.wait_event(backend, event)
+```
+
+A multi-device backend therefore **must** accept an event recorded on a different device
+than the one active in `wait_event`. CUDA expresses this dependency in the driver
+(`cuStreamWaitEvent` works across devices); a backend whose driver cannot **must** fall
+back to waiting cooperatively, as [`synchronize`](@ref) does.
 
 
 ## Moving data with `adapt`

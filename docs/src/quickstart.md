@@ -161,5 +161,27 @@ end
 Waiting on a backend, whether with [`synchronize`](@ref) or at the end of a spawned task,
 yields to the Julia scheduler, so other tasks keep making progress while a kernel runs.
 
+`@spawn` selects the spawning task's device before the task runs any user code. If the task
+then switches to another device with [`device!`](@ref KernelAbstractions.device!), that
+switch carries no ordering of its own: work queued on the new device is not ordered with
+respect to what `@spawn` had already waited for, or with respect to anything the task queued
+before the switch. Order it explicitly with
+[`record_event`](@ref KernelAbstractions.record_event) and
+[`wait_event`](@ref KernelAbstractions.wait_event), which apply to the device that is active
+when each is called:
+
+```julia
+task = KernelAbstractions.@spawn backend begin
+    mul2_kernel(backend, 64)(A, ndrange=length(A))    # device of the spawning task
+    event = KernelAbstractions.record_event(backend)
+    KernelAbstractions.device!(backend, 2)
+    KernelAbstractions.wait_event(backend, event)     # device 2 waits for the kernel above
+    mul2_kernel(backend, 64)(B, ndrange=length(B))
+end
+```
+
+A plain [`synchronize`](@ref) before the `device!` works too, at the cost of blocking the
+task until the first device is idle.
+
 A full MPI example that overlaps communication with device copies is in
 [`examples/mpi.jl`](https://github.com/JuliaGPU/KernelAbstractions.jl/blob/master/examples/mpi.jl).
