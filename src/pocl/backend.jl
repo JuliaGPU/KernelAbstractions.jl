@@ -185,7 +185,7 @@ function threads_to_workgroupsize(threads, ndrange)
     end
 end
 
-function (obj::KA.Kernel{POCLBackend})(args...; ndrange = nothing, workgroupsize = nothing)
+function (obj::KA.Kernel{POCLBackend})(args::Vararg{Any, N}; ndrange = nothing, workgroupsize = nothing) where {N}
     ndrange, workgroupsize, iterspace, dynamic =
         KA.launch_config(obj, ndrange, workgroupsize)
 

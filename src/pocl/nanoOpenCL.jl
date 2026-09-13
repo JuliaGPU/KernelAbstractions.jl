@@ -665,6 +665,23 @@ end
     )::cl_int
 end
 
+# sizes passed as tuples, which `ccall` copies to the stack
+@checked function clEnqueueNDRangeKernel(
+        command_queue, kernel, work_dim,
+        global_work_size::NTuple{3, Csize_t}, local_work_size::NTuple{3, Csize_t}, event::Ref{cl_event}
+    )
+    @ccall libopencl.POclEnqueueNDRangeKernel(
+        command_queue::cl_command_queue,
+        kernel::cl_kernel, work_dim::cl_uint,
+        C_NULL::Ptr{Csize_t},
+        global_work_size::Ref{NTuple{3, Csize_t}},
+        local_work_size::Ref{NTuple{3, Csize_t}},
+        0::cl_uint,
+        C_NULL::Ptr{cl_event},
+        event::Ref{cl_event}
+    )::cl_int
+end
+
 @checked function clEnqueueNDRangeKernel(
         command_queue, kernel, work_dim,
         global_work_offset, global_work_size,
@@ -1254,9 +1271,10 @@ function set_arg!(k::Kernel, idx::Integer, arg::LocalMem)
 end
 
 function set_arg!(k::Kernel, idx::Integer, arg::T) where {T}
-    ref = Ref(arg)
-    tsize = sizeof(ref)
-    err = unchecked_clSetKernelArg(k, cl_uint(idx - 1), tsize, ref)
+    # `Ref{T}` makes `ccall` pass a pointer to a stack copy of `arg`
+    err = @ccall libopencl.POclSetKernelArg(
+        k::cl_kernel, cl_uint(idx - 1)::cl_uint, sizeof(T)::Csize_t, arg::Ref{T}
+    )::cl_int
     if err == CL_INVALID_ARG_SIZE
         error(
             """Mismatch between Julia and OpenCL type for kernel argument $idx.
@@ -1275,19 +1293,36 @@ function set_arg!(k::Kernel, idx::Integer, arg::T) where {T}
     return k
 end
 
-function set_args!(k::Kernel, args...)
-    for (i, a) in enumerate(args)
-        set_arg!(k, i, a)
-    end
-    return
+set_args!(k::Kernel, args::Vararg{Any, N}) where {N} = set_args!(k, 1, args...)
+@inline set_args!(k::Kernel, i::Int) = nothing
+@inline function set_args!(k::Kernel, i::Int, arg, args::Vararg{Any, N}) where {N}
+    set_arg!(k, i, arg)
+    return set_args!(k, i + 1, args...)
 end
+
+# work sizes padded to the three dimensions OpenCL devices support
+const WorkSize = NTuple{3, Csize_t}
+@inline work_size(sizes) = ntuple(i -> i <= length(sizes) ? Csize_t(sizes[i]) : Csize_t(0), Val(3))
 
 function enqueue_kernel(
         k::Kernel, global_work_size, local_work_size = nothing;
         global_work_offset = nothing, rng_state = false, nargs = nothing
     )
-    max_work_dim = device().max_work_item_dims
     work_dim = length(global_work_size)
+
+    if global_work_offset === nothing && local_work_size !== nothing && !rng_state && work_dim <= 3
+        if length(local_work_size) != work_dim
+            throw(ArgumentError("global_work_size and local_work_size have differing dims"))
+        end
+        ret_event = Ref{cl_event}()
+        clEnqueueNDRangeKernel(
+            queue(), k, cl_uint(work_dim),
+            work_size(global_work_size), work_size(local_work_size), ret_event
+        )
+        return Event(ret_event[])
+    end
+
+    max_work_dim = device().max_work_item_dims
     if work_dim > max_work_dim
         throw(ArgumentError("global_work_size has max dim of $max_work_dim"))
     end
@@ -1354,19 +1389,19 @@ function enqueue_kernel(
 end
 
 function call(
-        k::Kernel, args...; global_size = (1,), local_size = nothing,
+        k::Kernel, args::Vararg{Any, N}; global_size = (1,), local_size = nothing,
         global_work_offset = nothing,
-        svm_pointers::Vector{Ptr{Cvoid}} = Ptr{Cvoid}[],
+        svm_pointers::Union{Nothing, Vector{Ptr{Cvoid}}} = nothing,
         rng_state = false
-    )
+    ) where {N}
     set_args!(k, args...)
-    if !isempty(svm_pointers)
+    if svm_pointers !== nothing && !isempty(svm_pointers)
         clSetKernelExecInfo(
             k, CL_KERNEL_EXEC_INFO_SVM_PTRS,
             sizeof(svm_pointers), svm_pointers
         )
     end
-    return enqueue_kernel(k, global_size, local_size; global_work_offset, rng_state, nargs = length(args))
+    return enqueue_kernel(k, global_size, local_size; global_work_offset, rng_state, nargs = N)
 end
 
 # convert the argument values to match the kernel's signature (specified by the user)
