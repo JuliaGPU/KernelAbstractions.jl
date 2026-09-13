@@ -273,3 +273,27 @@ items of a partial last workgroup have no valid index.
 
 Obtain the backend from an array with [`get_backend`](@ref) and always call [`synchronize`](@ref) before reading results on the host.
 See the [Quickstart](@ref) for a full walkthrough and the Examples section of the manual for larger patterns.
+
+## Loops without a kernel
+
+A kernel whose body is a loop over the indices of an array needs none of the kernel language
+beyond the index itself. [`foreach_index`](@ref) launches such a loop directly, with one work item
+per index of `eachindex(itr)`:
+
+```julia
+function scale!(y, x)
+    foreach_index(x) do i
+        @inbounds y[i] = 2 * x[i] + 1
+    end
+    return y
+end
+```
+
+The body is an ordinary Julia function, and it receives the index a `for i in eachindex(itr)` loop
+would: a linear index for an array with `IndexLinear` style, a `CartesianIndex` otherwise. The
+launch is asynchronous like any other, and bounds checks are not elided.
+
+Because the body becomes a kernel, every value it captures must have a known type — which is why
+the example wraps the loop in a function, and why the body must not assign to a captured variable.
+Write the kernel out with [`@kernel`](@ref) when it needs more than an index: workgroup-level
+indices, local memory, or synchronization.

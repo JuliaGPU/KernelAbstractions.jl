@@ -70,6 +70,12 @@ KernelAbstractions.ndrange
 KernelAbstractions.backend
 ```
 
+### Index loops
+
+```@docs
+foreach_index
+```
+
 ## Reflection
 
 These macros help inspect the generated kernel code. LLVM IR reflection via
