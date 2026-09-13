@@ -66,6 +66,31 @@ function spawn_testsuite(Backend, AT)
         @test fetch(task) == 2
     end
 
+    @testset "device" begin
+        # Without `device=`, the task inherits the spawning task's device.
+        dev = KernelAbstractions.device(backend)
+        @test fetch(KernelAbstractions.@spawn backend KernelAbstractions.device(backend)) == dev
+
+        # `device=` selects the device explicitly, as a literal or an expression.
+        task = KernelAbstractions.@spawn backend device = dev KernelAbstractions.device(backend)
+        @test fetch(task) == dev
+        task = KernelAbstractions.@spawn backend device = 1 KernelAbstractions.device(backend)
+        @test fetch(task) == 1
+
+        # `device=` combines with a threadpool, and the kernels still run.
+        A = KernelAbstractions.zeros(backend, Float32, 128)
+        fill = spawn_fill_kernel(backend, 32)
+        wait(KernelAbstractions.@spawn :default backend device = dev fill(A, 7.0f0, ndrange = length(A)))
+        @test all(==(7.0f0), Array(A))
+
+        # An out-of-range device fails inside the task, as `device!` would.
+        nd = KernelAbstractions.ndevices(backend)
+        @test_throws TaskFailedException wait(KernelAbstractions.@spawn backend device = nd + 1 nothing)
+
+        # A top-level assignment in the body is a body, not a `device=` argument.
+        @test fetch(KernelAbstractions.@spawn backend y = 41 + 1) == 42
+    end
+
     @testset "@sync" begin
         # An enclosing `@sync` waits for the task, and sees its errors.
         A = KernelAbstractions.zeros(backend, Float32, 256)
