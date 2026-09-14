@@ -104,7 +104,7 @@ end
 end
 
 @testset "Codegen" begin
-    codegen_testsuite(POCLBackend())
+    Codegen.codegen_testsuite()
 end
 
 @testset "CPU back-end" begin
