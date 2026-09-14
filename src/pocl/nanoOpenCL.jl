@@ -1293,11 +1293,11 @@ function set_arg!(k::Kernel, idx::Integer, arg::T) where {T}
     return k
 end
 
-set_args!(k::Kernel, args::Vararg{Any, N}) where {N} = set_args!(k, 1, args...)
-@inline set_args!(k::Kernel, i::Int) = nothing
-@inline function set_args!(k::Kernel, i::Int, arg, args::Vararg{Any, N}) where {N}
+set_args!(k::Kernel, args::Vararg{Any, N}) where {N} = _set_args!(k, 1, args...)
+@inline _set_args!(k::Kernel, i::Int) = nothing
+@inline function _set_args!(k::Kernel, i::Int, arg, args::Vararg{Any, N}) where {N}
     set_arg!(k, i, arg)
-    return set_args!(k, i + 1, args...)
+    return _set_args!(k, i + 1, args...)
 end
 
 # work sizes padded to the three dimensions OpenCL devices support
