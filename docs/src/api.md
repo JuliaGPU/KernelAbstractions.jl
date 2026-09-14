@@ -87,11 +87,13 @@ They are only documented here for developers and contributors of `KernelAbstract
 
 ```@docs
 KernelAbstractions.partition
+KernelAbstractions.cartesian
 KernelAbstractions.@context
 KernelAbstractions.argconvert
 KernelAbstractions.NDIteration.DynamicSize
 KernelAbstractions.NDIteration.StaticSize
 KernelAbstractions.NDIteration.NDRange
+KernelAbstractions.NDIteration.expand
 KernelAbstractions.NDIteration.StaticOffset
 KernelAbstractions.NDIteration.DynamicOffset
 KernelAbstractions.NDIteration.extents
