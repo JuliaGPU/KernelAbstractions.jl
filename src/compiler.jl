@@ -34,3 +34,13 @@ cartesian(t::Tuple) = CartesianIndices(t)
 @inline groupsize(ctx::CompilerMetadata) = __groupsize(ctx)
 @inline ndrange(ctx::CompilerMetadata) = __ndrange(ctx)
 @inline Base.ndims(ctx::CompilerMetadata) = ndims(__iterspace(ctx))
+
+# Adapt the iteration space, which may hold device data in its mapping, and keep the rest
+function Adapt.adapt_structure(to, cm::CompilerMetadata{NDRange, CB, I}) where {NDRange, CB, I}
+    iterspace = Adapt.adapt(to, cm.iterspace)
+    if I === Nothing
+        return CompilerMetadata{NDRange, CB}(cm.ndrange, iterspace)
+    else
+        return CompilerMetadata{NDRange, CB}(cm.groupindex, cm.ndrange, iterspace)
+    end
+end
