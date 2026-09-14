@@ -193,37 +193,8 @@ end
 
 const clfunction_lock = ReentrantLock()
 
-# `HostKernel` with the world age and context it was resolved in; valid as long as no method
-# has been defined since and the context is unchanged.
-struct ResolvedKernel
-    world::UInt
-    context::nanoOpenCL.Context
-    kernel::Any
-end
-
-# `HostKernel{F, tt}` instances keyed by their type
-const _kernel_fastpath = Dict{DataType, ResolvedKernel}()
-
-# On Julia 1.11 to 1.13 reading a `ScopedValue` allocates; outside of any dynamic scope it
-# holds its default, so the read is skipped there.
-@static if v"1.11" <= VERSION < v"1.14-"
-    @inline compile_hook_set() = Core.current_scope() !== nothing && GPUCompiler.compile_hook[] !== nothing
-else
-    @inline compile_hook_set() = GPUCompiler.compile_hook[] !== nothing
-end
-
 function clfunction(f::F, tt::TT = Tuple{}; kwargs...) where {F, TT}
     Base.@lock clfunction_lock begin
-        ctx = context()
-        world = Base.get_world_counter()
-        cacheable = isempty(kwargs) && !compile_hook_set()
-        if cacheable
-            entry = get(_kernel_fastpath, HostKernel{F, tt}, nothing)
-            if entry !== nothing && entry.world == world && entry.context === ctx
-                return entry.kernel::HostKernel{F, tt}
-            end
-        end
-
         config = compiler_config(device(); kwargs...)::OpenCLCompilerConfig
         source = methodinstance(F, tt)
         job = CompilerJob(source, config)
@@ -232,6 +203,7 @@ function clfunction(f::F, tt::TT = Tuple{}; kwargs...) where {F, TT}
 
         # Resolve the cl.Kernel for the active context. Linear scan over the
         # session-local cache; almost always n=1, so this is one `===` compare.
+        ctx = context()
         cached = nothing
         @inbounds for (cached_ctx, cached_kernel) in res.kernels
             if cached_ctx === ctx
@@ -253,13 +225,9 @@ function clfunction(f::F, tt::TT = Tuple{}; kwargs...) where {F, TT}
         end
 
         h = hash(kernel, hash(f, hash(tt)))
-        hostkernel = get!(_kernel_instances, h) do
+        return get!(_kernel_instances, h) do
             HostKernel{F, tt}(f, kernel, res.device_rng)
         end::HostKernel{F, tt}
-        if cacheable
-            _kernel_fastpath[HostKernel{F, tt}] = ResolvedKernel(world, ctx, hostkernel)
-        end
-        return hostkernel
     end
 end
 
@@ -272,7 +240,10 @@ end
 # Julia's code cache, so the post-compile `cached_results` re-fetch is guaranteed to
 # succeed. The `compile_hook` check additionally forces the compile path so
 # reflection-style consumers (`@device_code_*`) observe the compilation even on a hit.
-function compile_or_lookup(@nospecialize(job::CompilerJob))::OpenCLResults
+# Keep this specialized so the caller can avoid boxing `CompilerJob`. Its type parameters
+# only identify the target and compiler parameters, so this is bounded per back-end rather
+# than specialized for every kernel; `@noinline` keeps the body out of each `clfunction`.
+@noinline function compile_or_lookup(job::CompilerJob)::OpenCLResults
     res = GPUCompiler.cached_results(OpenCLResults, job)
     if res === nothing || res.obj === nothing || GPUCompiler.compile_hook[] !== nothing
         compiled = compile_to_obj(job)
