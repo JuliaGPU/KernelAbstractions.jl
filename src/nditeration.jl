@@ -5,6 +5,7 @@ export NDRange, blocks, workitems, expand
 export StaticOffset, DynamicOffset, offsets, extents, linear_index
 export DynamicCheck, NoDynamicCheck
 
+import Adapt
 import Base.@pure
 
 struct DynamicCheck end
@@ -165,6 +166,10 @@ struct NDRange{N, StaticBlocks, StaticWorkitems, DynamicBlock, DynamicWorkitems,
         return new{N, B, W, typeof(blocks), typeof(workitems), typeof(mapping)}(blocks, workitems, mapping)
     end
 end
+
+# The mapping may hold device data, e.g. a list of indices, that has to move with the range
+Adapt.adapt_structure(to, range::NDRange{N, B, W}) where {N, B, W} =
+    NDRange{N, B, W}(Adapt.adapt(to, range.blocks), Adapt.adapt(to, range.workitems), Adapt.adapt(to, range.mapping))
 
 @inline workitems(range::NDRange{N, B, W}) where {N, B, W <: DynamicSize} = range.workitems::CartesianIndices{N}
 @inline workitems(range::NDRange{N, B, W}) where {N, B, W <: StaticSize} = CartesianIndices(get(W))::CartesianIndices{N}

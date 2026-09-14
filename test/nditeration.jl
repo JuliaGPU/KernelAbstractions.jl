@@ -1,6 +1,13 @@
+using Adapt
 using KernelAbstractions
 using KernelAbstractions.NDIteration
 using Test
+
+# A mapping holding an array, like a list of indices to iterate over
+struct ArrayMapping{A}
+    array::A
+end
+Adapt.@adapt_structure ArrayMapping
 
 function nditeration_testsuite()
     @testset "iteration" begin
@@ -45,6 +52,35 @@ function nditeration_testsuite()
             @test linear_index(ci, CartesianIndex(4, 2)) == 8
             @test linear_index(ci, CartesianIndex(4, 11)) == 80
         end
+    end
+
+    @testset "adapt" begin
+        mapping = ArrayMapping([1, 2, 3])
+        ndrange = NDRange{1, DynamicSize, StaticSize{(4,)}}(CartesianIndices((2,)), nothing, mapping)
+        adapted = adapt(Array{Float32}, ndrange)
+        @test adapted isa NDRange{1, DynamicSize, StaticSize{(4,)}}
+        @test blocks(adapted) == blocks(ndrange)
+        @test adapted.mapping.array isa Vector{Float32}
+        @test adapted.mapping.array == [1, 2, 3]
+
+        # a mapping without device data is left alone
+        offset = NDRange{2, DynamicSize, DynamicSize}(CartesianIndices((4, 4)), CartesianIndices((8, 8)), DynamicOffset((-8, 3)))
+        @test adapt(Array{Float32}, offset).mapping === offset.mapping
+
+        # GPU-style context: the index is implicit
+        ctx = KernelAbstractions.CompilerMetadata{DynamicSize, DynamicCheck}(CartesianIndices((8,)), ndrange)
+        actx = adapt(Array{Float32}, ctx)
+        @test actx isa KernelAbstractions.CompilerMetadata{DynamicSize, DynamicCheck}
+        @test KernelAbstractions.__groupindex(actx) === nothing
+        @test KernelAbstractions.__ndrange(actx) == CartesianIndices((8,))
+        @test KernelAbstractions.__iterspace(actx).mapping.array isa Vector{Float32}
+
+        # CPU-style context: the group index is explicit
+        ctx = KernelAbstractions.CompilerMetadata{DynamicSize, DynamicCheck}(CartesianIndex(2), CartesianIndices((8,)), ndrange)
+        actx = adapt(Array{Float32}, ctx)
+        @test KernelAbstractions.__groupindex(actx) == CartesianIndex(2)
+        @test KernelAbstractions.__ndrange(actx) == CartesianIndices((8,))
+        @test KernelAbstractions.__iterspace(actx).mapping.array isa Vector{Float32}
     end
 
     # GPU scenario where we get a linear index into workitems/blocks
