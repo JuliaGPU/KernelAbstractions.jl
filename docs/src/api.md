@@ -72,12 +72,27 @@ KernelAbstractions.backend
 
 ## Reflection
 
-These macros help inspect the generated kernel code. LLVM IR reflection via
-[`@ka_code_llvm`](@ref) is only supported on the CPU backend.
+[`@ka_code_typed`](@ref) inspects the kernel function as the host sees it, before the
+backend has compiled it.
+
+To look at the code a backend actually generates, wrap a kernel launch in one of the
+`@device_code_*` macros below. They are GPUCompiler's, and report on every kernel compiled
+while the wrapped expression runs, so they work the same on the CPU backend and on GPU
+backends. They are not exported, because the backend packages (CUDA.jl, AMDGPU.jl, ...)
+export macros of the same name; call them qualified:
+
+```julia
+KernelAbstractions.@device_code_llvm mul2(backend, 64)(A, ndrange=length(A))
+```
 
 ```@docs
 @ka_code_typed
-@ka_code_llvm
+KernelAbstractions.@device_code_lowered
+KernelAbstractions.@device_code_typed
+KernelAbstractions.@device_code_warntype
+KernelAbstractions.@device_code_llvm
+KernelAbstractions.@device_code_native
+KernelAbstractions.@device_code
 ```
 
 ## Internal

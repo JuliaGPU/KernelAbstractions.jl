@@ -1,5 +1,6 @@
 import InteractiveUtils
-export @ka_code_typed, @ka_code_llvm
+import GPUCompiler
+export @ka_code_typed
 
 using UUIDs
 const Cthulhu = Base.PkgId(UUID("f68482b8-f384-11e8-15f7-abe071a5a75f"), "Cthulhu")
@@ -30,28 +31,6 @@ function ka_code_typed(kernel, argtypes; ndrange = nothing, workgroupsize = noth
     else
         return InteractiveUtils.code_typed(kernel.f, (typeof(ctx), argtypes...); kwargs...)
     end
-end
-
-
-function ka_code_llvm(kernel, argtypes; ndrange = nothing, workgroupsize = nothing, kwargs...)
-    return ka_code_llvm(stdout, kernel, argtypes; ndrange = ndrange, workgroupsize = nothing, kwargs...)
-end
-
-function ka_code_llvm(io::IO, kernel, argtypes; ndrange = nothing, workgroupsize = nothing, kwargs...)
-    # get the iterspace and dynamic of a kernel
-    ndrange, workgroupsize, iterspace, dynamic = KernelAbstractions.launch_config(kernel, ndrange, workgroupsize)
-
-    # get the first block
-    block = @inbounds KernelAbstractions.blocks(iterspace)[1]
-    # get a context of the kernel based on the first block
-    ctx = KernelAbstractions.mkcontext(kernel, block, ndrange, iterspace, dynamic)
-
-    # reformat
-    if argtypes isa Type
-        argtypes = argtypes.parameters
-    end
-    # use code_typed
-    return InteractiveUtils.code_llvm(io, kernel.f, (typeof(ctx), argtypes...); kwargs...)
 end
 
 
@@ -104,6 +83,10 @@ Pass `interactive=true` to descend into the IR with [Cthulhu](https://github.com
 (must be loaded in the session). If `ndrange` is fixed at kernel construction time, it can be
 omitted at the call site.
 
+This reflects on the kernel function as the host sees it, which is independent of the backend.
+To inspect the code a backend actually generates, use [`KernelAbstractions.@device_code_typed`](@ref)
+or one of the other `@device_code_*` macros.
+
 # Examples
 
 ```julia
@@ -131,33 +114,56 @@ macro ka_code_typed(ex0...)
 end
 
 
-"""
-    @ka_code_llvm [kwargs...] kernel(args...; ndrange=..., workgroupsize=...)
+#
+# Device code reflection
+#
 
-Return the LLVM IR for a kernel's device function, similar to `InteractiveUtils.code_llvm`.
+# GPUCompiler's `@device_code_*` macros install a compilation hook for the duration of the
+# wrapped expression, so they report on every kernel that any GPUCompiler-based backend
+# compiles while it runs -- the in-tree CPU backend as well as CUDA, AMDGPU, oneAPI or Metal.
+# That makes them the backend-agnostic way to inspect generated device code, which the
+# host-side `@ka_code_typed` cannot be: it reflects on the kernel function as the host sees
+# it, before the backend's compilation pipeline has run.
+#
+# They are forwarded here rather than exported, because the backend packages export macros of
+# the same name and `using CUDA, KernelAbstractions` would make the name ambiguous.
+for (macroname, stage) in (
+        Symbol("@device_code_lowered") => "the lowered IR",
+        Symbol("@device_code_typed") => "the type-inferred IR",
+        Symbol("@device_code_warntype") => "the type-inferred IR, highlighting type instabilities",
+        Symbol("@device_code_llvm") => "the generated LLVM IR",
+        Symbol("@device_code_native") => "the generated machine code",
+    )
+    docstring = """
+        KernelAbstractions.$macroname [kwargs...] ex
 
-Only supported on the CPU backend. GPU kernels will throw an error.
+    Evaluate `ex` and, for every device kernel compiled along the way, show $stage.
 
-# Examples
+    This is `GPUCompiler.$macroname`, re-exposed for convenience; see its documentation for the
+    supported keyword arguments. It applies to any GPUCompiler-based backend, so wrapping a
+    kernel launch works on the CPU backend and on GPU backends alike. Note that `ex` is really
+    evaluated: the kernels it launches are compiled *and* run.
 
-```julia
-@ka_code_llvm my_kernel(CPU())(A, ndrange=length(A))
-@ka_code_llvm my_kernel(CPU(), 64)(A, ndrange=length(A))
-```
-"""
-macro ka_code_llvm(ex0...)
-    ex, args, old_args, kern = format_ex(ex0)
+    # Examples
 
-    thecall = InteractiveUtils.gen_call_with_extracted_types_and_kwargs(__module__, :ka_code_llvm, ex)
-
-    return quote
-        local $(esc(args)) = $(old_args)
-
-        if isa($kern, Kernel{G} where {G <: GPU})
-            # does not support GPU kernels
-            error("@ka_code_llvm does not support GPU kernels")
-        end
-
-        local results = $thecall
+    ```julia
+    KernelAbstractions.$macroname my_kernel(backend, 64)(A, ndrange=length(A))
+    ```
+    """
+    @eval begin
+        const $macroname = GPUCompiler.$macroname
+        @doc $docstring $macroname
     end
 end
+
+"""
+    KernelAbstractions.@device_code [dir=...] [...] ex
+
+Evaluate `ex` and dump all forms of code generated for the device kernels it compiles to the
+directory `dir`, or to a temporary directory if none is given.
+
+This is `GPUCompiler.@device_code`, re-exposed for convenience; see its documentation for the
+supported keyword arguments. Like the other `@device_code_*` macros it applies to any
+GPUCompiler-based backend, and really evaluates `ex`.
+"""
+const var"@device_code" = GPUCompiler.var"@device_code"

@@ -102,6 +102,22 @@ end
     @test count() == n + 2
 end
 
+@testset "Device code reflection" begin
+    @kernel function reflect_mul2(A)
+        i = @index(Global, Linear)
+        @inbounds A[i] = 2 * A[i]
+    end
+
+    A = KernelAbstractions.ones(POCLBackend(), Float32, 64)
+    ir = sprint() do io
+        KernelAbstractions.@device_code_llvm io = io debuginfo = :none reflect_mul2(POCLBackend(), 16)(A, ndrange = 64)
+    end
+    @test occursin("reflect_mul2", ir)
+    # the wrapped expression is evaluated, not just compiled
+    KernelAbstractions.synchronize(POCLBackend())
+    @test all(==(2.0f0), A)
+end
+
 @testset "CPU back-end" begin
     struct CPUBackendArray{T, N, A} end # Fake and unused
     Testsuite.testsuite(CPU, "CPU", Base, Array, CPUBackendArray)
