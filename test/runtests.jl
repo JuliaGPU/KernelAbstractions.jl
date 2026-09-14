@@ -93,8 +93,7 @@ end
 end
 
 @testset "CPU back-end" begin
-    struct CPUBackendArray{T, N, A} end # Fake and unused
-    Testsuite.testsuite(CPU, "CPU", Base, Array, CPUBackendArray)
+    Testsuite.testsuite(CPU, "CPU", POCL, Array, POCL.CLDeviceArray)
 end
 
 struct NewBackend <: KernelAbstractions.GPU end
