@@ -66,6 +66,52 @@ let default = BenchmarkGroup()
     SUITE["saxpy"]["default"] = default
 end
 
+# `@Const` asserts that an argument is not written by the kernel. Here that lets the
+# compiler hoist the loads of `a`, `b` and `c` out of the loop; without it the store to
+# `out` may alias them, so all three have to be reloaded on every step. The two kernels
+# below are identical apart from the annotations, so the difference between them is what
+# `@Const` buys on a given backend.
+@kernel function relax_kernel!(out, @Const(a), @Const(b), @Const(c), ::Val{steps}) where {steps}
+    I = @index(Global)
+    for _ in 1:steps
+        @inbounds out[I] = a[I] * out[I] + b[I] * c[I]
+    end
+end
+
+@kernel function relax_kernel_unmarked!(out, a, b, c, ::Val{steps}) where {steps}
+    I = @index(Global)
+    for _ in 1:steps
+        @inbounds out[I] = a[I] * out[I] + b[I] * c[I]
+    end
+end
+
+SUITE["const"] = BenchmarkGroup()
+
+# The two variants share their inputs and are measured on warm data, rather than
+# allocating in a setup, so that the comparison isn't dominated by memory traffic.
+let steps = Val(16), variants = ("@Const" => relax_kernel!, "unmarked" => relax_kernel_unmarked!)
+    for (name, _) in variants
+        variant = BenchmarkGroup()
+        for T in (Float32, Float64)
+            variant["$T"] = BenchmarkGroup()
+        end
+        SUITE["const"][name] = variant
+    end
+    for T in (Float32, Float64), N in (65536, 262144)
+        a = rand!(KernelAbstractions.zeros(BACKEND, T, N))
+        b = rand!(KernelAbstractions.zeros(BACKEND, T, N))
+        c = rand!(KernelAbstractions.zeros(BACKEND, T, N))
+        for (name, kernel_fun) in variants
+            kernel = kernel_fun(BACKEND, 1024)
+            out = rand!(KernelAbstractions.zeros(BACKEND, T, N))
+            SUITE["const"][name]["$T"][N] = @benchmarkable begin
+                $kernel($out, $a, $b, $c, $steps, ndrange = $N)
+                KernelAbstractions.synchronize($BACKEND)
+            end
+        end
+    end
+end
+
 # Launch overhead: a problem of a single workgroup, so that the time is dominated by the
 # host-side work of a launch. The kernel is constructed in the setup and the backend
 # synchronized in the teardown, so only the launch itself is measured.
