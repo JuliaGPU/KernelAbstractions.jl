@@ -1,6 +1,7 @@
 [deps]
 Adapt = "79e6a3ab-5dfb-504d-930d-738a2a938a0e"
 Aqua = "4c88cf16-eb10-579e-8560-4a9242c79595"
+FileCheck = "4e644321-382b-4b05-b0b6-5d23c3d944fb"
 InteractiveUtils = "b77e0a4c-d291-57a0-90e8-8db25a27a240"
 KernelAbstractions = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
 KernelInterface = "4ee993da-d684-4d17-a7dd-4e58e78d92bf"
@@ -19,3 +20,4 @@ KernelInterface = {path = "../lib/KernelInterface"}
 
 [compat]
 Aqua = "0.8"
+FileCheck = "1.2"

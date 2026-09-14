@@ -6,6 +6,7 @@ include("quality_assurance.jl")
 include("linenumbers.jl")
 include("coverage.jl")
 include("testsuite.jl")
+include("codegen.jl")
 
 @testset "Quality assurance" begin
     quality_assurance_testsuite()
@@ -100,6 +101,10 @@ end
     @eval mod @noinline child() = nothing
     Base.invokelatest(launch)
     @test count() == n + 2
+end
+
+@testset "Codegen" begin
+    codegen_testsuite(POCLBackend())
 end
 
 @testset "CPU back-end" begin
