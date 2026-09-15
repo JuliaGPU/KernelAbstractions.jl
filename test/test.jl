@@ -265,36 +265,28 @@ function unittest_testsuite(Backend, backend_str, backend_mod, BackendArrayT; sk
         @inbounds A[I] = B[I]
     end
 
+    @kernel function constarg2d(A, @Const(B))
+        i, j = @index(Global, NTuple)
+        @inbounds A[i, j] = B[i, j]
+    end
+
     @conditional_testset "Const" skip_tests begin
         let kernel = constarg(Backend(), 8, (1024,))
             # this is poking at internals
             iterspace = NDRange{1, StaticSize{(128,)}, StaticSize{(8,)}}()
-            ctx = if Backend == CPU
-                KernelAbstractions.mkcontext(kernel, 1, nothing, iterspace, Val(NoDynamicCheck()))
-            else
-                KernelAbstractions.mkcontext(kernel, nothing, iterspace)
-            end
-            AT = if Backend == CPU
-                Array{Float32, 2}
-            else
-                BackendArrayT{Float32, 2, 1} # AS 1
-            end
+            ctx = KernelAbstractions.mkcontext(kernel, nothing, iterspace)
+            AT = BackendArrayT{Float32, 2, 1} # AS 1
             IR = sprint() do io
-                if backend_str == "CPU"
-                    code_llvm(
-                        io, kernel.f, (typeof(ctx), AT, AT),
-                        optimize = false, raw = true,
-                    )
-                else
-                    backend_mod.code_llvm(
-                        io, kernel.f, (typeof(ctx), AT, AT),
-                        kernel = true, optimize = true,
-                    )
-                end
+                backend_mod.code_llvm(
+                    io, kernel.f, (typeof(ctx), AT, AT),
+                    kernel = true, optimize = true,
+                    # the annotation we look for on POCL is metadata, which is only
+                    # printed in raw mode
+                    raw = backend_str == "CPU",
+                )
             end
             if backend_str == "CPU"
-                @test occursin("!alias.scope", IR)
-                @test occursin("!noalias", IR)
+                @test occursin("!invariant.load", IR)
             elseif backend_str == "CUDA"
                 if Base.libllvm_version >= v"20"
                     @test occursin("addrspace(1)", IR)
@@ -307,6 +299,20 @@ function unittest_testsuite(Backend, backend_str, backend_mod, BackendArrayT; sk
                 @test_skip false
             end
         end
+
+        # a constified argument must still read back the values it was given,
+        # both linearly and as an N-d index
+        A = KernelAbstractions.zeros(Backend(), Float32, 1024)
+        B = KernelAbstractions.ones(Backend(), Float32, 1024)
+        constarg(Backend(), 8)(A, B, ndrange = length(A))
+        synchronize(Backend())
+        @test all(Array(A) .== 1.0f0)
+
+        A = KernelAbstractions.zeros(Backend(), Float32, 32, 32)
+        B = KernelAbstractions.ones(Backend(), Float32, 32, 32)
+        constarg2d(Backend(), (8, 8))(A, B, ndrange = size(A))
+        synchronize(Backend())
+        @test all(Array(A) .== 1.0f0)
     end
 
     @kernel function kernel_val!(a, ::Val{m}) where {m}

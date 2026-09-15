@@ -6,7 +6,7 @@
 - `@Const`:
     - `restrict const` in C
     - `ldg` on the GPU
-    - `@aliasscopes` on the CPU
+    - `!invariant.load` on POCL
 
 - Cartesian or Linear indices supported
   - `@index(Linear)

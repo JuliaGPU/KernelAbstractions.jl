@@ -81,6 +81,11 @@ KI.allocate(::POCLBackend, ::Type{T}, dims::Tuple; unified::Bool = false) where 
 # which we want to keep as they are.
 Adapt.adapt_storage(::POCLBackend, x::AbstractArray) = isbits(x) ? x : Adapt.adapt(Array, x)
 
+# `@Const` applies `constify` inside the kernel, where arguments have already been
+# converted to device arrays, so the rule has to be registered for `CLDeviceArray`
+# rather than for `Array`.
+Adapt.adapt_storage(::KA.ConstAdaptor, a::POCL.CLDeviceArray) = Base.Experimental.Const(a)
+
 
 # Initialized
 

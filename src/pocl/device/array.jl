@@ -155,10 +155,53 @@ end
     end
 end
 
+# A load from memory that is known not to be written for the duration of the kernel.
+# There is no SPIR-V equivalent of NVPTX's `ld.global.nc`, so instead of a dedicated
+# instruction we mark the load `!invariant.load`, which lets LLVM hoist it out of loops
+# and reorder it across stores to other objects.
+@inline @generated function unsafe_invariant_load(ptr::LLVMPtr{T, AS}, i::I, ::Val{align}) where {T, AS, I, align}
+    sizeof(T) == 0 && return T.instance
+    ispow2(align) || return :(error("unsafe_invariant_load: alignment must be a power of 2, got $($align)"))
+    return @dispose ctx = Context() begin
+        eltyp = convert(LLVMType, T)
+        T_idx = convert(LLVMType, I)
+        T_ptr = convert(LLVMType, ptr)
+        T_typed_ptr = LLVM.PointerType(eltyp, AS)
+
+        llvm_f, _ = create_function(eltyp, LLVMType[T_ptr, T_idx])
+
+        @dispose builder = IRBuilder() begin
+            entry = BasicBlock(llvm_f, "entry")
+            position!(builder, entry)
+            base = if supports_typed_pointers(ctx)
+                bitcast!(builder, parameters(llvm_f)[1], T_typed_ptr)
+            else
+                parameters(llvm_f)[1]
+            end
+            gep = inbounds_gep!(builder, eltyp, base, [parameters(llvm_f)[2]])
+            ld = load!(builder, eltyp, gep)
+            if AS != 0
+                metadata(ld)[LLVM.MD_tbaa] = tbaa_addrspace(AS)
+            end
+            metadata(ld)[LLVM.MD_invariant_load] = MDNode(LLVM.Metadata[])
+            alignment!(ld, align)
+
+            ret!(builder, ld)
+        end
+
+        call_function(llvm_f, T, Tuple{LLVMPtr{T, AS}, I}, :ptr, :(i - one(I)))
+    end
+end
+
 @device_function @inline function const_arrayref(A::CLDeviceArray{T}, index::Integer) where {T}
     @boundscheck checkbounds(A, index)
-    align = alignment(A)
-    unsafe_cached_load(pointer(A), index, Val(align))
+    return if isbitstype(T)
+        align = alignment(A)
+        unsafe_invariant_load(pointer(A), index, Val(align))
+    else #if isbitsunion(T)
+        # the type tag is stored separately, and is not part of the invariant payload
+        arrayref_union(A, index)
+    end
 end
 
 
@@ -195,9 +238,8 @@ Base.@propagate_inbounds Base.setindex!(
     Const(A::CLDeviceArray)
 
 Mark a CLDeviceArray as constant/read-only. The invariant guaranteed is that you will not
-modify an CLDeviceArray for the duration of the current kernel.
-
-This API can only be used on devices with compute capability 3.5 or higher.
+modify an CLDeviceArray for the duration of the current kernel. Loads from it are emitted
+as `!invariant.load`, so violating that invariant is undefined behavior.
 
 !!! warning
     Experimental API. Subject to change without deprecation.
@@ -211,6 +253,15 @@ Base.IndexStyle(::Type{<:Const}) = IndexLinear()
 Base.size(C::Const) = size(C.a)
 Base.axes(C::Const) = axes(C.a)
 Base.@propagate_inbounds Base.getindex(A::Const, i1::Integer) = const_arrayref(A.a, i1)
+
+# as for CLDeviceArray, preserve the index type and route N-d indices through our own
+# linearization, since Base doesn't like Integer indices
+Base.to_index(::Const, i::Integer) = i
+Base.@propagate_inbounds Base.getindex(
+    A::Const,
+    I::Union{Integer, CartesianIndex}...
+) =
+    A[Base._to_linear_index(A, to_indices(A, I)...)]
 
 
 ## other
