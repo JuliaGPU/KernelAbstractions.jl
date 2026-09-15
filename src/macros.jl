@@ -79,7 +79,6 @@ function transform_gpu!(def, constargs, force_inbounds, unsafe_indices)
     # `Any[]`, since `split` hands back `LineNumberNode`s alongside `Expr`s
     new_stmts = Any[]
     body = MacroTools.flatten(def[:body])
-    push!(new_stmts, Expr(:aliasscope))
     if !unsafe_indices
         push!(new_stmts, :(__active_lane__ = $__validindex(__ctx__)))
     end
@@ -94,7 +93,6 @@ function transform_gpu!(def, constargs, force_inbounds, unsafe_indices)
     if force_inbounds
         push!(new_stmts, Expr(:inbounds, :pop))
     end
-    push!(new_stmts, Expr(:popaliasscope))
     push!(new_stmts, :(return nothing))
     def[:body] = Expr(
         :let,

@@ -447,8 +447,6 @@ y = adapt(CPU(), x)                         # an Array again
 """
 Adapt.adapt_storage(::Backend, x)
 
-Adapt.adapt_storage(::ConstAdaptor, a::Array) = Base.Experimental.Const(a)
-
 constify(arg) = adapt(ConstAdaptor(), arg)
 
 include("nditeration.jl")
