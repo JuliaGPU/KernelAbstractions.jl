@@ -37,7 +37,6 @@ include("offsets.jl")
 include("copyto.jl")
 include("devices.jl")
 include("print_test.jl")
-include("reflection.jl")
 include("examples.jl")
 include("convert.jl")
 include("specialfunctions.jl")
@@ -90,10 +89,6 @@ function testsuite(backend, backend_str, backend_mod, AT, DAT; skip_tests = Set{
 
     @conditional_testset "Printing" skip_tests begin
         printing_testsuite(backend)
-    end
-
-    @conditional_testset "Reflection" skip_tests begin
-        reflection_testsuite(backend, backend_str, AT)
     end
 
     @conditional_testset "Convert" skip_tests begin

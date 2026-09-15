@@ -72,21 +72,15 @@ KernelAbstractions.backend
 
 ## Reflection
 
-[`@ka_code_typed`](@ref) inspects the kernel function as the host sees it, before the
-backend has compiled it.
-
 To look at the code a backend actually generates, wrap a kernel launch in one of the
-`@device_code_*` macros below. They are GPUCompiler's, and report on every kernel compiled
-while the wrapped expression runs, so they work the same on the CPU backend and on GPU
-backends. They are not exported, because the backend packages (CUDA.jl, AMDGPU.jl, ...)
-export macros of the same name; call them qualified:
+`@device_code_*` macros below. They work the same on the CPU backend and on GPU
+backends, and they are public, but not exported, so you must call them qualified:
 
 ```julia
 KernelAbstractions.@device_code_llvm mul2(backend, 64)(A, ndrange=length(A))
 ```
 
 ```@docs
-@ka_code_typed
 KernelAbstractions.@device_code_lowered
 KernelAbstractions.@device_code_typed
 KernelAbstractions.@device_code_warntype
