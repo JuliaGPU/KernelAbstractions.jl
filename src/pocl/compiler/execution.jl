@@ -204,26 +204,29 @@ function clfunction(f::F, tt::TT = Tuple{}; kwargs...) where {F, TT}
         # Resolve the cl.Kernel for the active context. Linear scan over the
         # session-local cache; almost always n=1, so this is one `===` compare.
         ctx = context()
-        kernel = Ref{nanoOpenCL.Kernel}()
+        cached = nothing
         @inbounds for (cached_ctx, cached_kernel) in res.kernels
             if cached_ctx === ctx
-                kernel[] = cached_kernel
+                cached = cached_kernel
                 break
             end
         end
-        if !isassigned(kernel)
-            kernel[] = link_kernel(job, res.obj::Vector{UInt8}, res.entry::String)
+        kernel = if cached === nothing
+            linked = link_kernel(job, res.obj::Vector{UInt8}, res.entry::String)
             # Don't cache session-local kernel handles while precompiling: the
             # results struct is serialized into the package image along with its
             # CodeInstance, and the handles would come back dangling.
             if ccall(:jl_generating_output, Cint, ()) != 1
-                push!(res.kernels, (ctx, kernel[]))
+                push!(res.kernels, (ctx, linked))
             end
+            linked
+        else
+            cached
         end
 
-        h = hash(kernel[], hash(f, hash(tt)))
+        h = hash(kernel, hash(f, hash(tt)))
         return get!(_kernel_instances, h) do
-            HostKernel{F, tt}(f, kernel[], res.device_rng)
+            HostKernel{F, tt}(f, kernel, res.device_rng)
         end::HostKernel{F, tt}
     end
 end
@@ -237,11 +240,16 @@ end
 # Julia's code cache, so the post-compile `cached_results` re-fetch is guaranteed to
 # succeed. The `compile_hook` check additionally forces the compile path so
 # reflection-style consumers (`@device_code_*`) observe the compilation even on a hit.
-function compile_or_lookup(@nospecialize(job::CompilerJob))::OpenCLResults
+# Keep this specialized so the caller can avoid boxing `CompilerJob`. Its type parameters
+# only identify the target and compiler parameters, so this is bounded per back-end rather
+# than specialized for every kernel; `@noinline` keeps the body out of each `clfunction`.
+@noinline function compile_or_lookup(job::CompilerJob)::OpenCLResults
     res = GPUCompiler.cached_results(OpenCLResults, job)
     if res === nothing || res.obj === nothing || GPUCompiler.compile_hook[] !== nothing
         compiled = compile_to_obj(job)
-        res = @something res GPUCompiler.cached_results(OpenCLResults, job)
+        if res === nothing
+            res = GPUCompiler.cached_results(OpenCLResults, job)::OpenCLResults
+        end
         res.obj = compiled.obj
         res.entry = compiled.entry
         res.device_rng = compiled.device_rng
