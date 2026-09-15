@@ -136,6 +136,11 @@ end
 - `ndrange` entries may be index ranges, given statically (`kernel(backend, workgroupsize, (-2:N+3, 0:M+1))`)
   or at launch (`ndrange=(-2:N+3, 0:M+1)`, a single range, or a `CartesianIndices`).
   `@index(Global, Cartesian)` and `@index(Global, NTuple)` return the shifted indices.
+- `@ka_code_llvm` and `@ka_code_typed` have been removed. They reflected on the host-side
+  lowering of a kernel, and `@ka_code_llvm` additionally rejected GPU backends, which since
+  the CPU backend became an OpenCL backend meant every backend. Use
+  `KernelAbstractions.@device_code_llvm` and `KernelAbstractions.@device_code_typed` instead,
+  which report on the code a backend actually generates; see [Reflection](@ref).
 
 ## Semantic differences
 
