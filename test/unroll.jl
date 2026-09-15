@@ -36,6 +36,14 @@ end
     end
 end
 
+# `generated=true` makes the kernel a generated function, so that the `where`
+# parameter `N` can be interpolated into `@unroll $N`, which requires a literal.
+@kernel generated = true function kernel_unroll_generated!(a, ::Val{N}) where {N}
+    @unroll $N for i in 1:5
+        @inbounds a[i] = i * $N
+    end
+end
+
 function unroll_testsuite(backend, ArrayT)
     a = ArrayT(zeros(Float32, 5))
     kernel! = kernel_unroll!(backend(), 1, 1)
@@ -44,5 +52,11 @@ function unroll_testsuite(backend, ArrayT)
     kernel2! = kernel_unroll2!(backend(), 1, 1)
     kernel2!(a)
     synchronize(backend())
+
+    a = ArrayT(zeros(Float32, 5))
+    kernel3! = kernel_unroll_generated!(backend(), 1, 1)
+    kernel3!(a, Val(2))
+    synchronize(backend())
+    @test Array(a) == Float32[2, 4, 6, 8, 10]
     return
 end
