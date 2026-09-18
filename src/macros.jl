@@ -25,7 +25,7 @@ function unblock_lines(ex)
 end
 
 # XXX: Proper errors
-function __kernel(expr, __source__::LineNumberNode, force_inbounds = false, unsafe_indices = false)
+function __kernel(expr, __source__::LineNumberNode, __module__::Module, force_inbounds = false, unsafe_indices = false, generated = false)
     def = splitdef(expr)
     name = def[:name]
     args = def[:args]
@@ -46,6 +46,13 @@ function __kernel(expr, __source__::LineNumberNode, force_inbounds = false, unsa
     def_gpu = deepcopy(def)
     def_gpu[:name] = gpu_name = Symbol(:gpu_, name)
     transform_gpu!(def_gpu, constargs, force_inbounds, unsafe_indices)
+    if generated
+        # Turn the kernel into a generated function: the transformed body is
+        # quoted so that it is returned as an expression, and `macroexpand`
+        # takes care of resolving the `$` interpolations in it.
+        body = macroexpand(__module__, Expr(:quote, def_gpu[:body]), recursive = false)
+        def_gpu[:body] = Expr(:if, Expr(:generated), body, Expr(:meta, :generated_only))
+    end
     gpu_function = combinedef(def_gpu)
 
     # create constructor functions
