@@ -134,34 +134,73 @@ mymul(A, ones(size(A)))
 
 As shown in the [Synchronization](@ref) section above, multiple kernels can be enqueued on the
 same backend before a single [`synchronize`](@ref) call. The same pattern extends to Julia's
-task-based parallelism: launch kernels from [`Threads.@spawn`](https://docs.julialang.org/en/v1/base/multi-threading/#Base.Threads.@spawn)
-tasks when you want to overlap kernel execution with other asynchronous host work.
+task-based parallelism: launch kernels from tasks when you want to overlap kernel execution
+with other asynchronous host work, or with each other.
 
-On GPU backends, [`synchronize`](@ref) is **cooperative** — it yields to the Julia scheduler
-rather than blocking inside a driver call, so other tasks can make progress while a kernel runs.
-See [Notes for backend implementations](@ref implementations_notes) for the contract backend authors must follow.
+Backends may give each Julia task its own queue, so kernels launched from different tasks
+can run concurrently, but are not ordered with respect to each other. Use
+[`KernelAbstractions.@spawn`](@ref) in place of `Threads.@spawn` to launch kernels from a
+task. It behaves like `Threads.@spawn`, and additionally guarantees that the task runs on
+the same device as the spawning task, that its kernels run after everything the spawning
+task had already queued, and that once `wait(task)` or `fetch(task)` returns, its results
+are ready to use:
 
 ```julia
-function cooperative_wait(task::Task)
-    while !Base.istaskdone(task)
-        yield()
-    end
-    return wait(task)
-end
-
 function exchange_and_compute!(backend, A, B)
-    recv = Threads.@spawn begin
+    recv = KernelAbstractions.@spawn backend begin
         mul2_kernel(backend, 64)(A, ndrange=length(A))
-        synchronize(backend)  # cooperative on GPU backends
     end
-    send = Threads.@spawn begin
+    send = KernelAbstractions.@spawn backend begin
         mul2_kernel(backend, 64)(B, ndrange=length(B))
-        synchronize(backend)
     end
-    cooperative_wait(recv)
-    cooperative_wait(send)
+    wait(recv)
+    wait(send)
 end
 ```
+
+Waiting on a backend, whether with [`synchronize`](@ref) or at the end of a spawned task,
+yields to the Julia scheduler, so other tasks keep making progress while a kernel runs.
+
+### Which device a task runs on
+
+Backends keep the active device in task-local state, and Julia does not copy that state into
+a child task. A task started with plain `Threads.@spawn` therefore runs on the backend's
+*default* device, whichever device the spawning task was using — a silent surprise if the
+arrays it captured live elsewhere. `KernelAbstractions.@spawn` selects the device explicitly:
+by default the one active in the spawning task, or the one named by `device`, a 1-based index
+into `1:ndevices(backend)`:
+
+```julia
+function compute_on_both!(backend, A, B)
+    here = KernelAbstractions.@spawn backend begin
+        mul2_kernel(backend, 64)(A, ndrange=length(A))
+    end
+    there = KernelAbstractions.@spawn backend device=2 begin
+        mul2_kernel(backend, 64)(B, ndrange=length(B))
+    end
+    wait(here)
+    wait(there)
+end
+```
+
+The ordering guarantee holds across the switch: the second task's work on device 2 is still
+ordered after what the spawning task had queued on its own device.
+
+Prefer `device=` over calling [`device!`](@ref KernelAbstractions.device!) inside the body.
+`device!` is not a synchronization point — work queued after it is ordered neither against
+the spawning task nor against what the body queued before the switch. If you do switch by
+hand, order it with [`record_event`](@ref KernelAbstractions.record_event) and
+[`wait_event`](@ref KernelAbstractions.wait_event), which apply to the device that is active
+when each is called:
+
+```julia
+event = KernelAbstractions.record_event(backend)   # captures work on the current device
+KernelAbstractions.device!(backend, 2)
+KernelAbstractions.wait_event(backend, event)      # device 2 waits for that work
+```
+
+A plain [`synchronize`](@ref) before the `device!` works too, at the cost of blocking the
+task until the first device is idle.
 
 A full MPI example that overlaps communication with device copies is in
 [`examples/mpi.jl`](https://github.com/JuliaGPU/KernelAbstractions.jl/blob/master/examples/mpi.jl).
