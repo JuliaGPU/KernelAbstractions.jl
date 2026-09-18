@@ -147,6 +147,7 @@ function quality_assurance_testsuite()
             KernelAbstractions;
             stale_deps = (; ignore = [:Enzyme, :EnzymeCore]),
             deps_compat = (; ignore = [:Enzyme, :EnzymeCore]),
+            persistent_tasks = (; broken = Sys.islinux()),
         )
     end
 
