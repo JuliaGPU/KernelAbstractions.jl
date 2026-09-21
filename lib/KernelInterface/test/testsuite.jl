@@ -27,10 +27,15 @@ end
 
 
 include("interface.jl")
+include("events.jl")
 
 function testsuite(backend, backend_str, backend_mod, AT, DAT; skip_tests = Set{String}())
     @conditional_testset "Interface" skip_tests begin
         interface_testsuite(backend, AT)
+    end
+
+    @conditional_testset "Events" skip_tests begin
+        events_testsuite(backend)
     end
 
     return
