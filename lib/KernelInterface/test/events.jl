@@ -3,14 +3,15 @@
 # it is replayed here by hand with `Threads.@spawn`: record in the spawning task, then
 # `device!`, `wait_event` and `synchronize` in the child task.
 
-# Burns a fixed amount of work per work-item before writing `v`. The accumulator is a
-# linear congruential step, which the compiler cannot fold away, and it feeds into the
-# store so the loop cannot be dropped.
-function slow_fill_kernel(A, v, ::Val{iters}) where {iters}
+# Burns `iters` dependent steps per work-item before writing `v`. The accumulator is
+# a linear congruential step, which the compiler cannot fold away, and it feeds into
+# the store so the loop cannot be dropped. `iters` is a run-time argument so the
+# duration can be tuned below without recompiling.
+function slow_fill_kernel(A, v, iters::UInt32)
     i = KI.get_global_id().x
     acc = UInt32(i)
-    for k in UInt32(1):UInt32(iters)
-        acc = acc * 0x0019660d + k
+    for k in UInt32(1):iters
+        acc = acc * 0x19660d + k
     end
     if i <= length(A)
         @inbounds A[i] = ifelse(acc == 0x12345678, -v, v)
@@ -22,26 +23,28 @@ function events_testsuite(backend)
     b = backend()
     dev = KI.device(b)
 
-    # Few work-items and many dependent iterations: tens of milliseconds on a GPU,
-    # and still well under a second per launch on a CPU-backed queue.
     N = 64
-    iters = Val(2^22)
-    slow_fill(A, v) = KI.@kernel b numworkgroups = 1 workgroupsize = N slow_fill_kernel(A, v, iters)
-
-    # Time a launch, after a warm-up that absorbs compilation, and queue enough of
-    # them back to back to keep the spawner's queue busy for a couple hundred
-    # milliseconds. The minimum of a few runs discards one-off stalls such as a GC
-    # pause, which would otherwise inflate the launch count.
     A = KI.zeros(b, Float32, N)
-    slow_fill(A, 1.0f0)
-    KI.synchronize(b)
-    slow_time = minimum(1:3) do _
-        @elapsed begin
-            slow_fill(A, 1.0f0)
-            KI.synchronize(b)
+    slow_fill(v, iters) = KI.@kernel b numworkgroups = 1 workgroupsize = N slow_fill_kernel(A, v, UInt32(iters))
+
+    # Time a launch as the minimum of a few runs: a backend's `synchronize` may run a
+    # GC or otherwise stall once in a while, and the minimum discards that.
+    function time_launch(iters)
+        return minimum(1:3) do _
+            @elapsed begin
+                slow_fill(1.0f0, iters)
+                KI.synchronize(b)
+            end
         end
     end
-    launches = clamp(ceil(Int, 0.2 / slow_time), 4, 64)
+
+    # Tune the kernel to about 10ms per launch, after a warm-up that absorbs
+    # compilation, and queue enough launches for a couple hundred milliseconds.
+    base = 2^20
+    time_launch(base)
+    iters = clamp(round(Int, base * 0.01 / time_launch(base)), base, 2^30)
+    launches = 20
+    expected = launches * time_launch(iters)
 
     @testset "ordered across tasks" begin
         # The child queues nothing but the wait, so its `synchronize` can only return
@@ -52,8 +55,12 @@ function events_testsuite(backend)
         # default full `synchronize` passes just the same. The data check alone would
         # not do: drivers that track hazards between command buffers (Metal, for its
         # default buffers) order the readback after the fills without any wait.
+        #
+        # Collect beforehand so that a GC pause is unlikely to land inside the
+        # measurement and mask a missing wait.
+        GC.gc()
         for v in 1:launches
-            slow_fill(A, Float32(v))
+            slow_fill(Float32(v), iters)
         end
         start = time_ns()
         ev = KI.record_event(b)
@@ -67,11 +74,9 @@ function events_testsuite(backend)
         end
         elapsed, result = fetch(task)
         KI.synchronize(b)
-        drained = (time_ns() - start) / 1.0e9
-        # Compare against the drain time of this very run rather than the calibration,
-        # so a stall during calibration cannot fail a correct backend. Half of it
-        # leaves room for a GC pause in the spawner's final `synchronize`.
-        @test elapsed >= drained / 2
+        # A third of the calibrated drain time leaves room for the device clocking up
+        # between calibration and this run; a missing wait is far below that.
+        @test elapsed >= expected / 3
         @test all(==(Float32(launches)), result)
     end
 
@@ -82,7 +87,7 @@ function events_testsuite(backend)
             # ordering itself is not observable without peer access; check that the
             # wait is accepted and that work on the other device still runs.
             other = mod1(dev + 1, KI.ndevices(b))
-            slow_fill(A, 1.0f0)
+            slow_fill(1.0f0, iters)
             ev = KI.record_event(b)
             task = Threads.@spawn begin
                 KI.device!(b, other)
