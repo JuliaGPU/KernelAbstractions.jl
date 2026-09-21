@@ -140,9 +140,8 @@ with other asynchronous host work, or with each other.
 Backends may give each Julia task its own queue, so kernels launched from different tasks
 can run concurrently, but are not ordered with respect to each other. Use
 [`KernelAbstractions.@spawn`](@ref) in place of `Threads.@spawn` to launch kernels from a
-task. It behaves like `Threads.@spawn`, and additionally guarantees that the task runs on
-the same device as the spawning task, that its kernels run after everything the spawning
-task had already queued, and that once `wait(task)` or `fetch(task)` returns, its results
+task. It behaves like `Threads.@spawn`, and additionally guarantee that kernels run after everything the spawning
+task had already queued, and that once `wait(task)` or `fetch(task)` returns, the kernel results
 are ready to use:
 
 ```julia
@@ -163,10 +162,8 @@ yields to the Julia scheduler, so other tasks keep making progress while a kerne
 
 ### Which device a task runs on
 
-Backends keep the active device in task-local state, and Julia does not copy that state into
-a child task. A task started with plain `Threads.@spawn` therefore runs on the backend's
-*default* device, whichever device the spawning task was using — a silent surprise if the
-arrays it captured live elsewhere. `KernelAbstractions.@spawn` selects the device explicitly:
+A task started with plain `Threads.@spawn` runs on an implementation defined device for chosen backend.
+`KernelAbstractions.@spawn` selects the device explicitly:
 by default the one active in the spawning task, or the one named by `device`, a 1-based index
 into `1:ndevices(backend)`:
 

@@ -41,15 +41,14 @@ which backends can support with two optional functions:
 
 A new Julia task does not inherit the device of the task that spawned it: backends keep the
 active device in task-local state, which Julia does not copy into a child task, so the task
-starts on the backend's default device. Backends with more than one device therefore
+Backends with more than one device
 **must** implement the device interface ([`device`](@ref KernelAbstractions.device),
 [`ndevices`](@ref KernelAbstractions.ndevices), [`device!`](@ref KernelAbstractions.device!))
 for `@spawn` to run on the right device.
 
 `@spawn backend device=id` records the event on the spawning task's device but waits on
 `id`, so a multi-device backend **must** accept an event recorded on a device other than the
-one active in `wait_event`. CUDA expresses this dependency in the driver
-(`cuStreamWaitEvent` works across devices); a backend whose driver cannot **must** fall back
+one active in `wait_event`. A backend whose driver cannot **must** fall back
 to waiting cooperatively, as [`synchronize`](@ref) does.
 
 Because `device!` selects the queue that `wait_event` acts on, the same two functions are
