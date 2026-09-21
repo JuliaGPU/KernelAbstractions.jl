@@ -11,7 +11,7 @@ function slow_fill_kernel(A, v, iters::UInt32)
     i = KI.get_global_id().x
     acc = UInt32(i)
     for k in UInt32(1):iters
-        acc = acc * 0x19660d + k
+        acc = acc * 0x0019660d + k
     end
     if i <= length(A)
         @inbounds A[i] = ifelse(acc == 0x12345678, -v, v)
