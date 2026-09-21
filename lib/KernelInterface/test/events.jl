@@ -28,22 +28,26 @@ function events_testsuite(backend)
     iters = Val(2^22)
     slow_fill(A, v) = KI.@kernel b numworkgroups = 1 workgroupsize = N slow_fill_kernel(A, v, iters)
 
-    # Time one launch, after a warm-up that absorbs compilation, and queue enough of
-    # them back to back to keep the spawner's queue busy for about 100ms.
+    # Time a launch, after a warm-up that absorbs compilation, and queue enough of
+    # them back to back to keep the spawner's queue busy for a couple hundred
+    # milliseconds. The minimum of a few runs discards one-off stalls such as a GC
+    # pause, which would otherwise inflate the launch count.
     A = KI.zeros(b, Float32, N)
     slow_fill(A, 1.0f0)
     KI.synchronize(b)
-    slow_time = @elapsed begin
-        slow_fill(A, 1.0f0)
-        KI.synchronize(b)
+    slow_time = minimum(1:3) do _
+        @elapsed begin
+            slow_fill(A, 1.0f0)
+            KI.synchronize(b)
+        end
     end
-    launches = clamp(ceil(Int, 0.1 / slow_time), 4, 64)
+    launches = clamp(ceil(Int, 0.2 / slow_time), 4, 64)
 
     @testset "ordered across tasks" begin
         # The child queues nothing but the wait, so its `synchronize` can only return
         # once the spawner's queued work has drained. A backend that forgets
         # `wait_event` for its event type fails with a MethodError here, and a
-        # `wait_event` that does nothing returns in about a millisecond. The clock
+        # `wait_event` that does nothing returns in a few milliseconds. The clock
         # starts before `record_event`, so a backend whose `record_event` is the
         # default full `synchronize` passes just the same. The data check alone would
         # not do: drivers that track hazards between command buffers (Metal, for its
@@ -62,11 +66,13 @@ function events_testsuite(backend)
             elapsed, Array(A)
         end
         elapsed, result = fetch(task)
-        # Half the expected drain time leaves room for GPU clock ramp-up between the
-        # calibration launch and these.
-        @test elapsed >= launches * slow_time / 2
-        @test all(==(Float32(launches)), result)
         KI.synchronize(b)
+        drained = (time_ns() - start) / 1.0e9
+        # Compare against the drain time of this very run rather than the calibration,
+        # so a stall during calibration cannot fail a correct backend. Half of it
+        # leaves room for a GC pause in the spawner's final `synchronize`.
+        @test elapsed >= drained / 2
+        @test all(==(Float32(launches)), result)
     end
 
     if KI.ndevices(b) > 1
