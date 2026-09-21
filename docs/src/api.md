@@ -55,6 +55,9 @@ KernelAbstractions.supports_float64
 
 ```@docs
 synchronize
+KernelAbstractions.@spawn
+KernelAbstractions.record_event
+KernelAbstractions.wait_event
 KernelAbstractions.device
 KernelAbstractions.ndevices
 KernelAbstractions.device!

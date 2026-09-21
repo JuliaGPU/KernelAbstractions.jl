@@ -144,6 +144,8 @@ unsafe_free!
 
 ```@docs; canonical=false
 synchronize
+record_event
+wait_event
 priority!
 ```
 
