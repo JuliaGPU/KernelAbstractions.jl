@@ -1,28 +1,67 @@
-@kernel function spawn_mul2_kernel(A)
-    I = @index(Global)
-    @inbounds A[I] = 2 * A[I]
-end
-
 @kernel function spawn_fill_kernel(A, v)
     I = @index(Global)
     @inbounds A[I] = v
+end
+
+# A single work item runs `n` dependent multiply-adds before writing, so one launch
+# keeps the queue busy for tens of milliseconds. The chain converges to exactly `2v`.
+@kernel function spawn_slow_fill_kernel(A, v, n)
+    I = @index(Global)
+    x = zero(v)
+    for _ in 1:n
+        x = muladd(x, 0.5f0, v)
+    end
+    @inbounds A[I] = x
+end
+
+# The spawned task queues nothing itself, so `wait(task)` can only take as long as the
+# parent's queued work if `wait_event` ordered the new queue after it.
+function spawn_ordered_elapsed(backend, A, slow, n)
+    t = @elapsed begin
+        slow(A, 1.5f0, n, ndrange = 1)   # queued, not synchronized
+        wait(KernelAbstractions.@spawn backend nothing)
+    end
+    KernelAbstractions.synchronize(backend)   # do not let a still-running kernel skew the next run
+    return t
 end
 
 function spawn_testsuite(Backend, AT)
     backend = Backend()
 
     @testset "ordered after the spawning task" begin
-        A = KernelAbstractions.ones(backend, Float32, 1024)
-        mul2 = spawn_mul2_kernel(backend, 64)
-        mul2(A, ndrange = length(A))   # queued by this task, not synchronized
-        task = KernelAbstractions.@spawn backend begin
-            mul2(A, ndrange = length(A))
-            mul2(A, ndrange = length(A))
-            :done
+        # Sharing data between the tasks would not do: backends that track which queue
+        # owns an array (CUDA) or which command buffers touch a buffer (Metal) order the
+        # accesses themselves, with or without `wait_event`. Observe the ordering through
+        # time instead.
+        A = KernelAbstractions.zeros(backend, Float32, 1)
+        slow = spawn_slow_fill_kernel(backend, 1)
+        # Reference: the minimum of a few launches, so a stall or a device still clocking
+        # up does not inflate it. The chain grows until the kernel takes a few
+        # milliseconds, so that it stands well clear of the spawn overhead on any device.
+        function time_slow(n)
+            slow(A, 1.5f0, n, ndrange = 1)   # compile up front
+            KernelAbstractions.synchronize(backend)
+            return minimum(1:3) do _
+                @elapsed begin
+                    slow(A, 1.5f0, n, ndrange = 1)
+                    KernelAbstractions.synchronize(backend)
+                end
+            end
         end
-        @test task isa Task
-        @test fetch(task) === :done
-        @test all(==(8.0f0), Array(A))
+        n = 2^24
+        t_slow = time_slow(n)
+        while t_slow < 0.005 && n < 2^32
+            n *= 4
+            t_slow = time_slow(n)
+        end
+        @test t_slow > 0.005
+        @test all(==(3.0f0), Array(A))
+
+        # The first round-trip also pays for compiling the task body, so it is not
+        # telling: warm up once, then measure. Without the wait the warmed round-trip is
+        # well under a millisecond.
+        spawn_ordered_elapsed(backend, A, slow, n)
+        @test spawn_ordered_elapsed(backend, A, slow, n) >= t_slow / 2
     end
 
     @testset "results visible after wait" begin
