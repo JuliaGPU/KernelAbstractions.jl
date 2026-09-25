@@ -78,6 +78,12 @@ function __kernel(expr, generate_cpu = true, force_inbounds = false, unsafe_indi
     end
 end
 
+# Julia 1.11 and later miscompile code placed inside an `aliasscope`, even when the
+# kernel makes no use of `@Const`, so the markers are only emitted on older versions.
+# See https://github.com/JuliaGPU/KernelAbstractions.jl/issues/652
+# and https://github.com/JuliaLang/julia/issues/63129
+const EMIT_ALIASSCOPE = VERSION < v"1.11-"
+
 # The easy case, transform the function for GPU execution
 # - mark constant arguments by applying `constify`.
 function transform_gpu!(def, constargs, force_inbounds, unsafe_indices)
@@ -91,10 +97,8 @@ function transform_gpu!(def, constargs, force_inbounds, unsafe_indices)
     pushfirst!(def[:args], :__ctx__)
     new_stmts = Expr[]
     body = MacroTools.flatten(def[:body])
-    # On 1.11 and later having this aliasscope causes issues
-    # even with kernels that don't use `@Const` on arguments
-    # See https://github.com/JuliaGPU/KernelAbstractions.jl/issues/652
-    has_constargs && push!(new_stmts, Expr(:aliasscope))
+    emit_aliasscope = has_constargs && EMIT_ALIASSCOPE
+    emit_aliasscope && push!(new_stmts, Expr(:aliasscope))
     if !unsafe_indices
         push!(new_stmts, :(__active_lane__ = $__validindex(__ctx__)))
     end
@@ -109,7 +113,7 @@ function transform_gpu!(def, constargs, force_inbounds, unsafe_indices)
     if force_inbounds
         push!(new_stmts, Expr(:inbounds, :pop))
     end
-    has_constargs && push!(new_stmts, Expr(:popaliasscope))
+    emit_aliasscope && push!(new_stmts, Expr(:popaliasscope))
     push!(new_stmts, :(return nothing))
     def[:body] = Expr(
         :let,
@@ -137,10 +141,8 @@ function transform_cpu!(def, constargs, force_inbounds)
     pushfirst!(def[:args], :__ctx__)
     new_stmts = Expr[]
     body = MacroTools.flatten(def[:body])
-    # On 1.11 and later having this aliasscope causes issues
-    # even with kernels that don't use `@Const` on arguments
-    # See https://github.com/JuliaGPU/KernelAbstractions.jl/issues/652
-    has_constargs && push!(new_stmts, Expr(:aliasscope))
+    emit_aliasscope = has_constargs && EMIT_ALIASSCOPE
+    emit_aliasscope && push!(new_stmts, Expr(:aliasscope))
     if force_inbounds
         push!(new_stmts, Expr(:inbounds, true))
     end
@@ -148,7 +150,7 @@ function transform_cpu!(def, constargs, force_inbounds)
     if force_inbounds
         push!(new_stmts, Expr(:inbounds, :pop))
     end
-    has_constargs && push!(new_stmts, Expr(:popaliasscope))
+    emit_aliasscope && push!(new_stmts, Expr(:popaliasscope))
     push!(new_stmts, :(return nothing))
     def[:body] = Expr(
         :let,
