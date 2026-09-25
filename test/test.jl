@@ -313,6 +313,25 @@ function unittest_testsuite(Backend, backend_str, backend_mod, BackendArrayT; sk
         constarg2d(Backend(), (8, 8))(A, B, ndrange = size(A))
         synchronize(Backend())
         @test all(Array(A) .== 1.0f0)
+
+        # wrapped arrays are rebuilt around the constified array inside the kernel
+        host = Float32.(reshape(1:25, 5, 5))
+        dev = adapt(Backend(), host)
+        for (B, ref) in (
+                (vec(view(dev, 1:4, 1:4)), vec(view(host, 1:4, 1:4))),
+                (reshape(view(dev, 1:4, 1:4), 2, 8), reshape(view(host, 1:4, 1:4), 2, 8)),
+                (reshape(view(dev, :, 2:3), 2, 5), reshape(view(host, :, 2:3), 2, 5)),
+                (PermutedDimsArray(dev, (2, 1)), PermutedDimsArray(host, (2, 1))),
+            )
+            A = KernelAbstractions.zeros(Backend(), Float32, size(B))
+            if ndims(B) == 1
+                constarg(Backend(), 8)(A, B, ndrange = size(A))
+            else
+                constarg2d(Backend(), (4, 4))(A, B, ndrange = size(A))
+            end
+            synchronize(Backend())
+            @test Array(A) == ref
+        end
     end
 
     @kernel function kernel_val!(a, ::Val{m}) where {m}
