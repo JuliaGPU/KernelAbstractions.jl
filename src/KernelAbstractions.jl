@@ -463,6 +463,17 @@ Adapt.adapt_storage(::ConstAdaptor, a::Array) = Base.Experimental.Const(a)
 
 constify(arg) = adapt(ConstAdaptor(), arg)
 
+# `constify` runs inside the kernel, where wrappers must be rebuilt without re-validating
+# them: Adapt.jl's rules for these wrappers go through constructors whose error paths build
+# strings, which does not compile for GPUs. Adapting only replaces the parent array, so the
+# existing fields remain valid.
+Adapt.adapt_structure(to::ConstAdaptor, A::Base.ReshapedArray) =
+    Base.ReshapedArray(adapt(to, parent(A)), size(A), A.mi)
+@eval function Adapt.adapt_structure(to::ConstAdaptor, A::PermutedDimsArray{T, N, perm, iperm}) where {T, N, perm, iperm}
+    P = adapt(to, parent(A))
+    return $(Expr(:new, :(PermutedDimsArray{eltype(P), N, perm, iperm, typeof(P)}), :P))
+end
+
 ###
 # Backend hierarchy
 ###
