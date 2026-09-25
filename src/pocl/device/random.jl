@@ -270,7 +270,10 @@ end
     return T(invoke(Random.randexp, AbstractFloatFallback, rng, Float32))
 end
 
-@device_override Random.Sampler(
+# NOTE: not a consistent overlay (as SPIRVIntrinsics' `@device_override` may define), as
+#       this returns a different sampler than the host method: concrete evaluation would
+#       otherwise substitute the latter, which our overlaid `rand` methods fail to handle.
+Base.Experimental.@overlay method_table Random.Sampler(
     ::Type{<:AbstractRNG}, r::AbstractUnitRange{T},
     ::Random.Repetition
 ) where {T <: Union{Int64, UInt64}} = Random.SamplerRangeFast(r)
