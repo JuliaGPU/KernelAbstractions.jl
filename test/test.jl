@@ -203,8 +203,12 @@ function unittest_testsuite(Backend, backend_str, backend_mod, BackendArrayT; sk
                 end
             end
             if backend_str == "CPU"
-                @test occursin("!alias.scope", IR)
-                @test occursin("!noalias", IR)
+                if KernelAbstractions.EMIT_ALIASSCOPE
+                    @test occursin("!alias.scope", IR)
+                    @test occursin("!noalias", IR)
+                else
+                    @test_skip false
+                end
             elseif backend_str == "CUDA"
                 if Base.libllvm_version >= v"20"
                     @test occursin("addrspace(1)", IR)
