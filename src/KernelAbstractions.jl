@@ -76,7 +76,7 @@ end
 """
     @kernel config function f(args) end
 
-This allows for two different configurations:
+This allows for the following configurations:
 
 1. `cpu={true, false}`: Disables code-generation of the CPU function. This relaxes semantics such that KernelAbstractions primitives can be used in non-kernel functions.
 2. `inbounds={false, true}`: Enables a forced `@inbounds` macro around the function definition in the case the user is using too many `@inbounds` already in their kernel. Note that this can lead to incorrect results, crashes, etc and is fundamentally unsafe. Be careful!
@@ -84,6 +84,12 @@ This allows for two different configurations:
 4. `generated={false, true}`: Turns the kernel into a [generated function](https://docs.julialang.org/en/v1/manual/metaprogramming/#Generated-functions).
    The kernel body is treated as a quoted expression, so `\$` interpolation is available and
    `where`-parameters are bound to their values, e.g. to unroll a loop `\$N` times with `@unroll \$N for ...`.
+   This is meant for macros that need a literal, such as `@unroll \$N`, `Base.Cartesian.@nexprs \$N`
+   or `@ntuple \$N`; plain `where`-parameters are compile-time constants in every kernel already.
+   Configuration parameters must therefore be passed as types (`::Val{N}`) to be usable inside `\$`.
+   Inside `\$(...)` the argument names refer to the *types* of the arguments, not their values,
+   as in any generated function, and the body cannot contain closures, comprehensions or
+   generators (`x -> ...`, `do` blocks, `[f(i) for i in ...]`); use the Cartesian macros above instead.
 
 - [`@context`](@ref)
 
