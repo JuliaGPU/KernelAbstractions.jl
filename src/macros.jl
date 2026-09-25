@@ -25,7 +25,7 @@ function unblock_lines(ex)
 end
 
 # XXX: Proper errors
-function __kernel(expr, __source__::LineNumberNode, force_inbounds = false, unsafe_indices = false)
+function __kernel(expr, __source__::LineNumberNode, __module__::Module, force_inbounds = false, unsafe_indices = false, generated = false)
     def = splitdef(expr)
     name = def[:name]
     args = def[:args]
@@ -46,6 +46,28 @@ function __kernel(expr, __source__::LineNumberNode, force_inbounds = false, unsa
     def_gpu = deepcopy(def)
     def_gpu[:name] = gpu_name = Symbol(:gpu_, name)
     transform_gpu!(def_gpu, constargs, force_inbounds, unsafe_indices)
+    if generated
+        # Turn the kernel into a generated function: the transformed body is
+        # quoted so that it is returned as an expression. Passing the quote
+        # through `macroexpand` (one level only, we do not want to expand the
+        # macros *inside* the quoted body here) lowers the `$` interpolations
+        # into the code that builds the expression at generation time.
+        body = macroexpand(__module__, Expr(:quote, def_gpu[:body]), recursive = false)
+        # Inference swallows any error thrown while generating (the kernel then
+        # merely infers to `Any`, which GPUCompiler reports as "kernel returns a
+        # value of type `Any`" without ever showing the cause), and there is no
+        # common launch path across backends where we could rethrow it. So
+        # catch the error here and hand it back through the return type
+        # instead, where GPUCompiler's validation prints it on every backend.
+        body = quote
+            try
+                $(check_generated)($(__module__), $body)
+            catch err
+                $(generated_error_body)(err)
+            end
+        end
+        def_gpu[:body] = Expr(:if, Expr(:generated), body, Expr(:meta, :generated_only))
+    end
     gpu_function = combinedef(def_gpu)
 
     # create constructor functions
@@ -65,6 +87,63 @@ function __kernel(expr, __source__::LineNumberNode, force_inbounds = false, unsa
 
     return Expr(:block, esc(gpu_function), esc(constructors))
 end
+
+"""
+    GeneratedKernelError{Msg}
+
+Marker type a `generated=true` kernel returns when its generator failed, carrying the
+error message in its type parameter. A kernel that returns this shows up in the
+`KernelError` GPUCompiler raises for kernels that return a value, which is the only
+channel through which a failure at generation time can be reported.
+"""
+struct GeneratedKernelError{Msg} end
+GeneratedKernelError(msg::AbstractString) = GeneratedKernelError{Symbol(msg)}()
+
+function Base.show(io::IO, ::Type{GeneratedKernelError{Msg}}) where {Msg}
+    return print(io, "KernelAbstractions.GeneratedKernelError(", repr(String(Msg)), ")")
+end
+
+# Runs inside the generator: makes sure the generated body is something Julia
+# accepts as the result of a generated function. Julia itself only rejects a
+# closure, comprehension or generator when lowering the body, which happens
+# outside the generator's `try` and thus can't be turned into a useful error
+# there, so check for them up front.
+function check_generated(mod::Module, body)
+    ex = macroexpand(mod, body)
+    MacroTools.postwalk(ex) do node
+        if isexpr(node, :->) || isexpr(node, :function) || isexpr(node, :do) ||
+                isexpr(node, :comprehension) || isexpr(node, :generator) ||
+                isexpr(node, :flatten) || (isexpr(node, :(=)) && isexpr(node.args[1], :call))
+            found = replace(string(MacroTools.striplines(node)), r"\s+" => " ")
+            error(
+                "the body of a `generated=true` kernel cannot contain a closure, " *
+                    "comprehension or generator (found `", found, "`). " *
+                    "Use `Base.Cartesian.@nexprs \$N` or `@ntuple \$N` instead.",
+            )
+        end
+        return node
+    end
+    return body
+end
+
+# Runs inside the generator, so it must not use code reflection: `showerror` for a
+# `MethodError` looks up candidate methods, which is forbidden there, so format
+# that one by hand and fall back to the bare exception type for anything else
+# that can't be shown.
+function generated_error_message(err)
+    if err isa MethodError
+        sig = join((a isa Type ? "::Type{$a}" : "::$(typeof(a))" for a in err.args), ", ")
+        return string("MethodError: no method matching ", err.f, "(", sig, ")")
+    end
+    msg = try
+        sprint(showerror, err)
+    catch
+        string(typeof(err))
+    end
+    return first(Base.split(msg, '\n'))
+end
+
+generated_error_body(err) = :(return $(GeneratedKernelError(generated_error_message(err))))
 
 # The easy case, transform the function for GPU execution
 # - mark constant arguments by applying `constify`.
