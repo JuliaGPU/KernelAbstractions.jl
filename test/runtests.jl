@@ -123,6 +123,19 @@ end
     @test all(==(2.0f0), A)
 end
 
+# not part of the shared testsuite: not every back-end supports bits-union arrays
+@testset "POCL zeros/ones of bits-union types" begin
+    for T in (Union{Missing, Bool}, Union{Missing, Int32})
+        Z = KernelAbstractions.zeros(POCLBackend(), T, 3)
+        @test eltype(Z) == T
+        @test all(x -> !ismissing(x) && iszero(x), Z)
+
+        O = KernelAbstractions.ones(POCLBackend(), T, 3)
+        @test eltype(O) == T
+        @test all(x -> !ismissing(x) && isone(x), O)
+    end
+end
+
 @testset "CPU back-end" begin
     Testsuite.testsuite(CPU, "CPU", POCL, Array, POCL.CLDeviceArray)
 end
