@@ -1,3 +1,7 @@
+# Tests of the KernelAbstractions-related parts of the GPU back-ends. Draft pull requests skip
+# them, unless selected by name in the last commit message: `[only cuda]`, `[only metal, oneapi]`
+# or `[only tests]` for all of them. `[skip amdgpu]` or `[skip tests]` does the opposite.
+# (`opencl` selects the OpenCL.jl tests on CUDA hardware.)
 steps:
   - label: "CUDA Julia {{matrix.version}}"
     matrix:
@@ -29,6 +33,10 @@ steps:
                 Pkg.test("CUDA"; coverage=true, test_args=["core/kernelabstractions", "core/kernelinterface"])'
     agents:
       queue: "cuda"
+    if: |
+      build.message !~ /\[skip [^\]]*(tests|cuda)/ &&
+      (build.message =~ /\[only [^\]]*(tests|cuda)/ ||
+       build.message !~ /\[only / && !build.pull_request.draft)
     timeout_in_minutes: 120
     soft_fail:
       - exit_status: 3
@@ -92,6 +100,10 @@ steps:
                 Pkg.test("Metal"; coverage=true, test_args=["kernelabstractions", "kernelinterface"])'
     agents:
       queue: "metal"
+    if: |
+      build.message !~ /\[skip [^\]]*(tests|metal)/ &&
+      (build.message =~ /\[only [^\]]*(tests|metal)/ ||
+       build.message !~ /\[only / && !build.pull_request.draft)
     timeout_in_minutes: 120
     soft_fail:
       - exit_status: 3
@@ -126,6 +138,10 @@ steps:
                 Pkg.test("oneAPI"; coverage=true, test_args=["kernelabstractions", "kernelinterface"])'
     agents:
       queue: "oneapi"
+    if: |
+      build.message !~ /\[skip [^\]]*(tests|oneapi)/ &&
+      (build.message =~ /\[only [^\]]*(tests|oneapi)/ ||
+       build.message !~ /\[only / && !build.pull_request.draft)
     timeout_in_minutes: 120
     soft_fail:
       - exit_status: 3
@@ -161,6 +177,10 @@ steps:
                 Pkg.test("AMDGPU"; coverage=true, test_args=["kernelabstractions", "kernelinterface"])'
     agents:
       queue: "rocm"
+    if: |
+      build.message !~ /\[skip [^\]]*(tests|amdgpu)/ &&
+      (build.message =~ /\[only [^\]]*(tests|amdgpu)/ ||
+       build.message !~ /\[only / && !build.pull_request.draft)
     timeout_in_minutes: 120
     soft_fail:
       - exit_status: 3
@@ -196,6 +216,10 @@ steps:
                 Pkg.test("OpenCL"; coverage=true, test_args=`--platform=nvidia nvidia/kernelabstractions nvidia/kernelinterface`)'
     agents:
       queue: "cuda"
+    if: |
+      build.message !~ /\[skip [^\]]*(tests|opencl)/ &&
+      (build.message =~ /\[only [^\]]*(tests|opencl)/ ||
+       build.message !~ /\[only / && !build.pull_request.draft)
     timeout_in_minutes: 120
     soft_fail:
       - exit_status: 3
