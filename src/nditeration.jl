@@ -141,6 +141,24 @@ Encodes a blocked iteration space. The `mapping` field relates blocked indices t
 `ndrange` indices: `nothing` for the identity, or a [`StaticOffset`](@ref)/[`DynamicOffset`](@ref)
 for an `ndrange` whose indices do not start at 1.
 
+# Custom mappings
+
+A package can iterate over a space of its own, for example a list of indices, by launching a
+kernel with an `ndrange` object of its own type and defining:
+
+- [`partition(kernel, ndrange, workgroupsize)`](@ref KernelAbstractions.partition) for that
+  type, returning an `NDRange` whose `mapping` describes the space, and whether the last
+  workgroup needs bounds-checking;
+- [`cartesian(ndrange)`](@ref KernelAbstractions.cartesian) for that type, returning the
+  object stored as `ndrange` of the kernel context, which supports `Base.in` for a
+  `CartesianIndex` and [`linear_index`](@ref);
+- [`expand`](@ref) for an `NDRange` with that mapping and `groupidx`, `idx` given as
+  `Integer` or `CartesianIndex`, returning the index handled by a work item, or an index that
+  is not `in` the `ndrange` object for a work item without one.
+
+Backends check the validity of a work item as `expand(iterspace, groupidx, idx) in ndrange`,
+so nothing else is needed for the kernel to see the mapped index through `@index`.
+
 # Example
 ```
 ndrange = NDRange{2, DynamicSize, DynamicSize}(CartesianIndices((256, 256)), CartesianIndices((32, 32)))
@@ -193,6 +211,13 @@ import Base.iterate
 
 Base.length(range::NDRange) = length(blocks(range))
 
+"""
+    expand(ndrange::NDRange, groupidx, idx)
+
+Index of the `ndrange` handled by work item `idx` of workgroup `groupidx`, both given as a
+`CartesianIndex` or as a linear position in the blocked iteration space. The result follows
+the `mapping` of the `ndrange`.
+"""
 @inline function expand(ndrange::NDRange{N}, groupidx::CartesianIndex{N}, idx::CartesianIndex{N}) where {N}
     offset = offsets(ndrange)
     nI = ntuple(Val(N)) do I

@@ -16,7 +16,14 @@ struct CompilerMetadata{StaticNDRange, CheckBounds, I, NDRange, Iterspace}
     end
 end
 
-# `CartesianIndices` covering a launch `ndrange` (any form accepted by `partition`).
+"""
+    cartesian(ndrange)
+
+The object stored as `ndrange` of a kernel context for a launch `ndrange` in any form accepted
+by [`partition`](@ref): `CartesianIndices` covering the range, or `nothing` for a static one.
+Specialize it together with `partition` for an iteration space of your own, returning an object
+that supports `Base.in` for a `CartesianIndex` and [`linear_index`](@ref KernelAbstractions.NDIteration.linear_index).
+"""
 cartesian(::Nothing) = nothing
 cartesian(ci::CartesianIndices) = ci
 cartesian(n::Integer) = CartesianIndices((Int(n),))

@@ -524,6 +524,9 @@ Partition the iteration space of `kernel` into workgroups.
 
 Returns the blocked iteration space and whether dynamic bounds-checking is required for the
 last (possibly partial) workgroup. Primarily used by backend implementations and tests.
+
+Specialize on the type of `ndrange` to launch kernels over an iteration space of your own,
+see [`NDRange`](@ref KernelAbstractions.NDIteration.NDRange).
 """
 @inline function partition(kernel, ndrange, workgroupsize)
     static_ndrange = KernelAbstractions.ndrange(kernel)

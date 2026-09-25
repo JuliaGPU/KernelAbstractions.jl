@@ -75,3 +75,25 @@ to the backend's array type, so that `adapt(backend, x)` and
 Adapt.adapt_storage(::CUDABackend, x) = adapt(CuArray, x)
 ```
 
+## Iteration spaces and the validity of work items
+
+The context a backend passes to a kernel carries the blocked iteration space,
+[`__iterspace(ctx)`](@ref KernelAbstractions.NDIteration.NDRange), and the
+`ndrange` of the launch, `__ndrange(ctx)`. A backend must derive everything
+about a work item from these two objects through three functions:
+
+- [`expand(iterspace, groupidx, idx)`](@ref KernelAbstractions.NDIteration.expand)
+  gives the `CartesianIndex` handled by work item `idx` of workgroup `groupidx`;
+- `expand(iterspace, groupidx, idx) in __ndrange(ctx)` tells whether that work
+  item has an index to handle, which is how `__validindex` must be implemented;
+- [`linear_index(__ndrange(ctx), I)`](@ref KernelAbstractions.NDIteration.linear_index)
+  gives the linear index of `I`.
+
+A backend must not assume that `__ndrange(ctx)` is a `CartesianIndices` or that
+`expand` is an affine map: the `mapping` field of the `NDRange` lets a package
+define its own iteration space, for example a list of indices to visit, by
+extending these functions for its mapping type. Overriding `__validindex` or
+`__index_Global_Linear` for a generic `ctx` would bypass such an extension.
+See [`NDRange`](@ref KernelAbstractions.NDIteration.NDRange) for the functions
+a custom mapping has to define.
+
