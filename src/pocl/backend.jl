@@ -87,31 +87,13 @@ Adapt.adapt_storage(::POCLBackend, x::AbstractArray) = isbits(x) ? x : Adapt.ada
 Adapt.adapt_storage(::KA.ConstAdaptor, a::POCL.CLDeviceArray) = Base.Experimental.Const(a)
 
 
-# Initialized
-
-KA.@kernel function init_kernel(arr, f::F, ::Type{T}) where {F, T}
-    I = KA.@index(Global)
-    @inbounds arr[I] = f(T)
-end
+# Copying
 
 KA.@kernel function copy_kernel(A, @Const(B))
     I = KA.@index(Global)
     @inbounds A[I] = B[I]
 end
 
-
-function KI.zeros(backend::POCLBackend, ::Type{T}, dims::Tuple; kwargs...) where {T}
-    arr = KI.allocate(backend, T, dims; kwargs...)
-    kernel = init_kernel(backend)
-    kernel(arr, zero, T, ndrange = length(arr))
-    return arr
-end
-function KI.ones(backend::POCLBackend, ::Type{T}, dims::Tuple; kwargs...) where {T}
-    arr = KI.allocate(backend, T, dims; kwargs...)
-    kernel = init_kernel(backend)
-    kernel(arr, one, T; ndrange = length(arr))
-    return arr
-end
 
 function KI.copyto!(backend::POCLBackend, A, B)
     if KI.get_backend(A) == KI.get_backend(B) && KI.get_backend(A) isa POCLBackend
