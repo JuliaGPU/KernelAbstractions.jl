@@ -118,11 +118,23 @@ Adapt.adapt_structure(to::KernelAdaptor, r::Base.RefValue{<:Union{DataType, Type
     CLRefType{r[]}()
 
 # case where type is the function being broadcasted
+# (on Julia 1.14, the function type parameter is `Core.TypeEgal{T} <: Type{T}`)
 Adapt.adapt_structure(
     to::KernelAdaptor,
-    bc::Broadcast.Broadcasted{Style, <:Any, Type{T}}
+    bc::Broadcast.Broadcasted{Style, <:Any, <:Type{T}}
 ) where {Style, T} =
     Broadcast.Broadcasted{Style}((x...) -> T(x...), adapt(to, bc.args), bc.axes)
+
+# functions that capture a type, e.g., `Base.Fix1(convert, T)` as used by LinearAlgebra,
+# which isn't a valid kernel argument either
+function Adapt.adapt_structure(to::KernelAdaptor, f::Base.Fix1{<:Any, <:Type{T}}) where {T}
+    g = adapt(to, f.f)
+    return (x...) -> g(T, x...)
+end
+function Adapt.adapt_structure(to::KernelAdaptor, f::Base.Fix2{<:Any, <:Type{T}}) where {T}
+    g = adapt(to, f.f)
+    return (x...) -> g(x..., T)
+end
 
 """
     clconvert(x, [pointers])
