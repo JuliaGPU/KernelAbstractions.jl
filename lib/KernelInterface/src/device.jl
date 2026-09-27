@@ -11,7 +11,7 @@ Return the number of global work-items specified as a tuple of type `T`.
     ```
     The zero-argument form forwards to `get_global_size(Int)`.
 """
-get_global_size() = get_global_size(Int)
+@inline get_global_size() = get_global_size(Int)
 
 """
     get_global_id([::Type{T}=Int])::@NamedTuple{x::T, y::T, z::T}
@@ -28,7 +28,7 @@ Returns the unique global work-item ID as a tuple of type `T`. `T` defaults to `
     ```
     The zero-argument form forwards to `get_global_id(Int)`.
 """
-get_global_id() = get_global_id(Int)
+@inline get_global_id() = get_global_id(Int)
 
 """
     get_local_size([::Type{T}=Int])::@NamedTuple{x::T, y::T, z::T}
@@ -43,7 +43,7 @@ Return the number of local work-items specified as a tuple of type `T`.
     ```
     The zero-argument form forwards to `get_local_size(Int)`.
 """
-get_local_size() = get_local_size(Int)
+@inline get_local_size() = get_local_size(Int)
 
 """
     get_local_id([::Type{T}=Int])::@NamedTuple{x::T, y::T, z::T}
@@ -60,7 +60,7 @@ Returns the unique local work-item ID as a tuple of type `T`. `T` defaults to `I
     ```
     The zero-argument form forwards to `get_local_id(Int)`.
 """
-get_local_id() = get_local_id(Int)
+@inline get_local_id() = get_local_id(Int)
 
 """
     get_num_groups([::Type{T}=Int])::@NamedTuple{x::T, y::T, z::T}
@@ -74,7 +74,7 @@ Returns the number of groups as a tuple of type `T`. `T` defaults to `Int`.
     ```
     The zero-argument form forwards to `get_num_groups(Int)`.
 """
-get_num_groups() = get_num_groups(Int)
+@inline get_num_groups() = get_num_groups(Int)
 
 """
     get_group_id([::Type{T}=Int])::@NamedTuple{x::T, y::T, z::T}
@@ -91,7 +91,7 @@ Returns the unique group ID as a tuple of type `T`. `T` defaults to `Int`.
     ```
     The zero-argument form forwards to `get_group_id(Int)`.
 """
-get_group_id() = get_group_id(Int)
+@inline get_group_id() = get_group_id(Int)
 
 """
     get_sub_group_size()::UInt32
