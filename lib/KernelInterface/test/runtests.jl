@@ -219,6 +219,18 @@ end
     @test KI.threads_to_workgroupsize(256, (0, 4)) == (1, 4)
     @test KI.threads_to_workgroupsize(256, (4, 0)) == (4, 1)
     @test KI.threads_to_workgroupsize(0, (5,)) == (1,)
+
+    # Per-dimension limits, as for CUDA's (1024, 1024, 64) blocks.
+    @test KI.threads_to_workgroupsize(1024, (1, 1, 5000), (1024, 1024, 64)) == (1, 1, 64)
+    @test KI.threads_to_workgroupsize(1024, (2000, 3), (512, 1024, 64)) == (512, 2)
+    # dimensions past the limits are only bounded by the thread budget
+    @test KI.threads_to_workgroupsize(64, (1, 1, 1, 100), (1024, 1024, 64)) == (1, 1, 1, 64)
+end
+
+@testset "per-dimension limits" begin
+    # Unlimited unless the backend says otherwise.
+    @test KI.max_work_group_dims(StubBackend()) == (typemax(Int), typemax(Int), typemax(Int))
+    @test KI.max_num_groups(StubBackend()) == (typemax(Int), typemax(Int), typemax(Int))
 end
 
 @testset "Kernel" begin
@@ -236,7 +248,17 @@ function KI.kernel_max_work_group_size(k::KI.Kernel{SizedBackend}; max_work_item
     return min(k.backend.maxThreads, max_work_items)
 end
 
+# ... and a fixed limit per workgroup dimension
+struct DimsBackend <: KI.Backend end
+KI.kernel_max_work_group_size(k::KI.Kernel{DimsBackend}; max_work_items::Int = typemax(Int)) =
+    min(1024, max_work_items)
+KI.max_work_group_dims(::DimsBackend) = (1024, 1024, 64)
+
 @testset "auto_launch_sizes" begin
+    # the per-dimension limit is respected
+    @test KI.auto_launch_sizes(KI.Kernel(DimsBackend(), nothing), (), (), (1, 1, 5000)) ===
+        ((1, 1, 79), (1, 1, 64))
+
     kernel = KI.Kernel(SizedBackend(256), nothing)
 
     # Without an ndrange the sizes pass through, defaulting to 1.

@@ -4,6 +4,8 @@
 Return the number of global work-items specified as a tuple of type `T`.
 `T` defaults to `Int`.
 
+The value is computed in `T`, and is undefined when it does not fit in `T`.
+
 !!! note
     Backend implementations **must** implement:
     ```
@@ -17,6 +19,8 @@ Return the number of global work-items specified as a tuple of type `T`.
     get_global_id([::Type{T}=Int])::@NamedTuple{x::T, y::T, z::T}
 
 Returns the unique global work-item ID as a tuple of type `T`. `T` defaults to `Int`.
+
+The value is computed in `T`, and is undefined when it does not fit in `T`.
 
 !!! note
     1-based.
@@ -36,6 +40,8 @@ Returns the unique global work-item ID as a tuple of type `T`. `T` defaults to `
 Return the number of local work-items specified as a tuple of type `T`.
 `T` defaults to `Int`.
 
+The value is computed in `T`, and is undefined when it does not fit in `T`.
+
 !!! note
     Backend implementations **must** implement:
     ```
@@ -49,6 +55,8 @@ Return the number of local work-items specified as a tuple of type `T`.
     get_local_id([::Type{T}=Int])::@NamedTuple{x::T, y::T, z::T}
 
 Returns the unique local work-item ID as a tuple of type `T`. `T` defaults to `Int`.
+
+The value is computed in `T`, and is undefined when it does not fit in `T`.
 
 !!! note
     1-based.
@@ -67,6 +75,8 @@ Returns the unique local work-item ID as a tuple of type `T`. `T` defaults to `I
 
 Returns the number of groups as a tuple of type `T`. `T` defaults to `Int`.
 
+The value is computed in `T`, and is undefined when it does not fit in `T`.
+
 !!! note
     Backend implementations **must** implement:
     ```
@@ -80,6 +90,8 @@ Returns the number of groups as a tuple of type `T`. `T` defaults to `Int`.
     get_group_id([::Type{T}=Int])::@NamedTuple{x::T, y::T, z::T}
 
 Returns the unique group ID as a tuple of type `T`. `T` defaults to `Int`.
+
+The value is computed in `T`, and is undefined when it does not fit in `T`.
 
 !!! note
     1-based.
