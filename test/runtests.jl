@@ -213,7 +213,7 @@ end
             POCL.POCLKernels.launch_kernel(kernel, l, ndrange, workgroupsize, iterspace, args...)
         end
         @testset "$launch" begin
-            Testsuite.launch_testsuite(CPU, Array; launcher, zerodim = launch !== nothing)
+            Testsuite.launch_testsuite(CPU, Array; launcher)
         end
     end
 end

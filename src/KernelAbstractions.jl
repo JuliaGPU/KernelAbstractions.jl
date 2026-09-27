@@ -390,30 +390,15 @@ end
 ###
 
 # The index functions dispatch on the launch configuration of the context (see
-# `launch.jl`); `nothing` is a 1-D launch, indexed in `Int`.
+# `launch.jl`). A context without one was launched on a 1-D grid, and is indexed in `Int`.
+@inline index_launch(ctx) = something(__launch(ctx), LinearLaunch{Int}())
 
-@inline __index_Local_Linear(ctx) = local_linear(ctx, __launch(ctx))
-@inline __index_Group_Linear(ctx) = group_linear(ctx, __launch(ctx))
-@inline __index_Global_Linear(ctx) = global_linear(ctx, __launch(ctx))
-@inline __index_Local_Cartesian(ctx) = local_cartesian(ctx, __launch(ctx))
-@inline __index_Group_Cartesian(ctx) = group_cartesian(ctx, __launch(ctx))
-@inline __index_Global_Cartesian(ctx) = global_cartesian(ctx, __launch(ctx))
-
-@inline local_linear(ctx, ::Nothing) = KI.get_local_id().x
-@inline group_linear(ctx, ::Nothing) = KI.get_group_id().x
-@inline function global_linear(ctx, ::Nothing)
-    I = @inbounds expand(__iterspace(ctx), KI.get_group_id().x, KI.get_local_id().x)
-    # TODO: This is unfortunate, can we get the linear index cheaper
-    return linear_index(__ndrange(ctx), I)
-end
-@inline local_cartesian(ctx, ::Nothing) = @inbounds workitems(__iterspace(ctx))[KI.get_local_id().x]
-@inline group_cartesian(ctx, ::Nothing) = @inbounds blocks(__iterspace(ctx))[KI.get_group_id().x]
-@inline global_cartesian(ctx, ::Nothing) =
-    @inbounds expand(__iterspace(ctx), KI.get_group_id().x, KI.get_local_id().x)
-@inline function validindex(ctx, ::Nothing)
-    I = @inbounds expand(__iterspace(ctx), KI.get_group_id().x, KI.get_local_id().x)
-    return I in __ndrange(ctx)
-end
+@inline __index_Local_Linear(ctx) = local_linear(ctx, index_launch(ctx))
+@inline __index_Group_Linear(ctx) = group_linear(ctx, index_launch(ctx))
+@inline __index_Global_Linear(ctx) = global_linear(ctx, index_launch(ctx))
+@inline __index_Local_Cartesian(ctx) = local_cartesian(ctx, index_launch(ctx))
+@inline __index_Group_Cartesian(ctx) = group_cartesian(ctx, index_launch(ctx))
+@inline __index_Global_Cartesian(ctx) = global_cartesian(ctx, index_launch(ctx))
 
 @inline __index_Local_NTuple(ctx, I...) = Tuple(__index_Local_Cartesian(ctx, I...))
 @inline __index_Group_NTuple(ctx, I...) = Tuple(__index_Group_Cartesian(ctx, I...))
@@ -620,7 +605,7 @@ function __workitems_iterspace end
 # workgroup. Padding lanes still take part in `@synchronize`.
 @inline function __validindex(ctx)
     if __dynamic_checkbounds(ctx)
-        return validindex(ctx, __launch(ctx))
+        return validindex(ctx, index_launch(ctx))
     else
         return true
     end

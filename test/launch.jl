@@ -71,16 +71,16 @@ function check_indices(launcher, backend, AT, kernel, ndrange; workgroupsize = n
     return true
 end
 
-# 0-d ranges only work with a launch configuration
-function launch_testsuite(backend, AT; launcher = default_launcher, zerodim = false)
+function launch_testsuite(backend, AT; launcher = default_launcher)
     @testset "index layout" begin
-        shapes = Tuple[(7,), (37,), (5, 7), (33, 3), (3, 5, 7), (2, 3, 4, 5)]
-        zerodim && pushfirst!(shapes, ())
+        shapes = Tuple[(), (7,), (37,), (5, 7), (33, 3), (3, 5, 7), (2, 3, 4, 5)]
         @testset "$shape, workgroupsize=$wgs" for shape in shapes,
                 wgs in (nothing, 4, (2, 3), (4, 1, 2))
             wgs !== nothing && length(wgs) > length(shape) && continue
-            @test check_indices(launcher, backend(), AT, launch_indices!(backend()), shape;
-                                workgroupsize = wgs)
+            @test check_indices(
+                launcher, backend(), AT, launch_indices!(backend()), shape;
+                workgroupsize = wgs
+            )
         end
 
         @testset "static workgroupsize" begin
@@ -179,8 +179,10 @@ function select_launch_testsuite()
     # The index type is chosen before the workgroup size is tuned, so the padding that the
     # tuned workgroup introduces has to be bounded for every thread count.
     @testset "tuned padding bound" begin
-        for extent in ((5,), (1000,), (3, 7), (33, 1000), (1, 1, 5000), (7, 9, 11),
-                       (1500, 3, 2), (2, 3, 4, 5), (1, 1, 1, 3000), (0, 7))
+        for extent in (
+                (5,), (1000,), (3, 7), (33, 1000), (1, 1, 5000), (7, 9, 11),
+                (1500, 3, 2), (2, 3, 4, 5), (1, 1, 1, 3000), (0, 7),
+            )
             for limits in ((), max_dims)
                 bound = KernelAbstractions.tuned_padded(extent, max_items, limits)
                 @test all(1:max_items) do threads
