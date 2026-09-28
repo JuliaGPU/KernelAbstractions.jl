@@ -2,9 +2,11 @@ module EnzymeExt
 if isdefined(Base, :get_extension)
     using EnzymeCore
     using EnzymeCore.EnzymeRules
+    import Adapt
 else
     using ..EnzymeCore
     using ..EnzymeCore.EnzymeRules
+    import ..Adapt
 end
 
 import KernelAbstractions:
