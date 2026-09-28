@@ -215,54 +215,74 @@ end
 
 # Active arguments
 # On the CPU the kernel accumulates the adjoint of an `Active` argument into a host `Ref`,
-# passed as `MixedDuplicated`. On the GPU the kernel cannot write to a host `Ref`. Instead
-# the shadow lives in a one-element device array. The primal is passed by value. The host
-# passes both as a `DeviceMixed`, and the kernel turns it into
-# `MixedDuplicated(val, pointer(dval))`. Enzyme uses atomic adds for shadow updates on GPU
-# targets, so all threads can accumulate into the same element.
-_active_ref(::Kernel{CPU}, val) = Ref(EnzymeCore.make_zero(val))
-function _active_ref(kernel::Kernel{<:GPU}, val::T) where {T}
-    dbox = allocate(backend(kernel), T, 1)
-    copyto!(dbox, T[EnzymeCore.make_zero(val)])
+# passed as `MixedDuplicated`. With a batch width `W > 1` there is one `Ref` per lane,
+# passed as `BatchMixedDuplicated`. On the GPU the kernel cannot write to a host `Ref`.
+# Instead the shadow lives in a `W`-element device array, one element per lane. The primal
+# is passed by value. The host passes both as a `DeviceMixed`, and the kernel turns it into
+# `MixedDuplicated(val, pointer(dval))` or
+# `BatchMixedDuplicated(val, ntuple(k -> pointer(dval, k), W))`. Enzyme uses atomic adds
+# for shadow updates on GPU targets, so all threads can accumulate into the same element.
+_active_ref(::Kernel{CPU}, val, ::Val{1}) = Ref(EnzymeCore.make_zero(val))
+_active_ref(::Kernel{CPU}, val, ::Val{W}) where {W} =
+    ntuple(_ -> Ref(EnzymeCore.make_zero(val)), Val(W))
+function _active_ref(kernel::Kernel{<:GPU}, val::T, ::Val{W}) where {T, W}
+    dbox = allocate(backend(kernel), T, W)
+    copyto!(dbox, fill(EnzymeCore.make_zero(val), W))
     return dbox
 end
 
-struct DeviceMixed{T, D}
+struct DeviceMixed{W, T, D}
     val::T
     dval::D
 end
-Adapt.adapt_structure(to, x::DeviceMixed) = DeviceMixed(x.val, Adapt.adapt(to, x.dval))
+DeviceMixed{W}(val::T, dval::D) where {W, T, D} = DeviceMixed{W, T, D}(val, dval)
+Adapt.adapt_structure(to, x::DeviceMixed{W}) where {W} =
+    DeviceMixed{W}(x.val, Adapt.adapt(to, x.dval))
 
-_active_arg(arg, ref::Base.RefValue) = MixedDuplicated(arg.val, ref)
-_active_arg(arg, ref::AbstractArray) = DeviceMixed(arg.val, ref)
-_active_arg(arg, ::Nothing) = arg
+_active_arg(arg, ref::Base.RefValue, ::Val) = MixedDuplicated(arg.val, ref)
+_active_arg(arg, refs::NTuple{W, Base.RefValue}, ::Val) where {W} =
+    BatchMixedDuplicated(arg.val, refs)
+_active_arg(arg, ref::AbstractArray, ::Val{W}) where {W} = DeviceMixed{W}(arg.val, ref)
+_active_arg(arg, ::Nothing, ::Val) = arg
 
-_active_args(args::NTuple{N, Any}, arg_refs) where {N} = ntuple(Val(N)) do i
+_active_args(args::NTuple{N, Any}, arg_refs, width) where {N} = ntuple(Val(N)) do i
     Base.@_inline_meta
-    _active_arg(args[i], arg_refs[i])
+    _active_arg(args[i], arg_refs[i], width)
 end
 
-_active_refs(kernel, args::NTuple{N, Any}) where {N} = ntuple(Val(N)) do i
+_active_refs(kernel, args::NTuple{N, Any}, width) where {N} = ntuple(Val(N)) do i
     Base.@_inline_meta
-    args[i] isa Active ? _active_ref(kernel, args[i].val) : nothing
+    args[i] isa Active ? _active_ref(kernel, args[i].val, width) : nothing
 end
 
-_active_result(ref::Base.RefValue) = ref[]
-_active_result(ref::AbstractArray) = only(Array(ref))
-_active_results(args::NTuple{N, Any}, arg_refs) where {N} = ntuple(Val(N)) do i
-    Base.@_inline_meta
-    args[i] isa Active ? _active_result(arg_refs[i])::Core.Typeof(args[i].val) : nothing
-end
+_active_result(ref::Base.RefValue, ::Val{1}) = ref[]
+_active_result(refs::NTuple{W, Base.RefValue}, ::Val{W}) where {W} = map(getindex, refs)
+_active_result(ref::AbstractArray, ::Val{1}) = only(Array(ref))
+_active_result(ref::AbstractArray, ::Val{W}) where {W} = NTuple{W}(Array(ref))
 
-# Device side: build the `MixedDuplicated` from the device shadow.
+_active_restype(::Type{T}, ::Val{1}) where {T} = T
+_active_restype(::Type{T}, ::Val{W}) where {T, W} = NTuple{W, T}
+
+# On the GPU the tape, and hence `arg_refs`, is not inferred. Dispatch on the argument
+# annotation, whose type is known, to assert the result type of each position.
+_active_result_for(::Active{T}, ref, width) where {T} =
+    _active_result(ref, width)::_active_restype(T, width)
+_active_result_for(arg, ref, width) = nothing
+_active_results(args::NTuple{N, Any}, arg_refs, width) where {N} =
+    map((arg, i) -> _active_result_for(arg, arg_refs[i], width), args, ntuple(identity, Val(N)))
+
+# Device side: build the `(Batch)MixedDuplicated` from the device shadow.
 @inline _device_arg(arg) = arg
-@inline _device_arg(arg::DeviceMixed) = MixedDuplicated(arg.val, pointer(arg.dval))
+@inline _device_arg(arg::DeviceMixed{1}) = MixedDuplicated(arg.val, pointer(arg.dval))
+@inline _device_arg(arg::DeviceMixed{W}) where {W} =
+    BatchMixedDuplicated(arg.val, ntuple(k -> pointer(arg.dval, k), Val(W)))
 @inline _device_args(args::NTuple{N, Any}) where {N} = ntuple(Val(N)) do i
     Base.@_inline_meta
     _device_arg(args[i])
 end
 _device_argtype(::Type{T}) where {T} = T
-_device_argtype(::Type{DeviceMixed{T, D}}) where {T, D} = MixedDuplicated{T}
+_device_argtype(::Type{DeviceMixed{1, T, D}}) where {T, D} = MixedDuplicated{T}
+_device_argtype(::Type{DeviceMixed{W, T, D}}) where {W, T, D} = BatchMixedDuplicated{T, W}
 
 function EnzymeRules.augmented_primal(
         config::RevConfig,
@@ -282,8 +302,9 @@ function EnzymeRules.augmented_primal(
     # TODO autodiff_deferred on the func.val
     ModifiedBetween = Val((overwritten(config)[1], false, overwritten(config)[2:end]...))
 
-    arg_refs = _active_refs(kernel, args)
-    args2 = _active_args(args, arg_refs)
+    width = Val(EnzymeRules.width(config))
+    arg_refs = _active_refs(kernel, args, width)
+    args2 = _active_args(args, arg_refs, width)
     FT = Const{Core.Typeof(f)}
     Mode = EnzymeCore.set_runtime_activity(ReverseSplitModified(ReverseSplitWithPrimal, ModifiedBetween), config)
     TapeType, subtape, aug_kernel = _create_tape_kernel(
@@ -315,7 +336,8 @@ function EnzymeRules.reverse(
     subtape, arg_refs, tape_type = tape
 
     kernel = func.val
-    args2 = _active_args(args, arg_refs)
+    width = Val(EnzymeRules.width(config))
+    args2 = _active_args(args, arg_refs, width)
     f = kernel.f
 
     ModifiedBetween = Val((overwritten(config)[1], false, overwritten(config)[2:end]...))
@@ -332,5 +354,5 @@ function EnzymeRules.reverse(
     )
     # Reverse synchronization right after the kernel launch
     synchronize(backend(kernel))
-    return _active_results(args, arg_refs)
+    return _active_results(args, arg_refs, width)
 end
