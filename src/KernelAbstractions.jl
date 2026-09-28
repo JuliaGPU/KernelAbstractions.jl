@@ -472,12 +472,8 @@ synchronize(backend)
 Use [`workgroupsize`](@ref KernelAbstractions.workgroupsize), [`ndrange`](@ref KernelAbstractions.ndrange),
 and [`backend`](@ref KernelAbstractions.backend) to inspect a kernel's static configuration.
 
-!!! note
-    Backend implementations **must** implement:
-    ```
-    (kernel::Kernel{<:NewBackend})(args...; ndrange=nothing, workgroupsize=nothing)
-    ```
-    As well as the on-device functionality.
+Kernels are launched on any backend that implements [KernelInterface](@ref kernelinterface);
+see the [notes for backend implementations](@ref implementations_notes).
 """
 struct Kernel{Backend, WorkgroupSize <: _Size, NDRange <: _Size, Fun}
     backend::Backend
@@ -616,10 +612,6 @@ function __workitems_iterspace end
     end
 end
 
-# for reflection
-function mkcontext end
-function launch_config end
-
 include("macros.jl")
 include("spawn.jl")
 
@@ -648,6 +640,8 @@ automatically when a kernel is launched.
 """
 argconvert(k::Kernel{T}, arg) where {T} =
     error("Don't know how to convert arguments for Kernel{$T}")
+
+include("backend_launch.jl")
 
 # Enzyme support
 supports_enzyme(::Backend) = false

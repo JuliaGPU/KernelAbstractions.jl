@@ -78,63 +78,43 @@ Adapt.adapt_storage(::CUDABackend, x) = adapt(CuArray, x)
 
 ## Launching `@kernel` kernels
 
-A kernel written with [`@kernel`](@ref) receives a hidden context, a
-`KernelAbstractions.CompilerMetadata` built by the backend's `mkcontext`, from which
-[`@index`](@ref) computes its indices. By default (a context without a `launch`),
-`@index` assumes that the kernel was launched on a 1-D grid of
-`length(blocks(iterspace))` groups of `length(workitems(iterspace))` work-items. It then
-decomposes the linear hardware ids into Cartesian positions, which takes integer divisions
-when the `ndrange` is not known at compile time, and computes in `Int`.
+KernelAbstractions launches [`@kernel`](@ref) kernels on any backend that implements
+[KernelInterface](@ref kernelinterface): it partitions the `ndrange`, builds the kernel's
+hidden context (a `KernelAbstractions.CompilerMetadata`), compiles the kernel with
+[`KI.kernel_function`](@ref KernelInterface.kernel_function), tunes the workgroup size, and
+launches it with [`KI.launch`](@ref KernelInterface.launch). A backend doesn't implement any
+of that itself, but it needs KernelInterface's typed index queries and an N-d
+[`KI.launch`](@ref KernelInterface.launch), and it must not override KernelAbstractions' index
+functions (see below). It **may** customize the launch through:
 
-A backend **may** launch kernels differently, and pass the `launch` keyword to the
-`CompilerMetadata` constructor to tell `@index` how:
+- [`KI.launch_configuration`](@ref KernelInterface.launch_configuration): the workgroup size
+  used when the kernel has no static or given one. It receives the number of work-items in
+  the `ndrange` as `nitems`, e.g. to prefer more workgroups over larger ones.
+- [`KernelAbstractions.compiler_options`](@ref): compiler options for a kernel, e.g. a
+  register hint derived from its static workgroup size.
+- `KernelAbstractions.Scratchpad`, which backs [`@private`](@ref) arrays and has to be
+  implemented (`@device_override`) for a backend's device: e.g. a stack allocation, or a
+  `StaticArrays.MArray`.
+- `Adapt.adapt_storage(::KernelAbstractions.ConstAdaptor, x)` for the backend's device
+  arrays, which implements [`@Const`](@ref).
 
-- [`NDLaunch{T}`](@ref KernelAbstractions.NDLaunch): the grid has the shape of the
-  iteration space (for as many dimensions as the backend's grid has, i.e. up to 3), so
-  `@index` doesn't need any divisions;
-- [`LinearLaunch{T}`](@ref KernelAbstractions.LinearLaunch): the default 1-D grid.
+[`@index`](@ref) computes its indices from how a kernel was launched: on a grid with the
+shape of the iteration space ([`NDLaunch`](@ref KernelAbstractions.NDLaunch), for up to as
+many dimensions as the backend's grid has), which doesn't need any divisions, or on a 1-D
+grid ([`LinearLaunch`](@ref KernelAbstractions.LinearLaunch)). Either way it computes in a
+narrow index type such as `Int32` when the iteration space fits, which is why the typed
+[`KI.get_group_id`](@ref KernelInterface.get_group_id) and
+[`KI.get_local_id`](@ref KernelInterface.get_local_id) queries have to compute in that type
+too, as KernelInterface specifies. For the same reason, backends **must not** override
+`__validindex` or the `__index_*` functions.
 
-Either way `@index` computes in `T`, e.g. `Int32`, which is faster on GPUs. The backend
-has to implement the typed [`KI.get_group_id`](@ref KernelInterface.get_group_id) and
-[`KI.get_local_id`](@ref KernelInterface.get_local_id) queries such that they compute in
-`T` too, e.g. without checked conversions.
-
-[`select_launch`](@ref KernelAbstractions.select_launch) chooses the launch from the
-iteration space, whether the workgroup size will be tuned, and the limits of the backend
-([`KI.max_work_group_size`](@ref KernelInterface.max_work_group_size),
-[`KI.max_work_group_dims`](@ref KernelInterface.max_work_group_dims) and
-[`KI.max_num_groups`](@ref KernelInterface.max_num_groups)). It doesn't depend on the
-workgroup size a backend tunes afterwards, which keeps the context type (and thus the
-compiled kernel) the same before and after tuning, as long as the backend tunes with
-[`launch_workgroupsize`](@ref KernelAbstractions.launch_workgroupsize). A launch then
-looks like this:
-
-```julia
-function (obj::KA.Kernel{MyBackend})(args...; ndrange = nothing, workgroupsize = nothing)
-    ndrange, workgroupsize, iterspace, dynamic = KA.launch_config(obj, ndrange, workgroupsize)
-    launch = KA.select_launch(obj, workgroupsize, iterspace)
-    ctx = KA.CompilerMetadata{KA.ndrange(obj), KA.DynamicCheck}(ndrange, iterspace; launch)
-    kernel = compile(obj.f, ctx, args...)
-
-    if KA.workgroupsize(obj) <: KA.DynamicSize && workgroupsize === nothing
-        threads = max_threads(kernel)  # at most `KI.max_work_group_size(backend)`
-        workgroupsize = KA.launch_workgroupsize(backend, launch, threads, ndrange)
-        iterspace, dynamic = KA.partition(obj, ndrange, workgroupsize)
-        ctx = KA.CompilerMetadata{KA.ndrange(obj), KA.DynamicCheck}(ndrange, iterspace; launch)
-    end
-
-    groups, items = size(KA.blocks(iterspace)), size(KA.workitems(iterspace))
-    prod(groups) == 0 && return
-    if launch isa KA.NDLaunch
-        run(kernel, ctx, args...; groups, items)            # padded to 3 dimensions
-    else
-        run(kernel, ctx, args...; groups = prod(groups), items = prod(items))
-    end
-end
-```
-
-The POCL backend is an example. Backends that launch on an N-d grid **must not** override
-`__validindex` or the `__index_*` functions, which dispatch on the launch.
+A backend can still implement `(obj::KernelAbstractions.Kernel{MyBackend})(args...; ndrange, workgroupsize)`
+to launch kernels itself, e.g. while it is being ported to KernelInterface. That relies on
+KernelAbstractions internals: it has to choose the launch with
+[`select_launch`](@ref KernelAbstractions.select_launch), pass it to the kernel's context,
+and tune the workgroup size with
+[`launch_workgroupsize`](@ref KernelAbstractions.launch_workgroupsize), as the generic
+launch in `src/backend_launch.jl` does.
 
 Packages that customize the iteration space (with a custom `partition` and `expand`)
 don't need to do anything for these launches: the index functions only compute the global
