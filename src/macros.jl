@@ -10,7 +10,7 @@ function find_return(stmt)
 end
 
 # XXX: Proper errors
-function __kernel(expr, generate_cpu = true, force_inbounds = false, unsafe_indices = false)
+function __kernel(__module__, expr, generate_cpu = true, force_inbounds = false, unsafe_indices = false, generated = false)
     def = splitdef(expr)
     name = def[:name]
     args = def[:args]
@@ -41,12 +41,22 @@ function __kernel(expr, generate_cpu = true, force_inbounds = false, unsafe_indi
         def_cpu = deepcopy(def)
         def_cpu[:name] = cpu_name
         transform_cpu!(def_cpu, constargs, force_inbounds)
+        if generated
+            # Use macroexpand to perform the annoying work of interpolating `$` exprs
+            body = macroexpand(__module__, Expr(:quote, def_cpu[:body]), recursive = false)
+            def_cpu[:body] = Expr(:if, Expr(:generated), body, Expr(:meta, :generated_only))
+        end
         cpu_function = combinedef(def_cpu)
     end
 
     def_gpu = deepcopy(def)
     def_gpu[:name] = gpu_name = Symbol(:gpu_, name)
     transform_gpu!(def_gpu, constargs, force_inbounds, unsafe_indices)
+    if generated
+        # Use macroexpand to perform the annoying work of interpolating `$` exprs
+        body = macroexpand(__module__, Expr(:quote, def_gpu[:body]), recursive = false)
+        def_gpu[:body] = Expr(:if, Expr(:generated), body, Expr(:meta, :generated_only))
+    end
     gpu_function = combinedef(def_gpu)
 
     # create constructor functions
