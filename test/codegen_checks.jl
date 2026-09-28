@@ -68,8 +68,8 @@ end
     @testset "index computation" begin
         @test @filecheck implicit_check_not = "jl_" begin
             @check "define spir_kernel void @{{.*}}gpu_codegen_mul2_inbounds"
-            @check "@__spirv_BuiltInWorkgroupId"
-            @check "@__spirv_BuiltInLocalInvocationId"
+            @check "__spirv_BuiltInWorkgroupId"
+            @check "__spirv_BuiltInLocalInvocationId"
             @check "load float, {{.*}}addrspace(1)"
             @check "store float {{.*}}addrspace(1)"
             @check "ret void"
