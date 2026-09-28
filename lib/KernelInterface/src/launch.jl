@@ -55,14 +55,26 @@ function check_launch_args(numworkgroups, workgroupsize, ndrange)
     return
 end
 
-function threads_to_workgroupsize(threads, ndrange)
-    total = Ref(1)
-    return map(ndrange) do n
-        # each dimension must be at least 1, even for a zero-sized ndrange
-        x = max(min(div(threads, total[]), n), 1)
-        total[] *= x
-        return x
-    end
+"""
+    threads_to_workgroupsize(threads, ndrange, [limits])
+
+Distribute `threads` work-items over the dimensions of `ndrange`, filling the first
+dimension first. Dimension `d` gets at most `limits[d]` work-items; dimensions past the end
+of `limits` are only bounded by `threads`.
+
+Every dimension gets at least one work-item, even for a zero-sized `ndrange`.
+"""
+threads_to_workgroupsize(threads, ndrange::Tuple, limits = ()) =
+    _threads_to_workgroupsize(threads, 1, ndrange, limits)
+threads_to_workgroupsize(threads, ndrange::Integer, limits = ()) =
+    only(threads_to_workgroupsize(threads, (ndrange,), limits))
+# written recursively, because a closure updating the running total would box it
+_threads_to_workgroupsize(threads, total, ::Tuple{}, limits) = ()
+function _threads_to_workgroupsize(threads, total, ndrange::Tuple, limits)
+    limit = isempty(limits) ? typemax(Int) : first(limits)
+    x = max(min(div(threads, total), first(ndrange), limit), 1)
+    rest = isempty(limits) ? () : Base.tail(limits)
+    return (x, _threads_to_workgroupsize(threads, total * x, Base.tail(ndrange), rest)...)
 end
 
 """
@@ -86,7 +98,7 @@ writing their own heuristic for calculating launch size.
     else
         workgroupsize = if workgroupsize == ()
             max_wgs = kernel_max_work_group_size(kernel; max_work_items = min(prod(ndrange), max_work_items))
-            threads_to_workgroupsize(max_wgs, ndrange)
+            threads_to_workgroupsize(max_wgs, ndrange, max_work_group_dims(kernel.backend))
         else
             workgroupsize
         end
@@ -129,6 +141,36 @@ kernel launch with too big a workgroup is attempted.
     As well as the on-device functionality.
 """
 function max_work_group_size end
+
+"""
+    max_work_group_dims(backend)::NTuple{3, Int}
+
+The maximum number of work-items along each dimension of a workgroup, for the currently
+active device of `backend`. [`max_work_group_size`](@ref) bounds their product.
+
+!!! note
+    Backend implementations **should** implement:
+    ```
+    max_work_group_dims(backend::NewBackend)::NTuple{3, Int}
+    ```
+    The fallback does not limit individual dimensions.
+"""
+max_work_group_dims(::Backend) = (typemax(Int), typemax(Int), typemax(Int))
+
+"""
+    max_num_groups(backend)::NTuple{3, Int}
+
+The maximum number of workgroups along each dimension of a launch, for the currently
+active device of `backend`.
+
+!!! note
+    Backend implementations **should** implement:
+    ```
+    max_num_groups(backend::NewBackend)::NTuple{3, Int}
+    ```
+    The fallback does not limit the number of workgroups.
+"""
+max_num_groups(::Backend) = (typemax(Int), typemax(Int), typemax(Int))
 
 """
     sub_group_size(backend)::Int

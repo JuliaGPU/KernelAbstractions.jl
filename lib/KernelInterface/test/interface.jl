@@ -186,6 +186,46 @@ function interface_testsuite(backend, AT)
         @test_throws ArgumentError (KI.@kernel backend() numworkgroups = (2, 2, 2) workgroupsize = (2, 2, 2, 2) launch_kernel3d(arr3d))
     end
 
+    @testset "Launch limits" begin
+        max_dims = KI.max_work_group_dims(backend())
+        max_groups = KI.max_num_groups(backend())
+        @test max_dims isa NTuple{3, Int} && all(>=(1), max_dims)
+        @test max_groups isa NTuple{3, Int} && all(>=(1), max_groups)
+
+        function fill_kernel(arr)
+            i, j, k = KI.get_global_id()
+            if i <= size(arr, 1) && j <= size(arr, 2) && k <= size(arr, 3)
+                @inbounds arr[i, j, k] = 1.0f0
+            end
+            return
+        end
+        kernel = KI.@kernel backend() launch = false fill_kernel(AT(zeros(Float32, 1, 1, 1)))
+        function fill_test(dims; kwargs...)
+            arr = AT(zeros(Float32, dims))
+            kernel(arr; kwargs...)
+            KI.synchronize(backend())
+            return all(Array(arr) .== 1)
+        end
+
+        # automatically chosen workgroup sizes respect the per-dimension limits
+        @testset "ndrange = $ndrange" for ndrange in ((1, 1, 5000), (1, 5000, 1), (1, 3, 2000))
+            @test fill_test(ndrange; ndrange)
+        end
+
+        # the reported limits can be launched
+        max_items = KI.kernel_max_work_group_size(kernel)
+        @testset "dimension $d" for d in 1:3
+            items = min(max_dims[d], max_items)
+            workgroupsize = ntuple(i -> i == d ? items : 1, 3)
+            @test fill_test(workgroupsize; workgroupsize, numworkgroups = (1, 1, 1))
+
+            # don't launch (practically) unlimited grids
+            groups = min(max_groups[d], 2^16)
+            numworkgroups = ntuple(i -> i == d ? groups : 1, 3)
+            @test fill_test(numworkgroups; workgroupsize = (1, 1, 1), numworkgroups)
+        end
+    end
+
     @testset "Host return types" begin
         b = backend()
 

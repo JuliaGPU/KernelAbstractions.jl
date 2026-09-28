@@ -25,6 +25,18 @@ KernelAbstractions.versioninfo(POCLBackend())
 
 import KernelAbstractions.POCL: POCL, @opencl, @device_code_llvm
 
+module KernelInterfaceTests
+    import KernelInterface
+    using Test
+    include(joinpath(pkgdir(KernelInterface), "test", "testsuite.jl"))
+end
+@testset "POCL KernelInterface" begin
+    # POCL launches synchronously, so there's nothing for the events tests to order
+    KernelInterfaceTests.Testsuite.testsuite(
+        POCLBackend, "POCL", POCL, Array, POCL.CLDeviceArray; skip_tests = Set(["Events"])
+    )
+end
+
 @testset "POCL float atomics" begin
     # pocl's CPU device natively supports float add and min/max atomics in both global
     # and local memory, so the SPIR-V extensions guarding them must be permitted
