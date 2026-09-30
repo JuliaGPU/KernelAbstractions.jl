@@ -200,8 +200,8 @@ end
     @test_throws ArgumentError KI.check_launch_args((1, 2, 3, 4), 1, ())
     @test_throws ArgumentError KI.check_launch_args(1, (1, 2, 3, 4), ())
     @test_throws ArgumentError KI.check_launch_args((), 1, (1, 2, 3, 4))
-    @test_throws ArgumentError KI.check_launch_args(2, 4, 2) # both numworkgroupsize and ndrange defined
-    @test_throws ArgumentError KI.check_launch_args(2, (), 2) # both numworkgroupsize and ndrange defined
+    @test_throws ArgumentError KI.check_launch_args(2, 4, 2) # both numgroupsize and ndrange defined
+    @test_throws ArgumentError KI.check_launch_args(2, (), 2) # both numgroupsize and ndrange defined
 end
 
 @testset "threads_to_workgroupsize" begin
@@ -282,14 +282,11 @@ KI.max_work_group_dims(::DimsBackend) = (1024, 1024, 64)
 end
 
 @testset "split_kwargs" begin
-    kwargs = [:(launch = false), :(name = "foo"), :(numworkgroups = 2)]
-    macro_kw, compiler_kw, launch_kw, other = KI.split_kwargs(
-        kwargs, KI.MACRO_KWARGS, KI.COMPILER_KWARGS, KI.LAUNCH_KWARGS
-    )
+    kwargs = [:(launch = false), :(name = "foo"), :(numgroups = 2)]
+    macro_kw, launch_kw, other = KI.split_kwargs(kwargs, KI.MACRO_KWARGS, KI.LAUNCH_KWARGS)
     @test macro_kw == [:(launch = false)]
-    @test compiler_kw == [:(name = "foo")]
-    @test launch_kw == [:(numworkgroups = 2)]
-    @test isempty(other)
+    @test launch_kw == [:(numgroups = 2)]
+    @test other == [:(name = "foo")]
 
     # Unmatched keywords land in the trailing group rather than erroring.
     _, unmatched = KI.split_kwargs([:(bogus = 1)], [:launch])
@@ -313,19 +310,20 @@ end
     @test var_exprs[2] == Expr(:..., vars[2])
 end
 
-# A minimal backend, exercising the contract `KI.@kernel` expects of one.
+# A minimal backend, exercising the contract `KI.@launch` expects of one.
 struct MockBackend end
 
 struct MockKernel
     f::Any
     tt::Any
     name::Any
+    options::Any
     launches::Vector{Any}
 end
 
 KI.argconvert(::MockBackend, arg) = arg
 function KI.kernel_function(::MockBackend, f, tt = Tuple{}; name = nothing, kwargs...)
-    return MockKernel(f, tt, name, [])
+    return MockKernel(f, tt, name, Dict(kwargs), [])
 end
 function (kernel::MockKernel)(args...; kwargs...)
     push!(kernel.launches, (args, Dict(kwargs)))
@@ -334,27 +332,41 @@ end
 
 dummy(a, b) = nothing
 
-@testset "@kernel" begin
+const backend_evaluations = Ref(0)
+function counted_backend()
+    backend_evaluations[] += 1
+    return MockBackend()
+end
+
+@testset "@launch" begin
     backend = MockBackend()
 
-    kernel = KI.@kernel backend numworkgroups = 2 workgroupsize = 4 dummy(1, 2.0)
+    kernel = KI.@launch backend numgroups = 2 workgroupsize = 4 dummy(1, 2.0)
     @test kernel isa MockKernel
     @test kernel.f === dummy
     @test kernel.tt == Tuple{Int, Float64}
     args, launch_kwargs = only(kernel.launches)
     @test args == (1, 2.0)
-    @test launch_kwargs == Dict(:numworkgroups => 2, :workgroupsize => 4)
+    @test launch_kwargs == Dict(:numgroups => 2, :workgroupsize => 4)
+
+    # the backend expression is evaluated once
+    backend_evaluations[] = 0
+    KI.@launch counted_backend() ndrange = 4 dummy(1, 2.0)
+    @test backend_evaluations[] == 1
 
     # `launch=false` compiles only; the caller launches later.
-    deferred = KI.@kernel backend launch = false dummy(1, 2.0)
+    deferred = KI.@launch backend launch = false dummy(1, 2.0)
     @test isempty(deferred.launches)
 
-    # Compiler kwargs reach `kernel_function` instead of the launch.
-    named = KI.@kernel backend launch = false name = "mykernel" dummy(1, 2.0)
+    # Other keywords are compiler options for `kernel_function`.
+    named = KI.@launch backend launch = false name = "mykernel" maxthreads = 32 dummy(1, 2.0)
     @test named.name == "mykernel"
+    @test named.options == Dict(:maxthreads => 32)
+    optioned = KI.@launch backend ndrange = 4 maxthreads = 32 dummy(1, 2.0)
+    @test last(only(optioned.launches)) == Dict(:ndrange => 4)
 
     # Splatted arguments are supported.
-    splatted = KI.@kernel backend launch = false dummy((1, 2.0)...)
+    splatted = KI.@launch backend launch = false dummy((1, 2.0)...)
     @test splatted.tt == Tuple{Int, Float64}
 
     @testset "errors" begin
@@ -369,14 +381,14 @@ dummy(a, b) = nothing
             return nothing
         end
 
-        @test expansion_error(:(KI.@kernel backend bogus = 1 dummy(1))) isa ArgumentError
-        @test expansion_error(:(KI.@kernel backend dummy)) isa ArgumentError
-        @test expansion_error(:(KI.@kernel backend launch = 1 dummy(1))) isa ArgumentError
-        @test expansion_error(:(KI.@kernel backend "notakwarg" dummy(1))) isa ArgumentError
-        # launch-time kwargs are meaningless when we are not launching
+        @test expansion_error(:(KI.@launch backend)) isa ArgumentError
+        @test expansion_error(:(KI.@launch backend dummy)) isa ArgumentError
+        @test expansion_error(:(KI.@launch backend launch = 1 dummy(1))) isa ArgumentError
+        @test expansion_error(:(KI.@launch backend "notakwarg" dummy(1))) isa ArgumentError
+        # launch keywords are meaningless when we are not launching
         @test expansion_error(
-            :(KI.@kernel backend launch = false numworkgroups = 2 dummy(1))
-        ) isa ErrorException
+            :(KI.@launch backend launch = false numgroups = 2 dummy(1))
+        ) isa ArgumentError
     end
 end
 

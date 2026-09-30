@@ -9,12 +9,12 @@ kernel on the host.
 !!! note
     Backend implementations **must** implement:
     ```
-    (kernel::Kernel{<:NewBackend})(args...; numworkgroups=(), workgroupsize=(), ndrange=(), max_work_group_size=typemax(Int))
+    (kernel::Kernel{<:NewBackend})(args...; numgroups=(), workgroupsize=(), ndrange=(), max_work_group_size=typemax(Int))
     ```
-    `numworkgroups`, `workgroupsize`, and `ndrange` must accept a scalar Integer, a 1, 2,
+    `numgroups`, `workgroupsize`, and `ndrange` must accept a scalar Integer, a 1, 2,
     or 3 Integer tuple, or an empty tuple. Otherwise, it must throw an `ArgumentError`. An
-    `ArgumentError` must also be thrown if `ndrange` and `numworkgroups` are both specified.
-    The helper function `KI.check_launch_args(numworkgroups, workgroupsize, ndrange)` can be
+    `ArgumentError` must also be thrown if `ndrange` and `numgroups` are both specified.
+    The helper function `KI.check_launch_args(numgroups, workgroupsize, ndrange)` can be
     used by the backend or a custom check can be implemented.
 
     `max_work_group_size` is to allow algorithms to request a max workgroupsize with `ndrange`.
@@ -34,20 +34,20 @@ struct Kernel{B, Kern}
 end
 
 """
-    check_launch_args(numworkgroups, workgroupsize, ndrange)
+    check_launch_args(numgroups, workgroupsize, ndrange)
 
 Validate the launch configuration passed to a [`Kernel`](@ref), throwing an
 `ArgumentError` if either argument has more than 3 dimensions, or if `ndrange`
-and `numworkgroups` are both defined.
+and `numgroups` are both defined.
 
 Backends may call this from their kernel-launch method instead of writing their
 own check.
 """
-function check_launch_args(numworkgroups, workgroupsize, ndrange)
-    length(ndrange) > 0 && length(numworkgroups) > 0 &&
-        throw(ArgumentError("Only one of `numworkgroups` and `ndrange` can be used"))
-    length(numworkgroups) <= 3 ||
-        throw(ArgumentError("`numworkgroups` only accepts up to 3 dimensions"))
+function check_launch_args(numgroups, workgroupsize, ndrange)
+    length(ndrange) > 0 && length(numgroups) > 0 &&
+        throw(ArgumentError("Only one of `numgroups` and `ndrange` can be used"))
+    length(numgroups) <= 3 ||
+        throw(ArgumentError("`numgroups` only accepts up to 3 dimensions"))
     length(workgroupsize) <= 3 ||
         throw(ArgumentError("`workgroupsize` only accepts up to 3 dimensions"))
     length(ndrange) <= 3 ||
@@ -78,13 +78,13 @@ function _threads_to_workgroupsize(threads, total, ndrange::Tuple, limits)
 end
 
 """
-    auto_launch_sizes(kernel::KI.Kernel, numworkgroups, workgroupsize, ndrange, [max_work_items])
+    auto_launch_sizes(kernel::KI.Kernel, numgroups, workgroupsize, ndrange, [max_work_items])
 
-Returns a suggested `numworkgroups` and `workgroupsize` based on
+Returns a suggested `numgroups` and `workgroupsize` based on
 the input arguments. This function assumes arguments have been
 validated by `check_launch_args`.
 
-If any `ndrange` dimension is zero, the returned `numworkgroups` is zero in
+If any `ndrange` dimension is zero, the returned `numgroups` is zero in
 that dimension; backends should skip the launch in that case. Note that very
 large `ndrange`s can produce total grid sizes >= 2^32, which is problematic
 on some backends.
@@ -92,9 +92,9 @@ on some backends.
 Backends may call this from their kernel-launch method instead of
 writing their own heuristic for calculating launch size.
 """
-@inline function auto_launch_sizes(kernel::Kernel, numworkgroups, workgroupsize, ndrange, max_work_items = typemax(Int))
-    numworkgroups, workgroupsize = if ndrange == ()
-        numworkgroups == () ? 1 : numworkgroups, workgroupsize == () ? 1 : workgroupsize
+@inline function auto_launch_sizes(kernel::Kernel, numgroups, workgroupsize, ndrange, max_work_items = typemax(Int))
+    numgroups, workgroupsize = if ndrange == ()
+        numgroups == () ? 1 : numgroups, workgroupsize == () ? 1 : workgroupsize
     else
         workgroupsize = if workgroupsize == ()
             max_wgs = kernel_max_work_group_size(kernel; max_work_items = min(prod(ndrange), max_work_items))
@@ -102,11 +102,11 @@ writing their own heuristic for calculating launch size.
         else
             workgroupsize
         end
-        numworkgroups = cld.(ndrange, workgroupsize)
-        Int.(numworkgroups), Int.(workgroupsize)
+        numgroups = cld.(ndrange, workgroupsize)
+        Int.(numgroups), Int.(workgroupsize)
     end
 
-    return numworkgroups, workgroupsize
+    return numgroups, workgroupsize
 end
 
 """
@@ -222,13 +222,13 @@ function argconvert end
 
 Low-level interface to compile a function invocation for the currently-active GPU, returning
 a callable kernel object. For a higher-level interface, use
-[`KernelInterface.@kernel`](@ref).
-
-Currently, `kernel_function` only supports the `name` keyword argument as it is the only one
-by all backends.
+[`KernelInterface.@launch`](@ref).
 
 Keyword arguments:
-- `name`: override the name that the kernel will have in the generated code
+- `name`: override the name that the kernel will have in the generated code.
+
+Other keyword arguments are backend-specific compiler options (e.g. `maxthreads` for
+CUDA.jl); backends throw an error for options they don't support.
 
 !!! note
     Backend implementations **must** implement:
@@ -239,34 +239,43 @@ Keyword arguments:
 function kernel_function end
 
 const MACRO_KWARGS = [:launch]
-const COMPILER_KWARGS = [:name]
-const LAUNCH_KWARGS = [:numworkgroups, :workgroupsize, :ndrange, :max_work_group_size]
+const LAUNCH_KWARGS = [:numgroups, :workgroupsize, :ndrange, :max_work_group_size]
 
 """
-    KI.@kernel backend [workgroupsize=... numworkgroups=... ndrange=...] [kwargs...] func(args...)
+    KI.@launch backend [launch=true] [numgroups=...] [workgroupsize=...] [ndrange=...] [max_work_group_size=...] [kwargs...] f(args...)
 
-High-level interface for executing code on a GPU.
+Compile `f(args...)` for `backend` and launch it, like `@cuda` or `@metal` do.
 
-The `KI.@kernel` macro should prefix a call, with `func` a callable function or object that
-should return nothing. It will be compiled to a function native to the specified `backend`
-upon first use, and to a certain extent arguments will be converted and managed automatically
-using `argconvert`. Finally, if `launch=true`, the newly created callable kernel object is
-called and launched according to the specified `backend`.
+`f` and the arguments are converted with [`argconvert`](@ref) and compiled with
+[`kernel_function`](@ref), and the resulting [`Kernel`](@ref) is called with the launch
+keywords `numgroups`, `workgroupsize`, `ndrange` and `max_work_group_size`, whose meaning
+is documented there. The arguments are kept alive while the launch is being queued.
 
-There are a few keyword arguments that influence the behavior of `KI.@kernel`:
+Other keyword arguments:
+- `launch`: whether to launch the kernel, defaults to `true`. With `launch=false`, the
+  kernel is only compiled and returned, and the launch keywords can't be used: launch it by
+  calling it with the arguments and the launch keywords.
+- `name` and any other keyword are passed to [`kernel_function`](@ref) as compiler options.
 
-- `launch`: whether to launch this kernel, defaults to `true`. If `false`, the returned
-  kernel object should be launched by calling it and passing arguments again.
-- `name`: the name of the kernel in the generated code. Defaults to an automatically-
-  generated name.
+Launch options specific to a backend (such as a CUDA stream) can't be passed to
+`@launch`; use `launch=false` and pass them when calling the kernel.
 
-!!! note
-    `KI.@kernel` differs from the `KernelAbstractions` macro in that this macro acts
-    a wrapper around backend kernel compilation/launching (such as `@cuda`, `@metal`, etc.). It is
-    used when calling a function to be run on a specific backend, while `KernelAbstractions.@kernel`
-    is used kernel definition for use with the original higher-level `KernelAbstractions` API.
+`backend` is evaluated once. Returns the `Kernel`.
+
+```julia
+function vadd(c, a, b)
+    i = KI.get_global_id().x
+    if i <= length(c)
+        @inbounds c[i] = a[i] + b[i]
+    end
+    return
+end
+
+KI.@launch backend ndrange=length(c) vadd(c, a, b)
+```
 """
-macro kernel(backend, ex...)
+macro launch(backend, ex...)
+    isempty(ex) && throw(ArgumentError("KI.@launch needs a function call to launch"))
     call = ex[end]
     kwargs = map(ex[1:(end - 1)]) do kwarg
         if kwarg isa Symbol
@@ -279,51 +288,44 @@ macro kernel(backend, ex...)
     end
 
     # destructure the kernel call
-    Meta.isexpr(call, :call) || throw(ArgumentError("final argument to KI.@kernel should be a function call"))
+    Meta.isexpr(call, :call) || throw(ArgumentError("final argument to KI.@launch should be a function call"))
     f = call.args[1]
     args = call.args[2:end]
 
     code = quote end
     vars, var_exprs = assign_args!(code, args)
 
-    # group keyword argument
-    macro_kwargs, compiler_kwargs, call_kwargs, other_kwargs =
-        split_kwargs(kwargs, MACRO_KWARGS, COMPILER_KWARGS, LAUNCH_KWARGS)
-    if !isempty(other_kwargs)
-        key, val = first(other_kwargs).args
-        throw(ArgumentError("Unsupported keyword argument '$key'"))
-    end
+    # group keyword argument; everything we don't know is a compiler option
+    macro_kwargs, call_kwargs, compiler_kwargs =
+        split_kwargs(kwargs, MACRO_KWARGS, LAUNCH_KWARGS)
 
     # handle keyword arguments that influence the macro's behavior
     launch = true
     for kwarg in macro_kwargs
         key, val = kwarg.args
-        if key === :launch
-            isa(val, Bool) || throw(ArgumentError("`launch` keyword argument to KI.@kernel should be a Bool"))
-            launch = val::Bool
-        else
-            throw(ArgumentError("Unsupported keyword argument '$key'"))
-        end
+        isa(val, Bool) || throw(ArgumentError("`launch` keyword argument to KI.@launch should be a Bool"))
+        launch = val::Bool
     end
     if !launch && !isempty(call_kwargs)
-        error("KI.@kernel with launch=false does not support launch-time keyword arguments; use them when calling the kernel")
+        throw(ArgumentError("KI.@launch with launch=false does not support launch keyword arguments; use them when calling the kernel"))
     end
 
     # FIXME: macro hygiene wrt. escaping kwarg values (this broke with 1.5)
     #        we esc() the whole thing now, necessitating gensyms...
-    @gensym f_var kernel_f kernel_args kernel_tt kernel
+    @gensym backend_var f_var kernel_f kernel_args kernel_tt kernel
 
     # convert the arguments, call the compiler and launch the kernel
     # while keeping the original arguments alive
     push!(
         code.args,
         quote
+            $backend_var = $backend
             $f_var = $f
             GC.@preserve $(vars...) $f_var begin
-                $kernel_f = $argconvert($backend, $f_var)
-                $kernel_args = Base.map(x -> $argconvert($backend, x), ($(var_exprs...),))
+                $kernel_f = $argconvert($backend_var, $f_var)
+                $kernel_args = Base.map(x -> $argconvert($backend_var, x), ($(var_exprs...),))
                 $kernel_tt = Tuple{Base.map(Core.Typeof, $kernel_args)...}
-                $kernel = $kernel_function($backend, $kernel_f, $kernel_tt; $(compiler_kwargs...))
+                $kernel = $kernel_function($backend_var, $kernel_f, $kernel_tt; $(compiler_kwargs...))
                 if $launch
                     $kernel($(var_exprs...); $(call_kwargs...))
                 end

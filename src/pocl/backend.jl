@@ -211,18 +211,18 @@ function KI.kernel_function(::POCLBackend, f::F, tt::TT = Tuple{}; name = nothin
     return KI.Kernel{POCLBackend, typeof(kern)}(POCLBackend(), kern)
 end
 
-function (obj::KI.Kernel{POCLBackend})(args...; numworkgroups = (), workgroupsize = (), ndrange = (), max_work_group_size = typemax(Int))
-    KI.check_launch_args(numworkgroups, workgroupsize, ndrange)
+function (obj::KI.Kernel{POCLBackend})(args...; numgroups = (), workgroupsize = (), ndrange = (), max_work_group_size = typemax(Int))
+    KI.check_launch_args(numgroups, workgroupsize, ndrange)
 
     # zero-sized ndrange: nothing to launch
     prod(ndrange) == 0 && return nothing
 
-    numworkgroups, workgroupsize = KI.auto_launch_sizes(obj, numworkgroups, workgroupsize, ndrange, max_work_group_size)
+    numgroups, workgroupsize = KI.auto_launch_sizes(obj, numgroups, workgroupsize, ndrange, max_work_group_size)
 
     local_size = (workgroupsize..., ntuple(_ -> 1, 3 - length(workgroupsize))...)
 
-    numworkgroups = (numworkgroups..., ntuple(_ -> 1, 3 - length(numworkgroups))...)
-    global_size = local_size .* numworkgroups
+    numgroups = (numgroups..., ntuple(_ -> 1, 3 - length(numgroups))...)
+    global_size = local_size .* numgroups
 
     event = obj.kern(args...; local_size, global_size)
     wait(event)

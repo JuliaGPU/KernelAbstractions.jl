@@ -68,7 +68,7 @@ function hostinterface_testsuite(_backend, AT)
         end
 
         x = AT(zeros(Float32, 4))
-        kernel = KI.@kernel _backend() launch = false ki_hostinterface_kernel(x)
+        kernel = KI.@launch _backend() launch = false ki_hostinterface_kernel(x)
         @test kernel isa KI.Kernel
         @test KI.kernel_max_work_group_size(kernel) isa Int
         @test KI.kernel_max_work_group_size(kernel; max_work_items = 1) == 1
