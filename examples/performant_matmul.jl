@@ -18,6 +18,10 @@ function coalesced_matmul_kernel!(
     gi, gj, _ = KI.get_group_id()
     i, j, _ = KI.get_local_id()
 
+    # Actual indices
+    I = (gi - 1) * TDIM + i
+    J = (gj - 1) * TDIM + j
+
     # +1 to avoid bank conflicts on shared memory
     tile1 = KI.localmemory(eltype(output), (TDIM + BANK, TDIM))
     tile2 = KI.localmemory(eltype(output), (TDIM + BANK, TDIM))
@@ -31,10 +35,6 @@ function coalesced_matmul_kernel!(
 
     # loop over all tiles needed for this calculation
     for t in 0:(NUM_TILES - 1)
-        # Can't use @index(Global), because we use a smaller ndrange
-        I = (gi - 1) * TDIM + i
-        J = (gj - 1) * TDIM + j
-
         # load inputs into tiles, with bounds checking for non-square matrices
         if I <= N && t * TDIM + j <= R
             @inbounds tile1[i, j] = input1[I, t * TDIM + j]
@@ -50,10 +50,6 @@ function coalesced_matmul_kernel!(
         # wait for all tiles to be loaded
         KI.barrier()
 
-        # get global values again
-        I = (gi - 1) * TDIM + i
-        J = (gj - 1) * TDIM + j
-
         # calculate value of spot in output, use temporary value to allow for vectorization
         out = zero(eltype(output))
         @simd for k in 1:TDIM
@@ -63,10 +59,6 @@ function coalesced_matmul_kernel!(
 
         KI.barrier()
     end
-
-    # get global indices again
-    I = (gi - 1) * TDIM + i
-    J = (gj - 1) * TDIM + j
 
     # save if inbounds
     if I <= N && J <= M
