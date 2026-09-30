@@ -1,5 +1,4 @@
 # EXCLUDE FROM TESTING
-import KernelInterface as KI
 
 if !(@isdefined backend)
     if Base.find_package("CUDA") !== nothing
@@ -11,5 +10,3 @@ if !(@isdefined backend)
         const backend = CPU()
     end
 end
-
-const f_type = KI.supports_float64(backend) ? Float64 : Float32
