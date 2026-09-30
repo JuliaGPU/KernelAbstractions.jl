@@ -268,16 +268,21 @@ optional methods where it can do better than the fallback. In particular:
    [`adapt(backend, x)`](@ref Adapt.adapt_storage(::Backend, ::Any)) moves
    data to the backend, preferably by delegating to its array type:
    `Adapt.adapt_storage(::NewBackend, x) = adapt(NewArray, x)`.
-3. Implement [`kernel_function`](@ref), returning a [`Kernel`](@ref) that holds the
-   backend value it was given, and [`launch`](@ref), which receives an already validated
+3. Implement [`kernel_function`](@ref), which receives the unconverted callable, and
+   returns a [`Kernel`](@ref) that holds the backend value it was given and keeps that
+   callable alive. Also implement [`launch`](@ref), which receives an already validated
    `NTuple{3, Int}` of work-groups and of work-items, and the arguments as a tuple. Pass
    that tuple on to the native launcher rather than splatting it: Julia doesn't turn a
    splat of more than 32 elements into a direct call, so kernels with many arguments would
-   be slow to launch. For the PoCL backend, `launch` is
+   be slow to launch. For the PoCL backend, whose kernels hold the compiled kernel and the
+   callable, `launch` is
    ```julia
    function KI.launch(k::KI.Kernel{POCLBackend}, groups::Dims{3}, items::Dims{3}, args::Tuple)
-       event = POCL.launch_tuple(k.kern, args; local_size = items, global_size = groups .* items)
-       wait(event)
+       f = k.kern.f
+       event = GC.@preserve f args begin
+           event = POCL.launch_tuple(k.kern.kernel, args; local_size = items, global_size = groups .* items)
+           wait(event)
+       end
        cl.clReleaseEvent(event)
        return nothing
    end

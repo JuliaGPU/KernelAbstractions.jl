@@ -127,9 +127,8 @@ end
 
 @inline function compile(obj::Kernel, ctx, args::Tuple)
     b = backend(obj)
-    f = KI.argconvert(b, obj.f)
     tt = argument_types(b, ctx, args)
-    return KI.kernel_function(b, f, tt; compiler_options(obj)...)
+    return KI.kernel_function(b, obj.f, tt; compiler_options(obj)...)
 end
 
 # The helpers below avoid splatting the arguments, and `map`, which isn't type stable for 32

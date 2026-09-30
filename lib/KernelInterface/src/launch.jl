@@ -362,9 +362,13 @@ function argconvert end
 """
     kernel_function(backend, f::F, tt::TT=Tuple{}; name=nothing, kwargs...)::Kernel
 
-Compile the function `f` for arguments of the (device-side) types `tt`, for the active
+Compile the callable `f` for arguments of the (device-side) types `tt`, for the active
 device of `backend`, returning a [`Kernel`](@ref). For a higher-level interface, use
 [`KernelInterface.@launch`](@ref).
+
+`f` is the host-side callable, not converted with [`argconvert`](@ref): the backend converts
+it. For a closure, that matters: it can capture arrays, which its converted form only holds
+pointers to.
 
 Keyword arguments:
 - `name`: override the name that the kernel will have in the generated code.
@@ -372,13 +376,20 @@ Keyword arguments:
 Other keyword arguments are backend-specific compiler options (e.g. `maxthreads` for
 CUDA.jl); backends throw an error for options they don't support.
 
-The returned kernel doesn't keep any arguments alive: they are passed again at launch.
+The returned kernel keeps `f` alive, but not the arguments: they are passed again at
+launch.
 
 !!! note
     Backend implementations **must** implement:
     ```
     kernel_function(backend::NewBackend, f::F, tt::TT=Tuple{}; name=nothing, kwargs...) where {F,TT}
     ```
+    It converts `f` with [`argconvert`](@ref) to compile it, and the returned `Kernel` has
+    to keep `f` itself alive for as long as it can be launched, since the converted `f`
+    may only hold pointers to the arrays `f` captures. A backend that needs to know about
+    those arrays at launch, e.g. to declare them to the device, can convert `f` again for
+    every launch, as it does for the arguments.
+
     The returned `Kernel` stores `backend` itself (not a new default backend), so that
     options it carries apply to the launch. Kernels must execute with sub-group width
     [`sub_group_size(backend)`](@ref sub_group_size) if the backend supports sub-groups.
@@ -404,8 +415,8 @@ const LAUNCH_KWARGS = [:numgroups, :workgroupsize, :ndrange, :max_work_group_siz
 
 Compile `f(args...)` for `backend` and launch it, like `@cuda` or `@metal` do.
 
-`f` and the arguments are converted with [`argconvert`](@ref) and compiled with
-[`kernel_function`](@ref), and the resulting [`Kernel`](@ref) is called with the launch
+`f` is compiled with [`kernel_function`](@ref) for the types of the arguments converted
+with [`argconvert`](@ref), and the resulting [`Kernel`](@ref) is called with the launch
 keywords `numgroups`, `workgroupsize`, `ndrange` and `max_work_group_size`, whose meaning
 is documented there. The arguments are kept alive while the launch is being queued.
 
@@ -470,7 +481,7 @@ macro launch(backend, ex...)
 
     # FIXME: macro hygiene wrt. escaping kwarg values (this broke with 1.5)
     #        we esc() the whole thing now, necessitating gensyms...
-    @gensym backend_var f_var kernel_f kernel_tt kernel
+    @gensym backend_var f_var kernel_tt kernel
 
     # convert the arguments, call the compiler and launch the kernel
     # while keeping the original arguments alive
@@ -480,9 +491,8 @@ macro launch(backend, ex...)
             $backend_var = $backend
             $f_var = $f
             GC.@preserve $(vars...) $f_var begin
-                $kernel_f = $argconvert($backend_var, $f_var)
                 $kernel_tt = $argument_types($backend_var, ($(var_exprs...),))
-                $kernel = $kernel_function($backend_var, $kernel_f, $kernel_tt; $(compiler_kwargs...))
+                $kernel = $kernel_function($backend_var, $f_var, $kernel_tt; $(compiler_kwargs...))
                 if $launch
                     $kernel($(var_exprs...); $(call_kwargs...))
                 end

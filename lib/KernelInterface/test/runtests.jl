@@ -279,6 +279,11 @@ end
 KI.launch(kernel::KI.Kernel{OccupancyBackend}, groups::Dims{3}, items::Dims{3}, args::Tuple) =
     push!(kernel.kern, (groups, items))
 
+# a callable that KernelInterface mustn't convert: the backend does
+struct HostCallable end
+(::HostCallable)(x) = nothing
+KI.argconvert(::MockBackend, ::HostCallable) = error("only the backend should convert the callable")
+
 # ... and one that does nothing, to measure the overhead of launching
 struct NullBackend <: KI.Backend end
 KI.max_work_group_size(::KI.Kernel{NullBackend}) = 1024
@@ -462,6 +467,9 @@ end
     @test named.kern.options == Dict(:maxthreads => 32)
     optioned = KI.@launch backend ndrange = 4 maxthreads = 32 dummy(1, 2.0)
     @test isempty(only(optioned.kern.launches).kwargs)
+
+    # The callable is compiled unconverted.
+    @test (KI.@launch backend launch = false HostCallable()(1)).kern.f isa HostCallable
 
     # Splatted arguments are supported.
     splatted = KI.@launch backend launch = false dummy((1, 2.0)...)
