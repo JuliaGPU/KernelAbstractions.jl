@@ -563,13 +563,18 @@ last (possibly partial) workgroup. Primarily used by backend implementations and
     @assert ndrange !== nothing
     blocks, workgroupsize, dynamic = NDIteration.partition(extents(ndrange), workgroupsize)
 
-    if static_ndrange <: StaticSize
+    # the number of blocks is only static if the workgroup size is too: a backend that tunes
+    # the workgroup size would otherwise change the type of the kernel's context
+    if static_ndrange <: StaticSize && static_workgroupsize <: StaticSize
         static_blocks = StaticSize{blocks}
         blocks = nothing
-        mapping = NDIteration.static_mapping(ndrange)
     else
         static_blocks = DynamicSize
         blocks = CartesianIndices(blocks)
+    end
+    if static_ndrange <: StaticSize
+        mapping = NDIteration.static_mapping(ndrange)
+    else
         mapping = NDIteration.dynamic_mapping(ndrange)
     end
 

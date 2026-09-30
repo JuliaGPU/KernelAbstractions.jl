@@ -91,6 +91,13 @@ function launch_testsuite(backend, AT; launcher = default_launcher)
         @testset "static ndrange" begin
             @test check_indices(launcher, backend(), AT, launch_indices!(backend(), (4, 2), (9, 5)), (9, 5))
             @test check_indices(launcher, backend(), AT, launch_indices!(backend(), (4, 2), (0:8, -2:2)), (0:8, -2:2))
+
+            # with a tuned workgroup size, over more work-items than fit a workgroup
+            n = KI.max_work_group_size(backend()) + 1
+            kernel = launch_indices!(backend(), KernelAbstractions.DynamicSize(), KernelAbstractions.StaticSize((n, 3)))
+            @test check_indices(launcher, backend(), AT, kernel, (n, 3))
+            # a given ndrange has to agree with the static one
+            @test_throws ErrorException check_indices(launcher, backend(), AT, kernel, (n, 2))
         end
 
         @testset "offsets" begin

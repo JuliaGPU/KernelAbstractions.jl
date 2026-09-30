@@ -151,17 +151,16 @@ function KA.launch_config(kernel::KA.Kernel{POCLBackend}, ndrange, workgroupsize
         workgroupsize = (workgroupsize,)
     end
 
-    # partition checked that the ndrange's agreed
-    if KA.ndrange(kernel) <: KA.StaticSize
-        ndrange = nothing
-    end
-
     iterspace, dynamic = if KA.workgroupsize(kernel) <: KA.DynamicSize &&
             workgroupsize === nothing
-        # use ndrange as preliminary workgroupsize for autotuning
-        KA.partition(kernel, ndrange, ndrange)
+        # use the ndrange as preliminary workgroupsize for autotuning
+        KA.partition(kernel, ndrange, something(ndrange, static_ndrange(kernel)))
     else
+        # this also checks that a given ndrange agrees with a static one
         KA.partition(kernel, ndrange, workgroupsize)
+    end
+    if KA.ndrange(kernel) <: KA.StaticSize
+        ndrange = nothing
     end
 
     return ndrange, workgroupsize, iterspace, dynamic
@@ -184,7 +183,8 @@ function launch_kernel(obj, launch, ndrange, workgroupsize, iterspace, args::Var
     # figure out the optimal workgroupsize automatically
     if KA.workgroupsize(obj) <: KA.DynamicSize && workgroupsize === nothing
         wg_info = cl.work_group_info(kernel.fun, device())
-        wg_size_nd = KA.launch_workgroupsize(KA.backend(obj), launch, wg_info.size, ndrange)
+        range = something(ndrange, static_ndrange(obj))
+        wg_size_nd = KA.launch_workgroupsize(KA.backend(obj), launch, wg_info.size, range)
         iterspace, dynamic = KA.partition(obj, ndrange, wg_size_nd)
         ctx = KA.mkcontext(obj, ndrange, iterspace, launch)
     end
@@ -210,6 +210,8 @@ function launch_kernel(obj, launch, ndrange, workgroupsize, iterspace, args::Var
 end
 
 pad3(t::Tuple) = (t..., ntuple(_ -> 1, 3 - length(t))...)
+
+static_ndrange(kernel) = KA.ndrange(kernel) <: KA.StaticSize ? KA.get(KA.ndrange(kernel)) : nothing
 
 KI.argconvert(::POCLBackend, arg) = clconvert(arg)
 
