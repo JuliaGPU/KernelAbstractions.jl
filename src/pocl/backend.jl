@@ -145,7 +145,7 @@ end
 
 function KI.launch(obj::KI.Kernel{POCLBackend}, groups::Dims{3}, items::Dims{3}, args::Vararg{Any, N}) where {N}
     # POCL launches synchronously, see the implementation note on `synchronize`
-    event = obj.kern(args...; local_size = items, global_size = groups .* items)
+    event = POCL.launch_tuple(obj.kern, args; local_size = items, global_size = groups .* items)
     wait(event)
     cl.clReleaseEvent(event)
     return nothing
