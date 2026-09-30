@@ -26,7 +26,7 @@ function EnzymeRules.forward(
 end
 
 function EnzymeRules.forward(
-        func::Const{<:Kernel{<:GPU}},
+        func::Const{<:Kernel{<:Backend}},
         ::Type{Const{Nothing}},
         args...;
         ndrange = nothing,
@@ -41,7 +41,7 @@ end
 
 _enzyme_mkcontext(kernel::Kernel{CPU}, ndrange, iterspace, dynamic) =
     mkcontext(kernel, first(blocks(iterspace)), ndrange, iterspace, dynamic)
-_enzyme_mkcontext(kernel::Kernel{<:GPU}, ndrange, iterspace, dynamic) =
+_enzyme_mkcontext(kernel::Kernel{<:Backend}, ndrange, iterspace, dynamic) =
     mkcontext(kernel, ndrange, iterspace)
 
 _augmented_return(::Kernel{CPU}, subtape, arg_refs, tape_type) =
@@ -50,7 +50,7 @@ _augmented_return(::Kernel{CPU}, subtape, arg_refs, tape_type) =
     nothing,
     (subtape, arg_refs, tape_type),
 )
-_augmented_return(::Kernel{<:GPU}, subtape, arg_refs, tape_type) =
+_augmented_return(::Kernel{<:Backend}, subtape, arg_refs, tape_type) =
     AugmentedReturn{Nothing, Nothing, Any}(nothing, nothing, (subtape, arg_refs, tape_type))
 
 function _create_tape_kernel(
@@ -75,7 +75,7 @@ function _create_tape_kernel(
 end
 
 function _create_tape_kernel(
-        kernel::Kernel{<:GPU},
+        kernel::Kernel{<:Backend},
         ModifiedBetween,
         FT,
         ctxTy,
@@ -109,7 +109,7 @@ function _create_tape_kernel(
 end
 
 _create_rev_kernel(kernel::Kernel{CPU}) = similar(kernel, cpu_rev)
-_create_rev_kernel(kernel::Kernel{<:GPU}) = similar(kernel, gpu_rev)
+_create_rev_kernel(kernel::Kernel{<:Backend}) = similar(kernel, gpu_rev)
 
 function cpu_aug_fwd(
         ctx,
@@ -232,7 +232,7 @@ function EnzymeRules.augmented_primal(
     arg_refs = ntuple(Val(N)) do i
         Base.@_inline_meta
         if args[i] isa Active
-            if func.val isa Kernel{<:GPU}
+            if func.val isa Kernel{<:Backend}
                 error("Active kernel arguments not supported on GPU")
             else
                 Ref(EnzymeCore.make_zero(args[i].val))

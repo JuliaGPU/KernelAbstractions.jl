@@ -18,7 +18,7 @@ import Adapt
 
 export POCLBackend
 
-struct POCLBackend <: KA.GPU
+struct POCLBackend <: KI.Backend
 end
 
 function KI.versioninfo(io::IO, ::POCLBackend)
@@ -96,10 +96,9 @@ end
 
 
 function KI.copyto!(backend::POCLBackend, A, B)
+    length(A) == length(B) ||
+        throw(ArgumentError("Arrays must match in length, got $(length(A)) and $(length(B))"))
     if KI.get_backend(A) == KI.get_backend(B) && KI.get_backend(A) isa POCLBackend
-        if length(A) != length(B)
-            error("Arrays must match in length")
-        end
         if Base.mightalias(A, B)
             error("Arrays may not alias")
         end
@@ -107,7 +106,8 @@ function KI.copyto!(backend::POCLBackend, A, B)
         kernel(A, B, ndrange = length(A))
         return A
     else
-        return Base.copyto!(A, B)
+        Base.copyto!(A, B)
+        return A
     end
 end
 
@@ -123,8 +123,9 @@ KI.get_backend(::Array) = POCLBackend()
 ## must synchronize upon kernel launch and can't rely on synchronization upon
 ## array access. Therefore, `synchronize` is a no-op.
 KI.synchronize(::POCLBackend) = nothing
-KI.supports_float64(::POCLBackend) = true
+KI.supports_float64(::POCLBackend) = "cl_khr_fp64" in device().extensions
 KI.supports_unified(::POCLBackend) = true
+KI.supports_atomics(::POCLBackend) = true
 
 
 ## Kernel Launch
@@ -206,78 +207,61 @@ end
 
 KI.argconvert(::POCLBackend, arg) = clconvert(arg)
 
-function KI.kernel_function(::POCLBackend, f::F, tt::TT = Tuple{}; name = nothing, kwargs...) where {F, TT}
-    kern = clfunction(f, tt; name, kwargs...)
-    return KI.Kernel{POCLBackend, typeof(kern)}(POCLBackend(), kern)
+function KI.kernel_function(backend::POCLBackend, f::F, tt::TT = Tuple{}; name = nothing, kwargs...) where {F, TT}
+    # fix the sub-group width, as `KI.sub_group_size` promises
+    sub_group_size = device_limits().sub_group_size
+    kern = if sub_group_size > 0
+        clfunction(f, tt; name, sub_group_size, kwargs...)
+    else
+        clfunction(f, tt; name, kwargs...)
+    end
+    return KI.Kernel{POCLBackend, typeof(kern)}(backend, kern)
 end
 
-function (obj::KI.Kernel{POCLBackend})(args...; numworkgroups = (), workgroupsize = (), ndrange = (), max_work_group_size = typemax(Int))
-    KI.check_launch_args(numworkgroups, workgroupsize, ndrange)
-
-    # zero-sized ndrange: nothing to launch
-    prod(ndrange) == 0 && return nothing
-
-    numworkgroups, workgroupsize = KI.auto_launch_sizes(obj, numworkgroups, workgroupsize, ndrange, max_work_group_size)
-
-    local_size = (workgroupsize..., ntuple(_ -> 1, 3 - length(workgroupsize))...)
-
-    numworkgroups = (numworkgroups..., ntuple(_ -> 1, 3 - length(numworkgroups))...)
-    global_size = local_size .* numworkgroups
-
-    event = obj.kern(args...; local_size, global_size)
+function KI.launch(obj::KI.Kernel{POCLBackend}, groups::Dims{3}, items::Dims{3}, args::Vararg{Any, N}) where {N}
+    # POCL launches synchronously, see the implementation note on `synchronize`
+    event = obj.kern(args...; local_size = items, global_size = groups .* items)
     wait(event)
     cl.clReleaseEvent(event)
     return nothing
 end
 
-function KI.kernel_max_work_group_size(kernel::KI.Kernel{<:POCLBackend}; max_work_items::Int = typemax(Int))::Int
+function KI.max_work_group_size(kernel::KI.Kernel{<:POCLBackend})::Int
     wginfo = cl.work_group_info(kernel.kern.fun, device())
-    return Int(min(wginfo.size, max_work_items))
+    return Int(wginfo.size)
 end
 # querying the device allocates, so cache the limits that every launch needs
 function device_limits()
     return get!(task_local_storage(), :POCLLimits) do
         dev = device()
         sizes = dev.max_work_item_size
+        # POCL can technically support any sub-group size; prefer the common GPU ones
+        sg_sizes = dev.sub_group_sizes
+        common = filter(in(sg_sizes), [32, 64, 16, sg_sizes...])
         (;
             max_work_group_size = Int(dev.max_work_group_size),
             max_work_group_dims = ntuple(d -> d <= length(sizes) ? sizes[d] : 1, 3),
+            # 0 if the device has no sub-groups
+            sub_group_size = isempty(common) ? 0 : first(common),
         )
-    end::@NamedTuple{max_work_group_size::Int, max_work_group_dims::NTuple{3, Int}}
+    end::@NamedTuple{max_work_group_size::Int, max_work_group_dims::NTuple{3, Int}, sub_group_size::Int}
 end
 KI.max_work_group_size(::POCLBackend)::Int = device_limits().max_work_group_size
 KI.max_work_group_dims(::POCLBackend)::NTuple{3, Int} = device_limits().max_work_group_dims
-function KI.sub_group_size(::POCLBackend)::Int
-    # POCL can technically support any sub_group size.
-    #  Check for common values used on GPUs then
-    #  return 1 otherwise
-    sg_sizes = cl.device().sub_group_sizes
-    if 32 in sg_sizes
-        return 32
-    elseif 64 in sg_sizes
-        return 64
-    elseif 16 in sg_sizes
-        return 16
-    else
-        return 1
-    end
-end
+# the grid is only limited by the size of `size_t`
+KI.max_num_groups(::POCLBackend)::NTuple{3, Int} = (typemax(Int), typemax(Int), typemax(Int))
+KI.sub_group_size(::POCLBackend)::Int = device_limits().sub_group_size
 function KI.multiprocessor_count(::POCLBackend)::Int
     return Int(device().max_compute_units)
 end
 
-function KI.shfl_down_types(::POCLBackend)
-    res = copy(SPIRVIntrinsics.gentypes)
-
-    backend_extensions = cl.device().extensions
-    if "cl_khr_fp64" ∉ backend_extensions
-        res = setdiff(res, [Float64])
-    end
-    if "cl_khr_fp16" ∉ backend_extensions
-        res = setdiff(res, [Float16])
-    end
-
-    return res
+KI.supports_subgroups(::POCLBackend) = device_limits().sub_group_size > 0
+function KI.supports_shuffle(backend::POCLBackend, ::Type{T}) where {T}
+    KI.supports_subgroups(backend) || return false
+    T in SPIRVIntrinsics.gentypes || return false
+    T === Float64 && return "cl_khr_fp64" in device().extensions
+    T === Float16 && return "cl_khr_fp16" in device().extensions
+    return true
 end
 
 ## Indexing Functions
@@ -293,10 +277,6 @@ end
     return (; x = get_group_id(1) % T, y = get_group_id(2) % T, z = get_group_id(3) % T)
 end
 
-@device_override @inline function KI.get_global_id(::Type{T}) where {T}
-    return (; x = get_global_id(1) % T, y = get_global_id(2) % T, z = get_global_id(3) % T)
-end
-
 @device_override @inline function KI.get_local_size(::Type{T}) where {T}
     return (; x = get_local_size(1) % T, y = get_local_size(2) % T, z = get_local_size(3) % T)
 end
@@ -305,19 +285,23 @@ end
     return (; x = get_num_groups(1) % T, y = get_num_groups(2) % T, z = get_num_groups(3) % T)
 end
 
+@device_override @inline function KI.get_global_id(::Type{T}) where {T}
+    return (; x = get_global_id(1) % T, y = get_global_id(2) % T, z = get_global_id(3) % T)
+end
+
 @device_override @inline function KI.get_global_size(::Type{T}) where {T}
     return (; x = get_global_size(1) % T, y = get_global_size(2) % T, z = get_global_size(3) % T)
 end
 
-@device_override KI.get_sub_group_size() = get_sub_group_size() % UInt32
+@device_override KI.get_sub_group_size(::Type{T}) where {T} = get_sub_group_size() % T
 
-@device_override KI.get_max_sub_group_size() = get_max_sub_group_size() % UInt32
+@device_override KI.get_max_sub_group_size(::Type{T}) where {T} = get_max_sub_group_size() % T
 
-@device_override KI.get_num_sub_groups() = get_num_sub_groups() % UInt32
+@device_override KI.get_num_sub_groups(::Type{T}) where {T} = get_num_sub_groups() % T
 
-@device_override KI.get_sub_group_id() = get_sub_group_id() % UInt32
+@device_override KI.get_sub_group_id(::Type{T}) where {T} = get_sub_group_id() % T
 
-@device_override KI.get_sub_group_local_id() = get_sub_group_local_id() % UInt32
+@device_override KI.get_sub_group_local_id(::Type{T}) where {T} = get_sub_group_local_id() % T
 
 @device_override @inline function KA.__validindex(ctx)
     if KA.__dynamic_checkbounds(ctx)

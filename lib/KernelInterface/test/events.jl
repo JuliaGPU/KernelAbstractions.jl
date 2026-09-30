@@ -19,13 +19,18 @@ function slow_fill_kernel(A, v, iters::UInt32)
     return
 end
 
-function events_testsuite(backend)
-    b = backend()
+function events_testsuite(b::KI.Backend)
+    # A backend without events of its own records by synchronizing, so there is nothing
+    # for these tests to order.
+    if KI.record_event(b) === nothing
+        @test KI.wait_event(b, nothing) === nothing
+        return
+    end
     dev = KI.device(b)
 
     N = 64
     A = KI.zeros(b, Float32, N)
-    slow_fill(v, iters) = KI.@kernel b numworkgroups = 1 workgroupsize = N slow_fill_kernel(A, v, UInt32(iters))
+    slow_fill(v, iters) = KI.@launch b numgroups = 1 workgroupsize = N slow_fill_kernel(A, v, UInt32(iters))
 
     # Time a launch as the minimum of a few runs: a backend's `synchronize` may run a
     # GC or otherwise stall once in a while, and the minimum discards that.

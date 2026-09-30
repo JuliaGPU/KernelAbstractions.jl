@@ -56,8 +56,11 @@ function hostinterface_testsuite(_backend, AT)
     @testset "KernelInterface host functions" begin
         @test KI.max_work_group_size(backend) isa Int
         @test KI.multiprocessor_count(backend) isa Int
-        @test KI.sub_group_size(backend) isa Int
-        @test KI.shfl_down_types(backend) isa Vector{DataType}
+        @test KI.supports_subgroups(backend) isa Bool
+        if KI.supports_subgroups(backend)
+            @test KI.sub_group_size(backend) isa Int
+        end
+        @test KI.supports_shuffle(backend, Float32) isa Bool
 
         function ki_hostinterface_kernel(x)
             i = KI.get_global_id().x
@@ -68,10 +71,11 @@ function hostinterface_testsuite(_backend, AT)
         end
 
         x = AT(zeros(Float32, 4))
-        kernel = KI.@kernel _backend() launch = false ki_hostinterface_kernel(x)
+        kernel = KI.@launch _backend() launch = false ki_hostinterface_kernel(x)
         @test kernel isa KI.Kernel
-        @test KI.kernel_max_work_group_size(kernel) isa Int
-        @test KI.kernel_max_work_group_size(kernel; max_work_items = 1) == 1
+        @test KI.max_work_group_size(kernel) isa Int
+        @test KI.launch_configuration(kernel) isa @NamedTuple{workgroupsize::Int}
+        @test KI.launch_configuration(kernel; max_work_group_size = 1).workgroupsize == 1
     end
 
     return nothing

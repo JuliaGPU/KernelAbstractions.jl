@@ -4,7 +4,7 @@ export @kernel
 export @Const, @localmem, @private, @uniform, @synchronize
 export @index, @groupsize, @ndrange
 export @print
-export Backend, GPU, CPU
+export Backend, CPU
 export synchronize, get_backend, allocate
 
 import PrecompileTools
@@ -14,7 +14,7 @@ import Atomix: @atomic, @atomicswap, @atomicreplace
 using MacroTools
 using Adapt
 
-using KernelInterface: KernelInterface, Backend, GPU, get_backend, functional, synchronize, versioninfo, supports_unified, supports_float64, supports_atomics, copyto!, allocate, zeros, ones, device, device!, ndevices, priority!, pagelock!, unsafe_free!, record_event, wait_event
+using KernelInterface: KernelInterface, Backend, get_backend, functional, synchronize, versioninfo, supports_unified, supports_float64, supports_atomics, copyto!, allocate, zeros, ones, device, device!, ndevices, priority!, pagelock!, unsafe_free!, record_event, wait_event
 import KernelInterface as KI
 export KernelInterface
 
@@ -597,8 +597,8 @@ last (possibly partial) workgroup. Primarily used by backend implementations and
     return iterspace, dynamic
 end
 
-function construct(backend::Backend, ::S, ::NDRange, xpu_name::XPUName) where {Backend <: GPU, S <: _Size, NDRange <: _Size, XPUName}
-    return Kernel{Backend, S, NDRange, XPUName}(backend, xpu_name)
+function construct(backend::B, ::S, ::NDRange, xpu_name::XPUName) where {B <: Backend, S <: _Size, NDRange <: _Size, XPUName}
+    return Kernel{B, S, NDRange, XPUName}(backend, xpu_name)
 end
 
 ###

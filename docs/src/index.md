@@ -141,6 +141,10 @@ end
   the CPU backend became an OpenCL backend meant every backend. Use
   `KernelAbstractions.@device_code_llvm` and `KernelAbstractions.@device_code_typed` instead,
   which report on the code a backend actually generates; see [Reflection](@ref).
+- `KernelAbstractions.GPU` has been removed: it didn't mean GPU hardware (the `CPU` backend
+  was a subtype), and backends now subtype `KernelAbstractions.Backend` directly. Code
+  dispatching on `::GPU` should dispatch on `::Backend`, on concrete backend types, or on a
+  capability such as `KernelAbstractions.supports_float64`.
 
 ## Semantic differences
 

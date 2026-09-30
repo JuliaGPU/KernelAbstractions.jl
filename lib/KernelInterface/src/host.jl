@@ -32,8 +32,8 @@ end
 """
     synchronize(::Backend)
 
-Synchronize the current backend: block the calling task until all work it has queued on
-`backend` has completed.
+Block the calling task until all work it has queued on the active device of `backend` has
+completed.
 
 !!! note
     Backend implementations **must** implement this function, and it **must** be
@@ -117,11 +117,28 @@ end
 Return the 1-based index of the currently active device for `backend`.
 
 !!! note
-    The default implementation assumes a single device. Backends supporting multiple devices
-    **must** implement `device(backend::Backend)::Int`, [`ndevices`](@ref),
-    and [`device!`](@ref).
+    Backends supporting multiple devices **must** implement `device(backend::Backend)::Int`,
+    along with [`ndevices`](@ref), [`device!`](@ref) and `device(backend, A)`. The fallback
+    only works for a single device, and throws if [`ndevices`](@ref) reports more.
 """
-function device(::Backend)
+function device(backend::Backend)
+    ndevices(backend) == 1 || throw_multi_device(device, backend)
+    return 1
+end
+
+"""
+    device(backend::Backend, A::AbstractArray)::Int
+
+Return the 1-based index of the device that owns the memory of `A`, independently of the
+currently active device.
+
+!!! note
+    Backends supporting multiple devices **must** implement this for their array type.
+    The fallback only works for a single device, and throws if [`ndevices`](@ref) reports
+    more.
+"""
+function device(backend::Backend, ::AbstractArray)
+    ndevices(backend) == 1 || throw_multi_device(device, backend)
     return 1
 end
 
@@ -131,9 +148,8 @@ end
 Return the number of devices available to `backend`.
 
 !!! note
-    The default implementation assumes a single device. Backends supporting multiple devices
-    **must** implement `ndevices(backend::Backend)::Int`, [`device`](@ref),
-    and [`device!`](@ref).
+    Backends supporting multiple devices **must** implement `ndevices(backend::Backend)::Int`,
+    along with [`device`](@ref) and [`device!`](@ref). The fallback returns 1.
 """
 function ndevices(::Backend)
     return 1
@@ -142,8 +158,8 @@ end
 """
     device!(backend::Backend, id::Int)::Nothing
 
-Select the active device for `backend`. `id` is a 1-based device index and must satisfy
-`1 <= id <= ndevices(backend)`.
+Select the active device for `backend`. `id` is a 1-based device index; an `id` outside
+`1:ndevices(backend)` throws an `ArgumentError`.
 
 `device!` is not a synchronization point: work queued before the switch is not ordered
 with respect to work queued after it. To order across a switch, either [`synchronize`](@ref)
@@ -156,24 +172,31 @@ device!(CUDABackend(), 2)  # use the second CUDA device
 ```
 
 !!! note
-    The default implementation assumes a single device. Backends supporting multiple devices
-    **must** implement `device!(backend::Backend, id::Int)`, [`ndevices`](@ref),
-    and [`device`](@ref).
+    Backends supporting multiple devices **must** implement `device!(backend::Backend, id::Int)`,
+    along with [`ndevices`](@ref) and [`device`](@ref). The fallback only works for a single
+    device, and throws if [`ndevices`](@ref) reports more.
 """
 function device!(backend::Backend, id::Int)
-    if !(0 < id <= ndevices(backend))
+    n = ndevices(backend)
+    if !(0 < id <= n)
         throw(ArgumentError("Device id $id out of bounds."))
     end
+    n == 1 || throw_multi_device(device!, backend)
     return nothing
 end
+
+# a backend with several devices has to implement the device functions itself: the
+# single-device fallbacks would silently answer for the wrong device
+@noinline throw_multi_device(f, backend) =
+    error("`$(typeof(backend))` has multiple devices, so it must implement `KernelInterface.$(nameof(f))`")
 
 """
     pagelock!(::Backend, dest::AbstractArray)::Union{Nothing, Missing}
 
 Pagelock (pin) a host memory buffer for a backend device. This may be necessary for [`copyto!`](@ref)
-to perform asynchronously w.r.t to the host/
+to perform asynchronously with respect to the host.
 
-This function should return `nothing`; or `missing` if not implemented.
+This function returns `nothing`, or `missing` if not implemented.
 
 
 !!! note
@@ -186,17 +209,14 @@ end
 """
     unsafe_free!(x::AbstractArray)
 
-Release the memory of an array for reuse by future allocations
-and reduce pressure on the allocator.
-After releasing the memory of an array, it should no longer be accessed.
+Release the memory of an array for reuse by future allocations, reducing pressure on the
+allocator. The array may not be used afterwards.
+
+This is a hint: releasing the memory is allowed to do nothing.
 
 !!! note
-    On CPU backend this is always a no-op.
-
-!!! note
-    Backend implementations **may** implement this function.
-    If not implemented for a particular backend, default action is a no-op.
-    Otherwise, it should be defined for backend's array type.
+    Backend implementations **may** implement this function for their array type, and
+    should forward it to their own `unsafe_free!` if they have one. The fallback is a no-op.
 """
 function unsafe_free! end
 
@@ -206,42 +226,71 @@ unsafe_free!(::AbstractArray) = return
 """
     supports_unified(::Backend)::Bool
 
-Returns whether unified memory arrays are supported by the backend.
+Whether [`allocate`](@ref) supports `unified=true` on the active device: memory that can be
+accessed from both the host and the device without explicit copies.
 
 !!! note
-    Backend implementations **should** implement this function
-    only if they **do** support unified memory.
+    Backend implementations **must** implement this function if they support unified
+    memory. The fallback returns `false`.
 """
 supports_unified(::Backend) = false
 
 """
     supports_atomics(::Backend)::Bool
 
-Returns whether `@atomic` operations are supported by the backend.
+Whether kernels on the active device support Atomix.jl's atomic operations: at least `add`
+and compare-and-swap on 32-bit integers and floats in global memory.
 
 !!! note
-    Backend implementations **must** implement this function
-    only if they **do not** support atomic operations with Atomix.
+    Backend implementations **must** implement this function if they support atomics.
+    The fallback returns `false`.
 """
-supports_atomics(::Backend) = true
+supports_atomics(::Backend) = false
 
 """
     supports_float64(::Backend)::Bool
 
-Returns whether `Float64` values are supported by the backend.
+Whether kernels on the active device support `Float64` values.
 
 !!! note
-    Backend implementations **must** implement this function
-    only if they **do not** support `Float64`.
+    Backend implementations **must** implement this function if they support `Float64`.
+    The fallback returns `false`.
 """
-supports_float64(::Backend) = true
+supports_float64(::Backend) = false
+
+"""
+    supports_subgroups(::Backend)::Bool
+
+Whether kernels on the active device support sub-groups: the sub-group queries
+([`get_sub_group_size`](@ref) etc.), [`sub_group_barrier`](@ref), and a fixed sub-group
+width [`sub_group_size`](@ref).
+
+Which types [`shfl_down`](@ref) supports is queried separately with [`supports_shuffle`](@ref).
+
+!!! note
+    Backend implementations **must** implement this function if they support sub-groups.
+    The fallback returns `false`.
+"""
+supports_subgroups(::Backend) = false
+
+"""
+    supports_shuffle(::Backend, ::Type{T})::Bool
+
+Whether kernels on the active device support [`shfl_down`](@ref) for values of type `T`.
+
+!!! note
+    Backend implementations **must** implement this function for the types they support.
+    The fallback returns `false`.
+"""
+supports_shuffle(::Backend, ::Type) = false
 
 """
     allocate(::Backend, Type, dims...; unified=false)::AbstractArray
 
-Allocate a storage array appropriate for the computational backend. `unified=true`
-allocates an array using unified memory if the backend supports it and throws otherwise.
-Use [`supports_unified`](@ref) to determine whether it is supported by a backend.
+Allocate an uninitialized array on the active device of the backend. `unified=true`
+allocates unified memory, accessible from the host and the device without explicit copies,
+if the backend supports it and throws otherwise. Use [`supports_unified`](@ref) to
+determine whether it is supported by a backend.
 
 !!! note
     Backend implementations **must** implement `allocate(::NewBackend, T, dims::Tuple)`
@@ -262,13 +311,13 @@ end
 """
     zeros(::Backend, Type, dims...; unified=false)::AbstractArray
 
-Allocate a storage array appropriate for the computational backend filled with zeros.
-`unified=true` allocates an array using unified memory if the backend supports it and
-throws otherwise.
+Allocate an array with [`allocate`](@ref) and fill it with zeros.
+
+This is generic: backends implement `allocate` (and `fill!` for their array type).
 """
 zeros(backend::Backend, T::Type, dims...; kwargs...) = zeros(backend, T, dims; kwargs...)
 function zeros(backend::Backend, ::Type{T}, dims::Tuple; kwargs...) where {T}
-    data = allocate(backend, T, dims...; kwargs...)
+    data = allocate(backend, T, dims; kwargs...)
     fill!(data, zero(T))
     return data
 end
@@ -276,9 +325,9 @@ end
 """
     ones(::Backend, Type, dims...; unified=false)::AbstractArray
 
-Allocate a storage array appropriate for the computational backend filled with ones.
-`unified=true` allocates an array using unified memory if the backend supports it and
-throws otherwise.
+Allocate an array with [`allocate`](@ref) and fill it with ones.
+
+This is generic: backends implement `allocate` (and `fill!` for their array type).
 """
 ones(backend::Backend, T::Type, dims...; kwargs...) = ones(backend, T, dims; kwargs...)
 function ones(backend::Backend, ::Type{T}, dims::Tuple; kwargs...) where {T}
@@ -289,21 +338,25 @@ end
 
 
 """
-    copyto!(::Backend, dest::AbstractArray, src::AbstractArray)
+    copyto!(::Backend, dest::AbstractArray, src::AbstractArray)::typeof(dest)
 
-Perform an asynchronous `copyto!` operation that is execution ordered with respect to the back-end.
+Copy the elements of `src` to `dest`, ordered with respect to the other work on the calling
+task's queue: after work queued before the copy, and before work queued after it. Returns
+`dest`.
 
-For most users, `Base.copyto!` should suffice, performance a simple, synchronous copy.
-Only when you know you need asynchronicity w.r.t. the host, you should consider using
-this asynchronous version, which requires additional lifetime guarantees as documented below.
+Either array can be a host array or an array of `backend`. `dest` and `src` must have the
+same length, otherwise an `ArgumentError` is thrown. Backends only have to support dense
+(contiguous) arrays with the same element type.
+
+The copy may be asynchronous with respect to the host, but doesn't have to be: it can also
+block until it has completed. For a simple, synchronous copy, use `Base.copyto!`.
 
 !!! warning
 
-    Because of the asynchronous nature of this operation, the user is required to guarantee that the lifetime
-    of the source extends past the *completion* of the copy operation as to avoid a use-after-free. It is not
-    sufficient to simply use `GC.@preserve` around the call to `copyto!`, because that only extends the
-    lifetime past the operation getting queued. Instead, it may be required to `synchronize()`,
-    or otherwise guarantee that the source will still be around when the copy is executed:
+    Because the copy may be asynchronous, the caller has to keep both arrays alive, and not
+    access them from the host, until the copy has *completed*, e.g. by calling
+    [`synchronize`](@ref) before using them. A `GC.@preserve` around `copyto!` only keeps
+    them alive until the copy is queued:
 
     ```julia
     arr = zeros(64)
@@ -316,10 +369,11 @@ this asynchronous version, which requires additional lifetime guarantees as docu
 
 !!! note
 
-    On some back-ends it may be necessary to first call [`pagelock!`](@ref) on host memory
+    On some backends it may be necessary to first call [`pagelock!`](@ref) on host memory
     to enable fully asynchronous behavior w.r.t to the host.
 
 !!! note
-    Backends **must** implement this function.
+    Backends **must** implement this function, for host-to-device, device-to-host and
+    device-to-device copies.
 """
 function copyto! end

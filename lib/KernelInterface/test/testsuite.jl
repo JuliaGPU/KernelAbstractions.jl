@@ -29,7 +29,17 @@ end
 include("interface.jl")
 include("events.jl")
 
-function testsuite(backend, backend_str, backend_mod, AT, DAT; skip_tests = Set{String}())
+"""
+    testsuite(backend::KI.Backend, AT; skip_tests=Set{String}())
+
+Run the KernelInterface tests for `backend`, whose array type is `AT`. Test sets named in
+`skip_tests` are skipped.
+"""
+function testsuite(backend::KI.Backend, AT; skip_tests = Set{String}())
+    @conditional_testset "Contract" skip_tests begin
+        contract_testsuite(backend, AT)
+    end
+
     @conditional_testset "Interface" skip_tests begin
         interface_testsuite(backend, AT)
     end

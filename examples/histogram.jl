@@ -60,7 +60,7 @@ end
 function histogram!(histogram_output, input, groupsize = 256)
     backend = get_backend(histogram_output)
     # Need static block size
-    KI.@kernel backend workgroupsize = groupsize numworkgroups = cld(length(input), groupsize) histogram_kernel!(histogram_output, input, Val(groupsize))
+    KI.@launch backend workgroupsize = groupsize numgroups = cld(length(input), groupsize) histogram_kernel!(histogram_output, input, Val(groupsize))
     return
 end
 

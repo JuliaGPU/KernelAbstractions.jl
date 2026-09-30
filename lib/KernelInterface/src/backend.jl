@@ -6,11 +6,13 @@
 """
     Backend
 
-Abstract supertype for all KernelAbstractions backends.
+Abstract supertype for all KernelInterface backends. Backends subtype it directly.
 
-Concrete backends (for example `CUDABackend` from CUDA.jl or `CPU` from KernelAbstractions)
-determine where arrays are allocated and where kernels execute. Use [`get_backend`](@ref) to
-obtain the backend for an array and [`allocate`](@ref) to create storage on a backend.
+A backend value identifies a backend and its configuration (e.g. compiler options). The
+device and the queue that operations use are task-local: each task selects its active device
+with [`device!`](@ref). Host-side queries answer for the calling task's active device, and
+work is queued on the calling task's queue of that device. Use [`get_backend`](@ref) to obtain the
+backend of an array and [`allocate`](@ref) to create storage on a backend.
 
 # Example
 
@@ -22,17 +24,6 @@ synchronize(backend)
 ```
 """
 abstract type Backend end
-
-"""
-Abstract type for all GPU based KernelAbstractions backends.
-
-!!! note
-    New backend implementations **must** sub-type this abstract type.
-
-!!! note
-    `GPU` will be removed in KernelAbstractions v1.0
-"""
-abstract type GPU <: Backend end
 
 """
     get_backend(A::AbstractArray)::Backend
