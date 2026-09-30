@@ -201,8 +201,11 @@ Core.kwcall(kwargs::NamedTuple, kernel::AbstractKernel, args::Vararg{Any, N}) wh
     # finalize types
     call_tt = Base.to_tuple_type(call_t)
 
+    # the converted arguments only hold pointers to the arrays in `args`
     return quote
-        $cl.clcall(kernel.fun, $call_tt, ($(call_args...),); global_size, local_size, kernel.rng_state)
+        GC.@preserve args begin
+            $cl.clcall(kernel.fun, $call_tt, ($(call_args...),); global_size, local_size, kernel.rng_state)
+        end
     end
 end
 

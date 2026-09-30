@@ -144,9 +144,12 @@ function KI.kernel_function(backend::POCLBackend, f::F, tt::TT = Tuple{}; name =
 end
 
 function KI.launch(obj::KI.Kernel{POCLBackend}, groups::Dims{3}, items::Dims{3}, args::Tuple)
-    # POCL launches synchronously, see the implementation note on `synchronize`
-    event = POCL.launch_tuple(obj.kern, args; local_size = items, global_size = groups .* items)
-    wait(event)
+    # the kernel only gets pointers to the arrays in `args`, so keep them alive until it
+    # completes. POCL launches synchronously, see the implementation note on `synchronize`
+    event = GC.@preserve args begin
+        event = POCL.launch_tuple(obj.kern, args; local_size = items, global_size = groups .* items)
+        wait(event)
+    end
     cl.clReleaseEvent(event)
     return nothing
 end
