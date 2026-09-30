@@ -1,3 +1,5 @@
+import KernelInterface as KI
+
 # EXCLUDE FROM TESTING
 if !(@isdefined backend)
     if Base.find_package("CUDA") !== nothing
@@ -10,4 +12,4 @@ if !(@isdefined backend)
     end
 end
 
-const f_type = KernelAbstractions.supports_float64(backend) ? Float64 : Float32
+const f_type = KI.supports_float64(backend) ? Float64 : Float32

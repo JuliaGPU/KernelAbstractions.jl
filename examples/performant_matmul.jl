@@ -1,11 +1,10 @@
-using KernelAbstractions
 import KernelInterface as KI
 
 using StaticArrays
 using Test
 using Random
 
-include(joinpath(dirname(pathof(KernelAbstractions)), "../examples/utils.jl")) # Load backend
+include(joinpath(@__DIR__, "utils.jl")) # Load backend
 
 # We use a TILE_DIM of 16 as a safe value since while
 #  most backends support up to 1024 threads per group,
@@ -79,14 +78,14 @@ end
 N = 1024
 R = 512
 M = 2048
-A = copyto!(allocate(backend, Float32, N, R), rand(Float32, N, R))
-B = copyto!(allocate(backend, Float32, R, M), rand(Float32, R, M))
-C = KernelAbstractions.zeros(backend, Float32, N, M)
+A = copyto!(KI.allocate(backend, Float32, N, R), rand(Float32, N, R))
+B = copyto!(KI.allocate(backend, Float32, R, M), rand(Float32, R, M))
+C = KI.zeros(backend, Float32, N, M)
 
 workgroupsize = (TILE_DIM, TILE_DIM)
 numgroups = (cld(size(C, 1), TILE_DIM), cld(size(C, 2), TILE_DIM))
 
 KI.@launch backend workgroupsize numgroups coalesced_matmul_kernel!(C, A, B, N, R, M, Val(TILE_DIM))
-KernelAbstractions.synchronize(backend)
+KI.synchronize(backend)
 
 @test isapprox(A * B, C)
