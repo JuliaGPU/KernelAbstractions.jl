@@ -191,6 +191,7 @@ function interface_testsuite(backend::KI.Backend, AT)
         max_groups = KI.max_num_groups(backend)
         @test max_dims isa NTuple{3, Int} && all(>=(1), max_dims)
         @test max_groups isa NTuple{3, Int} && all(>=(1), max_groups)
+        @test KI.max_work_group_size(backend) isa Int
 
         function fill_kernel(arr)
             i, j, k = KI.get_global_id()
@@ -207,13 +208,26 @@ function interface_testsuite(backend::KI.Backend, AT)
             return all(Array(arr) .== 1)
         end
 
+        max_items = KI.max_work_group_size(kernel)
+        @test max_items isa Int && 1 <= max_items <= KI.max_work_group_size(backend)
+        config = KI.launch_configuration(kernel)
+        @test config isa @NamedTuple{workgroupsize::Int}
+        @test 1 <= config.workgroupsize <= max_items
+        @test KI.launch_configuration(kernel; max_work_group_size = 1).workgroupsize == 1
+        # the recommendation is legal, whatever the size of the launch
+        @testset "nitems = $nitems, max_work_group_size = $cap" for nitems in (nothing, 1, 1000, typemax(Int)),
+                cap in (1, 7, typemax(Int))
+            config = KI.launch_configuration(kernel; nitems, max_work_group_size = cap)
+            @test 1 <= config.workgroupsize <= min(cap, max_items)
+        end
+
         # automatically chosen workgroup sizes respect the per-dimension limits
         @testset "ndrange = $ndrange" for ndrange in ((1, 1, 5000), (1, 5000, 1), (1, 3, 2000))
             @test fill_test(ndrange; ndrange)
+            @test fill_test(ndrange; ndrange, max_work_group_size = 7)
         end
 
         # the reported limits can be launched
-        max_items = KI.kernel_max_work_group_size(kernel)
         @testset "dimension $d" for d in 1:3
             items = min(max_dims[d], max_items)
             workgroupsize = ntuple(i -> i == d ? items : 1, 3)
@@ -302,9 +316,6 @@ function interface_testsuite(backend::KI.Backend, AT)
         N = workgroupsize * numgroups
         results = AT(Vector{KernelData}(undef, N))
         kernel = KI.@launch backend launch = false test_interface_kernel(results)
-
-        @test KI.kernel_max_work_group_size(kernel) isa Int
-        @test KI.kernel_max_work_group_size(kernel; max_work_items = 1) == 1
 
         kernel(results; workgroupsize, numgroups)
         KI.synchronize(backend)

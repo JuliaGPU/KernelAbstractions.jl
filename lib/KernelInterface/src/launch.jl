@@ -97,8 +97,8 @@ writing their own heuristic for calculating launch size.
         numgroups == () ? 1 : numgroups, workgroupsize == () ? 1 : workgroupsize
     else
         workgroupsize = if workgroupsize == ()
-            max_wgs = kernel_max_work_group_size(kernel; max_work_items = min(prod(ndrange), max_work_items))
-            threads_to_workgroupsize(max_wgs, ndrange, max_work_group_dims(kernel.backend))
+            config = launch_configuration(kernel; nitems = prod(ndrange), max_work_group_size = max_work_items)
+            threads_to_workgroupsize(config.workgroupsize, ndrange, max_work_group_dims(kernel.backend))
         else
             workgroupsize
         end
@@ -109,68 +109,88 @@ writing their own heuristic for calculating launch size.
     return numgroups, workgroupsize
 end
 
-"""
-    kernel_max_work_group_size(kern; [max_work_items::Int])::Int
 
-The maximum workgroup size limit for a kernel as reported by the backend.
-This function should always be used to determine the workgroup size before
-launching a kernel.
+## limits and advice
+
+"""
+    max_work_group_size(backend)::Int
+    max_work_group_size(kernel::Kernel)::Int
+
+The largest number of work-items a work-group can have: on the active device of `backend`,
+or for launches of the compiled `kernel` (which may be lower, e.g. because of the kernel's
+register use). Launching a larger work-group is an error.
+
+The work-group size that performs best is often smaller; see [`launch_configuration`](@ref).
 
 !!! note
-    Backend implementations **must** implement:
-    ```
-    kernel_max_work_group_size(kern::Kernel{<:NewBackend}; max_work_items::Int=typemax(Int))::Int
-    ```
-    As well as the on-device functionality.
-"""
-function kernel_max_work_group_size end
-
-"""
-    max_work_group_size(backend, kern; [max_work_items::Int])::Int
-
-The maximum workgroup size limit for a kernel as reported by the backend.
-This function represents a theoretical maximum; `kernel_max_work_group_size`
-should be used before launching a kernel as some backends may error if
-kernel launch with too big a workgroup is attempted.
-
-!!! note
-    Backend implementations **must** implement:
+    Backend implementations **must** implement both:
     ```
     max_work_group_size(backend::NewBackend)::Int
+    max_work_group_size(kernel::Kernel{<:NewBackend})::Int
     ```
-    As well as the on-device functionality.
+    The kernel form answers for the device the kernel was compiled for.
 """
 function max_work_group_size end
 
 """
-    max_work_group_dims(backend)::NTuple{3, Int}
+    launch_configuration(kernel::Kernel; nitems=nothing, max_work_group_size=typemax(Int))::@NamedTuple{workgroupsize::Int}
 
-The maximum number of work-items along each dimension of a workgroup, for the currently
-active device of `backend`. [`max_work_group_size`](@ref) bounds their product.
+The recommended number of work-items per work-group for launching `kernel` over `nitems`
+work-items in total (`nothing` if unknown), at most `max_work_group_size`. This is what an
+`ndrange` launch without a `workgroupsize` uses, passing the number of work-items in the
+`ndrange`. `nitems` and `max_work_group_size` are positive.
+
+Unlike [`max_work_group_size`](@ref), this is advice: backends may base it on occupancy or
+on the size of the launch, e.g. to prefer more work-groups over larger ones.
 
 !!! note
-    Backend implementations **should** implement:
+    Backend implementations **may** implement:
+    ```
+    launch_configuration(kernel::Kernel{<:NewBackend}; nitems::Union{Int, Nothing}=nothing,
+                         max_work_group_size::Int=typemax(Int))::@NamedTuple{workgroupsize::Int}
+    ```
+    The result has to be positive and at most `max_work_group_size` and
+    `max_work_group_size(kernel)`. The fallback recommends the largest legal work-group
+    size.
+"""
+function launch_configuration(
+        kernel::Kernel; nitems::Union{Integer, Nothing} = nothing,
+        max_work_group_size::Integer = typemax(Int)
+    )
+    return (; workgroupsize = Int(min(KernelInterface.max_work_group_size(kernel), max_work_group_size)))
+end
+
+"""
+    max_work_group_dims(backend)::NTuple{3, Int}
+
+The maximum number of work-items along each dimension of a work-group, for the active
+device of `backend`. [`max_work_group_size`](@ref) bounds their product.
+
+!!! note
+    Backend implementations **must** implement:
     ```
     max_work_group_dims(backend::NewBackend)::NTuple{3, Int}
     ```
-    The fallback does not limit individual dimensions.
 """
-max_work_group_dims(::Backend) = (typemax(Int), typemax(Int), typemax(Int))
+function max_work_group_dims end
 
 """
     max_num_groups(backend)::NTuple{3, Int}
 
-The maximum number of workgroups along each dimension of a launch, for the currently
-active device of `backend`.
+The maximum number of work-groups along each dimension of a launch, for the active device
+of `backend`.
+
+This is conservative: a launch within these limits works for any work-group size, but some
+backends accept more work-groups for smaller work-groups (e.g. HIP bounds the number of
+work-items per dimension). The backend's validation at launch time is authoritative.
 
 !!! note
-    Backend implementations **should** implement:
+    Backend implementations **must** implement:
     ```
     max_num_groups(backend::NewBackend)::NTuple{3, Int}
     ```
-    The fallback does not limit the number of workgroups.
 """
-max_num_groups(::Backend) = (typemax(Int), typemax(Int), typemax(Int))
+function max_num_groups end
 
 """
     sub_group_size(backend)::Int

@@ -33,7 +33,7 @@ end
         KI.get_num_sub_groups, KI.get_sub_group_id,
         KI.get_sub_group_local_id,
         KI.shfl_down,
-        KI.kernel_max_work_group_size, KI.max_work_group_size, KI.sub_group_size,
+        KI.max_work_group_size, KI.max_work_group_dims, KI.max_num_groups, KI.sub_group_size,
         KI.argconvert, KI.kernel_function,
         # Host-side stubs: required backend methods with no sensible fallback.
         KI.synchronize, KI.copyto!,
@@ -225,12 +225,6 @@ end
     @test KI.threads_to_workgroupsize(64, (1, 1, 1, 100), (1024, 1024, 64)) == (1, 1, 1, 64)
 end
 
-@testset "per-dimension limits" begin
-    # Unlimited unless the backend says otherwise.
-    @test KI.max_work_group_dims(StubBackend()) == (typemax(Int), typemax(Int), typemax(Int))
-    @test KI.max_num_groups(StubBackend()) == (typemax(Int), typemax(Int), typemax(Int))
-end
-
 @testset "Kernel" begin
     kernel = KI.Kernel(:backend, :kern)
     @test kernel.backend === :backend
@@ -242,19 +236,27 @@ end
 struct SizedBackend <: KI.Backend
     maxThreads::Int
 end
-function KI.kernel_max_work_group_size(k::KI.Kernel{SizedBackend}; max_work_items::Int = typemax(Int))
-    return min(k.backend.maxThreads, max_work_items)
-end
+KI.max_work_group_size(k::KI.Kernel{SizedBackend}) = k.backend.maxThreads
+KI.max_work_group_dims(::SizedBackend) = (1024, 1024, 64)
 
-# ... and a fixed limit per workgroup dimension
-struct DimsBackend <: KI.Backend end
-KI.kernel_max_work_group_size(k::KI.Kernel{DimsBackend}; max_work_items::Int = typemax(Int)) =
-    min(1024, max_work_items)
-KI.max_work_group_dims(::DimsBackend) = (1024, 1024, 64)
+# ... and one recommending smaller work-groups than it can launch, like CUDA's occupancy API,
+# recording what it was asked
+struct OccupancyBackend <: KI.Backend
+    queries::Vector{Any}
+end
+OccupancyBackend() = OccupancyBackend([])
+KI.max_work_group_size(::KI.Kernel{OccupancyBackend}) = 1024
+KI.max_work_group_dims(::OccupancyBackend) = (1024, 1024, 64)
+function KI.launch_configuration(
+        kernel::KI.Kernel{OccupancyBackend}; nitems = nothing, max_work_group_size = typemax(Int)
+    )
+    push!(kernel.backend.queries, (; nitems, max_work_group_size))
+    return (; workgroupsize = min(96, max_work_group_size))
+end
 
 @testset "auto_launch_sizes" begin
     # the per-dimension limit is respected
-    @test KI.auto_launch_sizes(KI.Kernel(DimsBackend(), nothing), (), (), (1, 1, 5000)) ===
+    @test KI.auto_launch_sizes(KI.Kernel(SizedBackend(1024), nothing), (), (), (1, 1, 5000)) ===
         ((1, 1, 79), (1, 1, 64))
 
     kernel = KI.Kernel(SizedBackend(256), nothing)
@@ -277,8 +279,29 @@ KI.max_work_group_dims(::DimsBackend) = (1024, 1024, 64)
 
     # A zero-sized ndrange yields zero workgroups; backends skip the launch.
     @test KI.auto_launch_sizes(kernel, (), (), (0,)) === ((0,), (1,))
-    @test KI.auto_launch_sizes(kernel, (), (), (0, 4)) === ((0, 4), (1, 1))
+    @test KI.auto_launch_sizes(kernel, (), (), (0, 4)) === ((0, 1), (1, 4))
     @test KI.auto_launch_sizes(kernel, (), (), 0) === (0, 1)
+
+    # The backend's recommendation is used, not the limit, and it's told both the size of
+    # the launch and the cap.
+    occupancy = KI.Kernel(OccupancyBackend(), nothing)
+    @test KI.auto_launch_sizes(occupancy, (), (), (1000,)) === ((11,), (96,))
+    @test only(occupancy.backend.queries) == (; nitems = 1000, max_work_group_size = typemax(Int))
+    @test KI.auto_launch_sizes(occupancy, (), (), (1000, 3), 64) === ((16, 3), (64, 1))
+    @test last(occupancy.backend.queries) == (; nitems = 3000, max_work_group_size = 64)
+end
+
+@testset "launch_configuration" begin
+    kernel = KI.Kernel(SizedBackend(256), nothing)
+    # the fallback recommends the limit
+    @test KI.launch_configuration(kernel) === (; workgroupsize = 256)
+    @test KI.launch_configuration(kernel; max_work_group_size = 100) === (; workgroupsize = 100)
+    @test KI.launch_configuration(kernel; nitems = 10) === (; workgroupsize = 256)
+
+    # backends can recommend less than the limit
+    occupancy = KI.Kernel(OccupancyBackend(), nothing)
+    @test KI.launch_configuration(occupancy) === (; workgroupsize = 96)
+    @test KI.max_work_group_size(occupancy) == 1024
 end
 
 @testset "split_kwargs" begin

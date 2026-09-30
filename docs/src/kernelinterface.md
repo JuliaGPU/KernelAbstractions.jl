@@ -165,10 +165,11 @@ supports_atomics
 supports_float64
 ```
 
-### Backend queries
+### Limits
 
 ```@docs
 max_work_group_size
+launch_configuration
 max_work_group_dims
 max_num_groups
 sub_group_size
@@ -180,7 +181,6 @@ multiprocessor_count
 ```@docs
 Kernel
 kernel_function
-kernel_max_work_group_size
 argconvert
 KernelInterface.@launch
 ```
@@ -210,9 +210,10 @@ A backend must, at minimum:
    `KI.check_launch_args` to validate them, or check them directly. A zero-sized
    `ndrange` — launching over an empty array is not uncommon — must be a no-op
    returning `nothing`, not an error.
-7. Report its limits through [`kernel_max_work_group_size`](@ref) and, where
-   applicable, [`max_work_group_size`](@ref), [`sub_group_size`](@ref) and
-   [`multiprocessor_count`](@ref).
+7. Report its limits through [`max_work_group_size`](@ref) (for the backend and for a
+   kernel), [`max_work_group_dims`](@ref) and [`max_num_groups`](@ref), and where
+   applicable [`sub_group_size`](@ref) and [`multiprocessor_count`](@ref). It may
+   recommend work-group sizes with [`launch_configuration`](@ref).
 
 The PoCL backend in `src/pocl/backend.jl` is a complete worked example.
 

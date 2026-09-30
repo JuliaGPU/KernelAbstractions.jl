@@ -70,8 +70,9 @@ function hostinterface_testsuite(_backend, AT)
         x = AT(zeros(Float32, 4))
         kernel = KI.@launch _backend() launch = false ki_hostinterface_kernel(x)
         @test kernel isa KI.Kernel
-        @test KI.kernel_max_work_group_size(kernel) isa Int
-        @test KI.kernel_max_work_group_size(kernel; max_work_items = 1) == 1
+        @test KI.max_work_group_size(kernel) isa Int
+        @test KI.launch_configuration(kernel) isa @NamedTuple{workgroupsize::Int}
+        @test KI.launch_configuration(kernel; max_work_group_size = 1).workgroupsize == 1
     end
 
     return nothing

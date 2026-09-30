@@ -230,9 +230,9 @@ function (obj::KI.Kernel{POCLBackend})(args...; numgroups = (), workgroupsize = 
     return nothing
 end
 
-function KI.kernel_max_work_group_size(kernel::KI.Kernel{<:POCLBackend}; max_work_items::Int = typemax(Int))::Int
+function KI.max_work_group_size(kernel::KI.Kernel{<:POCLBackend})::Int
     wginfo = cl.work_group_info(kernel.kern.fun, device())
-    return Int(min(wginfo.size, max_work_items))
+    return Int(wginfo.size)
 end
 # querying the device allocates, so cache the limits that every launch needs
 function device_limits()
@@ -247,6 +247,8 @@ function device_limits()
 end
 KI.max_work_group_size(::POCLBackend)::Int = device_limits().max_work_group_size
 KI.max_work_group_dims(::POCLBackend)::NTuple{3, Int} = device_limits().max_work_group_dims
+# the grid is only limited by the size of `size_t`
+KI.max_num_groups(::POCLBackend)::NTuple{3, Int} = (typemax(Int), typemax(Int), typemax(Int))
 function KI.sub_group_size(::POCLBackend)::Int
     # POCL can technically support any sub_group size.
     #  Check for common values used on GPUs then
