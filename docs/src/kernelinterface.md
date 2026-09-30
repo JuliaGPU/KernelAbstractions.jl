@@ -63,6 +63,45 @@ A few rules hold throughout the interface:
 - **Capabilities default to "unsupported".** A backend that doesn't implement a
   `supports_*` query never claims support.
 
+## Contract
+
+What a backend implements, at a glance. The docstrings below have the details.
+
+| | Required | Optional (fallback) |
+|---|---|---|
+| **Backend** | subtype [`Backend`](@ref); [`get_backend`](@ref) for its array type | |
+| **Memory** | [`allocate`](@ref), [`copyto!`](@ref) | `allocate(...; unified=true)` (throws), [`pagelock!`](@ref) (`missing`), [`unsafe_free!`](@ref) (no-op) |
+| **Execution** | [`synchronize`](@ref) (cooperative) | [`record_event`](@ref)/[`wait_event`](@ref) (synchronize), [`priority!`](@ref) (no-op) |
+| **Devices** | with more than one device: [`ndevices`](@ref), [`device`](@ref), [`device!`](@ref), `device(backend, A)` | all four (a single device) |
+| **Queries** | [`max_work_group_size`](@ref) (for the backend and for a kernel), [`max_work_group_dims`](@ref), [`max_num_groups`](@ref) | [`launch_configuration`](@ref) (the limit), [`multiprocessor_count`](@ref) (0), [`functional`](@ref) (`missing`), [`versioninfo`](@ref) |
+| **Capabilities** | | [`supports_float64`](@ref), [`supports_atomics`](@ref), [`supports_unified`](@ref), [`supports_subgroups`](@ref), [`supports_shuffle`](@ref) (all `false`) |
+| **Compilation** | [`argconvert`](@ref), [`kernel_function`](@ref), [`launch`](@ref) | |
+| **Device** | [`get_local_id`](@ref), [`get_group_id`](@ref), [`get_local_size`](@ref), [`get_num_groups`](@ref), [`localmemory`](@ref), [`barrier`](@ref) | [`get_global_id`](@ref), [`get_global_size`](@ref) (derived from the primitive queries), [`_print`](@ref KernelInterface._print) (host `print`) |
+| **Sub-groups** | if `supports_subgroups`: [`sub_group_size`](@ref), the sub-group queries, [`sub_group_barrier`](@ref); if `supports_shuffle(backend, T)`: [`shfl_down`](@ref) for `T` | |
+
+Everything else, such as [`zeros`](@ref KernelInterface.zeros), [`ones`](@ref KernelInterface.ones),
+the launch-keyword handling of [`Kernel`](@ref) and [`@launch`](@ref KernelInterface.@launch),
+is generic and not meant to be overridden.
+
+### Versioning
+
+- Required methods only change in breaking releases (0.x → 0.x+1).
+- Optional methods can be added in any release, with a fallback that is conservative:
+  never claiming support, never wrong. Tests for them pass on the fallback, or are gated
+  on a capability query.
+- A patch release may add tests of behavior that was already specified; tests for newly
+  specified behavior are new obligations and wait for a breaking release.
+
+Backends test themselves against the contract with the testsuite in
+`lib/KernelInterface/test`:
+
+```julia
+import KernelInterface
+using Test
+include(joinpath(pkgdir(KernelInterface), "test", "testsuite.jl"))
+Testsuite.testsuite(MyBackend(), MyArray)
+```
+
 ## Backend hierarchy
 
 Backends subtype [`Backend`](@ref), and everything else in the interface dispatches on
@@ -154,9 +193,6 @@ what makes [`KernelAbstractions.@print`](@ref) usable outside of a kernel.
 
 ## Host-side API
 
-Several of these have generic fallbacks. Each docstring notes which methods
-a backend **must** implement and which ones are optional.
-
 ### Memory
 
 ```@docs; canonical=false
@@ -223,35 +259,24 @@ KernelInterface.@launch
 
 ## Implementing a backend
 
-A backend must, at minimum:
+A backend implements the required methods from the [contract](@ref Contract), and those
+optional methods where it can do better than the fallback. In particular:
 
 1. Define a backend type subtyping [`Backend`](@ref), and implement [`get_backend`](@ref)
    for its array type.
-2. Implement the host-side management functions for that type:
-   [`allocate`](@ref), [`copyto!`](@ref) and [`synchronize`](@ref) are required, and so
-   are the device functions for backends with more than one device; the remaining
-   functions under [Host-side API](@ref) have conservative fallbacks.
-3. Extend `Adapt.adapt_storage(::NewBackend, x)` so that
+2. Extend `Adapt.adapt_storage(::NewBackend, x)` so that
    [`adapt(backend, x)`](@ref Adapt.adapt_storage(::Backend, ::Any)) moves
    data to the backend, preferably by delegating to its array type:
    `Adapt.adapt_storage(::NewBackend, x) = adapt(NewArray, x)`.
-4. `@device_override` the device-side functions it supports. The four primitive index
-   queries and [`barrier`](@ref) are required; sub-group and [`shfl_down`](@ref) support
-   is optional.
-5. Implement [`argconvert`](@ref) and [`kernel_function`](@ref) for its backend
-   type, returning a [`Kernel`](@ref).
-6. Implement [`launch`](@ref), which receives an already validated `NTuple{3, Int}` of
-   work-groups and of work-items. For CUDA.jl, that is
+3. Implement [`kernel_function`](@ref), returning a [`Kernel`](@ref) that holds the
+   backend value it was given, and [`launch`](@ref), which receives an already validated
+   `NTuple{3, Int}` of work-groups and of work-items. For CUDA.jl, the latter is
    ```julia
    KI.launch(k::KI.Kernel{CUDABackend}, groups::Dims{3}, items::Dims{3}, args::Vararg{Any, N}; kwargs...) where {N} =
        k.kern(args...; threads = items, blocks = groups, kwargs...)
    ```
-7. Compute the typed index queries with `% T`, not `T(x)`: a checked conversion leaves
+4. Compute the typed index queries with `% T`, not `T(x)`: a checked conversion leaves
    an error branch in every kernel.
-8. Report its limits through [`max_work_group_size`](@ref) (for the backend and for a
-   kernel), [`max_work_group_dims`](@ref) and [`max_num_groups`](@ref), and where
-   applicable [`sub_group_size`](@ref) and [`multiprocessor_count`](@ref). It may
-   recommend work-group sizes with [`launch_configuration`](@ref).
 
 The PoCL backend in `src/pocl/backend.jl` is a complete worked example.
 

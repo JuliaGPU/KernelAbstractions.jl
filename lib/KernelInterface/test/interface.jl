@@ -685,3 +685,21 @@ function interface_testsuite(backend::KI.Backend, AT)
     end
     return nothing
 end
+
+# Checks that a backend implements the methods that have no fallback.
+function contract_testsuite(backend::KI.Backend, AT)
+    B = typeof(backend)
+    @test hasmethod(KI.synchronize, Tuple{B})
+    @test hasmethod(KI.copyto!, Tuple{B, AT, Array})
+    @test hasmethod(KI.argconvert, Tuple{B, Any})
+    @test hasmethod(KI.kernel_function, Tuple{B, Any, Type})
+    @test hasmethod(KI.launch, Tuple{KI.Kernel{B}, Dims{3}, Dims{3}})
+    @test hasmethod(KI.max_work_group_size, Tuple{B})
+    @test hasmethod(KI.max_work_group_size, Tuple{KI.Kernel{B}})
+    @test hasmethod(KI.max_work_group_dims, Tuple{B})
+    @test hasmethod(KI.max_num_groups, Tuple{B})
+    if KI.supports_subgroups(backend)
+        @test hasmethod(KI.sub_group_size, Tuple{B})
+    end
+    return
+end
