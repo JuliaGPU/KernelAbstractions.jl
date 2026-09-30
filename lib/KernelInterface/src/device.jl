@@ -125,76 +125,93 @@ end
 
 ## sub-groups
 
-"""
-    get_sub_group_size()::UInt32
+# Sub-group support is optional, see `supports_subgroups`. A work-group is divided into
+# sub-groups of `sub_group_size(backend)` work-items. How work-items are assigned to
+# sub-groups is unspecified, except that `(get_sub_group_id(), get_sub_group_local_id())`
+# is unique within a work-group and doesn't change during the kernel's execution.
 
-Returns the number of work-items in the sub-group.
+"""
+    get_sub_group_size([::Type{T}=Int])::T
+
+The number of work-items in the sub-group: the sub-group width
+([`get_max_sub_group_size`](@ref)), or fewer for the last sub-group of a work-group whose
+size isn't a multiple of the width.
+
+See [`get_local_id`](@ref) for the supported types `T`.
 
 !!! note
-    Backend implementations **must** implement:
+    Backend implementations that support sub-groups **must** implement:
     ```
-    @device_override get_sub_group_size()::UInt32
+    @device_override get_sub_group_size(::Type{T})::T where {T}
     ```
+    The zero-argument form forwards to `get_sub_group_size(Int)`.
 """
-function get_sub_group_size end
+@inline get_sub_group_size() = get_sub_group_size(Int)
 
 """
-    get_max_sub_group_size()::UInt32
+    get_max_sub_group_size([::Type{T}=Int])::T
 
-Returns the maximum sub-group size for sub-groups in the current workgroup.
+The sub-group width, [`sub_group_size(backend)`](@ref sub_group_size) on the host.
+
+See [`get_local_id`](@ref) for the supported types `T`.
 
 !!! note
-    Backend implementations **must** implement:
+    Backend implementations that support sub-groups **must** implement:
     ```
-    @device_override get_max_sub_group_size()::UInt32
+    @device_override get_max_sub_group_size(::Type{T})::T where {T}
     ```
+    The zero-argument form forwards to `get_max_sub_group_size(Int)`.
 """
-function get_max_sub_group_size end
+@inline get_max_sub_group_size() = get_max_sub_group_size(Int)
 
 """
-    get_num_sub_groups()::UInt32
+    get_num_sub_groups([::Type{T}=Int])::T
 
-Returns the number of sub-groups in the current workgroup.
+The number of sub-groups in the work-group: `cld(prod(get_local_size()), get_max_sub_group_size())`.
+
+See [`get_local_id`](@ref) for the supported types `T`.
 
 !!! note
-    Backend implementations **must** implement:
+    Backend implementations that support sub-groups **must** implement:
     ```
-    @device_override get_num_sub_groups()::UInt32
+    @device_override get_num_sub_groups(::Type{T})::T where {T}
     ```
+    The zero-argument form forwards to `get_num_sub_groups(Int)`.
 """
-function get_num_sub_groups end
+@inline get_num_sub_groups() = get_num_sub_groups(Int)
 
 """
-    get_sub_group_id()::UInt32
+    get_sub_group_id([::Type{T}=Int])::T
 
-Returns the sub-group ID within the work-group.
+The 1-based index of the sub-group within the work-group.
+
+See [`get_local_id`](@ref) for the supported types `T`.
 
 !!! note
-    1-based.
-
-!!! note
-    Backend implementations **must** implement:
+    Backend implementations that support sub-groups **must** implement:
     ```
-    @device_override get_sub_group_id()::UInt32
+    @device_override get_sub_group_id(::Type{T})::T where {T}
     ```
+    The zero-argument form forwards to `get_sub_group_id(Int)`.
 """
-function get_sub_group_id end
+@inline get_sub_group_id() = get_sub_group_id(Int)
 
 """
-    get_sub_group_local_id()::UInt32
+    get_sub_group_local_id([::Type{T}=Int])::T
 
-Returns the work-item ID within the current sub-group.
+The 1-based index of the work-item within its sub-group (its lane). It doesn't depend on
+which work-items of the sub-group are active, e.g. in a divergent branch.
+
+See [`get_local_id`](@ref) for the supported types `T`.
 
 !!! note
-    1-based.
-
-!!! note
-    Backend implementations **must** implement:
+    Backend implementations that support sub-groups **must** implement:
     ```
-    @device_override get_sub_group_local_id()::UInt32
+    @device_override get_sub_group_local_id(::Type{T})::T where {T}
     ```
+    The zero-argument form forwards to `get_sub_group_local_id(Int)`.
 """
-function get_sub_group_local_id end
+@inline get_sub_group_local_id() = get_sub_group_local_id(Int)
 
 
 """
@@ -218,37 +235,25 @@ localmemory(::Type{T}, ::Val) where {T} =
 
 
 """
-    shfl_down(val::T, offset::Integer) where T
+    shfl_down(val::T, offset::Integer)::T
 
-Read `val` from a lane with higher id given by `offset`.
+Return `val` of the work-item `offset` lanes further in the sub-group, i.e. with
+[`get_sub_group_local_id`](@ref) equal to `get_sub_group_local_id() + offset`. When there is
+no such work-item, the result is an unspecified value (of type `T`).
+
+All work-items of the sub-group have to execute `shfl_down` together (not in a divergent
+branch), with the same `offset`.
+
+`shfl_down` exchanges values, not memory: it is not a memory fence.
 
 !!! note
-    `shfl_down` must be encountered by all workitems of a sub-group executing the kernel or by none at all.
-
-!!! note
-    Backend implementations **must** implement:
+    Backend implementations **must** implement this for every `T` for which
+    [`supports_shuffle`](@ref) returns `true`:
     ```
     @device_override shfl_down(val::T, offset::Integer) where T
     ```
-    As well as the on-device functionality.
-
-    This implementation **must** be synchronizing.
-    That is, kernels using this function can safely assume that
-    they do **not** need a `sub_group_barrier` before calling
-    this function.
 """
 function shfl_down end
-
-"""
-    shfl_down_types(::Backend)::Vector{DataType}
-
-Returns a vector of `DataType`s supported on `backend`
-
-!!! note
-    Backend implementations **must** implement this function
-    only if they support `shfl_down` for any types.
-"""
-shfl_down_types(::Backend) = DataType[]
 
 
 """
@@ -277,18 +282,14 @@ end
 """
     sub_group_barrier()
 
-After a `sub_group_barrier()` call, all read and writes to global and local memory
-from each thread in the sub-group are visible in from all other threads in the
-sub-group.
+Like [`barrier`](@ref), for the work-items of a sub-group: wait until all work-items of the
+sub-group have reached the barrier, and make their writes to global and local memory
+before it visible to the sub-group.
 
-This does **not** guarantee that a write from a thread in a certain sub-group will
-be visible to a thread in a different sub-group.
-
-!!! note
-    `sub_group_barrier()` must be encountered by all workitems of a sub-group executing the kernel or by none at all.
+All work-items of a sub-group have to reach the same `sub_group_barrier()`.
 
 !!! note
-    Backend implementations **must** implement:
+    Backend implementations that support sub-groups **must** implement:
     ```
     @device_override sub_group_barrier()
     ```

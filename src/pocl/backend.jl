@@ -207,7 +207,13 @@ end
 KI.argconvert(::POCLBackend, arg) = clconvert(arg)
 
 function KI.kernel_function(::POCLBackend, f::F, tt::TT = Tuple{}; name = nothing, kwargs...) where {F, TT}
-    kern = clfunction(f, tt; name, kwargs...)
+    # fix the sub-group width, as `KI.sub_group_size` promises
+    sub_group_size = device_limits().sub_group_size
+    kern = if sub_group_size > 0
+        clfunction(f, tt; name, sub_group_size, kwargs...)
+    else
+        clfunction(f, tt; name, kwargs...)
+    end
     return KI.Kernel{POCLBackend, typeof(kern)}(POCLBackend(), kern)
 end
 
@@ -228,47 +234,33 @@ function device_limits()
     return get!(task_local_storage(), :POCLLimits) do
         dev = device()
         sizes = dev.max_work_item_size
+        # POCL can technically support any sub-group size; prefer the common GPU ones
+        sg_sizes = dev.sub_group_sizes
+        common = filter(in(sg_sizes), [32, 64, 16, sg_sizes...])
         (;
             max_work_group_size = Int(dev.max_work_group_size),
             max_work_group_dims = ntuple(d -> d <= length(sizes) ? sizes[d] : 1, 3),
+            # 0 if the device has no sub-groups
+            sub_group_size = isempty(common) ? 0 : first(common),
         )
-    end::@NamedTuple{max_work_group_size::Int, max_work_group_dims::NTuple{3, Int}}
+    end::@NamedTuple{max_work_group_size::Int, max_work_group_dims::NTuple{3, Int}, sub_group_size::Int}
 end
 KI.max_work_group_size(::POCLBackend)::Int = device_limits().max_work_group_size
 KI.max_work_group_dims(::POCLBackend)::NTuple{3, Int} = device_limits().max_work_group_dims
 # the grid is only limited by the size of `size_t`
 KI.max_num_groups(::POCLBackend)::NTuple{3, Int} = (typemax(Int), typemax(Int), typemax(Int))
-function KI.sub_group_size(::POCLBackend)::Int
-    # POCL can technically support any sub_group size.
-    #  Check for common values used on GPUs then
-    #  return 1 otherwise
-    sg_sizes = cl.device().sub_group_sizes
-    if 32 in sg_sizes
-        return 32
-    elseif 64 in sg_sizes
-        return 64
-    elseif 16 in sg_sizes
-        return 16
-    else
-        return 1
-    end
-end
+KI.sub_group_size(::POCLBackend)::Int = device_limits().sub_group_size
 function KI.multiprocessor_count(::POCLBackend)::Int
     return Int(device().max_compute_units)
 end
 
-function KI.shfl_down_types(::POCLBackend)
-    res = copy(SPIRVIntrinsics.gentypes)
-
-    backend_extensions = cl.device().extensions
-    if "cl_khr_fp64" ∉ backend_extensions
-        res = setdiff(res, [Float64])
-    end
-    if "cl_khr_fp16" ∉ backend_extensions
-        res = setdiff(res, [Float16])
-    end
-
-    return res
+KI.supports_subgroups(::POCLBackend) = device_limits().sub_group_size > 0
+function KI.supports_shuffle(backend::POCLBackend, ::Type{T}) where {T}
+    KI.supports_subgroups(backend) || return false
+    T in SPIRVIntrinsics.gentypes || return false
+    T === Float64 && return "cl_khr_fp64" in device().extensions
+    T === Float16 && return "cl_khr_fp16" in device().extensions
+    return true
 end
 
 ## Indexing Functions
@@ -300,15 +292,15 @@ end
     return (; x = get_global_size(1) % T, y = get_global_size(2) % T, z = get_global_size(3) % T)
 end
 
-@device_override KI.get_sub_group_size() = get_sub_group_size() % UInt32
+@device_override KI.get_sub_group_size(::Type{T}) where {T} = get_sub_group_size() % T
 
-@device_override KI.get_max_sub_group_size() = get_max_sub_group_size() % UInt32
+@device_override KI.get_max_sub_group_size(::Type{T}) where {T} = get_max_sub_group_size() % T
 
-@device_override KI.get_num_sub_groups() = get_num_sub_groups() % UInt32
+@device_override KI.get_num_sub_groups(::Type{T}) where {T} = get_num_sub_groups() % T
 
-@device_override KI.get_sub_group_id() = get_sub_group_id() % UInt32
+@device_override KI.get_sub_group_id(::Type{T}) where {T} = get_sub_group_id() % T
 
-@device_override KI.get_sub_group_local_id() = get_sub_group_local_id() % UInt32
+@device_override KI.get_sub_group_local_id(::Type{T}) where {T} = get_sub_group_local_id() % T
 
 @device_override @inline function KA.__validindex(ctx)
     if KA.__dynamic_checkbounds(ctx)

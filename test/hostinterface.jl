@@ -56,8 +56,11 @@ function hostinterface_testsuite(_backend, AT)
     @testset "KernelInterface host functions" begin
         @test KI.max_work_group_size(backend) isa Int
         @test KI.multiprocessor_count(backend) isa Int
-        @test KI.sub_group_size(backend) isa Int
-        @test KI.shfl_down_types(backend) isa Vector{DataType}
+        @test KI.supports_subgroups(backend) isa Bool
+        if KI.supports_subgroups(backend)
+            @test KI.sub_group_size(backend) isa Int
+        end
+        @test KI.supports_shuffle(backend, Float32) isa Bool
 
         function ki_hostinterface_kernel(x)
             i = KI.get_global_id().x

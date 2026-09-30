@@ -237,6 +237,32 @@ Returns whether `Float64` values are supported by the backend.
 supports_float64(::Backend) = true
 
 """
+    supports_subgroups(::Backend)::Bool
+
+Whether kernels on the active device support sub-groups: the sub-group queries
+([`get_sub_group_size`](@ref) etc.), [`sub_group_barrier`](@ref), and a fixed sub-group
+width [`sub_group_size`](@ref).
+
+Which types [`shfl_down`](@ref) supports is queried separately with [`supports_shuffle`](@ref).
+
+!!! note
+    Backend implementations **must** implement this function if they support sub-groups.
+    The fallback returns `false`.
+"""
+supports_subgroups(::Backend) = false
+
+"""
+    supports_shuffle(::Backend, ::Type{T})::Bool
+
+Whether kernels on the active device support [`shfl_down`](@ref) for values of type `T`.
+
+!!! note
+    Backend implementations **must** implement this function for the types they support.
+    The fallback returns `false`.
+"""
+supports_shuffle(::Backend, ::Type) = false
+
+"""
     allocate(::Backend, Type, dims...; unified=false)::AbstractArray
 
 Allocate a storage array appropriate for the computational backend. `unified=true`

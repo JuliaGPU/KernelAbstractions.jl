@@ -90,6 +90,12 @@ get_global_size
 
 ### Sub-groups
 
+Sub-groups are optional ([`supports_subgroups`](@ref)). A work-group is divided into
+sub-groups of [`sub_group_size(backend)`](@ref sub_group_size) work-items, the last of which
+can be partial. How work-items are assigned to sub-groups is unspecified, but every
+work-item has a unique `(get_sub_group_id(), get_sub_group_local_id())` pair in its
+work-group, which doesn't change during the kernel.
+
 ```@docs
 get_sub_group_size
 get_max_sub_group_size
@@ -115,7 +121,6 @@ localmemory
 
 ```@docs
 shfl_down
-shfl_down_types
 ```
 
 ### Printing
@@ -169,6 +174,11 @@ versioninfo
 supports_unified
 supports_atomics
 supports_float64
+```
+
+```@docs
+supports_subgroups
+supports_shuffle
 ```
 
 ### Limits

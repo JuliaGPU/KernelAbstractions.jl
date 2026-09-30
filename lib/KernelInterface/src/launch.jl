@@ -297,16 +297,20 @@ function max_num_groups end
 """
     sub_group_size(backend)::Int
 
-Returns a reasonable sub-group size supported by the currently
-active device for the specified backend. This would typically
-be 32, or 64 for devices that don't support 32.
+The sub-group width of kernels compiled for the active device of `backend`.
+
+Kernels compiled by [`kernel_function`](@ref) execute with exactly this width: on the device,
+[`get_max_sub_group_size`](@ref) returns it, and full sub-groups have this many work-items.
+Host code can rely on it, e.g. to pick a `Val(N)` for a warp-level reduction.
 
 !!! note
-    Backend implementations **must** implement:
+    Backend implementations **must** implement this if [`supports_subgroups`](@ref) returns
+    `true`:
     ```
     sub_group_size(backend::NewBackend)::Int
     ```
-    As well as the on-device functionality.
+    A backend that cannot guarantee the width for every kernel has to report
+    `supports_subgroups(backend) = false`.
 """
 function sub_group_size end
 
@@ -357,6 +361,8 @@ CUDA.jl); backends throw an error for options they don't support.
     ```
     kernel_function(backend::NewBackend, f::F, tt::TT=Tuple{}; name=nothing, kwargs...) where {F,TT}
     ```
+    Kernels must execute with sub-group width [`sub_group_size(backend)`](@ref sub_group_size)
+    if the backend supports sub-groups.
 """
 function kernel_function end
 

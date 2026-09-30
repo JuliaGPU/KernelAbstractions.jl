@@ -29,12 +29,9 @@ end
     # These have no fallback on purpose: a backend that forgets to `@device_override`
     # them should get a MethodError rather than silently wrong behaviour.
     stubs = [
-        KI.get_sub_group_size, KI.get_max_sub_group_size,
-        KI.get_num_sub_groups, KI.get_sub_group_id,
-        KI.get_sub_group_local_id,
         KI.shfl_down,
-        KI.max_work_group_size, KI.max_work_group_dims, KI.max_num_groups, KI.sub_group_size,
-        KI.argconvert, KI.kernel_function, KI.launch,
+        KI.max_work_group_size, KI.max_work_group_dims, KI.max_num_groups,
+        KI.sub_group_size, KI.argconvert, KI.kernel_function, KI.launch,
         # Host-side stubs: required backend methods with no sensible fallback.
         KI.synchronize, KI.copyto!,
     ]
@@ -47,6 +44,9 @@ end
     primitives = [
         KI.get_local_size, KI.get_local_id,
         KI.get_num_groups, KI.get_group_id,
+        KI.get_sub_group_size, KI.get_max_sub_group_size,
+        KI.get_num_sub_groups, KI.get_sub_group_id,
+        KI.get_sub_group_local_id,
     ]
     for f in primitives
         @test length(methods(f)) == 1
@@ -86,9 +86,10 @@ end
     @test_throws "used outside kernel" KI.barrier()
     @test_throws "used outside kernel" KI.sub_group_barrier()
 
-    # Permissive defaults: a backend only implements these if it can do better.
-    @test KI.shfl_down_types(StubBackend()) == DataType[]
+    # Conservative defaults: a backend only implements these if it can do better.
     @test KI.multiprocessor_count(StubBackend()) == 0
+    @test KI.supports_subgroups(StubBackend()) === false
+    @test KI.supports_shuffle(StubBackend(), Float32) === false
 
     # `localmemory` forwards the untyped `dims` to the `Val` form backends override.
     # Off-device that form is unimplemented, and must error rather than recurse
