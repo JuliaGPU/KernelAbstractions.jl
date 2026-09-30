@@ -1293,11 +1293,10 @@ function set_arg!(k::Kernel, idx::Integer, arg::T) where {T}
     return k
 end
 
-set_args!(k::Kernel, args::Vararg{Any, N}) where {N} = _set_args!(k, 1, args...)
-@inline _set_args!(k::Kernel, i::Int) = nothing
-@inline function _set_args!(k::Kernel, i::Int, arg, args::Vararg{Any, N}) where {N}
-    set_arg!(k, i, arg)
-    return _set_args!(k, i + 1, args...)
+# one call per argument: a splat of more than 32 arguments isn't a direct call
+@inline @generated function set_args!(k::Kernel, args::Tuple)
+    calls = (:(set_arg!(k, $i, args[$i])) for i in 1:fieldcount(args))
+    return :($(calls...); nothing)
 end
 
 # work sizes padded to the three dimensions OpenCL devices support
@@ -1389,31 +1388,32 @@ function enqueue_kernel(
 end
 
 function call(
-        k::Kernel, args::Vararg{Any, N}; global_size = (1,), local_size = nothing,
+        k::Kernel, args::Tuple; global_size = (1,), local_size = nothing,
         global_work_offset = nothing,
         svm_pointers::Union{Nothing, Vector{Ptr{Cvoid}}} = nothing,
         rng_state = false
-    ) where {N}
-    set_args!(k, args...)
+    )
+    set_args!(k, args)
     if svm_pointers !== nothing && !isempty(svm_pointers)
         clSetKernelExecInfo(
             k, CL_KERNEL_EXEC_INFO_SVM_PTRS,
             sizeof(svm_pointers), svm_pointers
         )
     end
-    return enqueue_kernel(k, global_size, local_size; global_work_offset, rng_state, nargs = N)
+    return enqueue_kernel(k, global_size, local_size; global_work_offset, rng_state, nargs = length(args))
 end
 
 # convert the argument values to match the kernel's signature (specified by the user)
 # (this mimics `lower-ccall` in julia-syntax.scm)
-@inline @generated function convert_arguments(f::Function, ::Type{tt}, args...) where {tt}
+@inline @generated function convert_arguments(f::Function, ::Type{tt}, args::Tuple) where {tt}
     types = tt.parameters
+    nargs = fieldcount(args)
 
     ex = quote end
 
-    converted_args = Vector{Symbol}(undef, length(args))
-    arg_ptrs = Vector{Symbol}(undef, length(args))
-    for i in 1:length(args)
+    converted_args = Vector{Symbol}(undef, nargs)
+    arg_ptrs = Vector{Symbol}(undef, nargs)
+    for i in 1:nargs
         converted_args[i] = gensym()
         arg_ptrs[i] = gensym()
         push!(ex.args, :($(converted_args[i]) = Base.cconvert($(types[i]), args[$i])))
@@ -1424,7 +1424,7 @@ end
         ex.args, (
             quote
                 GC.@preserve $(converted_args...) begin
-                    f($(arg_ptrs...))
+                    f(($(arg_ptrs...),))
                 end
             end
         ).args
@@ -1433,14 +1433,13 @@ end
     return ex
 end
 
-clcall(f::F, types::Tuple, args::Vararg{Any, N}; kwargs...) where {N, F} =
-    clcall(f, _to_tuple_type(types), args...; kwargs...)
+# the arguments are passed as a tuple, see `set_args!`
+clcall(f::F, types::Tuple, args::Tuple; kwargs...) where {F} =
+    clcall(f, _to_tuple_type(types), args; kwargs...)
 
-function clcall(k::Kernel, types::Type{T}, args::Vararg{Any, N}; kwargs...) where {T, N}
-    call_closure = function (converted_args::Vararg{Any, N})
-        return call(k, converted_args...; kwargs...)
-    end
-    return convert_arguments(call_closure, types, args...)
+function clcall(k::Kernel, types::Type{T}, args::Tuple; kwargs...) where {T}
+    call_closure = converted_args -> call(k, converted_args; kwargs...)
+    return convert_arguments(call_closure, types, args)
 end
 
 struct KernelWorkGroupInfo

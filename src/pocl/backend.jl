@@ -132,27 +132,40 @@ KI.supports_atomics(::POCLBackend) = true
 
 KI.argconvert(::POCLBackend, arg) = clconvert(arg)
 
+# a compiled kernel, and the callable it was compiled from. the compiled kernel only holds
+# pointers to the arrays the callable captures, so the callable has to be kept alive.
+struct POCLKernel{K, F}
+    kernel::K
+    f::F
+end
+
 function KI.kernel_function(backend::POCLBackend, f::F, tt::TT = Tuple{}; name = nothing, kwargs...) where {F, TT}
     # fix the sub-group width, as `KI.sub_group_size` promises
     sub_group_size = device_limits().sub_group_size
-    kern = if sub_group_size > 0
-        clfunction(f, tt; name, sub_group_size, kwargs...)
+    kernel = if sub_group_size > 0
+        clfunction(clconvert(f), tt; name, sub_group_size, kwargs...)
     else
-        clfunction(f, tt; name, kwargs...)
+        clfunction(clconvert(f), tt; name, kwargs...)
     end
+    kern = POCLKernel(kernel, f)
     return KI.Kernel{POCLBackend, typeof(kern)}(backend, kern)
 end
 
-function KI.launch(obj::KI.Kernel{POCLBackend}, groups::Dims{3}, items::Dims{3}, args::Vararg{Any, N}) where {N}
-    # POCL launches synchronously, see the implementation note on `synchronize`
-    event = obj.kern(args...; local_size = items, global_size = groups .* items)
-    wait(event)
+function KI.launch(obj::KI.Kernel{POCLBackend}, groups::Dims{3}, items::Dims{3}, args::Tuple)
+    # the kernel only gets pointers to the arrays in `args` and captured by `f`, so keep
+    # them alive until it completes. POCL launches synchronously, see the implementation
+    # note on `synchronize`
+    f = obj.kern.f
+    event = GC.@preserve f args begin
+        event = POCL.launch_tuple(obj.kern.kernel, args; local_size = items, global_size = groups .* items)
+        wait(event)
+    end
     cl.clReleaseEvent(event)
     return nothing
 end
 
 function KI.max_work_group_size(kernel::KI.Kernel{<:POCLBackend})::Int
-    wginfo = cl.work_group_info(kernel.kern.fun, device())
+    wginfo = cl.work_group_info(kernel.kern.kernel.fun, device())
     return Int(wginfo.size)
 end
 # querying the device allocates, so cache the limits that every launch needs

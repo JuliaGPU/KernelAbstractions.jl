@@ -70,6 +70,34 @@ if "cl_khr_fp16" in POCL.device().extensions
     end
 end
 
+# Julia doesn't turn a splat of more than 32 elements into a direct call, so a launch with
+# many arguments allocates unless every layer passes them on as a tuple
+@testset "POCL launch with many arguments" begin
+    xs = [Symbol(:x, i) for i in 1:40]
+    mod = @eval module $(gensym())
+    using KernelAbstractions
+    @kernel function few!(A, x1, x2, x3, x4)
+        I = @index(Global, Linear)
+        @inbounds A[I] = x1 + x2 + x3 + x4
+    end
+    @kernel function many!(A, $(xs...))
+        I = @index(Global, Linear)
+        @inbounds A[I] = $(foldl((a, b) -> :($a + $b), xs))
+    end
+    # the arguments are written out, since splatting them here would allocate too
+    launch_few(k, A) = k(A, $((1:4)...); ndrange = length(A))
+    launch_many(k, A) = k(A, $((1:40)...); ndrange = length(A))
+    end
+
+    A = zeros(Int, 16)
+    few = mod.few!(CPU(), 16)
+    many = mod.many!(CPU(), 16)
+    mod.launch_few(few, A)
+    mod.launch_many(many, A)
+    @test all(==(sum(1:40)), A)
+    @test @allocated(mod.launch_many(many, A)) <= @allocated(mod.launch_few(few, A))
+end
+
 @testset "POCL compilation cache" begin
     mod = @eval module $(gensym())
     @noinline child() = return
@@ -203,7 +231,7 @@ end
             CartesianIndices((2, 2)), nothing, TransposedMapping()
         )
         A = zeros(Int, 5, 7)
-        KernelAbstractions.launch_kernel(kernel, launch, CartesianIndices(A), nothing, iterspace, A)
+        KernelAbstractions.launch_kernel(kernel, launch, CartesianIndices(A), nothing, iterspace, (A,))
         @test A == LinearIndices(A)
     end
     @testset "custom iteration space, $launch" for launch in (nothing, KA.LinearLaunch{Int}(), KA.NDLaunch{Int}())
@@ -212,7 +240,7 @@ end
         iterspace = KA.NDRange{2, KA.StaticSize{(2, 2)}, KA.StaticSize{(4, 4)}}(nothing, ItemOffsets((1, 2)))
         ndrange = CartesianIndices((2:8, 3:7))
         A = zeros(Int, 9, 8)
-        KernelAbstractions.launch_kernel(kernel, launch, ndrange, nothing, iterspace, A)
+        KernelAbstractions.launch_kernel(kernel, launch, ndrange, nothing, iterspace, (A,))
         @test A[ndrange] == LinearIndices(ndrange)
         A[ndrange] .= 0
         @test all(iszero, A)
@@ -225,7 +253,7 @@ end
             ndrange, workgroupsize, iterspace, _ = KA.launch_config(kernel, ndrange, workgroupsize)
             # an N-d launch is limited to three dimensions
             l = launch isa KA.NDLaunch && ndims(iterspace) > 3 ? KA.LinearLaunch{Int}() : launch
-            KernelAbstractions.launch_kernel(kernel, l, ndrange, workgroupsize, iterspace, args...)
+            KernelAbstractions.launch_kernel(kernel, l, ndrange, workgroupsize, iterspace, args)
         end
         @testset "$launch" begin
             Testsuite.launch_testsuite(CPU, Array; launcher)

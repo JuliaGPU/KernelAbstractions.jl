@@ -255,7 +255,7 @@ KI.argconvert(::MockBackend, arg) = arg
 function KI.kernel_function(backend::MockBackend, f, tt = Tuple{}; name = nothing, kwargs...)
     return KI.Kernel(backend, MockKernel(f, tt, name, Dict(kwargs), []))
 end
-function KI.launch(kernel::KI.Kernel{MockBackend}, groups::Dims{3}, items::Dims{3}, args...; kwargs...)
+function KI.launch(kernel::KI.Kernel{MockBackend}, groups::Dims{3}, items::Dims{3}, args::Tuple; kwargs...)
     push!(kernel.kern.launches, (; groups, items, args, kwargs = Dict(kwargs)))
     return :ignored
 end
@@ -276,8 +276,19 @@ function KI.launch_configuration(
     push!(kernel.backend.queries, (; nitems, max_work_group_size))
     return (; workgroupsize = min(96, max_work_group_size))
 end
-KI.launch(kernel::KI.Kernel{OccupancyBackend}, groups::Dims{3}, items::Dims{3}, args...) =
+KI.launch(kernel::KI.Kernel{OccupancyBackend}, groups::Dims{3}, items::Dims{3}, args::Tuple) =
     push!(kernel.kern, (groups, items))
+
+# a callable that KernelInterface mustn't convert: the backend does
+struct HostCallable end
+(::HostCallable)(x) = nothing
+KI.argconvert(::MockBackend, ::HostCallable) = error("only the backend should convert the callable")
+
+# ... and one that does nothing, to measure the overhead of launching
+struct NullBackend <: KI.Backend end
+KI.max_work_group_size(::KI.Kernel{NullBackend}) = 1024
+KI.max_work_group_dims(::NullBackend) = (1024, 1024, 64)
+KI.launch(::KI.Kernel{NullBackend}, groups::Dims{3}, items::Dims{3}, args::Tuple; kwargs...) = nothing
 
 @testset "launch geometry" begin
     kernel = KI.kernel_function(MockBackend(), identity, Tuple{Int})
@@ -345,6 +356,13 @@ KI.launch(kernel::KI.Kernel{OccupancyBackend}, groups::Dims{3}, items::Dims{3}, 
     kernel(1; ndrange = 4, stream = :mine)
     @test last(kernel.kern.launches).kwargs == Dict(:stream => :mine)
 
+    # The arguments reach the backend as one tuple, whatever their number, and a single
+    # tuple-valued argument stays one argument.
+    kernel((1, 2); ndrange = 4)
+    @test last(kernel.kern.launches).args == ((1, 2),)
+    kernel(ntuple(identity, 40)...; ndrange = 4)
+    @test last(kernel.kern.launches).args == ntuple(identity, 40)
+
     # Auto-sizing uses the backend's recommendation, not the limit, and tells it both the
     # size of the launch and the cap.
     occupancy = KI.Kernel(OccupancyBackend(), [])
@@ -411,6 +429,17 @@ function counted_backend()
     return MockBackend()
 end
 
+# Julia doesn't turn a splat of more than 32 elements into a direct call, so launching with
+# many arguments allocates unless they're passed on as a tuple
+@testset "many arguments" begin
+    kernel = KI.Kernel(NullBackend(), nothing)
+    @eval launch_few(k) = k($((1:4)...); numgroups = 2, workgroupsize = 4)
+    @eval launch_many(k) = k($((1:40)...); numgroups = 2, workgroupsize = 4)
+    launch_few(kernel)
+    launch_many(kernel)
+    @test @allocated(launch_many(kernel)) <= @allocated(launch_few(kernel))
+end
+
 @testset "@launch" begin
     backend = MockBackend()
 
@@ -438,6 +467,9 @@ end
     @test named.kern.options == Dict(:maxthreads => 32)
     optioned = KI.@launch backend ndrange = 4 maxthreads = 32 dummy(1, 2.0)
     @test isempty(only(optioned.kern.launches).kwargs)
+
+    # The callable is compiled unconverted.
+    @test (KI.@launch backend launch = false HostCallable()(1)).kern.f isa HostCallable
 
     # Splatted arguments are supported.
     splatted = KI.@launch backend launch = false dummy((1, 2.0)...)

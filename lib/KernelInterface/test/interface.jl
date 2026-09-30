@@ -238,6 +238,13 @@ function sub_group_barrier_kernel(scratch, out, ::Val{N}) where {N}
     return
 end
 
+# a kernel whose callable captures an array, compiled but not launched yet
+function captured_array_kernel(backend, AT, out)
+    a = AT(Int32[42])
+    kernel = KI.@launch backend launch = false (() -> (@inbounds out[1] = a[1]; nothing))()
+    return kernel, WeakRef(a)
+end
+
 function interface_testsuite(backend::KI.Backend, AT)
     @testset "Launch parameters" begin
         # unequal group counts and sizes in every dimension, so that confusing them shows
@@ -527,6 +534,19 @@ function interface_testsuite(backend::KI.Backend, AT)
         end
     end
 
+    # The converted callable only holds pointers to the arrays it captures, so the kernel
+    # has to keep the original alive (and a backend may need it at launch).
+    @testset "Captured arrays" begin
+        out = AT(Int32[0])
+        kernel, captured = captured_array_kernel(backend, AT, out)
+        GC.gc(true)
+        @test captured.value !== nothing
+        garbage = [AT(fill(Int32(7), 1)) for _ in 1:100]
+        kernel()
+        KI.synchronize(backend)
+        @test Array(out) == Int32[42]
+    end
+
     @testset "Local memory and barriers" begin
         N = 32
         groups = 3
@@ -693,7 +713,7 @@ function contract_testsuite(backend::KI.Backend, AT)
     @test hasmethod(KI.copyto!, Tuple{B, AT, Array})
     @test hasmethod(KI.argconvert, Tuple{B, Any})
     @test hasmethod(KI.kernel_function, Tuple{B, Any, Type})
-    @test hasmethod(KI.launch, Tuple{KI.Kernel{B}, Dims{3}, Dims{3}})
+    @test hasmethod(KI.launch, Tuple{KI.Kernel{B}, Dims{3}, Dims{3}, Tuple})
     @test hasmethod(KI.max_work_group_size, Tuple{B})
     @test hasmethod(KI.max_work_group_size, Tuple{KI.Kernel{B}})
     @test hasmethod(KI.max_work_group_dims, Tuple{B})

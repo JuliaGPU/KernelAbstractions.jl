@@ -82,7 +82,7 @@ function testsuite(backend, backend_str, backend_mod, AT, DAT; skip_tests = Set{
     end
 
     @conditional_testset "Launch" skip_tests begin
-        launch_testsuite(backend, AT)
+        launch_testsuite(backend, AT; skip_tests)
     end
 
     @conditional_testset "copyto!" skip_tests begin

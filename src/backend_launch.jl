@@ -74,7 +74,15 @@ end
 
 argconvert(kernel::Kernel{<:KI.Backend}, arg) = KI.argconvert(backend(kernel), arg)
 
-function (obj::Kernel{<:KI.Backend})(args::Vararg{Any, N}; ndrange = nothing, workgroupsize = nothing) where {N}
+# The arguments are passed on as a tuple: Julia doesn't turn a splat of more than 32
+# elements into a direct call, and a method with both varargs and keyword arguments splats
+# them into its body. So the keyword method is defined explicitly, as Base does for
+# `invokelatest`.
+(obj::Kernel{<:KI.Backend})(args::Vararg{Any, N}) where {N} = launch_tuple(obj, args)
+Core.kwcall(kwargs::NamedTuple, obj::Kernel{<:KI.Backend}, args::Vararg{Any, N}) where {N} =
+    launch_tuple(obj, args; kwargs...)
+
+function launch_tuple(obj::Kernel, args::Tuple; ndrange = nothing, workgroupsize = nothing)
     ndrange, workgroupsize, iterspace, dynamic = launch_config(obj, ndrange, workgroupsize)
     # nothing to launch (or compile) for an empty ndrange
     any(iszero, size(blocks(iterspace))) && return nothing
@@ -84,21 +92,19 @@ function (obj::Kernel{<:KI.Backend})(args::Vararg{Any, N}; ndrange = nothing, wo
     launch = select_launch(obj, workgroupsize, iterspace)
     if launch === NDLaunch{Int32}()
         # the common case, specialized statically
-        launch_kernel(obj, NDLaunch{Int32}(), ndrange, workgroupsize, iterspace, args...)
+        launch_kernel(obj, NDLaunch{Int32}(), ndrange, workgroupsize, iterspace, args)
     else
-        launch_kernel(obj, launch, ndrange, workgroupsize, iterspace, args...)
+        launch_kernel(obj, launch, ndrange, workgroupsize, iterspace, args)
     end
     return nothing
 end
 
-function launch_kernel(
-        obj::Kernel, launch, ndrange, _workgroupsize, iterspace, args::Vararg{Any, N}
-    ) where {N}
+function launch_kernel(obj::Kernel, launch, ndrange, _workgroupsize, iterspace, args::Tuple)
     b = backend(obj)
 
     # this might not be the final context, since we may tune the workgroupsize
     ctx = mkcontext(obj, ndrange, iterspace, launch)
-    kernel = compile(obj, ctx, args...)
+    kernel = compile(obj, ctx, args)
 
     # tune the workgroup size, keeping the context type (and thus the kernel) the same
     if workgroupsize(obj) <: DynamicSize && _workgroupsize === nothing
@@ -112,16 +118,30 @@ function launch_kernel(
     groups = size(blocks(iterspace))
     items = size(workitems(iterspace))
     if launch isa NDLaunch
-        kernel(ctx, args...; numgroups = groups, workgroupsize = items)
+        call_kernel(kernel, ctx, args, groups, items)
     else
-        kernel(ctx, args...; numgroups = prod(groups), workgroupsize = prod(items))
+        call_kernel(kernel, ctx, args, prod(groups), prod(items))
     end
     return nothing
 end
 
-@inline function compile(obj::Kernel, ctx, args::Vararg{Any, N}) where {N}
+@inline function compile(obj::Kernel, ctx, args::Tuple)
     b = backend(obj)
-    f = KI.argconvert(b, obj.f)
-    tt = Tuple{Core.Typeof(KI.argconvert(b, ctx)), map(arg -> Core.Typeof(KI.argconvert(b, arg)), args)...}
-    return KI.kernel_function(b, f, tt; compiler_options(obj)...)
+    tt = argument_types(b, ctx, args)
+    return KI.kernel_function(b, obj.f, tt; compiler_options(obj)...)
+end
+
+# The helpers below avoid splatting the arguments, and `map`, which isn't type stable for 32
+# or more elements.
+
+# `Tuple{map(x -> Core.Typeof(KI.argconvert(backend, x)), (ctx, args...))...}`
+@inline @generated function argument_types(backend, ctx, args::Tuple)
+    types = (:(Core.Typeof(KI.argconvert(backend, args[$i]))) for i in 1:fieldcount(args))
+    return :(Tuple{Core.Typeof(KI.argconvert(backend, ctx)), $(types...)})
+end
+
+# `kernel(ctx, args...; numgroups, workgroupsize)`
+@inline @generated function call_kernel(kernel::KI.Kernel, ctx, args::Tuple, numgroups, workgroupsize)
+    argexprs = (:(args[$i]) for i in 1:fieldcount(args))
+    return :(kernel(ctx, $(argexprs...); numgroups, workgroupsize))
 end

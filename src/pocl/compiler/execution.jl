@@ -52,7 +52,7 @@ macro opencl(ex...)
 
     # FIXME: macro hygiene wrt. escaping kwarg values (this broke with 1.5)
     #        we esc() the whole thing now, necessitating gensyms...
-    @gensym f_var kernel_f kernel_args kernel_tt kernel
+    @gensym f_var kernel_f kernel_tt kernel
 
     # convert the arguments, call the compiler and launch the kernel
     # while keeping the original arguments alive
@@ -62,8 +62,7 @@ macro opencl(ex...)
             $f_var = $f
             GC.@preserve $(vars...) $f_var begin
                 $kernel_f = $clconvert($f_var)
-                $kernel_args = map($clconvert, ($(var_exprs...),))
-                $kernel_tt = Tuple{map(Core.Typeof, $kernel_args)...}
+                $kernel_tt = $argument_types(($(var_exprs...),))
                 $kernel = $clfunction($kernel_f, $kernel_tt; $(compiler_kwargs...))
                 if $launch
                     $kernel($(var_exprs...); $(call_kwargs...))
@@ -153,6 +152,13 @@ function clconvert(arg, pointers::Union{Nothing, Vector{Ptr{Cvoid}}} = nothing)
     return adapt(KernelAdaptor(pointers), arg)
 end
 
+# `Tuple{map(x -> Core.Typeof(clconvert(x)), args)...}`, without `map`, which isn't type
+# stable for 32 or more elements
+@inline @generated function argument_types(args::Tuple)
+    types = (:(Core.Typeof(clconvert(args[$i]))) for i in 1:fieldcount(args))
+    return :(Tuple{$(types...)})
+end
+
 
 ## abstract kernel functionality
 
@@ -160,12 +166,21 @@ abstract type AbstractKernel{F, TT} end
 
 pass_arg(@nospecialize dt) = !(GPUCompiler.isghosttype(dt) || Core.Compiler.isconstType(dt))
 
-@inline @generated function (kernel::AbstractKernel{F, TT})(
-        args::Vararg{Any, N};
-        global_size = (1,), local_size = nothing
-    ) where {F, TT, N}
+# The arguments are passed on as a tuple: Julia doesn't turn a splat of more than 32
+# elements into a direct call, and a method with both varargs and keyword arguments splats
+# them into its body. So the keyword method is defined explicitly.
+(kernel::AbstractKernel)(args::Vararg{Any, N}) where {N} = launch_tuple(kernel, args)
+Core.kwcall(kwargs::NamedTuple, kernel::AbstractKernel, args::Vararg{Any, N}) where {N} =
+    launch_tuple(kernel, args; kwargs...)
+
+@inline launch_tuple(kernel::AbstractKernel, args::Tuple; global_size = (1,), local_size = nothing) =
+    launch_converted(kernel, args, global_size, local_size)
+
+@inline @generated function launch_converted(
+        kernel::AbstractKernel{F, TT}, args::Tuple, global_size, local_size
+    ) where {F, TT}
     sig = Tuple{F, TT.parameters...}    # Base.signature_type with a function type
-    args = (:(kernel.f), (:(clconvert(args[$i])) for i in 1:length(args))...)
+    args = (:(kernel.f), (:(clconvert(args[$i])) for i in 1:fieldcount(args))...)
 
     # filter out ghost arguments that shouldn't be passed
     to_pass = map(pass_arg, sig.parameters)
@@ -186,8 +201,11 @@ pass_arg(@nospecialize dt) = !(GPUCompiler.isghosttype(dt) || Core.Compiler.isco
     # finalize types
     call_tt = Base.to_tuple_type(call_t)
 
+    # the converted arguments only hold pointers to the arrays in `args`
     return quote
-        $cl.clcall(kernel.fun, $call_tt, $(call_args...); global_size, local_size, kernel.rng_state)
+        GC.@preserve args begin
+            $cl.clcall(kernel.fun, $call_tt, ($(call_args...),); global_size, local_size, kernel.rng_state)
+        end
     end
 end
 
