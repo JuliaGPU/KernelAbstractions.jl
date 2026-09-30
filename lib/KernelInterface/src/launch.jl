@@ -3,55 +3,185 @@
 """
     Kernel{Backend, Kern}
 
-Kernel closure struct that is used to represent the backend
-kernel on the host.
+A kernel compiled by [`kernel_function`](@ref) for `backend`, wrapping the backend's own
+kernel object `kern`. `kernel.backend` is the backend value that was passed to
+`kernel_function`.
 
-!!! note
-    Backend implementations **must** implement:
-    ```
-    (kernel::Kernel{<:NewBackend})(args...; numgroups=(), workgroupsize=(), ndrange=(), max_work_group_size=typemax(Int))
-    ```
-    `numgroups`, `workgroupsize`, and `ndrange` must accept a scalar Integer, a 1, 2,
-    or 3 Integer tuple, or an empty tuple. Otherwise, it must throw an `ArgumentError`. An
-    `ArgumentError` must also be thrown if `ndrange` and `numgroups` are both specified.
-    The helper function `KI.check_launch_args(numgroups, workgroupsize, ndrange)` can be
-    used by the backend or a custom check can be implemented.
+Calling a `Kernel` launches it:
 
-    `max_work_group_size` is to allow algorithms to request a max workgroupsize with `ndrange`.
-    This is a maximum value because a kernel's maximum workitems per workgroup may be lower than
-    requested.
+    (kernel::Kernel)(args...; numgroups=(), workgroupsize=(), ndrange=(),
+                     max_work_group_size=typemax(Int), kwargs...)
 
-    An `ndrange` with a zero-sized dimension, as when launching over an empty array, is
-    not an error: the call must be a no-op and return `nothing` instead of launching.
+`args` are the host-side arguments, e.g. a `CuArray` rather than a `CuDeviceArray`. The
+backend converts them with [`argconvert`](@ref), and the converted types have to match the
+argument types the kernel was compiled for.
 
-    By default, kernels must launch with 1 workgroup containing 1 workitem.
+The launch geometry is given in one of three ways:
 
-    Backends must also implement the on-device kernel launch functionality.
+- `numgroups` and `workgroupsize`: launch exactly that many work-groups of that many
+  work-items. Either defaults to 1.
+- `ndrange` and `workgroupsize`: launch `cld.(ndrange, workgroupsize)` work-groups.
+- `ndrange` alone: the work-group size is chosen with [`launch_configuration`](@ref), bounded
+  by `max_work_group_size` and by [`max_work_group_dims`](@ref), and filled first dimension
+  first.
+
+Each is an `Integer` or a tuple of up to 3 `Integer`s; missing dimensions are 1. `ndrange`
+and `numgroups` are mutually exclusive.
+
+`ndrange` is rounded up to whole work-groups and is not masked: the kernel runs for every
+work-item of every launched group, and [`get_global_size`](@ref) returns the padded size.
+Kernels have to check their own bounds.
+
+A zero anywhere in `ndrange` or `numgroups` launches nothing. Work-group sizes must be
+positive and fit [`max_work_group_dims`](@ref) and [`max_work_group_size`](@ref)`(kernel)`,
+and the number of work-items in each dimension must fit an `Int`; anything else throws an
+`ArgumentError` before the backend sees it. The number of work-groups is validated by the
+backend.
+
+Other keyword arguments are passed to [`launch`](@ref) unchanged. They are
+backend-specific: a backend throws an error for keywords it doesn't support.
+
+A launch is queued on the calling task's queue of the active device, and returns `nothing`.
 """
 struct Kernel{B, Kern}
     backend::B
     kern::Kern
 end
 
-"""
-    check_launch_args(numgroups, workgroupsize, ndrange)
+# `Vararg{Any, N}` makes Julia specialize on the arguments, which are only passed through
+function (kernel::Kernel)(
+        args::Vararg{Any, N}; numgroups = (), workgroupsize = (), ndrange = (),
+        max_work_group_size::Integer = typemax(Int), kwargs...
+    ) where {N}
+    groups, items = launch_geometry(kernel, numgroups, workgroupsize, ndrange, max_work_group_size)
+    any(iszero, groups) && return nothing
+    launch(kernel, groups, items, args...; kwargs...)
+    return nothing
+end
 
-Validate the launch configuration passed to a [`Kernel`](@ref), throwing an
-`ArgumentError` if either argument has more than 3 dimensions, or if `ndrange`
-and `numgroups` are both defined.
-
-Backends may call this from their kernel-launch method instead of writing their
-own check.
 """
-function check_launch_args(numgroups, workgroupsize, ndrange)
-    length(ndrange) > 0 && length(numgroups) > 0 &&
+    launch(kernel::Kernel, groups::Dims{3}, items::Dims{3}, args...; kwargs...)
+
+Launch `kernel` with `groups` work-groups of `items` work-items each, passing the host-side
+arguments `args`. This is what calling a [`Kernel`](@ref) does after validating and
+normalizing the launch geometry; users call the kernel instead.
+
+`groups` and `items` are positive, `items` fits [`max_work_group_dims`](@ref) and
+[`max_work_group_size`](@ref)`(kernel)`, and `groups .* items` doesn't overflow `Int`.
+`kwargs` are the keyword arguments of the call that KernelInterface doesn't know.
+
+!!! note
+    Backend implementations **must** implement:
+    ```
+    launch(kernel::Kernel{<:NewBackend}, groups::Dims{3}, items::Dims{3}, args...; kwargs...)
+    ```
+    It converts `args` with [`argconvert`](@ref) (or lets its native launcher do so), and
+    queues the launch on the calling task's queue; it doesn't have to wait for the kernel to
+    complete. Declare the arguments as `args::Vararg{Any, N}` (with `where {N}`): Julia
+    doesn't specialize a method on `args...` that it only passes through, which makes every
+    launch dispatch dynamically. It must throw for keywords it does not support, and may
+    throw for a number of work-groups the device cannot launch, or for a geometry that
+    backend-specific compiler options of the kernel don't allow.
+"""
+function launch end
+
+# the launch keywords are either scalars or tuples of up to 3 integers
+const LaunchDims = Union{Integer, Tuple{}, NTuple{1, Integer}, NTuple{2, Integer}, NTuple{3, Integer}}
+
+@inline pad3(x::Integer) = (Int(x), 1, 1)
+@inline pad3(x::Tuple) = (map(Int, x)..., ntuple(_ -> 1, Val(3 - length(x)))...)
+
+@noinline function throw_launch_error(name, value)
+    throw(ArgumentError("`$name` must be an integer or a tuple of up to 3 integers, got $(repr(value))"))
+end
+
+@noinline function throw_range_error(name, value)
+    throw(ArgumentError("`$name` must be between 0 and typemax(Int), got $(repr(value))"))
+end
+
+@inline function check_dims(name, x)
+    x isa LaunchDims || throw_launch_error(name, x)
+    any(d -> d < 0 || d > typemax(Int), x) && throw_range_error(name, x)
+    return
+end
+
+# the product of positive `dims`, or `cap` if it is larger, without overflowing
+@inline function capped_prod(dims::Dims, cap::Int)
+    p = 1
+    for d in dims
+        d > cap ÷ p && return cap
+        p *= d
+    end
+    return p
+end
+
+# whether the product of positive `dims` exceeds `limit`, without overflowing
+@inline function prod_exceeds(dims::Dims, limit::Int)
+    p = 1
+    for d in dims
+        d > limit ÷ p && return true
+        p *= d
+    end
+    return false
+end
+
+"""
+    launch_geometry(kernel, numgroups, workgroupsize, ndrange, max_work_group_size)::Tuple{Dims{3}, Dims{3}}
+
+Validate the launch keywords of a [`Kernel`](@ref) call and turn them into the number of
+work-groups and the work-group size. A zero number of work-groups means nothing is launched.
+"""
+@inline function launch_geometry(kernel::Kernel, numgroups, workgroupsize, ndrange, max_work_group_size)
+    check_dims("numgroups", numgroups)
+    check_dims("workgroupsize", workgroupsize)
+    check_dims("ndrange", ndrange)
+    if ndrange != () && numgroups != ()
         throw(ArgumentError("Only one of `numgroups` and `ndrange` can be used"))
-    length(numgroups) <= 3 ||
-        throw(ArgumentError("`numgroups` only accepts up to 3 dimensions"))
-    length(workgroupsize) <= 3 ||
-        throw(ArgumentError("`workgroupsize` only accepts up to 3 dimensions"))
-    length(ndrange) <= 3 ||
-        throw(ArgumentError("`ndrange` only accepts up to 3 dimensions"))
+    end
+    max_work_group_size > 0 ||
+        throw(ArgumentError("`max_work_group_size` must be positive, got $max_work_group_size"))
+
+    items = if workgroupsize != ()
+        wgsize = pad3(workgroupsize)
+        any(iszero, wgsize) &&
+            throw(ArgumentError("`workgroupsize` must be positive, got $(repr(workgroupsize))"))
+        check_work_group_size(kernel, wgsize)
+        wgsize
+    elseif ndrange == ()
+        (1, 1, 1)
+    elseif any(iszero, ndrange)
+        return (0, 0, 0), (1, 1, 1)
+    else
+        wanted = pad3(ndrange)
+        config = launch_configuration(
+            kernel; nitems = capped_prod(wanted, typemax(Int)),
+            max_work_group_size = min(max_work_group_size, typemax(Int)) % Int
+        )
+        threads_to_workgroupsize(config.workgroupsize, wanted, max_work_group_dims(kernel.backend))
+    end
+
+    groups = if ndrange != ()
+        cld.(pad3(ndrange), items)
+    elseif numgroups != ()
+        pad3(numgroups)
+    else
+        (1, 1, 1)
+    end
+
+    # the global size has to fit an `Int`, as `get_global_size()` returns it
+    if !any(iszero, groups) && any(map((g, i) -> g > typemax(Int) ÷ i, groups, items))
+        throw(ArgumentError("Launch of $groups work-groups of $items work-items has more than typemax(Int) work-items in a dimension"))
+    end
+    return groups, items
+end
+
+function check_work_group_size(kernel::Kernel, items::Dims{3})
+    max_dims = max_work_group_dims(kernel.backend)
+    all(items .<= max_dims) ||
+        throw(ArgumentError("Work-group size $items exceeds the maximum of $max_dims per dimension"))
+    max_items = max_work_group_size(kernel)
+    prod_exceeds(items, max_items) &&
+        throw(ArgumentError("Work-group size $items has more than $max_items work-items, the maximum for this kernel"))
     return
 end
 
@@ -63,6 +193,9 @@ dimension first. Dimension `d` gets at most `limits[d]` work-items; dimensions p
 of `limits` are only bounded by `threads`.
 
 Every dimension gets at least one work-item, even for a zero-sized `ndrange`.
+
+Not part of the public interface; used by KernelInterface's and KernelAbstractions' launch
+code.
 """
 threads_to_workgroupsize(threads, ndrange::Tuple, limits = ()) =
     _threads_to_workgroupsize(threads, 1, ndrange, limits)
@@ -75,38 +208,6 @@ function _threads_to_workgroupsize(threads, total, ndrange::Tuple, limits)
     x = max(min(div(threads, total), first(ndrange), limit), 1)
     rest = isempty(limits) ? () : Base.tail(limits)
     return (x, _threads_to_workgroupsize(threads, total * x, Base.tail(ndrange), rest)...)
-end
-
-"""
-    auto_launch_sizes(kernel::KI.Kernel, numgroups, workgroupsize, ndrange, [max_work_items])
-
-Returns a suggested `numgroups` and `workgroupsize` based on
-the input arguments. This function assumes arguments have been
-validated by `check_launch_args`.
-
-If any `ndrange` dimension is zero, the returned `numgroups` is zero in
-that dimension; backends should skip the launch in that case. Note that very
-large `ndrange`s can produce total grid sizes >= 2^32, which is problematic
-on some backends.
-
-Backends may call this from their kernel-launch method instead of
-writing their own heuristic for calculating launch size.
-"""
-@inline function auto_launch_sizes(kernel::Kernel, numgroups, workgroupsize, ndrange, max_work_items = typemax(Int))
-    numgroups, workgroupsize = if ndrange == ()
-        numgroups == () ? 1 : numgroups, workgroupsize == () ? 1 : workgroupsize
-    else
-        workgroupsize = if workgroupsize == ()
-            config = launch_configuration(kernel; nitems = prod(ndrange), max_work_group_size = max_work_items)
-            threads_to_workgroupsize(config.workgroupsize, ndrange, max_work_group_dims(kernel.backend))
-        else
-            workgroupsize
-        end
-        numgroups = cld.(ndrange, workgroupsize)
-        Int.(numgroups), Int.(workgroupsize)
-    end
-
-    return numgroups, workgroupsize
 end
 
 
@@ -138,7 +239,7 @@ function max_work_group_size end
 The recommended number of work-items per work-group for launching `kernel` over `nitems`
 work-items in total (`nothing` if unknown), at most `max_work_group_size`. This is what an
 `ndrange` launch without a `workgroupsize` uses, passing the number of work-items in the
-`ndrange`. `nitems` and `max_work_group_size` are positive.
+`ndrange` (saturated at `typemax(Int)`). `nitems` and `max_work_group_size` are positive.
 
 Unlike [`max_work_group_size`](@ref), this is advice: backends may base it on occupancy or
 on the size of the launch, e.g. to prefer more work-groups over larger ones.
@@ -180,9 +281,10 @@ function max_work_group_dims end
 The maximum number of work-groups along each dimension of a launch, for the active device
 of `backend`.
 
-This is conservative: a launch within these limits works for any work-group size, but some
-backends accept more work-groups for smaller work-groups (e.g. HIP bounds the number of
-work-items per dimension). The backend's validation at launch time is authoritative.
+This is conservative: a launch within these limits works for any work-group size (as long
+as the number of work-items in each dimension fits an `Int`), but some backends accept more
+work-groups for smaller work-groups (e.g. HIP bounds the number of work-items per
+dimension). The backend's validation at launch time is authoritative.
 
 !!! note
     Backend implementations **must** implement:
@@ -238,10 +340,10 @@ converting them to their device side representation.
 function argconvert end
 
 """
-    KI.kernel_function(::NewBackend, f::F, tt::TT=Tuple{}; name=nothing, kwargs...) where {F,TT}
+    kernel_function(backend, f::F, tt::TT=Tuple{}; name=nothing, kwargs...)::Kernel
 
-Low-level interface to compile a function invocation for the currently-active GPU, returning
-a callable kernel object. For a higher-level interface, use
+Compile the function `f` for arguments of the (device-side) types `tt`, for the active
+device of `backend`, returning a [`Kernel`](@ref). For a higher-level interface, use
 [`KernelInterface.@launch`](@ref).
 
 Keyword arguments:
@@ -253,7 +355,7 @@ CUDA.jl); backends throw an error for options they don't support.
 !!! note
     Backend implementations **must** implement:
     ```
-    kernel_function(::NewBackend, f::F, tt::TT=Tuple{}; name=nothing, kwargs...) where {F,TT}
+    kernel_function(backend::NewBackend, f::F, tt::TT=Tuple{}; name=nothing, kwargs...) where {F,TT}
     ```
 """
 function kernel_function end

@@ -1,6 +1,21 @@
 import KernelInterface as KI
 using Random
 
+# Counts every work-item at the element it identifies, computed from the group and local
+# ids, so that a mix-up between group counts and group sizes shows.
+function launch_kernel(arr)
+    l = KI.get_local_id()
+    g = KI.get_group_id()
+    s = KI.get_local_size()
+    i = (g.x - 1) * s.x + l.x
+    j = (g.y - 1) * s.y + l.y
+    k = (g.z - 1) * s.z + l.z
+    if i <= size(arr, 1) && j <= size(arr, 2) && k <= size(arr, 3)
+        @inbounds arr[i, j, k] += 1
+    end
+    return
+end
+
 struct KernelData
     global_size::Int
     global_id::Int
@@ -133,57 +148,68 @@ end
 
 function interface_testsuite(backend::KI.Backend, AT)
     @testset "Launch parameters" begin
-        # 1d
-        function launch_kernel1d(arr)
-            i, _, _ = KI.get_local_id()
-            gi, _, _ = KI.get_group_id()
-            ngi, _, _ = KI.get_num_groups()
-
-            arr[(gi - 1) * ngi + i] = 1.0f0
-            return
+        # unequal group counts and sizes in every dimension, so that confusing them shows
+        function run(dims; kwargs...)
+            arr = KI.zeros(backend, Int32, dims)
+            kernel = KI.@launch backend launch = false launch_kernel(arr)
+            kernel(arr; kwargs...)
+            KI.synchronize(backend)
+            return Array(arr)
         end
-        arr1d = AT(zeros(Float32, 4))
-        KI.@launch backend numgroups = 2 workgroupsize = 2 launch_kernel1d(arr1d)
+        @test all(==(1), run((6, 1, 1); numgroups = 3, workgroupsize = 2))
+        @test all(==(1), run((6, 1, 1); numgroups = (2,), workgroupsize = (3,)))
+        @test all(==(1), run((6, 10, 1); numgroups = (2, 5), workgroupsize = (3, 2)))
+        @test all(==(1), run((6, 10, 12); numgroups = (2, 5, 3), workgroupsize = (3, 2, 4)))
+
+        # `ndrange` rounds up to whole groups, and doesn't mask the padding
+        @test all(==(1), run((7, 5, 3); ndrange = (7, 5, 3), workgroupsize = (2, 3, 2)))
+        @test all(==(1), run((7, 5, 3); ndrange = (7, 5, 3)))
+        @test all(==(1), run((1000, 1, 1); ndrange = 1000))
+
+        # defaults: one work-group of one work-item
+        @test run((2, 2, 1)) == reshape(Int32[1, 0, 0, 0], 2, 2, 1)
+        @test run((4, 1, 1); numgroups = 2) == reshape(Int32[1, 1, 0, 0], 4, 1, 1)
+        @test run((4, 1, 1); workgroupsize = 2) == reshape(Int32[1, 1, 0, 0], 4, 1, 1)
+
+        # nothing to launch
+        @test all(==(0), run((2, 2, 2); ndrange = 0))
+        @test all(==(0), run((2, 2, 2); ndrange = (2, 0)))
+        @test all(==(0), run((2, 2, 2); numgroups = (2, 0, 2), workgroupsize = 2))
+
+        # the global size is the padded ndrange
+        results = AT(Vector{KernelData}(undef, 12))
+        kernel = KI.@launch backend launch = false test_interface_kernel(results)
+        kernel(results; ndrange = 10, workgroupsize = 4)
         KI.synchronize(backend)
-        @test all(Array(arr1d) .== 1)
+        @test all(d -> d.global_size == 12 && d.num_groups == 3, Array(results))
+    end
 
-        # 1d tuple
-        arr1dt = AT(zeros(Float32, 4))
-        KI.@launch backend numgroups = (2,) workgroupsize = (2,) launch_kernel1d(arr1dt)
-        KI.synchronize(backend)
-        @test all(Array(arr1dt) .== 1)
+    @testset "Launch validation" begin
+        arr = KI.zeros(backend, Int32, (1, 1, 1))
+        kernel = KI.@launch backend launch = false launch_kernel(arr)
+        max_items = KI.max_work_group_size(kernel)
+        max_dims = KI.max_work_group_dims(backend)
 
-        # 2d
-        function launch_kernel2d(arr)
-            i, j, _ = KI.get_local_id()
-            gi, gj, _ = KI.get_group_id()
-            ngi, ngj, _ = KI.get_num_groups()
-
-            arr[(gi - 1) * ngi + i, (gj - 1) * ngj + j] = 1.0f0
-            return
+        @test_throws ArgumentError kernel(arr; numgroups = (2, 2, 2, 2), workgroupsize = (2, 2, 2))
+        @test_throws ArgumentError kernel(arr; numgroups = (2, 2, 2), workgroupsize = (2, 2, 2, 2))
+        @test_throws ArgumentError kernel(arr; ndrange = (2, 2, 2, 2))
+        @test_throws ArgumentError kernel(arr; ndrange = 4, numgroups = 2)
+        @test_throws ArgumentError kernel(arr; workgroupsize = 0)
+        @test_throws ArgumentError kernel(arr; workgroupsize = (2, 0))
+        @test_throws ArgumentError kernel(arr; workgroupsize = -1)
+        @test_throws ArgumentError kernel(arr; numgroups = -1)
+        @test_throws ArgumentError kernel(arr; ndrange = (4, -1))
+        @test_throws ArgumentError kernel(arr; ndrange = 4.0)
+        @test_throws ArgumentError kernel(arr; ndrange = 4, max_work_group_size = 0)
+        @test_throws ArgumentError kernel(arr; workgroupsize = max_items + 1)
+        if max_dims[3] < max_items
+            @test_throws ArgumentError kernel(arr; workgroupsize = (1, 1, max_dims[3] + 1))
         end
-        arr2d = AT(zeros(Float32, 4, 4))
-        KI.@launch backend numgroups = (2, 2) workgroupsize = (2, 2) launch_kernel2d(arr2d)
         KI.synchronize(backend)
-        @test all(Array(arr2d) .== 1)
+        @test Array(arr) == zeros(Int32, 1, 1, 1)
 
-        # 3d
-        function launch_kernel3d(arr)
-            i, j, k = KI.get_local_id()
-            gi, gj, gk = KI.get_group_id()
-            ngi, ngj, ngk = KI.get_num_groups()
-
-            arr[(gi - 1) * ngi + i, (gj - 1) * ngj + j, (gk - 1) * ngk + k] = 1.0f0
-            return
-        end
-        arr3d = AT(zeros(Float32, 4, 4, 4))
-        KI.@launch backend numgroups = (2, 2, 2) workgroupsize = (2, 2, 2) launch_kernel3d(arr3d)
-        KI.synchronize(backend)
-        @test all(Array(arr3d) .== 1)
-
-        # 4d (Errors)
-        @test_throws ArgumentError (KI.@launch backend numgroups = (2, 2, 2, 2) workgroupsize = (2, 2, 2) launch_kernel3d(arr3d))
-        @test_throws ArgumentError (KI.@launch backend numgroups = (2, 2, 2) workgroupsize = (2, 2, 2, 2) launch_kernel3d(arr3d))
+        # other keywords are passed to the backend, which rejects the ones it doesn't know
+        @test_throws Exception kernel(arr; this_is_not_a_launch_option = 1)
     end
 
     @testset "Launch limits" begin
@@ -247,6 +273,7 @@ function interface_testsuite(backend::KI.Backend, AT)
         @test KI.supports_atomics(b) isa Bool
         @test KI.supports_float64(b) isa Bool
         @test KI.functional(b) isa Union{Missing, Bool}
+        @test KI.multiprocessor_count(b) isa Int
 
         @test KI.device(b) isa Int
         @test KI.ndevices(b) isa Int
@@ -306,13 +333,8 @@ function interface_testsuite(backend::KI.Backend, AT)
     end
 
     @testset "Basic interface functionality" begin
-
-        @test KI.max_work_group_size(backend) isa Int
-        @test KI.multiprocessor_count(backend) isa Int
-
-        # Test with small kernel
         workgroupsize = 4
-        numgroups = 4
+        numgroups = 3
         N = workgroupsize * numgroups
         results = AT(Vector{KernelData}(undef, N))
         kernel = KI.@launch backend launch = false test_interface_kernel(results)
@@ -321,27 +343,13 @@ function interface_testsuite(backend::KI.Backend, AT)
         KI.synchronize(backend)
 
         host_results = Array(results)
-
-        # Verify results make sense
         for (i, k_data) in enumerate(host_results)
-
-            # Global IDs should be 1-based and sequential
             @test k_data.global_id == i
-
-            # Global size should match our ndrange
             @test k_data.global_size == N
-
             @test k_data.local_size == workgroupsize
-
             @test k_data.num_groups == numgroups
-
-            # Group ID should be 1-based
-            expected_group = div(i - 1, numgroups) + 1
-            @test k_data.group_id == expected_group
-
-            # Local ID should be 1-based within group
-            expected_local = ((i - 1) % workgroupsize) + 1
-            @test k_data.local_id == expected_local
+            @test k_data.group_id == div(i - 1, workgroupsize) + 1
+            @test k_data.local_id == ((i - 1) % workgroupsize) + 1
         end
     end
 

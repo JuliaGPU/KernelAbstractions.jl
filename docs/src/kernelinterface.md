@@ -182,6 +182,7 @@ multiprocessor_count
 Kernel
 kernel_function
 argconvert
+launch
 KernelInterface.@launch
 ```
 
@@ -205,11 +206,12 @@ A backend must, at minimum:
    [`shfl_down`](@ref) support is optional.
 5. Implement [`argconvert`](@ref) and [`kernel_function`](@ref) for its backend
    type, returning a [`Kernel`](@ref).
-6. Make that `Kernel` callable, accepting `numgroups`, `workgroupsize` and
-   `ndrange` as a scalar `Integer` or a 1-, 2- or 3-element tuple. Use
-   `KI.check_launch_args` to validate them, or check them directly. A zero-sized
-   `ndrange` — launching over an empty array is not uncommon — must be a no-op
-   returning `nothing`, not an error.
+6. Implement [`launch`](@ref), which receives an already validated `NTuple{3, Int}` of
+   work-groups and of work-items. For CUDA.jl, that is
+   ```julia
+   KI.launch(k::KI.Kernel{CUDABackend}, groups::Dims{3}, items::Dims{3}, args::Vararg{Any, N}; kwargs...) where {N} =
+       k.kern(args...; threads = items, blocks = groups, kwargs...)
+   ```
 7. Report its limits through [`max_work_group_size`](@ref) (for the backend and for a
    kernel), [`max_work_group_dims`](@ref) and [`max_num_groups`](@ref), and where
    applicable [`sub_group_size`](@ref) and [`multiprocessor_count`](@ref). It may

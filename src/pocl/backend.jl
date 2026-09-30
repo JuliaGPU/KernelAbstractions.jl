@@ -211,20 +211,9 @@ function KI.kernel_function(::POCLBackend, f::F, tt::TT = Tuple{}; name = nothin
     return KI.Kernel{POCLBackend, typeof(kern)}(POCLBackend(), kern)
 end
 
-function (obj::KI.Kernel{POCLBackend})(args...; numgroups = (), workgroupsize = (), ndrange = (), max_work_group_size = typemax(Int))
-    KI.check_launch_args(numgroups, workgroupsize, ndrange)
-
-    # zero-sized ndrange: nothing to launch
-    prod(ndrange) == 0 && return nothing
-
-    numgroups, workgroupsize = KI.auto_launch_sizes(obj, numgroups, workgroupsize, ndrange, max_work_group_size)
-
-    local_size = (workgroupsize..., ntuple(_ -> 1, 3 - length(workgroupsize))...)
-
-    numgroups = (numgroups..., ntuple(_ -> 1, 3 - length(numgroups))...)
-    global_size = local_size .* numgroups
-
-    event = obj.kern(args...; local_size, global_size)
+function KI.launch(obj::KI.Kernel{POCLBackend}, groups::Dims{3}, items::Dims{3}, args::Vararg{Any, N}) where {N}
+    # POCL launches synchronously, see the implementation note on `synchronize`
+    event = obj.kern(args...; local_size = items, global_size = groups .* items)
     wait(event)
     cl.clReleaseEvent(event)
     return nothing

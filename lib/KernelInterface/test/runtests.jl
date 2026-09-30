@@ -34,7 +34,7 @@ end
         KI.get_sub_group_local_id,
         KI.shfl_down,
         KI.max_work_group_size, KI.max_work_group_dims, KI.max_num_groups, KI.sub_group_size,
-        KI.argconvert, KI.kernel_function,
+        KI.argconvert, KI.kernel_function, KI.launch,
         # Host-side stubs: required backend methods with no sensible fallback.
         KI.synchronize, KI.copyto!,
     ]
@@ -190,20 +190,6 @@ end
     @test capture_stdout(() -> KI._print(Val(3), " ", Val(:sym))) == "3 sym"
 end
 
-@testset "check_launch_args" begin
-    # Validation only: valid configurations pass through without normalization.
-    @test KI.check_launch_args(1, 1, ()) === nothing
-    @test KI.check_launch_args((1, 2, 3), (1, 2, 3), ()) === nothing
-    @test KI.check_launch_args((), 1, 1) === nothing
-    @test KI.check_launch_args((), (), ()) === nothing
-
-    @test_throws ArgumentError KI.check_launch_args((1, 2, 3, 4), 1, ())
-    @test_throws ArgumentError KI.check_launch_args(1, (1, 2, 3, 4), ())
-    @test_throws ArgumentError KI.check_launch_args((), 1, (1, 2, 3, 4))
-    @test_throws ArgumentError KI.check_launch_args(2, 4, 2) # both numgroupsize and ndrange defined
-    @test_throws ArgumentError KI.check_launch_args(2, (), 2) # both numgroupsize and ndrange defined
-end
-
 @testset "threads_to_workgroupsize" begin
     # Fills dimensions left to right without exceeding the thread budget.
     @test KI.threads_to_workgroupsize(256, (1000,)) == (256,)
@@ -231,13 +217,30 @@ end
     @test kernel.kern === :kern
 end
 
-# A backend reporting a fixed workgroup-size limit, for exercising the
-# auto-sizing helper.
-struct SizedBackend <: KI.Backend
-    maxThreads::Int
+# A minimal backend, recording the compilations and launches that KernelInterface asks for.
+struct MockBackend <: KI.Backend
+    max_items::Int
 end
-KI.max_work_group_size(k::KI.Kernel{SizedBackend}) = k.backend.maxThreads
-KI.max_work_group_dims(::SizedBackend) = (1024, 1024, 64)
+MockBackend() = MockBackend(256)
+
+struct MockKernel
+    f::Any
+    tt::Any
+    name::Any
+    options::Any
+    launches::Vector{Any}
+end
+
+KI.argconvert(::MockBackend, arg) = arg
+function KI.kernel_function(backend::MockBackend, f, tt = Tuple{}; name = nothing, kwargs...)
+    return KI.Kernel(backend, MockKernel(f, tt, name, Dict(kwargs), []))
+end
+function KI.launch(kernel::KI.Kernel{MockBackend}, groups::Dims{3}, items::Dims{3}, args...; kwargs...)
+    push!(kernel.kern.launches, (; groups, items, args, kwargs = Dict(kwargs)))
+    return :ignored
+end
+KI.max_work_group_size(kernel::KI.Kernel{MockBackend}) = kernel.backend.max_items
+KI.max_work_group_dims(::MockBackend) = (1024, 1024, 64)
 
 # ... and one recommending smaller work-groups than it can launch, like CUDA's occupancy API,
 # recording what it was asked
@@ -253,53 +256,100 @@ function KI.launch_configuration(
     push!(kernel.backend.queries, (; nitems, max_work_group_size))
     return (; workgroupsize = min(96, max_work_group_size))
 end
+KI.launch(kernel::KI.Kernel{OccupancyBackend}, groups::Dims{3}, items::Dims{3}, args...) =
+    push!(kernel.kern, (groups, items))
 
-@testset "auto_launch_sizes" begin
-    # the per-dimension limit is respected
-    @test KI.auto_launch_sizes(KI.Kernel(SizedBackend(1024), nothing), (), (), (1, 1, 5000)) ===
-        ((1, 1, 79), (1, 1, 64))
-
-    kernel = KI.Kernel(SizedBackend(256), nothing)
+@testset "launch geometry" begin
+    kernel = KI.kernel_function(MockBackend(), identity, Tuple{Int})
+    function geometry(; kwargs...)
+        empty!(kernel.kern.launches)
+        @test kernel(1; kwargs...) === nothing
+        isempty(kernel.kern.launches) && return nothing
+        launch = only(kernel.kern.launches)
+        return launch.groups, launch.items
+    end
 
     # Without an ndrange the sizes pass through, defaulting to 1.
-    @test KI.auto_launch_sizes(kernel, (), (), ()) === (1, 1)
-    @test KI.auto_launch_sizes(kernel, 4, (), ()) === (4, 1)
-    @test KI.auto_launch_sizes(kernel, (), (2, 2), ()) === (1, (2, 2))
-    @test KI.auto_launch_sizes(kernel, (4, 4), (2, 2), ()) === ((4, 4), (2, 2))
+    @test geometry() == ((1, 1, 1), (1, 1, 1))
+    @test geometry(numgroups = 4) == ((4, 1, 1), (1, 1, 1))
+    @test geometry(workgroupsize = (2, 2)) == ((1, 1, 1), (2, 2, 1))
+    @test geometry(numgroups = (4, 3), workgroupsize = (2, 5)) == ((4, 3, 1), (2, 5, 1))
+    @test geometry(numgroups = (4, 3, 2), workgroupsize = (2, 5, 3)) == ((4, 3, 2), (2, 5, 3))
 
     # With an ndrange and no workgroupsize, the workgroupsize is derived from
     # the kernel's limit and the workgroup count covers the ndrange.
-    @test KI.auto_launch_sizes(kernel, (), (), (1000,)) === ((4,), (256,))
-    @test KI.auto_launch_sizes(kernel, (), (), (10,)) === ((1,), (10,))
-    @test KI.auto_launch_sizes(kernel, (), (), (100, 50)) === ((1, 25), (100, 2))
-    @test KI.auto_launch_sizes(kernel, (), (), 1000) === (4, 256)
+    @test geometry(ndrange = 1000) == ((4, 1, 1), (256, 1, 1))
+    @test geometry(ndrange = (1000,)) == ((4, 1, 1), (256, 1, 1))
+    @test geometry(ndrange = 10) == ((1, 1, 1), (10, 1, 1))
+    @test geometry(ndrange = (100, 50)) == ((1, 25, 1), (100, 2, 1))
+    @test geometry(ndrange = 1000, max_work_group_size = 100) == ((10, 1, 1), (100, 1, 1))
+    # ... also for ndranges with more elements than an `Int` can count
+    @test geometry(ndrange = (2^40, 2^40)) == ((2^32, 2^40, 1), (256, 1, 1))
+    # ... respecting the per-dimension limit
+    let k = KI.kernel_function(MockBackend(1024), identity)
+        k(; ndrange = (1, 1, 5000))
+        launch = only(k.kern.launches)
+        @test (launch.groups, launch.items) == ((1, 1, 79), (1, 1, 64))
+    end
 
-    # An explicit workgroupsize is kept as-is.
-    @test KI.auto_launch_sizes(kernel, (), (16,), (100,)) === ((7,), (16,))
+    # An explicit workgroupsize is kept as-is, and the ndrange rounded up to it.
+    @test geometry(ndrange = 100, workgroupsize = 16) == ((7, 1, 1), (16, 1, 1))
+    @test geometry(ndrange = (7, 5), workgroupsize = (2, 3)) == ((4, 2, 1), (2, 3, 1))
 
-    # A zero-sized ndrange yields zero workgroups; backends skip the launch.
-    @test KI.auto_launch_sizes(kernel, (), (), (0,)) === ((0,), (1,))
-    @test KI.auto_launch_sizes(kernel, (), (), (0, 4)) === ((0, 1), (1, 4))
-    @test KI.auto_launch_sizes(kernel, (), (), 0) === (0, 1)
+    # Zero anywhere in the ndrange or the number of groups launches nothing.
+    @test geometry(ndrange = 0) === nothing
+    @test geometry(ndrange = (0, 4)) === nothing
+    @test geometry(ndrange = (4, 0), workgroupsize = 2) === nothing
+    @test geometry(numgroups = (2, 0)) === nothing
+    @test geometry(ndrange = (0, typemax(Int)), workgroupsize = (1, 2)) === nothing
 
-    # The backend's recommendation is used, not the limit, and it's told both the size of
-    # the launch and the cap.
-    occupancy = KI.Kernel(OccupancyBackend(), nothing)
-    @test KI.auto_launch_sizes(occupancy, (), (), (1000,)) === ((11,), (96,))
+    # Invalid launches are rejected before the backend sees them.
+    for kwargs in [
+            (; numgroups = (1, 1, 1, 1)), (; workgroupsize = (1, 1, 1, 1)),
+            (; ndrange = (1, 1, 1, 1)), (; ndrange = 2, numgroups = 2),
+            (; workgroupsize = 0), (; workgroupsize = (1, 0)), (; workgroupsize = -1),
+            (; numgroups = -1), (; ndrange = -1), (; ndrange = 2.0), (; numgroups = [1]),
+            (; ndrange = 4, max_work_group_size = 0), (; ndrange = typemax(UInt)),
+            # the kernel's limit, and the per-dimension limit
+            (; workgroupsize = 257), (; workgroupsize = (1, 1, 65)),
+            # more work-items in a dimension than an `Int` can count
+            (; ndrange = typemax(Int), workgroupsize = 2),
+            (; numgroups = typemax(Int), workgroupsize = 2),
+            (; numgroups = (1, typemax(Int) ÷ 2 + 1), workgroupsize = (1, 2)),
+        ]
+        @test_throws ArgumentError kernel(1; kwargs...)
+    end
+    @test isempty(kernel.kern.launches)
+
+    # Other keywords are for the backend.
+    kernel(1; ndrange = 4, stream = :mine)
+    @test last(kernel.kern.launches).kwargs == Dict(:stream => :mine)
+
+    # Auto-sizing uses the backend's recommendation, not the limit, and tells it both the
+    # size of the launch and the cap.
+    occupancy = KI.Kernel(OccupancyBackend(), [])
+    occupancy(; ndrange = 1000)
+    @test only(occupancy.kern) == ((11, 1, 1), (96, 1, 1))
     @test only(occupancy.backend.queries) == (; nitems = 1000, max_work_group_size = typemax(Int))
-    @test KI.auto_launch_sizes(occupancy, (), (), (1000, 3), 64) === ((16, 3), (64, 1))
+    occupancy(; ndrange = (1000, 3), max_work_group_size = 64)
+    @test last(occupancy.kern) == ((16, 3, 1), (64, 1, 1))
     @test last(occupancy.backend.queries) == (; nitems = 3000, max_work_group_size = 64)
+    occupancy(; ndrange = (2^40, 2^40))
+    @test last(occupancy.backend.queries).nitems == typemax(Int)
+    # ... while explicit sizes can go up to the limit
+    occupancy(; workgroupsize = 1024)
+    @test last(occupancy.kern) == ((1, 1, 1), (1024, 1, 1))
 end
 
 @testset "launch_configuration" begin
-    kernel = KI.Kernel(SizedBackend(256), nothing)
+    kernel = KI.kernel_function(MockBackend(), identity)
     # the fallback recommends the limit
     @test KI.launch_configuration(kernel) === (; workgroupsize = 256)
     @test KI.launch_configuration(kernel; max_work_group_size = 100) === (; workgroupsize = 100)
     @test KI.launch_configuration(kernel; nitems = 10) === (; workgroupsize = 256)
 
     # backends can recommend less than the limit
-    occupancy = KI.Kernel(OccupancyBackend(), nothing)
+    occupancy = KI.Kernel(OccupancyBackend(), [])
     @test KI.launch_configuration(occupancy) === (; workgroupsize = 96)
     @test KI.max_work_group_size(occupancy) == 1024
 end
@@ -333,26 +383,6 @@ end
     @test var_exprs[2] == Expr(:..., vars[2])
 end
 
-# A minimal backend, exercising the contract `KI.@launch` expects of one.
-struct MockBackend end
-
-struct MockKernel
-    f::Any
-    tt::Any
-    name::Any
-    options::Any
-    launches::Vector{Any}
-end
-
-KI.argconvert(::MockBackend, arg) = arg
-function KI.kernel_function(::MockBackend, f, tt = Tuple{}; name = nothing, kwargs...)
-    return MockKernel(f, tt, name, Dict(kwargs), [])
-end
-function (kernel::MockKernel)(args...; kwargs...)
-    push!(kernel.launches, (args, Dict(kwargs)))
-    return nothing
-end
-
 dummy(a, b) = nothing
 
 const backend_evaluations = Ref(0)
@@ -365,12 +395,13 @@ end
     backend = MockBackend()
 
     kernel = KI.@launch backend numgroups = 2 workgroupsize = 4 dummy(1, 2.0)
-    @test kernel isa MockKernel
-    @test kernel.f === dummy
-    @test kernel.tt == Tuple{Int, Float64}
-    args, launch_kwargs = only(kernel.launches)
-    @test args == (1, 2.0)
-    @test launch_kwargs == Dict(:numgroups => 2, :workgroupsize => 4)
+    @test kernel isa KI.Kernel{MockBackend}
+    @test kernel.backend === backend
+    @test kernel.kern.f === dummy
+    @test kernel.kern.tt == Tuple{Int, Float64}
+    launch = only(kernel.kern.launches)
+    @test launch.args == (1, 2.0)
+    @test (launch.groups, launch.items) == ((2, 1, 1), (4, 1, 1))
 
     # the backend expression is evaluated once
     backend_evaluations[] = 0
@@ -379,18 +410,18 @@ end
 
     # `launch=false` compiles only; the caller launches later.
     deferred = KI.@launch backend launch = false dummy(1, 2.0)
-    @test isempty(deferred.launches)
+    @test isempty(deferred.kern.launches)
 
     # Other keywords are compiler options for `kernel_function`.
     named = KI.@launch backend launch = false name = "mykernel" maxthreads = 32 dummy(1, 2.0)
-    @test named.name == "mykernel"
-    @test named.options == Dict(:maxthreads => 32)
+    @test named.kern.name == "mykernel"
+    @test named.kern.options == Dict(:maxthreads => 32)
     optioned = KI.@launch backend ndrange = 4 maxthreads = 32 dummy(1, 2.0)
-    @test last(only(optioned.launches)) == Dict(:ndrange => 4)
+    @test isempty(only(optioned.kern.launches).kwargs)
 
     # Splatted arguments are supported.
     splatted = KI.@launch backend launch = false dummy((1, 2.0)...)
-    @test splatted.tt == Tuple{Int, Float64}
+    @test splatted.kern.tt == Tuple{Int, Float64}
 
     @testset "errors" begin
         # These throw during macro expansion, so they cannot be written as a plain
