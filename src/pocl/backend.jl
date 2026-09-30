@@ -143,7 +143,7 @@ function KI.kernel_function(backend::POCLBackend, f::F, tt::TT = Tuple{}; name =
     return KI.Kernel{POCLBackend, typeof(kern)}(backend, kern)
 end
 
-function KI.launch(obj::KI.Kernel{POCLBackend}, groups::Dims{3}, items::Dims{3}, args::Vararg{Any, N}) where {N}
+function KI.launch(obj::KI.Kernel{POCLBackend}, groups::Dims{3}, items::Dims{3}, args::Tuple)
     # POCL launches synchronously, see the implementation note on `synchronize`
     event = POCL.launch_tuple(obj.kern, args; local_size = items, global_size = groups .* items)
     wait(event)

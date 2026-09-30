@@ -48,23 +48,30 @@ struct Kernel{B, Kern}
     kern::Kern
 end
 
-# `Vararg{Any, N}` makes Julia specialize on the arguments, which are only passed through
-function (kernel::Kernel)(
-        args::Vararg{Any, N}; numgroups = (), workgroupsize = (), ndrange = (),
+# The arguments are passed on as a tuple: Julia doesn't turn a splat of more than 32
+# elements into a direct call, and a method with both varargs and keyword arguments splats
+# them into its body. So the keyword method is defined explicitly, as Base does for
+# `invokelatest`. `Vararg{Any, N}` makes Julia specialize on the arguments.
+(kernel::Kernel)(args::Vararg{Any, N}) where {N} = call_kernel(kernel, args)
+Core.kwcall(kwargs::NamedTuple, kernel::Kernel, args::Vararg{Any, N}) where {N} =
+    call_kernel(kernel, args; kwargs...)
+
+function call_kernel(
+        kernel::Kernel, args::Tuple; numgroups = (), workgroupsize = (), ndrange = (),
         max_work_group_size::Integer = typemax(Int), kwargs...
-    ) where {N}
+    )
     groups, items = launch_geometry(kernel, numgroups, workgroupsize, ndrange, max_work_group_size)
     any(iszero, groups) && return nothing
-    launch(kernel, groups, items, args...; kwargs...)
+    launch(kernel, groups, items, args; kwargs...)
     return nothing
 end
 
 """
-    launch(kernel::Kernel, groups::Dims{3}, items::Dims{3}, args...; kwargs...)
+    launch(kernel::Kernel, groups::Dims{3}, items::Dims{3}, args::Tuple; kwargs...)
 
 Launch `kernel` with `groups` work-groups of `items` work-items each, passing the host-side
-arguments `args`. This is what calling a [`Kernel`](@ref) does after validating and
-normalizing the launch geometry; users call the kernel instead.
+arguments `args`, a tuple. This is what calling a [`Kernel`](@ref) does after validating
+and normalizing the launch geometry; users call the kernel instead.
 
 `groups` and `items` are positive, `items` fits [`max_work_group_dims`](@ref) and
 [`max_work_group_size`](@ref)`(kernel)`, and `groups .* items` doesn't overflow `Int`.
@@ -73,15 +80,19 @@ normalizing the launch geometry; users call the kernel instead.
 !!! note
     Backend implementations **must** implement:
     ```
-    launch(kernel::Kernel{<:NewBackend}, groups::Dims{3}, items::Dims{3}, args...; kwargs...)
+    launch(kernel::Kernel{<:NewBackend}, groups::Dims{3}, items::Dims{3}, args::Tuple; kwargs...)
     ```
     It converts `args` with [`argconvert`](@ref) (or lets its native launcher do so), and
     queues the launch on the calling task's queue; it doesn't have to wait for the kernel to
-    complete. Declare the arguments as `args::Vararg{Any, N}` (with `where {N}`): Julia
-    doesn't specialize a method on `args...` that it only passes through, which makes every
-    launch dispatch dynamically. It must throw for keywords it does not support, and may
-    throw for a number of work-groups the device cannot launch, or for a geometry that
+    complete. To keep launches with many arguments cheap, it should pass `args` on as a
+    tuple rather than splatting it: Julia doesn't turn a splat of more than 32 elements into
+    a direct call. It must throw for keywords it does not support, and may throw for a
+    number of work-groups the device cannot launch, or for a geometry that
     backend-specific compiler options of the kernel don't allow.
+
+!!! compat "KernelInterface 0.4"
+    Before KernelInterface 0.4, `launch` received the arguments as varargs,
+    `launch(kernel, groups, items, args...; kwargs...)`.
 """
 function launch end
 
@@ -378,6 +389,13 @@ The returned kernel doesn't keep any arguments alive: they are passed again at l
 """
 function kernel_function end
 
+# `Tuple{map(x -> Core.Typeof(argconvert(backend, x)), args)...}`, without `map`, which
+# isn't type stable for 32 or more elements
+@inline @generated function argument_types(backend, args::Tuple)
+    types = (:(Core.Typeof(argconvert(backend, args[$i]))) for i in 1:fieldcount(args))
+    return :(Tuple{$(types...)})
+end
+
 const MACRO_KWARGS = [:launch]
 const LAUNCH_KWARGS = [:numgroups, :workgroupsize, :ndrange, :max_work_group_size]
 
@@ -452,7 +470,7 @@ macro launch(backend, ex...)
 
     # FIXME: macro hygiene wrt. escaping kwarg values (this broke with 1.5)
     #        we esc() the whole thing now, necessitating gensyms...
-    @gensym backend_var f_var kernel_f kernel_args kernel_tt kernel
+    @gensym backend_var f_var kernel_f kernel_tt kernel
 
     # convert the arguments, call the compiler and launch the kernel
     # while keeping the original arguments alive
@@ -463,8 +481,7 @@ macro launch(backend, ex...)
             $f_var = $f
             GC.@preserve $(vars...) $f_var begin
                 $kernel_f = $argconvert($backend_var, $f_var)
-                $kernel_args = Base.map(x -> $argconvert($backend_var, x), ($(var_exprs...),))
-                $kernel_tt = Tuple{Base.map(Core.Typeof, $kernel_args)...}
+                $kernel_tt = $argument_types($backend_var, ($(var_exprs...),))
                 $kernel = $kernel_function($backend_var, $kernel_f, $kernel_tt; $(compiler_kwargs...))
                 if $launch
                     $kernel($(var_exprs...); $(call_kwargs...))
