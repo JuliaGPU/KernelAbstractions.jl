@@ -31,10 +31,7 @@ module KernelInterfaceTests
     include(joinpath(pkgdir(KernelInterface), "test", "testsuite.jl"))
 end
 @testset "POCL KernelInterface" begin
-    # POCL launches synchronously, so there's nothing for the events tests to order
-    KernelInterfaceTests.Testsuite.testsuite(
-        POCLBackend, "POCL", POCL, Array, POCL.CLDeviceArray; skip_tests = Set(["Events"])
-    )
+    KernelInterfaceTests.Testsuite.testsuite(POCLBackend(), Array)
 end
 
 @testset "POCL float atomics" begin

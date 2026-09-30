@@ -131,7 +131,7 @@ function shfl_down_test_kernel(a, b, ::Val{N}) where {N}
     return
 end
 
-function interface_testsuite(backend, AT)
+function interface_testsuite(backend::KI.Backend, AT)
     @testset "Launch parameters" begin
         # 1d
         function launch_kernel1d(arr)
@@ -143,14 +143,14 @@ function interface_testsuite(backend, AT)
             return
         end
         arr1d = AT(zeros(Float32, 4))
-        KI.@kernel backend() numworkgroups = 2 workgroupsize = 2 launch_kernel1d(arr1d)
-        KI.synchronize(backend())
+        KI.@kernel backend numworkgroups = 2 workgroupsize = 2 launch_kernel1d(arr1d)
+        KI.synchronize(backend)
         @test all(Array(arr1d) .== 1)
 
         # 1d tuple
         arr1dt = AT(zeros(Float32, 4))
-        KI.@kernel backend() numworkgroups = (2,) workgroupsize = (2,) launch_kernel1d(arr1dt)
-        KI.synchronize(backend())
+        KI.@kernel backend numworkgroups = (2,) workgroupsize = (2,) launch_kernel1d(arr1dt)
+        KI.synchronize(backend)
         @test all(Array(arr1dt) .== 1)
 
         # 2d
@@ -163,8 +163,8 @@ function interface_testsuite(backend, AT)
             return
         end
         arr2d = AT(zeros(Float32, 4, 4))
-        KI.@kernel backend() numworkgroups = (2, 2) workgroupsize = (2, 2) launch_kernel2d(arr2d)
-        KI.synchronize(backend())
+        KI.@kernel backend numworkgroups = (2, 2) workgroupsize = (2, 2) launch_kernel2d(arr2d)
+        KI.synchronize(backend)
         @test all(Array(arr2d) .== 1)
 
         # 3d
@@ -177,18 +177,18 @@ function interface_testsuite(backend, AT)
             return
         end
         arr3d = AT(zeros(Float32, 4, 4, 4))
-        KI.@kernel backend() numworkgroups = (2, 2, 2) workgroupsize = (2, 2, 2) launch_kernel3d(arr3d)
-        KI.synchronize(backend())
+        KI.@kernel backend numworkgroups = (2, 2, 2) workgroupsize = (2, 2, 2) launch_kernel3d(arr3d)
+        KI.synchronize(backend)
         @test all(Array(arr3d) .== 1)
 
         # 4d (Errors)
-        @test_throws ArgumentError (KI.@kernel backend() numworkgroups = (2, 2, 2, 2) workgroupsize = (2, 2, 2) launch_kernel3d(arr3d))
-        @test_throws ArgumentError (KI.@kernel backend() numworkgroups = (2, 2, 2) workgroupsize = (2, 2, 2, 2) launch_kernel3d(arr3d))
+        @test_throws ArgumentError (KI.@kernel backend numworkgroups = (2, 2, 2, 2) workgroupsize = (2, 2, 2) launch_kernel3d(arr3d))
+        @test_throws ArgumentError (KI.@kernel backend numworkgroups = (2, 2, 2) workgroupsize = (2, 2, 2, 2) launch_kernel3d(arr3d))
     end
 
     @testset "Launch limits" begin
-        max_dims = KI.max_work_group_dims(backend())
-        max_groups = KI.max_num_groups(backend())
+        max_dims = KI.max_work_group_dims(backend)
+        max_groups = KI.max_num_groups(backend)
         @test max_dims isa NTuple{3, Int} && all(>=(1), max_dims)
         @test max_groups isa NTuple{3, Int} && all(>=(1), max_groups)
 
@@ -199,11 +199,11 @@ function interface_testsuite(backend, AT)
             end
             return
         end
-        kernel = KI.@kernel backend() launch = false fill_kernel(AT(zeros(Float32, 1, 1, 1)))
+        kernel = KI.@kernel backend launch = false fill_kernel(AT(zeros(Float32, 1, 1, 1)))
         function fill_test(dims; kwargs...)
             arr = AT(zeros(Float32, dims))
             kernel(arr; kwargs...)
-            KI.synchronize(backend())
+            KI.synchronize(backend)
             return all(Array(arr) .== 1)
         end
 
@@ -227,7 +227,7 @@ function interface_testsuite(backend, AT)
     end
 
     @testset "Host return types" begin
-        b = backend()
+        b = backend
 
         @test KI.supports_unified(b) isa Bool
         @test KI.supports_atomics(b) isa Bool
@@ -250,15 +250,15 @@ function interface_testsuite(backend, AT)
     end
 
     @testset "Device return types" begin
-        results = KI.zeros(backend(), Bool, 6)
-        KI.@kernel backend() typecheck_kernel(results)
-        KI.synchronize(backend())
+        results = KI.zeros(backend, Bool, 6)
+        KI.@kernel backend typecheck_kernel(results)
+        KI.synchronize(backend)
         @test all(Array(results))
 
         @testset "$T" for T in (Int32, Int64, UInt32, UInt64)
-            typed_results = KI.zeros(backend(), Bool, 6)
-            KI.@kernel backend() typed_typecheck_kernel(typed_results, T)
-            KI.synchronize(backend())
+            typed_results = KI.zeros(backend, Bool, 6)
+            KI.@kernel backend typed_typecheck_kernel(typed_results, T)
+            KI.synchronize(backend)
             @test all(Array(typed_results))
         end
     end
@@ -270,9 +270,9 @@ function interface_testsuite(backend, AT)
 
         # `Int` is the reference: it is what the zero-argument form returns.
         function run_typed(::Type{T}) where {T}
-            results = KI.zeros(backend(), T, N, 18)
-            KI.@kernel backend() workgroupsize = workgroupsize numworkgroups = numworkgroups typed_index_kernel(results, T)
-            KI.synchronize(backend())
+            results = KI.zeros(backend, T, N, 18)
+            KI.@kernel backend workgroupsize = workgroupsize numworkgroups = numworkgroups typed_index_kernel(results, T)
+            KI.synchronize(backend)
             return Array(results)
         end
         reference = run_typed(Int)
@@ -293,21 +293,21 @@ function interface_testsuite(backend, AT)
 
     @testset "Basic interface functionality" begin
 
-        @test KI.max_work_group_size(backend()) isa Int
-        @test KI.multiprocessor_count(backend()) isa Int
+        @test KI.max_work_group_size(backend) isa Int
+        @test KI.multiprocessor_count(backend) isa Int
 
         # Test with small kernel
         workgroupsize = 4
         numworkgroups = 4
         N = workgroupsize * numworkgroups
         results = AT(Vector{KernelData}(undef, N))
-        kernel = KI.@kernel backend() launch = false test_interface_kernel(results)
+        kernel = KI.@kernel backend launch = false test_interface_kernel(results)
 
         @test KI.kernel_max_work_group_size(kernel) isa Int
         @test KI.kernel_max_work_group_size(kernel; max_work_items = 1) == 1
 
         kernel(results; workgroupsize, numworkgroups)
-        KI.synchronize(backend())
+        KI.synchronize(backend)
 
         host_results = Array(results)
 
@@ -335,32 +335,32 @@ function interface_testsuite(backend, AT)
     end
 
     # Used as a proxy for sub-group support
-    if !isempty(KI.shfl_down_types(backend()))
+    if !isempty(KI.shfl_down_types(backend))
         @testset "Sub-group return types" begin
-            @test KI.sub_group_size(backend()) isa Int
+            @test KI.sub_group_size(backend) isa Int
 
-            T = first(setdiff(KI.shfl_down_types(backend()), [Bool]))
-            results = KI.zeros(backend(), Bool, 6)
-            KI.@kernel backend() workgroupsize = KI.sub_group_size(backend()) subgroup_typecheck_kernel(results, one(T))
-            KI.synchronize(backend())
+            T = first(setdiff(KI.shfl_down_types(backend), [Bool]))
+            results = KI.zeros(backend, Bool, 6)
+            KI.@kernel backend workgroupsize = KI.sub_group_size(backend) subgroup_typecheck_kernel(results, one(T))
+            KI.synchronize(backend)
             @test all(Array(results))
         end
 
         @testset "Sub-groups" begin
-            @test KI.sub_group_size(backend()) isa Int
+            @test KI.sub_group_size(backend) isa Int
 
             # Test with small kernel
-            sg_size = KI.sub_group_size(backend())
+            sg_size = KI.sub_group_size(backend)
             sg_n = 2
             workgroupsize = sg_size * sg_n
             numworkgroups = 2
             N = workgroupsize * numworkgroups
 
             results = AT(Vector{SubgroupData}(undef, N))
-            kernel = KI.@kernel backend() launch = false test_subgroup_kernel(results)
+            kernel = KI.@kernel backend launch = false test_subgroup_kernel(results)
 
             kernel(results; workgroupsize, numworkgroups)
-            KI.synchronize(backend())
+            KI.synchronize(backend)
 
             host_results = Array(results)
 
@@ -380,17 +380,17 @@ function interface_testsuite(backend, AT)
             end
         end
         @testset "shfl_down" begin
-            @test !isempty(KI.shfl_down_types(backend()))
-            types_to_test = setdiff(KI.shfl_down_types(backend()), [Bool])
+            @test !isempty(KI.shfl_down_types(backend))
+            types_to_test = setdiff(KI.shfl_down_types(backend), [Bool])
             @testset "$T" for T in types_to_test
-                N = KI.sub_group_size(backend())
+                N = KI.sub_group_size(backend)
                 a = zeros(T, N)
                 rand!(a, (0:1))
 
                 dev_a = AT(a)
                 dev_b = AT(zeros(T, N))
 
-                KI.@kernel backend() workgroupsize = N shfl_down_test_kernel(dev_a, dev_b, Val(N))
+                KI.@kernel backend workgroupsize = N shfl_down_test_kernel(dev_a, dev_b, Val(N))
 
                 b = Array(dev_b)
                 @test sum(a) ≈ b[1]

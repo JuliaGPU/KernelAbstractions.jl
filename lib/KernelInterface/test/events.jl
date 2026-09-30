@@ -19,8 +19,13 @@ function slow_fill_kernel(A, v, iters::UInt32)
     return
 end
 
-function events_testsuite(backend)
-    b = backend()
+function events_testsuite(b::KI.Backend)
+    # A backend without events of its own records by synchronizing, so there is nothing
+    # for these tests to order.
+    if KI.record_event(b) === nothing
+        @test KI.wait_event(b, nothing) === nothing
+        return
+    end
     dev = KI.device(b)
 
     N = 64
