@@ -38,6 +38,13 @@ end
     @inbounds A[I] = lmem[i]
 end
 
+# more arguments than Julia splats efficiently (32)
+const MANY_ARGS = [Symbol(:x, i) for i in 1:40]
+@eval @kernel function launch_many!(A, $(MANY_ARGS...))
+    I = @index(Global, Linear)
+    @inbounds A[I] = $(foldl((a, b) -> :($a + $b), MANY_ARGS))
+end
+
 default_launcher(kernel, args...; ndrange, workgroupsize = nothing) =
     kernel(args...; ndrange, workgroupsize)
 
@@ -71,7 +78,7 @@ function check_indices(launcher, backend, AT, kernel, ndrange; workgroupsize = n
     return true
 end
 
-function launch_testsuite(backend, AT; launcher = default_launcher)
+function launch_testsuite(backend, AT; launcher = default_launcher, skip_tests = Set{String}())
     @testset "index layout" begin
         shapes = Tuple[(), (7,), (37,), (5, 7), (33, 3), (3, 5, 7), (2, 3, 4, 5)]
         @testset "$shape, workgroupsize=$wgs" for shape in shapes,
@@ -123,6 +130,14 @@ function launch_testsuite(backend, AT; launcher = default_launcher)
             synchronize(backend())
             @test Array(A) == LinearIndices(A)
         end
+    end
+
+    # back ends that limit the number of kernel arguments (Metal: 31 buffers) can skip this
+    @conditional_testset "many arguments" skip_tests begin
+        A = AT(zeros(Int, 5))
+        launcher(launch_many!(backend()), A, 1:40...; ndrange = length(A))
+        synchronize(backend())
+        @test all(==(sum(1:40)), Array(A))
     end
 
     @testset "synchronize with padding lanes" begin

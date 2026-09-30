@@ -175,7 +175,7 @@ end
             @check "define spir_kernel void @{{.*}}gpu_codegen_global_linear"
             @check "udiv i32"
             @device_code_llvm debuginfo = :none KernelAbstractions.launch_kernel(
-                kernel, KernelAbstractions.LinearLaunch{Int32}(), ndrange, workgroupsize, iterspace, B
+                kernel, KernelAbstractions.LinearLaunch{Int32}(), ndrange, workgroupsize, iterspace, (B,)
             )
             KernelAbstractions.synchronize(backend)
         end
