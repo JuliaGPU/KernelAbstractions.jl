@@ -263,7 +263,9 @@ supports_float64(::Backend) = false
 
 Whether kernels on the active device support sub-groups: the sub-group queries
 ([`get_sub_group_size`](@ref) etc.), [`sub_group_barrier`](@ref), and a fixed sub-group
-width [`sub_group_size`](@ref).
+width [`sub_group_size`](@ref). See the manual for what KernelInterface guarantees about
+how work-groups are divided into sub-groups; a backend that can't ensure that reports
+`false`.
 
 Which types [`shfl_down`](@ref) supports is queried separately with [`supports_shuffle`](@ref).
 
