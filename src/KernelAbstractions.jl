@@ -389,29 +389,16 @@ end
 # Internal kernel functions
 ###
 
-@inline function __index_Local_Linear(ctx)
-    return KI.get_local_id().x
-end
+# The index functions dispatch on the launch configuration of the context (see
+# `launch.jl`). A context without one was launched on a 1-D grid, and is indexed in `Int`.
+@inline index_launch(ctx) = something(__launch(ctx), LinearLaunch{Int}())
 
-@inline function __index_Group_Linear(ctx)
-    return KI.get_group_id().x
-end
-
-@inline function __index_Global_Linear(ctx)
-    I = @inbounds expand(__iterspace(ctx), KI.get_group_id().x, KI.get_local_id().x)
-    # TODO: This is unfortunate, can we get the linear index cheaper
-    return linear_index(__ndrange(ctx), I)
-end
-
-@inline function __index_Local_Cartesian(ctx)
-    return @inbounds workitems(__iterspace(ctx))[KI.get_local_id().x]
-end
-@inline function __index_Group_Cartesian(ctx)
-    return @inbounds blocks(__iterspace(ctx))[KI.get_group_id().x]
-end
-@inline function __index_Global_Cartesian(ctx)
-    return @inbounds expand(__iterspace(ctx), KI.get_group_id().x, KI.get_local_id().x)
-end
+@inline __index_Local_Linear(ctx) = local_linear(ctx, index_launch(ctx))
+@inline __index_Group_Linear(ctx) = group_linear(ctx, index_launch(ctx))
+@inline __index_Global_Linear(ctx) = global_linear(ctx, index_launch(ctx))
+@inline __index_Local_Cartesian(ctx) = local_cartesian(ctx, index_launch(ctx))
+@inline __index_Group_Cartesian(ctx) = group_cartesian(ctx, index_launch(ctx))
+@inline __index_Global_Cartesian(ctx) = global_cartesian(ctx, index_launch(ctx))
 
 @inline __index_Local_NTuple(ctx, I...) = Tuple(__index_Local_Cartesian(ctx, I...))
 @inline __index_Group_NTuple(ctx, I...) = Tuple(__index_Group_Cartesian(ctx, I...))
@@ -606,13 +593,23 @@ end
 ###
 
 include("compiler.jl")
+include("launch.jl")
 
 ###
 # Compiler/Frontend
 ###
 
 function __workitems_iterspace end
-function __validindex end
+
+# Whether the current work-item is part of the ndrange, or a padding lane of a partial
+# workgroup. Padding lanes still take part in `@synchronize`.
+@inline function __validindex(ctx)
+    if __dynamic_checkbounds(ctx)
+        return validindex(ctx, index_launch(ctx))
+    else
+        return true
+    end
+end
 
 # for reflection
 function mkcontext end

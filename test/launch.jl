@@ -1,0 +1,197 @@
+using KernelAbstractions
+using KernelAbstractions.NDIteration
+import KernelAbstractions.KernelInterface as KI
+using Test
+
+@kernel function launch_indices!(GL, GC, BL, BC, LL, LC, WS, lo)
+    I = @index(Global, NTuple)
+    J = I .- lo .+ 1
+    @inbounds begin
+        GL[J...] = @index(Global, Linear)
+        GC[J...] = @index(Global, Cartesian)
+        BL[J...] = @index(Group, Linear)
+        BC[J...] = @index(Group, Cartesian)
+        LL[J...] = @index(Local, Linear)
+        LC[J...] = @index(Local, Cartesian)
+        WS[J...] = CartesianIndex(@groupsize())
+    end
+end
+
+# `unsafe_indices` kernels compute global indices from the group and local ones
+@kernel unsafe_indices = true function launch_unsafe!(A)
+    g = @index(Group, NTuple)
+    l = @index(Local, NTuple)
+    I = (g .- 1) .* @groupsize() .+ l
+    if all(I .<= size(A))
+        @inbounds A[I...] = LinearIndices(A)[I...]
+    end
+end
+
+# padding lanes of partial workgroups have to reach the barrier too
+@kernel function launch_sync!(A)
+    I = @index(Global, Linear)
+    i = @index(Local, Linear)
+    N = @uniform prod(@groupsize())
+    lmem = @localmem Int (N,)
+    @inbounds lmem[i] = I
+    @synchronize
+    @inbounds A[I] = lmem[i]
+end
+
+default_launcher(kernel, args...; ndrange, workgroupsize = nothing) =
+    kernel(args...; ndrange, workgroupsize)
+
+# Check every `@index` flavour against the layout KernelAbstractions defines: groups and
+# work-items are numbered column-major, and the global index is `(g-1)*groupsize + l`.
+function check_indices(launcher, backend, AT, kernel, ndrange; workgroupsize = nothing)
+    ranges = map(r -> r isa Integer ? (1:r) : r, ndrange)
+    N = length(ranges)
+    ext = map(length, ranges)
+    lo = map(first, ranges)
+    arrays = map((Int, CartesianIndex{N}, Int, CartesianIndex{N}, Int, CartesianIndex{N}, CartesianIndex{N})) do T
+        AT(zeros(T, ext))
+    end
+    launcher(kernel, arrays..., lo; ndrange, workgroupsize)
+    synchronize(backend)
+    GL, GC, BL, BC, LL, LC, WS = map(Array, arrays)
+
+    wgs = Tuple(first(WS))
+    all(==(CartesianIndex(wgs)), WS) || return false
+    groups = cld.(ext, wgs)
+    for J in CartesianIndices(ext)
+        g = cld.(J.I, wgs)
+        l = J.I .- (g .- 1) .* wgs
+        GL[J] == LinearIndices(ext)[J] || return false
+        GC[J] == CartesianIndex(J.I .+ lo .- 1) || return false
+        BC[J] == CartesianIndex(g) || return false
+        BL[J] == LinearIndices(groups)[g...] || return false
+        LC[J] == CartesianIndex(l) || return false
+        LL[J] == LinearIndices(wgs)[l...] || return false
+    end
+    return true
+end
+
+function launch_testsuite(backend, AT; launcher = default_launcher)
+    @testset "index layout" begin
+        shapes = Tuple[(), (7,), (37,), (5, 7), (33, 3), (3, 5, 7), (2, 3, 4, 5)]
+        @testset "$shape, workgroupsize=$wgs" for shape in shapes,
+                wgs in (nothing, 4, (2, 3), (4, 1, 2))
+            wgs !== nothing && length(wgs) > length(shape) && continue
+            @test check_indices(
+                launcher, backend(), AT, launch_indices!(backend()), shape;
+                workgroupsize = wgs
+            )
+        end
+
+        @testset "static workgroupsize" begin
+            @test check_indices(launcher, backend(), AT, launch_indices!(backend(), (4, 2)), (9, 5))
+            @test check_indices(launcher, backend(), AT, launch_indices!(backend(), 8), (9, 5, 3))
+        end
+
+        @testset "static ndrange" begin
+            @test check_indices(launcher, backend(), AT, launch_indices!(backend(), (4, 2), (9, 5)), (9, 5))
+            @test check_indices(launcher, backend(), AT, launch_indices!(backend(), (4, 2), (0:8, -2:2)), (0:8, -2:2))
+        end
+
+        @testset "offsets" begin
+            @test check_indices(launcher, backend(), AT, launch_indices!(backend()), (-3:4,))
+            @test check_indices(launcher, backend(), AT, launch_indices!(backend()), (-3:4, 2:11); workgroupsize = (3, 3))
+            @test check_indices(launcher, backend(), AT, launch_indices!(backend()), (0:4, 3, 2:3))
+        end
+    end
+
+    @testset "empty ndrange" begin
+        for shape in ((0,), (0, 5), (5, 0), (3, 4, 0), (2, 0, 2, 2))
+            A = AT(zeros(Int, max.(shape, 1)))
+            launcher(launch_unsafe!(backend()), A; ndrange = shape)
+            synchronize(backend())
+            @test all(iszero, Array(A))
+        end
+    end
+
+    @testset "unsafe_indices" begin
+        for (shape, wgs) in (((37,), 8), ((33, 7), (8, 4)), ((9, 5, 3), (4, 2, 2)), ((9, 5), nothing))
+            A = AT(zeros(Int, shape))
+            launcher(launch_unsafe!(backend()), A; ndrange = shape, workgroupsize = wgs)
+            synchronize(backend())
+            @test Array(A) == LinearIndices(A)
+        end
+    end
+
+    @testset "synchronize with padding lanes" begin
+        for (shape, wgs) in (((37,), (8,)), ((7, 6), (4, 4)), ((5, 3, 3), (2, 2, 2)))
+            A = AT(zeros(Int, shape))
+            launcher(launch_sync!(backend(), wgs), A; ndrange = shape)
+            synchronize(backend())
+            @test Array(A) == LinearIndices(A)
+        end
+    end
+    return
+end
+
+function select_launch_testsuite()
+    # the limits of a CUDA GPU
+    max_items = 1024
+    max_dims = (1024, 1024, 64)
+    max_groups = (Int(typemax(Int32)), 65535, 65535)
+    select(extent, groupsize = nothing; max_dims = max_dims, max_groups = max_groups) =
+        KernelAbstractions.select_launch(extent, groupsize, max_items, max_dims, max_groups)
+    LinearLaunch = KernelAbstractions.LinearLaunch
+    NDLaunch = KernelAbstractions.NDLaunch
+
+    @testset "selection" begin
+        # as many dimensions as the grid has are launched as such
+        @test select((1000,)) === NDLaunch{Int32}()
+        @test select((100, 100)) === NDLaunch{Int32}()
+        @test select((10, 10, 10), (4, 4, 4)) === NDLaunch{Int32}()
+        @test select(()) === NDLaunch{Int32}()
+        @test select((2, 3, 4, 5)) === LinearLaunch{Int32}()
+        @test select((100, 100); max_dims = (1024, 1024), max_groups = (65535, 65535)) ===
+            NDLaunch{Int32}()
+        @test select((10, 10, 10); max_dims = (1024, 1024), max_groups = (65535, 65535)) ===
+            LinearLaunch{Int32}()
+
+        # unless that exceeds the per-dimension limits
+        @test select((100, 100_000)) === LinearLaunch{Int32}()
+        @test select((1, 1, 5000), (1, 1, 128)) === LinearLaunch{Int32}()
+        @test select((10,), (2048,)) === LinearLaunch{Int32}()
+        @test select((64, 64), (64, 64)) === LinearLaunch{Int32}()
+        # tuning respects the per-dimension limits
+        @test select((1, 1, 5000)) === NDLaunch{Int32}()
+
+        # indices are computed in Int32 if the padded iteration space fits
+        @test select((1024, 1024, 1024)) === NDLaunch{Int32}()
+        @test select((1025, 1024, 1024)) === NDLaunch{Int}()
+        @test select((2^31 - 1024,)) === NDLaunch{Int32}()
+        @test select((2^31 - 1023,)) === NDLaunch{Int}()
+        @test select((2^31 - 1,), (1,)) === NDLaunch{Int32}()
+        @test select((2^31 - 1,), (2,)) === NDLaunch{Int}()
+        @test select((2^16, 2^16, 2), (256,)) === LinearLaunch{Int}()
+        # ... and don't have to be representable at all
+        @test_throws ArgumentError select((2^40, 2^40))
+        @test_throws ArgumentError select((typemax(Int),))
+        @test_throws ArgumentError select((typemax(Int),), (2,))
+        # including when empty
+        @test select((2^40, 2^40, 0)) === LinearLaunch{Int32}()
+        @test select((2^20, 2^12, 0), (1024,)) === NDLaunch{Int32}()
+    end
+
+    # The index type is chosen before the workgroup size is tuned, so the padding that the
+    # tuned workgroup introduces has to be bounded for every thread count.
+    @testset "tuned padding bound" begin
+        for extent in (
+                (5,), (1000,), (3, 7), (33, 1000), (1, 1, 5000), (7, 9, 11),
+                (1500, 3, 2), (2, 3, 4, 5), (1, 1, 1, 3000), (0, 7),
+            )
+            for limits in ((), max_dims)
+                bound = KernelAbstractions.tuned_padded(extent, max_items, limits)
+                @test all(1:max_items) do threads
+                    wgs = KI.threads_to_workgroupsize(threads, extent, limits)
+                    padded = cld.(extent, wgs) .* wgs
+                    all(padded .<= bound)
+                end
+            end
+        end
+    end
+    return
+end

@@ -108,4 +108,8 @@ KernelAbstractions.NDIteration.DynamicOffset
 KernelAbstractions.NDIteration.extents
 KernelAbstractions.NDIteration.offsets
 KernelAbstractions.NDIteration.linear_index
+KernelAbstractions.LinearLaunch
+KernelAbstractions.NDLaunch
+KernelAbstractions.select_launch
+KernelAbstractions.launch_workgroupsize
 ```

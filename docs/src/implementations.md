@@ -75,3 +75,73 @@ to the backend's array type, so that `adapt(backend, x)` and
 Adapt.adapt_storage(::CUDABackend, x) = adapt(CuArray, x)
 ```
 
+
+## Launching `@kernel` kernels
+
+A kernel written with [`@kernel`](@ref) receives a hidden context, a
+`KernelAbstractions.CompilerMetadata` built by the backend's `mkcontext`, from which
+[`@index`](@ref) computes its indices. By default (a context without a `launch`),
+`@index` assumes that the kernel was launched on a 1-D grid of
+`length(blocks(iterspace))` groups of `length(workitems(iterspace))` work-items. It then
+decomposes the linear hardware ids into Cartesian positions, which takes integer divisions
+when the `ndrange` is not known at compile time, and computes in `Int`.
+
+A backend **may** launch kernels differently, and pass the `launch` keyword to the
+`CompilerMetadata` constructor to tell `@index` how:
+
+- [`NDLaunch{T}`](@ref KernelAbstractions.NDLaunch): the grid has the shape of the
+  iteration space (for as many dimensions as the backend's grid has, i.e. up to 3), so
+  `@index` doesn't need any divisions;
+- [`LinearLaunch{T}`](@ref KernelAbstractions.LinearLaunch): the default 1-D grid.
+
+Either way `@index` computes in `T`, e.g. `Int32`, which is faster on GPUs. The backend
+has to implement the typed [`KI.get_group_id`](@ref KernelInterface.get_group_id) and
+[`KI.get_local_id`](@ref KernelInterface.get_local_id) queries such that they compute in
+`T` too, e.g. without checked conversions.
+
+[`select_launch`](@ref KernelAbstractions.select_launch) chooses the launch from the
+iteration space, whether the workgroup size will be tuned, and the limits of the backend
+([`KI.max_work_group_size`](@ref KernelInterface.max_work_group_size),
+[`KI.max_work_group_dims`](@ref KernelInterface.max_work_group_dims) and
+[`KI.max_num_groups`](@ref KernelInterface.max_num_groups)). It doesn't depend on the
+workgroup size a backend tunes afterwards, which keeps the context type (and thus the
+compiled kernel) the same before and after tuning, as long as the backend tunes with
+[`launch_workgroupsize`](@ref KernelAbstractions.launch_workgroupsize). A launch then
+looks like this:
+
+```julia
+function (obj::KA.Kernel{MyBackend})(args...; ndrange = nothing, workgroupsize = nothing)
+    ndrange, workgroupsize, iterspace, dynamic = KA.launch_config(obj, ndrange, workgroupsize)
+    launch = KA.select_launch(obj, workgroupsize, iterspace)
+    ctx = KA.CompilerMetadata{KA.ndrange(obj), KA.DynamicCheck}(ndrange, iterspace; launch)
+    kernel = compile(obj.f, ctx, args...)
+
+    if KA.workgroupsize(obj) <: KA.DynamicSize && workgroupsize === nothing
+        threads = max_threads(kernel)  # at most `KI.max_work_group_size(backend)`
+        workgroupsize = KA.launch_workgroupsize(backend, launch, threads, ndrange)
+        iterspace, dynamic = KA.partition(obj, ndrange, workgroupsize)
+        ctx = KA.CompilerMetadata{KA.ndrange(obj), KA.DynamicCheck}(ndrange, iterspace; launch)
+    end
+
+    groups, items = size(KA.blocks(iterspace)), size(KA.workitems(iterspace))
+    prod(groups) == 0 && return
+    if launch isa KA.NDLaunch
+        run(kernel, ctx, args...; groups, items)            # padded to 3 dimensions
+    else
+        run(kernel, ctx, args...; groups = prod(groups), items = prod(items))
+    end
+end
+```
+
+The POCL backend is an example. Backends that launch on an N-d grid **must not** override
+`__validindex` or the `__index_*` functions, which dispatch on the launch.
+
+Packages that customize the iteration space (with a custom `partition` and `expand`)
+don't need to do anything for these launches: the index functions only compute the global
+index directly for the iteration spaces KernelAbstractions creates itself, and call
+`expand`, `in` and `linear_index` otherwise.
+
+Packages with an `Adapt` rule for `CompilerMetadata` **must** preserve its `launch`, e.g. by
+passing `launch = KernelAbstractions.__launch(ctx)` to the constructor. Otherwise the
+kernel computes its indices as if it had been launched on a 1-D grid, which gives wrong
+results for a kernel launched with an `NDLaunch`.
