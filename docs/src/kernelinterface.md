@@ -44,6 +44,25 @@ unchanged.
 KernelInterface
 ```
 
+## Semantics
+
+A few rules hold throughout the interface:
+
+- **Execution is task-local.** A backend value (e.g. `CUDABackend()`) identifies a
+  backend and its configuration, such as compiler options. Each Julia task has an active
+  device per backend (selected with [`device!`](@ref)) and a queue on it. Host-side
+  queries and compilation use the active device, allocations go to it, and copies and
+  launches go to the calling task's queue. [`synchronize`](@ref) waits for that queue,
+  and [`record_event`](@ref)/[`wait_event`](@ref) order work across queues. Switching
+  devices doesn't synchronize.
+- **Compiled kernels belong to a device.** Queries on a [`Kernel`](@ref)
+  ([`max_work_group_size`](@ref), [`launch_configuration`](@ref)) answer for the device it
+  was compiled for. Launching it after switching to another device either works or
+  throws, but never runs on the wrong device.
+- **Indices are 1-based**, and `x` is the fastest-varying dimension.
+- **Capabilities default to "unsupported".** A backend that doesn't implement a
+  `supports_*` query never claims support.
+
 ## Backend hierarchy
 
 Backends subtype [`Backend`](@ref), and everything else in the interface dispatches on
@@ -209,10 +228,9 @@ A backend must, at minimum:
 1. Define a backend type subtyping [`Backend`](@ref), and implement [`get_backend`](@ref)
    for its array type.
 2. Implement the host-side management functions for that type:
-   [`allocate`](@ref), [`copyto!`](@ref), [`synchronize`](@ref) and
-   [`unsafe_free!`](@ref) are required; the remaining functions under
-   [Host-side API](@ref) have fallbacks that only need overriding when the
-   defaults don't apply.
+   [`allocate`](@ref), [`copyto!`](@ref) and [`synchronize`](@ref) are required, and so
+   are the device functions for backends with more than one device; the remaining
+   functions under [Host-side API](@ref) have conservative fallbacks.
 3. Extend `Adapt.adapt_storage(::NewBackend, x)` so that
    [`adapt(backend, x)`](@ref Adapt.adapt_storage(::Backend, ::Any)) moves
    data to the backend, preferably by delegating to its array type:

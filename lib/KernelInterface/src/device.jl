@@ -214,17 +214,26 @@ See [`get_local_id`](@ref) for the supported types `T`.
 @inline get_sub_group_local_id() = get_sub_group_local_id(Int)
 
 
+## memory
+
 """
     localmemory(::Type{T}, dims)
 
-Declare memory that is local to a workgroup.
+Declare an array of element type `T` and size `dims` in memory that is local to a
+work-group. `dims` has to be known at compile time.
+
+Every call site of `localmemory` in a kernel has its own memory, shared by all work-items
+of a work-group. It is uninitialized, and lives until the work-group finishes. Executing the
+same call site again, e.g. in a loop, returns the same memory. A function containing a call
+that is itself called from several places may get the same memory at each of them, or
+different memory, depending on whether it is inlined: don't rely on either. Use
+[`barrier`](@ref) to make writes visible to the other work-items.
 
 !!! note
     Backend implementations **must** implement:
     ```
     @device_override localmemory(::Type{T}, ::Val{Dims}) where {T, Dims}
     ```
-    As well as the on-device functionality.
 """
 localmemory(::Type{T}, dims) where {T} = localmemory(T, Val(dims))
 
@@ -233,6 +242,8 @@ localmemory(::Type{T}, dims) where {T} = localmemory(T, Val(dims))
 localmemory(::Type{T}, ::Val) where {T} =
     error("Local memory used outside kernel or not captured")
 
+
+## communication
 
 """
     shfl_down(val::T, offset::Integer)::T
@@ -256,18 +267,18 @@ branch), with the same `offset`.
 function shfl_down end
 
 
+## synchronization
+
 """
     barrier()
 
-After a `barrier()` call, all read and writes to global and local memory
-from each thread in the workgroup are visible in from all other threads in the
-workgroup.
+Wait until all work-items of the work-group have reached the barrier. Afterwards, the
+writes to global and local memory that each work-item made before the barrier are visible
+to all work-items of the work-group.
 
-This does **not** guarantee that a write from a thread in a certain workgroup will
-be visible to a thread in a different workgroup.
+This does **not** order memory between work-groups.
 
-!!! note
-    `barrier()` must be encountered by all workitems of a work-group executing the kernel or by none at all.
+All work-items of a work-group have to reach the same `barrier()` (not in a divergent branch).
 
 !!! note
     Backend implementations **must** implement:
@@ -298,19 +309,21 @@ function sub_group_barrier()
     error("Sub-group barrier used outside kernel or not captured")
 end
 
+
+## printing
+
 """
     _print(args...)
 
-    Overloaded by backends to enable `KernelAbstractions.@print`
-    functionality.
+Print `args` from a kernel; the backend hook behind `KernelAbstractions.@print`.
 
 !!! note
-    Backend implementations **must** implement:
+    Backend implementations **should** implement:
     ```
     @device_override _print(args...)
     ```
-    If the backend does not support printing,
-    define it to return `nothing`.
+    A backend that can't print from a kernel defines it to return `nothing`, and
+    documents that.
 
 The generic fallback prints on the host, which keeps CPU backends working.
 `Val` arguments are unwrapped, since `KernelAbstractions.@print` uses them to

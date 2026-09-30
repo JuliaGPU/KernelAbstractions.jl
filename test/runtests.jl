@@ -162,8 +162,9 @@ struct NewBackend <: KernelAbstractions.Backend end
     @test_throws MethodError KernelAbstractions.zeros(backend, Float32, 1)
     @test_throws MethodError KernelAbstractions.ones(backend, Float32, 1)
 
-    @test KernelAbstractions.supports_atomics(backend) == true
-    @test KernelAbstractions.supports_float64(backend) == true
+    # conservative capability defaults
+    @test KernelAbstractions.supports_atomics(backend) == false
+    @test KernelAbstractions.supports_float64(backend) == false
 
     @test KernelAbstractions.priority!(backend, :high) === nothing
     @test KernelAbstractions.priority!(backend, :normal) === nothing

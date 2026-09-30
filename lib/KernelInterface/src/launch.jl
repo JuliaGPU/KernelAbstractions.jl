@@ -315,25 +315,30 @@ Host code can rely on it, e.g. to pick a `Val(N)` for a warp-level reduction.
 function sub_group_size end
 
 """
-    multiprocessor_count(backend::NewBackend)::Int
+    multiprocessor_count(backend)::Int
 
-The multiprocessor count for the current device used by `backend`.
-Used for certain algorithm optimizations.
+The number of multiprocessors (CUDA SMs, AMD CUs, Intel Xe cores, ...) of the active device
+of `backend`, or 0 if unknown. The unit differs between backends, so this is only useful for
+heuristics, e.g. to choose how many work-groups a grid-stride loop launches.
 
 !!! note
     Backend implementations **may** implement:
     ```
     multiprocessor_count(backend::NewBackend)::Int
     ```
-    As well as the on-device functionality.
 """
 multiprocessor_count(::Backend) = 0
 
-"""
-    argconvert(::NewBackend, arg)
 
-This function is called for every argument to be passed to a kernel,
-converting them to their device side representation.
+## compilation
+
+"""
+    argconvert(backend, arg)
+
+Convert `arg` to its device-side representation, e.g. a `CuArray` to a `CuDeviceArray`.
+Called for every kernel argument, and for the kernel function itself.
+
+It has to be pure: it may be called more than once for the same launch.
 
 !!! note
     Backend implementations **must** implement:
@@ -356,13 +361,20 @@ Keyword arguments:
 Other keyword arguments are backend-specific compiler options (e.g. `maxthreads` for
 CUDA.jl); backends throw an error for options they don't support.
 
+The returned kernel doesn't keep any arguments alive: they are passed again at launch.
+
 !!! note
     Backend implementations **must** implement:
     ```
     kernel_function(backend::NewBackend, f::F, tt::TT=Tuple{}; name=nothing, kwargs...) where {F,TT}
     ```
-    Kernels must execute with sub-group width [`sub_group_size(backend)`](@ref sub_group_size)
-    if the backend supports sub-groups.
+    The returned `Kernel` stores `backend` itself (not a new default backend), so that
+    options it carries apply to the launch. Kernels must execute with sub-group width
+    [`sub_group_size(backend)`](@ref sub_group_size) if the backend supports sub-groups.
+
+    Launching a kernel after [`device!`](@ref) switched to a device other than the one it
+    was compiled for must either work, or throw an error: it may never run on the wrong
+    device.
 """
 function kernel_function end
 

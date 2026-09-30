@@ -96,10 +96,9 @@ end
 
 
 function KI.copyto!(backend::POCLBackend, A, B)
+    length(A) == length(B) ||
+        throw(ArgumentError("Arrays must match in length, got $(length(A)) and $(length(B))"))
     if KI.get_backend(A) == KI.get_backend(B) && KI.get_backend(A) isa POCLBackend
-        if length(A) != length(B)
-            error("Arrays must match in length")
-        end
         if Base.mightalias(A, B)
             error("Arrays may not alias")
         end
@@ -107,7 +106,8 @@ function KI.copyto!(backend::POCLBackend, A, B)
         kernel(A, B, ndrange = length(A))
         return A
     else
-        return Base.copyto!(A, B)
+        Base.copyto!(A, B)
+        return A
     end
 end
 
@@ -123,8 +123,9 @@ KI.get_backend(::Array) = POCLBackend()
 ## must synchronize upon kernel launch and can't rely on synchronization upon
 ## array access. Therefore, `synchronize` is a no-op.
 KI.synchronize(::POCLBackend) = nothing
-KI.supports_float64(::POCLBackend) = true
+KI.supports_float64(::POCLBackend) = "cl_khr_fp64" in device().extensions
 KI.supports_unified(::POCLBackend) = true
+KI.supports_atomics(::POCLBackend) = true
 
 
 ## Kernel Launch
@@ -206,7 +207,7 @@ end
 
 KI.argconvert(::POCLBackend, arg) = clconvert(arg)
 
-function KI.kernel_function(::POCLBackend, f::F, tt::TT = Tuple{}; name = nothing, kwargs...) where {F, TT}
+function KI.kernel_function(backend::POCLBackend, f::F, tt::TT = Tuple{}; name = nothing, kwargs...) where {F, TT}
     # fix the sub-group width, as `KI.sub_group_size` promises
     sub_group_size = device_limits().sub_group_size
     kern = if sub_group_size > 0
@@ -214,7 +215,7 @@ function KI.kernel_function(::POCLBackend, f::F, tt::TT = Tuple{}; name = nothin
     else
         clfunction(f, tt; name, kwargs...)
     end
-    return KI.Kernel{POCLBackend, typeof(kern)}(POCLBackend(), kern)
+    return KI.Kernel{POCLBackend, typeof(kern)}(backend, kern)
 end
 
 function KI.launch(obj::KI.Kernel{POCLBackend}, groups::Dims{3}, items::Dims{3}, args::Vararg{Any, N}) where {N}

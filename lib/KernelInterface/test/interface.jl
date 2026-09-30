@@ -39,6 +39,42 @@ function test_interface_kernel(results)
     end
     return
 end
+# Local arrays, written by one work-item and read back by another one after a barrier.
+# `c` has the same type and size as `a`, but is a different call site, so different memory.
+function localmem_kernel(out, ::Val{N}) where {N}
+    i = KI.get_local_id().x
+    a = KI.localmemory(Int32, N)
+    b = KI.localmemory(Int32, (2, N))
+    c = KI.localmemory(Int32, N)
+    @inbounds begin
+        a[i] = i
+        b[1, i] = -i
+        b[2, i] = 2i
+        c[i] = 3i
+    end
+    KI.barrier()
+    j = N - i + 1
+    gid = KI.get_global_id().x
+    @inbounds begin
+        out[gid, 1] = a[j]
+        out[gid, 2] = b[1, j]
+        out[gid, 3] = b[2, j]
+        out[gid, 4] = c[j]
+    end
+    return
+end
+
+# Every work-item writes global memory, and reads another work-item's write after a barrier.
+function global_barrier_kernel(scratch, out)
+    n = KI.get_local_size().x
+    base = (KI.get_group_id().x - 1) * n
+    i = KI.get_local_id().x
+    @inbounds scratch[base + i] = base + i
+    KI.barrier()
+    @inbounds out[base + i] = scratch[base + n - i + 1]
+    return
+end
+
 # The interface documents a concrete return type for each device-side function;
 # these kernels record whether the backend honors them.
 const WorkItemNT{T} = @NamedTuple{x::T, y::T, z::T}
@@ -328,23 +364,83 @@ function interface_testsuite(backend::KI.Backend, AT)
         @test KI.supports_unified(b) isa Bool
         @test KI.supports_atomics(b) isa Bool
         @test KI.supports_float64(b) isa Bool
+        @test KI.supports_subgroups(b) isa Bool
+        @test KI.supports_shuffle(b, Float32) isa Bool
         @test KI.functional(b) isa Union{Missing, Bool}
         @test KI.multiprocessor_count(b) isa Int
 
         @test KI.device(b) isa Int
         @test KI.ndevices(b) isa Int
-        # @test KI.device!(b, KI.device(b)) isa Nothing
-        # @test KI.priority!(b, :normal) isa Nothing
-
-        @test KI.supports_subgroups(b) isa Bool
-        @test KI.supports_shuffle(b, Float32) isa Bool
 
         arr = KI.allocate(b, Float32, 2)
         @test arr isa AT{Float32, 1}
         @test KI.zeros(b, Float32, 2) isa AT{Float32, 1}
         @test KI.ones(b, Float32, 2) isa AT{Float32, 1}
         @test KI.get_backend(arr) isa KI.Backend
+        @test KI.device(b, arr) == KI.device(b)
 
+        kernel = KI.@launch b launch = false test_interface_kernel(AT(Vector{KernelData}(undef, 1)))
+        @test kernel isa KI.Kernel
+        @test kernel.backend === b
+    end
+
+    @testset "Devices" begin
+        b = backend
+        dev = KI.device(b)
+        @test 1 <= dev <= KI.ndevices(b)
+        KI.device!(b, dev)
+        @test KI.device(b) == dev
+        @test_throws ArgumentError KI.device!(b, 0)
+        @test_throws ArgumentError KI.device!(b, KI.ndevices(b) + 1)
+
+        if KI.ndevices(b) > 1
+            other = mod1(dev + 1, KI.ndevices(b))
+            arr_dev = KI.ones(b, Float32, 4)
+            try
+                KI.device!(b, other)
+                # the owner of an array doesn't change with the active device
+                @test KI.device(b, arr_dev) == dev
+                @test KI.device(b) == other
+                arr = KI.ones(b, Float32, 4)
+                @test KI.device(b, arr) == other
+                @test Array(arr) == ones(Float32, 4)
+            finally
+                KI.device!(b, dev)
+            end
+            @test KI.device(b) == dev
+        end
+    end
+
+    @testset "copyto!" begin
+        b = backend
+        host = rand(Float32, 16)
+        dev = KI.allocate(b, Float32, 16)
+        @test KI.copyto!(b, dev, host) === dev
+        dev2 = KI.allocate(b, Float32, 16)
+        @test KI.copyto!(b, dev2, dev) === dev2
+        back = zeros(Float32, 16)
+        @test KI.copyto!(b, back, dev2) === back
+        KI.synchronize(b)
+        @test back == host
+
+        # arrays of different shapes copy by linear index
+        dev3 = KI.allocate(b, Float32, (4, 4))
+        KI.copyto!(b, dev3, host)
+        KI.synchronize(b)
+        @test Array(dev3) == reshape(host, 4, 4)
+
+        # ordered with respect to kernels on the same queue
+        arr = KI.zeros(b, Int32, (4, 1, 1))
+        KI.@launch b numgroups = 1 workgroupsize = 4 launch_kernel(arr)
+        result = zeros(Int32, 4)
+        KI.copyto!(b, result, arr)
+        KI.synchronize(b)
+        @test result == ones(Int32, 4)
+
+        @test_throws ArgumentError KI.copyto!(b, KI.allocate(b, Float32, 8), host)
+        @test_throws ArgumentError KI.copyto!(b, zeros(Float32, 8), dev)
+        @test_throws ArgumentError KI.copyto!(b, KI.allocate(b, Float32, 32), dev)
+        KI.synchronize(b)
     end
 
     @testset "Device return types" begin
@@ -429,6 +525,27 @@ function interface_testsuite(backend::KI.Backend, AT)
             @test k_data.group_id == div(i - 1, workgroupsize) + 1
             @test k_data.local_id == ((i - 1) % workgroupsize) + 1
         end
+    end
+
+    @testset "Local memory and barriers" begin
+        N = 32
+        groups = 3
+        out = KI.zeros(backend, Int32, N * groups, 4)
+        KI.@launch backend numgroups = groups workgroupsize = N localmem_kernel(out, Val(N))
+        KI.synchronize(backend)
+        out = Array(out)
+        # each work-item sees what its mirror image wrote before the barrier, in both arrays
+        expected = repeat(N:-1:1, groups)
+        @test out[:, 1] == expected
+        @test out[:, 2] == -expected
+        @test out[:, 3] == 2 .* expected
+        @test out[:, 4] == 3 .* expected
+
+        scratch = KI.zeros(backend, Int, N * groups)
+        out = KI.zeros(backend, Int, N * groups)
+        KI.@launch backend numgroups = groups workgroupsize = N global_barrier_kernel(scratch, out)
+        KI.synchronize(backend)
+        @test Array(out) == vcat([(g * N) .+ (N:-1:1) for g in 0:(groups - 1)]...)
     end
 
     if KI.supports_subgroups(backend)

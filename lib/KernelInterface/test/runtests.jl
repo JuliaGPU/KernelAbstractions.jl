@@ -66,6 +66,10 @@ end
 
 struct StubBackend <: KI.Backend end
 
+# A backend with two devices that forgot the other device functions.
+struct MultiDeviceBackend <: KI.Backend end
+KI.ndevices(::MultiDeviceBackend) = 2
+
 # An array type with a known backend, for exercising the `get_backend` fallback
 # that unwraps wrapper arrays.
 struct BackedArray{T, N} <: AbstractArray{T, N}
@@ -125,8 +129,17 @@ end
     @test KI.device(b) == 1
     @test KI.ndevices(b) == 1
     @test KI.device!(b, 1) === nothing
+    @test KI.device(b, zeros(2)) == 1
     @test_throws ArgumentError KI.device!(b, 0)
     @test_throws ArgumentError KI.device!(b, 2)
+
+    # A backend with several devices that only implements `ndevices` gets errors from
+    # the single-device fallbacks, not answers for the wrong device.
+    mb = MultiDeviceBackend()
+    @test_throws "must implement `KernelInterface.device`" KI.device(mb)
+    @test_throws "must implement `KernelInterface.device`" KI.device(mb, zeros(2))
+    @test_throws "must implement `KernelInterface.device!`" KI.device!(mb, 2)
+    @test_throws ArgumentError KI.device!(mb, 3)
 
     # `priority!` validates the symbol even when the backend ignores it.
     for prio in (:high, :normal, :low)
@@ -134,10 +147,10 @@ end
     end
     @test_throws "priority must be one of" KI.priority!(b, :bogus)
 
-    # Capability defaults: pessimistic for unified memory, optimistic otherwise.
+    # Capability defaults are conservative: a missing method never claims support.
     @test KI.supports_unified(b) === false
-    @test KI.supports_atomics(b) === true
-    @test KI.supports_float64(b) === true
+    @test KI.supports_atomics(b) === false
+    @test KI.supports_float64(b) === false
 
     # Pinning is optional and freeing is a no-op unless a backend does better.
     @test KI.pagelock!(b, zeros(2)) === missing
