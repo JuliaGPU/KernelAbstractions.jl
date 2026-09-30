@@ -1,6 +1,6 @@
 # [Notes for backend implementations](@id implementations_notes)
 
-The [KernelInterface](@ref kernelinterface) sibling package defines the core interface a backend must implement. A backend must implement a backend type that subtypes `KernelInterface.GPU`, or `KernelInterface.Backend` for non-gpu backends. This documentation contains the host and devices side functions that backends can define, as well as whether they are mandatory or not.
+The [KernelInterface](@ref kernelinterface) sibling package defines the core interface a backend must implement. A backend must implement a backend type that subtypes `KernelInterface.Backend`. This documentation contains the host and devices side functions that backends can define, as well as whether they are mandatory or not.
 
 ## Semantics of `KernelAbstractions.synchronize`
 

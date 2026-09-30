@@ -16,7 +16,6 @@ import KernelAbstractions:
     mkcontext,
     CompilerMetadata,
     CPU,
-    GPU,
     argconvert,
     supports_enzyme,
     __fake_compiler_job,

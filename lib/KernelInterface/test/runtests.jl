@@ -92,8 +92,6 @@ end
 end
 
 @testset "get_backend" begin
-    @test KI.GPU <: KI.Backend
-
     # The fallback finds the backend of wrapper arrays by walking `parent`.
     arr = BackedArray([1, 2, 3])
     @test KI.get_backend(arr) === StubBackend()

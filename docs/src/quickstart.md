@@ -63,7 +63,7 @@ See also [Memcopy with static NDRange](@ref memcopy_static).
 
 ## Launching kernel on the backend
 
-To launch the kernel on a backend-supported backend `isa(backend, KA.GPU)` (e.g., `CUDABackend()`, `ROCBackend()`, `oneAPIBackend()`, `MetalBackend()`), we generate the kernel
+To launch the kernel on a backend (e.g., `CUDABackend()`, `ROCBackend()`, `oneAPIBackend()`, `MetalBackend()`), we generate the kernel
 for this backend.
 
 First, we initialize the array using the Array constructor of the chosen backend with

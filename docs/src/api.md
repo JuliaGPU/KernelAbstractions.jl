@@ -33,7 +33,6 @@
 
 ```@docs
 Backend
-GPU
 CPU
 POCLBackend
 get_backend

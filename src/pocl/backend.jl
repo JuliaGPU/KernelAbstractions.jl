@@ -18,7 +18,7 @@ import Adapt
 
 export POCLBackend
 
-struct POCLBackend <: KA.GPU
+struct POCLBackend <: KI.Backend
 end
 
 function KI.versioninfo(io::IO, ::POCLBackend)

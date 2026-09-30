@@ -152,7 +152,7 @@ end
     Testsuite.testsuite(CPU, "CPU", POCL, Array, POCL.CLDeviceArray)
 end
 
-struct NewBackend <: KernelAbstractions.GPU end
+struct NewBackend <: KernelAbstractions.Backend end
 @testset "Default host implementation" begin
     backend = NewBackend()
 

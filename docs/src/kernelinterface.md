@@ -46,15 +46,13 @@ KernelInterface
 
 ## Backend hierarchy
 
-A backend package subtypes [`GPU`](@ref) (or [`Backend`](@ref) directly for
-non-GPU backends), and everything else in the interface dispatches on that
-type. These types and the host-side management functions below are re-exported
-by `KernelAbstractions`, so their canonical docstrings are on the
+Backends subtype [`Backend`](@ref), and everything else in the interface dispatches on
+that type. It and the host-side management functions below are re-exported by
+`KernelAbstractions`, so their canonical docstrings are on the
 [API page](@ref api_backends_arrays).
 
 ```@docs; canonical=false
 Backend
-GPU
 get_backend
 ```
 
@@ -198,8 +196,8 @@ KernelInterface.@kernel
 
 A backend must, at minimum:
 
-1. Define a backend type subtyping [`GPU`](@ref) (or [`Backend`](@ref) for
-   non-GPU backends), and implement [`get_backend`](@ref) for its array type.
+1. Define a backend type subtyping [`Backend`](@ref), and implement [`get_backend`](@ref)
+   for its array type.
 2. Implement the host-side management functions for that type:
    [`allocate`](@ref), [`copyto!`](@ref), [`synchronize`](@ref) and
    [`unsafe_free!`](@ref) are required; the remaining functions under
