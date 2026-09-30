@@ -95,7 +95,11 @@ end
     mod.launch_few(few, A)
     mod.launch_many(many, A)
     @test all(==(sum(1:40)), A)
-    @test @allocated(mod.launch_many(many, A)) <= @allocated(mod.launch_few(few, A))
+    # the first launch after new code has been defined (like the function below) allocates,
+    # to look up the callback that notifies it of the kernel's completion again
+    allocated(launch, k, A) = @allocated launch(k, A)
+    allocated(mod.launch_many, many, A)
+    @test allocated(mod.launch_many, many, A) <= allocated(mod.launch_few, few, A)
 end
 
 @testset "POCL compilation cache" begin
@@ -158,6 +162,32 @@ end
     # the wrapped expression is evaluated, not just compiled
     KernelAbstractions.synchronize(POCLBackend())
     @test all(==(2.0f0), A)
+end
+
+@kernel function busy_kernel!(A, n)
+    I = @index(Global)
+    acc = 0.0f0
+    for j in 1:n
+        acc += sin(Float32(j) + acc)
+    end
+    @inbounds A[I] = acc
+end
+
+# POCL launches wait for the kernel to finish, but let other tasks run in the meantime
+@testset "POCL cooperative launches" begin
+    A = zeros(Float32, 1024)
+    kernel = busy_kernel!(POCLBackend())
+    kernel(A, 1; ndrange = length(A))   # compile
+    n = 1000
+    while @elapsed(kernel(A, n; ndrange = length(A))) < 0.1
+        n *= 2
+    end
+
+    ran = Ref(false)
+    task = @async ran[] = true
+    kernel(A, n; ndrange = length(A))
+    @test ran[]
+    wait(task)
 end
 
 # not part of the shared testsuite: not every back-end supports bits-union arrays

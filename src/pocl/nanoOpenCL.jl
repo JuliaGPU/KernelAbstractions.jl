@@ -4,7 +4,7 @@ using ..POCL: platform, device, context, queue
 
 import pocl_standalone_jll
 
-using GPUToolbox: @gcsafe_ccall
+using GPUToolbox: GPUToolbox, @gcsafe_ccall, cooperative_wait
 
 using Printf
 
@@ -716,6 +716,17 @@ end
 
 @checked function clFinish(command_queue)
     @gcsafe_ccall libopencl.POclFinish(command_queue::cl_command_queue)::cl_int
+end
+
+@checked function clFlush(command_queue)
+    @gcsafe_ccall libopencl.POclFlush(command_queue::cl_command_queue)::cl_int
+end
+
+@checked function clSetEventCallback(event, command_exec_callback_type, pfn_notify, user_data)
+    @gcsafe_ccall libopencl.POclSetEventCallback(
+        event::cl_event, command_exec_callback_type::cl_int,
+        pfn_notify::Ptr{Cvoid}, user_data::Ptr{Cvoid}
+    )::cl_int
 end
 
 @checked function clWaitForEvents(num_events, event_list)
@@ -1543,6 +1554,7 @@ struct Event
 end
 Base.unsafe_convert(::Type{cl_event}, e::Event) = e.id
 
+const CL_EVENT_COMMAND_QUEUE = 0x11d0
 const CL_EVENT_COMMAND_EXECUTION_STATUS = 0x11d3
 
 function Base.getproperty(evt::Event, s::Symbol)
@@ -1557,11 +1569,51 @@ function Base.getproperty(evt::Event, s::Symbol)
     end
 end
 
+const CL_COMPLETE = 0
 const CL_EXEC_STATUS_ERROR_FOR_EVENTS_IN_WAIT_LIST = -14
 
+# driver notification that a command has completed
+function notify_completion(::cl_event, ::Cint, payload::Ptr{Cvoid})
+    GPUToolbox.signal_completion(payload)
+    return
+end
+function subscribe_completion(evt, payload)
+    callback = @cfunction(notify_completion, Cvoid, (cl_event, Cint, Ptr{Cvoid}))
+    return clSetEventCallback(evt, CL_COMPLETE, callback, payload)
+end
+
+# commands have completed when their execution status is `CL_COMPLETE`, or negative when
+# they were terminated abnormally
+iscomplete(evt::Event) = evt.status <= CL_COMPLETE
+
+blocking_wait(evt::Event) = unchecked_clWaitForEvents(cl_uint(1), Ref(evt.id))
+
 function Base.wait(evt::Event)
-    evt_id = Ref(evt.id)
-    err = unchecked_clWaitForEvents(cl_uint(1), evt_id)
+    # wait without blocking the thread, so that other tasks can run in the meantime. after
+    # polling briefly, PoCL notifies us when the command completes: waking a worker thread
+    # to wait for it, or polling for longer, would compete with the command for the CPU
+    # cores it executes on.
+    #
+    # this cannot be interrupted, as kernels may be using memory that callers would release:
+    # an interrupt is only thrown once the kernel has completed (or waiting failed, in which
+    # case we block), but host memory still needs to be synchronized before unwinding.
+    try
+        # commands only need to start executing once their queue has been flushed
+        queue = Ref{cl_command_queue}()
+        clGetEventInfo(evt, CL_EVENT_COMMAND_QUEUE, sizeof(cl_command_queue), queue, C_NULL)
+        clFlush(queue[])
+
+        cooperative_wait(
+            blocking_wait, evt; subscribe = subscribe_completion, isdone = iscomplete,
+            spin = 10.0e-6
+        )
+    catch
+        blocking_wait(evt)
+        rethrow()
+    end
+
+    # synchronize host memory and report errors (without blocking anymore)
+    err = unchecked_clWaitForEvents(cl_uint(1), Ref(evt.id))
     if err == CL_EXEC_STATUS_ERROR_FOR_EVENTS_IN_WAIT_LIST
         error("Kernel execution failed")
     elseif err != CL_SUCCESS
