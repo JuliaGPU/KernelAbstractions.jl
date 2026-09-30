@@ -282,28 +282,31 @@ end
 
 ## Indexing Functions
 
+# `% T` rather than `T(x)`: a checked conversion leaves an error branch in every kernel.
+# This needs SPIRVIntrinsics 1.1.3, whose 3-D builtins survive the truncation.
+
 @device_override @inline function KI.get_local_id(::Type{T}) where {T}
-    return (; x = T(get_local_id(1)), y = T(get_local_id(2)), z = T(get_local_id(3)))
+    return (; x = get_local_id(1) % T, y = get_local_id(2) % T, z = get_local_id(3) % T)
 end
 
 @device_override @inline function KI.get_group_id(::Type{T}) where {T}
-    return (; x = T(get_group_id(1)), y = T(get_group_id(2)), z = T(get_group_id(3)))
+    return (; x = get_group_id(1) % T, y = get_group_id(2) % T, z = get_group_id(3) % T)
 end
 
 @device_override @inline function KI.get_global_id(::Type{T}) where {T}
-    return (; x = T(get_global_id(1)), y = T(get_global_id(2)), z = T(get_global_id(3)))
+    return (; x = get_global_id(1) % T, y = get_global_id(2) % T, z = get_global_id(3) % T)
 end
 
 @device_override @inline function KI.get_local_size(::Type{T}) where {T}
-    return (; x = T(get_local_size(1)), y = T(get_local_size(2)), z = T(get_local_size(3)))
+    return (; x = get_local_size(1) % T, y = get_local_size(2) % T, z = get_local_size(3) % T)
 end
 
 @device_override @inline function KI.get_num_groups(::Type{T}) where {T}
-    return (; x = T(get_num_groups(1)), y = T(get_num_groups(2)), z = T(get_num_groups(3)))
+    return (; x = get_num_groups(1) % T, y = get_num_groups(2) % T, z = get_num_groups(3) % T)
 end
 
 @device_override @inline function KI.get_global_size(::Type{T}) where {T}
-    return (; x = T(get_global_size(1)), y = T(get_global_size(2)), z = T(get_global_size(3)))
+    return (; x = get_global_size(1) % T, y = get_global_size(2) % T, z = get_global_size(3) % T)
 end
 
 @device_override KI.get_sub_group_size() = get_sub_group_size() % UInt32
