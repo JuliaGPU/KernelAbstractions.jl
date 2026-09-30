@@ -1,6 +1,6 @@
+# EXCLUDE FROM TESTING
 import KernelInterface as KI
 
-# EXCLUDE FROM TESTING
 if !(@isdefined backend)
     if Base.find_package("CUDA") !== nothing
         using CUDA
