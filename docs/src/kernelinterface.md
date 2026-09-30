@@ -61,7 +61,7 @@ get_backend
 These are called from inside a kernel. A backend provides each one with
 
 ```julia
-@device_override KI.get_global_id(::Type{T}) where {T} = ...
+@device_override KI.get_local_id(::Type{T}) where {T} = ...
 ```
 
 along with the corresponding on-device functionality.
@@ -69,17 +69,23 @@ along with the corresponding on-device functionality.
 ### Indexing
 
 All index queries are **1-based** and return a named tuple of `x`, `y` and `z`
-components. They take an optional element type `T` for the components, defaulting
+components. They take an optional integer type `T` for the components, defaulting
 to `Int`, so a kernel can request e.g. `Int32` indices with
-`KI.get_global_id(Int32)`.
+`KI.get_global_id(Int32)`. The operands are converted to `T` before any arithmetic,
+and the result is the exact value modulo `T`: a query never throws, and a value that
+doesn't fit wraps around, as with `x % T`.
+
+Backends implement the four primitive queries. [`get_global_id`](@ref) and
+[`get_global_size`](@ref) have fallbacks derived from them, which backends with a native
+builtin (e.g. SPIR-V and Metal) should override.
 
 ```@docs
-get_global_size
-get_global_id
-get_local_size
 get_local_id
-get_num_groups
 get_group_id
+get_local_size
+get_num_groups
+get_global_id
+get_global_size
 ```
 
 ### Sub-groups
@@ -201,9 +207,9 @@ A backend must, at minimum:
    [`adapt(backend, x)`](@ref Adapt.adapt_storage(::Backend, ::Any)) moves
    data to the backend, preferably by delegating to its array type:
    `Adapt.adapt_storage(::NewBackend, x) = adapt(NewArray, x)`.
-4. `@device_override` the device-side functions it supports. The indexing
-   queries and [`barrier`](@ref) are required; sub-group and
-   [`shfl_down`](@ref) support is optional.
+4. `@device_override` the device-side functions it supports. The four primitive index
+   queries and [`barrier`](@ref) are required; sub-group and [`shfl_down`](@ref) support
+   is optional.
 5. Implement [`argconvert`](@ref) and [`kernel_function`](@ref) for its backend
    type, returning a [`Kernel`](@ref).
 6. Implement [`launch`](@ref), which receives an already validated `NTuple{3, Int}` of
@@ -212,7 +218,9 @@ A backend must, at minimum:
    KI.launch(k::KI.Kernel{CUDABackend}, groups::Dims{3}, items::Dims{3}, args::Vararg{Any, N}; kwargs...) where {N} =
        k.kern(args...; threads = items, blocks = groups, kwargs...)
    ```
-7. Report its limits through [`max_work_group_size`](@ref) (for the backend and for a
+7. Compute the typed index queries with `% T`, not `T(x)`: a checked conversion leaves
+   an error branch in every kernel.
+8. Report its limits through [`max_work_group_size`](@ref) (for the backend and for a
    kernel), [`max_work_group_dims`](@ref) and [`max_num_groups`](@ref), and where
    applicable [`sub_group_size`](@ref) and [`multiprocessor_count`](@ref). It may
    recommend work-group sizes with [`launch_configuration`](@ref).

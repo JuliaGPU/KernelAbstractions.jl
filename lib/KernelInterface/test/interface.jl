@@ -111,6 +111,23 @@ function typed_index_kernel(results, ::Type{T}) where {T}
     return
 end
 
+# Records the `x` components of the typed queries in a type too small for the launch,
+# indexed by the (untyped) global id.
+function wrapping_index_kernel(results, ::Type{T}) where {T}
+    i = KI.get_global_id().x
+    if i <= size(results, 1)
+        @inbounds begin
+            results[i, 1] = KI.get_global_id(T).x
+            results[i, 2] = KI.get_global_size(T).x
+            results[i, 3] = KI.get_local_id(T).x
+            results[i, 4] = KI.get_local_size(T).x
+            results[i, 5] = KI.get_group_id(T).x
+            results[i, 6] = KI.get_num_groups(T).x
+        end
+    end
+    return
+end
+
 function subgroup_typecheck_kernel(results, val::T) where {T}
     # uniformly executed by the whole sub-group, as `shfl_down` requires
     shuffled = KI.shfl_down(val, 0x00000001)
@@ -305,8 +322,8 @@ function interface_testsuite(backend::KI.Backend, AT)
     end
 
     @testset "Typed indexing" begin
-        workgroupsize = (2, 2, 2)
-        numgroups = (3, 2, 1)
+        workgroupsize = (2, 3, 2)
+        numgroups = (3, 2, 4)
         N = prod(workgroupsize) * prod(numgroups)
 
         # `Int` is the reference: it is what the zero-argument form returns.
@@ -322,13 +339,34 @@ function interface_testsuite(backend::KI.Backend, AT)
         @test all(eachrow(reference[:, 1:3]) .== Ref(collect(global_size)))
         @test all(eachrow(reference[:, 7:9]) .== Ref(collect(workgroupsize)))
         @test all(eachrow(reference[:, 13:15]) .== Ref(collect(numgroups)))
-        # every global id is seen exactly once
+        # every global id is seen exactly once, and agrees with the group and local ids
         @test sort(Tuple.(eachrow(reference[:, 4:6]))) == sort(vec(Tuple.(CartesianIndices(global_size))))
+        @test reference[:, 4:6] == (reference[:, 16:18] .- 1) .* reference[:, 7:9] .+ reference[:, 10:12]
 
-        @testset "$T" for T in (Int32, UInt32, UInt64)
+        @testset "$T" for T in (Int32, UInt32, Int64, UInt64)
             typed = run_typed(T)
             @test typed isa AbstractMatrix{T}
             @test typed == reference
+        end
+    end
+
+    @testset "Typed indexing wraps" begin
+        # a type too small for the launch wraps around (like `x % T`) instead of throwing
+        @testset "$T" for (T, workgroupsize, numgroups) in (
+                (UInt8, 128, 3), (Int8, 128, 3), (Int16, 256, 160),
+            )
+            N = workgroupsize * numgroups
+            results = KI.zeros(backend, T, N, 6)
+            KI.@launch backend workgroupsize = workgroupsize numgroups = numgroups wrapping_index_kernel(results, T)
+            KI.synchronize(backend)
+            results = Array(results)
+            ids = 1:N
+            @test results[:, 1] == ids .% T
+            @test all(==(N % T), results[:, 2])
+            @test results[:, 3] == mod1.(ids, workgroupsize) .% T
+            @test all(==(workgroupsize % T), results[:, 4])
+            @test results[:, 5] == cld.(ids, workgroupsize) .% T
+            @test all(==(numgroups % T), results[:, 6])
         end
     end
 

@@ -42,17 +42,23 @@ end
         @test isempty(methods(stub))
     end
 
-    # The indexing queries take an element type; only the zero-argument form has a
+    # The primitive queries take an element type; only the zero-argument form has a
     # (forwarding) method, and it must reach the typed stub rather than recurse.
-    indexing = [
-        KI.get_global_size, KI.get_global_id,
+    primitives = [
         KI.get_local_size, KI.get_local_id,
         KI.get_num_groups, KI.get_group_id,
     ]
-    for f in indexing
+    for f in primitives
         @test length(methods(f)) == 1
         @test hasmethod(f, Tuple{})
         @test !hasmethod(f, Tuple{Type{Int}})
+        @test_throws MethodError f()
+        @test_throws MethodError f(Int32)
+    end
+
+    # The global queries are derived from the primitive ones.
+    for f in [KI.get_global_size, KI.get_global_id]
+        @test hasmethod(f, Tuple{Type{Int}})
         @test_throws MethodError f()
         @test_throws MethodError f(Int32)
     end

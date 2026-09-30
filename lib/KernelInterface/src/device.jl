@@ -1,65 +1,19 @@
-"""
-    get_global_size([::Type{T}=Int])::@NamedTuple{x::T, y::T, z::T}
+## indexing
 
-Return the number of global work-items specified as a tuple of type `T`.
-`T` defaults to `Int`.
-
-The value is computed in `T`, and is undefined when it does not fit in `T`.
-
-!!! note
-    Backend implementations **must** implement:
-    ```
-    @device_override get_global_size(::Type{T})::@NamedTuple{x::T, y::T, z::T} where {T}
-    ```
-    The zero-argument form forwards to `get_global_size(Int)`.
-"""
-@inline get_global_size() = get_global_size(Int)
-
-"""
-    get_global_id([::Type{T}=Int])::@NamedTuple{x::T, y::T, z::T}
-
-Returns the unique global work-item ID as a tuple of type `T`. `T` defaults to `Int`.
-
-The value is computed in `T`, and is undefined when it does not fit in `T`.
-
-!!! note
-    1-based.
-
-!!! note
-    Backend implementations **must** implement:
-    ```
-    @device_override get_global_id(::Type{T})::@NamedTuple{x::T, y::T, z::T} where {T}
-    ```
-    The zero-argument form forwards to `get_global_id(Int)`.
-"""
-@inline get_global_id() = get_global_id(Int)
-
-"""
-    get_local_size([::Type{T}=Int])::@NamedTuple{x::T, y::T, z::T}
-
-Return the number of local work-items specified as a tuple of type `T`.
-`T` defaults to `Int`.
-
-The value is computed in `T`, and is undefined when it does not fit in `T`.
-
-!!! note
-    Backend implementations **must** implement:
-    ```
-    @device_override get_local_size(::Type{T})::@NamedTuple{x::T, y::T, z::T} where {T}
-    ```
-    The zero-argument form forwards to `get_local_size(Int)`.
-"""
-@inline get_local_size() = get_local_size(Int)
+# The index queries are 1-based, and take the integer type `T` of their result. Backends
+# implement the four primitive ones; the global ones have fallbacks derived from them.
+#
+# Supported `T` are the fixed-width integer types up to 64 bits. The operands are converted
+# to `T` before any arithmetic, and the result is the exact value modulo `T` (as with `x % T`):
+# a query never throws, and a value that doesn't fit wraps.
 
 """
     get_local_id([::Type{T}=Int])::@NamedTuple{x::T, y::T, z::T}
 
-Returns the unique local work-item ID as a tuple of type `T`. `T` defaults to `Int`.
+The 1-based index of the work-item within its work-group, as integers of type `T`.
 
-The value is computed in `T`, and is undefined when it does not fit in `T`.
-
-!!! note
-    1-based.
+`T` is a fixed-width integer type of at most 64 bits (e.g. `Int32` or `UInt64`); the result
+is the exact value modulo `T`, as if computed with `x % T`.
 
 !!! note
     Backend implementations **must** implement:
@@ -71,11 +25,43 @@ The value is computed in `T`, and is undefined when it does not fit in `T`.
 @inline get_local_id() = get_local_id(Int)
 
 """
+    get_group_id([::Type{T}=Int])::@NamedTuple{x::T, y::T, z::T}
+
+The 1-based index of the work-group within the launch, as integers of type `T`.
+
+See [`get_local_id`](@ref) for the supported types `T`.
+
+!!! note
+    Backend implementations **must** implement:
+    ```
+    @device_override get_group_id(::Type{T})::@NamedTuple{x::T, y::T, z::T} where {T}
+    ```
+    The zero-argument form forwards to `get_group_id(Int)`.
+"""
+@inline get_group_id() = get_group_id(Int)
+
+"""
+    get_local_size([::Type{T}=Int])::@NamedTuple{x::T, y::T, z::T}
+
+The number of work-items in a work-group, as integers of type `T`.
+
+See [`get_local_id`](@ref) for the supported types `T`.
+
+!!! note
+    Backend implementations **must** implement:
+    ```
+    @device_override get_local_size(::Type{T})::@NamedTuple{x::T, y::T, z::T} where {T}
+    ```
+    The zero-argument form forwards to `get_local_size(Int)`.
+"""
+@inline get_local_size() = get_local_size(Int)
+
+"""
     get_num_groups([::Type{T}=Int])::@NamedTuple{x::T, y::T, z::T}
 
-Returns the number of groups as a tuple of type `T`. `T` defaults to `Int`.
+The number of work-groups in the launch, as integers of type `T`.
 
-The value is computed in `T`, and is undefined when it does not fit in `T`.
+See [`get_local_id`](@ref) for the supported types `T`.
 
 !!! note
     Backend implementations **must** implement:
@@ -87,23 +73,57 @@ The value is computed in `T`, and is undefined when it does not fit in `T`.
 @inline get_num_groups() = get_num_groups(Int)
 
 """
-    get_group_id([::Type{T}=Int])::@NamedTuple{x::T, y::T, z::T}
+    get_global_id([::Type{T}=Int])::@NamedTuple{x::T, y::T, z::T}
 
-Returns the unique group ID as a tuple of type `T`. `T` defaults to `Int`.
+The 1-based index of the work-item within the launch, as integers of type `T`:
+`(get_group_id(T) - 1) * get_local_size(T) + get_local_id(T)` per dimension.
 
-The value is computed in `T`, and is undefined when it does not fit in `T`.
-
-!!! note
-    1-based.
+See [`get_local_id`](@ref) for the supported types `T`.
 
 !!! note
-    Backend implementations **must** implement:
+    The fallback derives this from the primitive queries. Backend implementations with a
+    native builtin **should** override it, returning the same values:
     ```
-    @device_override get_group_id(::Type{T})::@NamedTuple{x::T, y::T, z::T} where {T}
+    @device_override get_global_id(::Type{T})::@NamedTuple{x::T, y::T, z::T} where {T}
     ```
-    The zero-argument form forwards to `get_group_id(Int)`.
 """
-@inline get_group_id() = get_group_id(Int)
+@inline function get_global_id(::Type{T}) where {T}
+    group = get_group_id(T)
+    size = get_local_size(T)
+    local_id = get_local_id(T)
+    return (;
+        x = (group.x - one(T)) * size.x + local_id.x,
+        y = (group.y - one(T)) * size.y + local_id.y,
+        z = (group.z - one(T)) * size.z + local_id.z,
+    )
+end
+@inline get_global_id() = get_global_id(Int)
+
+"""
+    get_global_size([::Type{T}=Int])::@NamedTuple{x::T, y::T, z::T}
+
+The number of work-items in the launch, as integers of type `T`:
+`get_local_size(T) * get_num_groups(T)` per dimension. For an `ndrange` launch, this is the
+`ndrange` padded to whole work-groups.
+
+See [`get_local_id`](@ref) for the supported types `T`.
+
+!!! note
+    The fallback derives this from the primitive queries. Backend implementations with a
+    native builtin **should** override it, returning the same values:
+    ```
+    @device_override get_global_size(::Type{T})::@NamedTuple{x::T, y::T, z::T} where {T}
+    ```
+"""
+@inline function get_global_size(::Type{T}) where {T}
+    size = get_local_size(T)
+    groups = get_num_groups(T)
+    return (; x = size.x * groups.x, y = size.y * groups.y, z = size.z * groups.z)
+end
+@inline get_global_size() = get_global_size(Int)
+
+
+## sub-groups
 
 """
     get_sub_group_size()::UInt32
