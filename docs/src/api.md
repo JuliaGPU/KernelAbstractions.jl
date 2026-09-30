@@ -112,4 +112,5 @@ KernelAbstractions.LinearLaunch
 KernelAbstractions.NDLaunch
 KernelAbstractions.select_launch
 KernelAbstractions.launch_workgroupsize
+KernelAbstractions.compiler_options
 ```

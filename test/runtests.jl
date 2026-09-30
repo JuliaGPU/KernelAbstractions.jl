@@ -178,6 +178,21 @@ end
     Testsuite.select_launch_testsuite()
 end
 
+@kernel function fill_index!(A)
+    I = @index(Global, Linear)
+    @inbounds A[I] = I
+end
+
+@testset "generic launch" begin
+    # workgroup sizes are validated against the kernel's limits
+    limit = KernelAbstractions.KI.max_work_group_size(CPU())
+    @test_throws ArgumentError fill_index!(CPU())(zeros(Int, 2limit); ndrange = 2limit, workgroupsize = 2limit)
+
+    # iteration spaces with more work-items than an `Int` can count are rejected, instead
+    # of launching nothing because the number of workgroups overflowed
+    @test_throws ArgumentError fill_index!(CPU())(zeros(Int, 1); ndrange = (2^22, 2^22, 2^22, 1), workgroupsize = 1)
+end
+
 # the shared testsuite only covers the launch configuration POCL selects
 @testset "POCL launch configurations" begin
     KA = KernelAbstractions
@@ -188,7 +203,7 @@ end
             CartesianIndices((2, 2)), nothing, TransposedMapping()
         )
         A = zeros(Int, 5, 7)
-        POCL.POCLKernels.launch_kernel(kernel, launch, CartesianIndices(A), nothing, iterspace, A)
+        KernelAbstractions.launch_kernel(kernel, launch, CartesianIndices(A), nothing, iterspace, A)
         @test A == LinearIndices(A)
     end
     @testset "custom iteration space, $launch" for launch in (nothing, KA.LinearLaunch{Int}(), KA.NDLaunch{Int}())
@@ -197,7 +212,7 @@ end
         iterspace = KA.NDRange{2, KA.StaticSize{(2, 2)}, KA.StaticSize{(4, 4)}}(nothing, ItemOffsets((1, 2)))
         ndrange = CartesianIndices((2:8, 3:7))
         A = zeros(Int, 9, 8)
-        POCL.POCLKernels.launch_kernel(kernel, launch, ndrange, nothing, iterspace, A)
+        KernelAbstractions.launch_kernel(kernel, launch, ndrange, nothing, iterspace, A)
         @test A[ndrange] == LinearIndices(ndrange)
         A[ndrange] .= 0
         @test all(iszero, A)
@@ -210,7 +225,7 @@ end
             ndrange, workgroupsize, iterspace, _ = KA.launch_config(kernel, ndrange, workgroupsize)
             # an N-d launch is limited to three dimensions
             l = launch isa KA.NDLaunch && ndims(iterspace) > 3 ? KA.LinearLaunch{Int}() : launch
-            POCL.POCLKernels.launch_kernel(kernel, l, ndrange, workgroupsize, iterspace, args...)
+            KernelAbstractions.launch_kernel(kernel, l, ndrange, workgroupsize, iterspace, args...)
         end
         @testset "$launch" begin
             Testsuite.launch_testsuite(CPU, Array; launcher)

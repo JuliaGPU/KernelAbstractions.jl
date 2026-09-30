@@ -130,87 +130,6 @@ KI.supports_atomics(::POCLBackend) = true
 
 ## Kernel Launch
 
-function KA.mkcontext(kernel::KA.Kernel{POCLBackend}, _ndrange, iterspace)
-    return KA.CompilerMetadata{KA.ndrange(kernel), KA.DynamicCheck}(_ndrange, iterspace)
-end
-function KA.mkcontext(kernel::KA.Kernel{POCLBackend}, _ndrange, iterspace, launch)
-    return KA.CompilerMetadata{KA.ndrange(kernel), KA.DynamicCheck}(_ndrange, iterspace; launch)
-end
-function KA.mkcontext(
-        kernel::KA.Kernel{POCLBackend}, I, _ndrange, iterspace,
-        ::Dynamic
-    ) where {Dynamic}
-    return KA.CompilerMetadata{KA.ndrange(kernel), Dynamic}(I, _ndrange, iterspace)
-end
-
-function KA.launch_config(kernel::KA.Kernel{POCLBackend}, ndrange, workgroupsize)
-    if ndrange isa Integer
-        ndrange = (ndrange,)
-    end
-    if workgroupsize isa Integer
-        workgroupsize = (workgroupsize,)
-    end
-
-    # partition checked that the ndrange's agreed
-    if KA.ndrange(kernel) <: KA.StaticSize
-        ndrange = nothing
-    end
-
-    iterspace, dynamic = if KA.workgroupsize(kernel) <: KA.DynamicSize &&
-            workgroupsize === nothing
-        # use ndrange as preliminary workgroupsize for autotuning
-        KA.partition(kernel, ndrange, ndrange)
-    else
-        KA.partition(kernel, ndrange, workgroupsize)
-    end
-
-    return ndrange, workgroupsize, iterspace, dynamic
-end
-
-function (obj::KA.Kernel{POCLBackend})(args::Vararg{Any, N}; ndrange = nothing, workgroupsize = nothing) where {N}
-    ndrange, workgroupsize, iterspace, dynamic =
-        KA.launch_config(obj, ndrange, workgroupsize)
-    # the launch doesn't depend on the tuned workgroup size, so neither does the context
-    launch = KA.select_launch(obj, workgroupsize, iterspace)
-    launch_kernel(obj, launch, ndrange, workgroupsize, iterspace, args...)
-    return nothing
-end
-
-function launch_kernel(obj, launch, ndrange, workgroupsize, iterspace, args::Vararg{Any, N}) where {N}
-    # this might not be the final context, since we may tune the workgroupsize
-    ctx = KA.mkcontext(obj, ndrange, iterspace, launch)
-    kernel = @opencl launch = false obj.f(ctx, args...)
-
-    # figure out the optimal workgroupsize automatically
-    if KA.workgroupsize(obj) <: KA.DynamicSize && workgroupsize === nothing
-        wg_info = cl.work_group_info(kernel.fun, device())
-        wg_size_nd = KA.launch_workgroupsize(KA.backend(obj), launch, wg_info.size, ndrange)
-        iterspace, dynamic = KA.partition(obj, ndrange, wg_size_nd)
-        ctx = KA.mkcontext(obj, ndrange, iterspace, launch)
-    end
-
-    groups = size(KA.blocks(iterspace))
-    items = size(KA.workitems(iterspace))
-    if prod(groups) == 0
-        return nothing
-    end
-
-    # Launch kernel
-    if launch isa KA.NDLaunch
-        local_size = pad3(items)
-        global_size = local_size .* pad3(groups)
-    else
-        local_size = prod(items)
-        global_size = prod(groups) * local_size
-    end
-    event = kernel(ctx, args...; global_size, local_size)
-    wait(event)
-    cl.clReleaseEvent(event)
-    return nothing
-end
-
-pad3(t::Tuple) = (t..., ntuple(_ -> 1, 3 - length(t))...)
-
 KI.argconvert(::POCLBackend, arg) = clconvert(arg)
 
 function KI.kernel_function(backend::POCLBackend, f::F, tt::TT = Tuple{}; name = nothing, kwargs...) where {F, TT}
@@ -342,10 +261,5 @@ end
 @device_override @inline function KI._print(args...)
     POCL._print(args...)
 end
-
-
-## Other
-
-KA.argconvert(::KA.Kernel{POCLBackend}, arg) = clconvert(arg)
 
 end
