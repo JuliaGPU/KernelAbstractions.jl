@@ -133,6 +133,9 @@ KI.supports_atomics(::POCLBackend) = true
 function KA.mkcontext(kernel::KA.Kernel{POCLBackend}, _ndrange, iterspace)
     return KA.CompilerMetadata{KA.ndrange(kernel), KA.DynamicCheck}(_ndrange, iterspace)
 end
+function KA.mkcontext(kernel::KA.Kernel{POCLBackend}, _ndrange, iterspace, launch)
+    return KA.CompilerMetadata{KA.ndrange(kernel), KA.DynamicCheck}(_ndrange, iterspace; launch)
+end
 function KA.mkcontext(
         kernel::KA.Kernel{POCLBackend}, I, _ndrange, iterspace,
         ::Dynamic
@@ -164,46 +167,49 @@ function KA.launch_config(kernel::KA.Kernel{POCLBackend}, ndrange, workgroupsize
     return ndrange, workgroupsize, iterspace, dynamic
 end
 
-function threads_to_workgroupsize(threads, ndrange)
-    total = 1
-    return map(ndrange) do n
-        x = min(div(threads, total), n)
-        total *= x
-        return x
-    end
-end
-
 function (obj::KA.Kernel{POCLBackend})(args::Vararg{Any, N}; ndrange = nothing, workgroupsize = nothing) where {N}
     ndrange, workgroupsize, iterspace, dynamic =
         KA.launch_config(obj, ndrange, workgroupsize)
+    # the launch doesn't depend on the tuned workgroup size, so neither does the context
+    launch = KA.select_launch(obj, workgroupsize, iterspace)
+    launch_kernel(obj, launch, ndrange, workgroupsize, iterspace, args...)
+    return nothing
+end
 
+function launch_kernel(obj, launch, ndrange, workgroupsize, iterspace, args::Vararg{Any, N}) where {N}
     # this might not be the final context, since we may tune the workgroupsize
-    ctx = KA.mkcontext(obj, ndrange, iterspace)
+    ctx = KA.mkcontext(obj, ndrange, iterspace, launch)
     kernel = @opencl launch = false obj.f(ctx, args...)
 
     # figure out the optimal workgroupsize automatically
     if KA.workgroupsize(obj) <: KA.DynamicSize && workgroupsize === nothing
         wg_info = cl.work_group_info(kernel.fun, device())
-        wg_size_nd = threads_to_workgroupsize(wg_info.size, KA.NDIteration.extents(ndrange))
+        wg_size_nd = KA.launch_workgroupsize(KA.backend(obj), launch, wg_info.size, ndrange)
         iterspace, dynamic = KA.partition(obj, ndrange, wg_size_nd)
-        ctx = KA.mkcontext(obj, ndrange, iterspace)
+        ctx = KA.mkcontext(obj, ndrange, iterspace, launch)
     end
 
-    groups = length(KA.blocks(iterspace))
-    items = length(KA.workitems(iterspace))
-
-    if groups == 0
+    groups = size(KA.blocks(iterspace))
+    items = size(KA.workitems(iterspace))
+    if prod(groups) == 0
         return nothing
     end
 
     # Launch kernel
-    global_size = groups * items
-    local_size = items
+    if launch isa KA.NDLaunch
+        local_size = pad3(items)
+        global_size = local_size .* pad3(groups)
+    else
+        local_size = prod(items)
+        global_size = prod(groups) * local_size
+    end
     event = kernel(ctx, args...; global_size, local_size)
     wait(event)
     cl.clReleaseEvent(event)
     return nothing
 end
+
+pad3(t::Tuple) = (t..., ntuple(_ -> 1, 3 - length(t))...)
 
 KI.argconvert(::POCLBackend, arg) = clconvert(arg)
 
@@ -302,16 +308,6 @@ end
 @device_override KI.get_sub_group_id(::Type{T}) where {T} = get_sub_group_id() % T
 
 @device_override KI.get_sub_group_local_id(::Type{T}) where {T} = get_sub_group_local_id() % T
-
-@device_override @inline function KA.__validindex(ctx)
-    if KA.__dynamic_checkbounds(ctx)
-        I = @inbounds KA.expand(KA.__iterspace(ctx), get_group_id(1), get_local_id(1))
-        return I in KA.__ndrange(ctx)
-    else
-        return true
-    end
-end
-
 
 ## Shared and Scratch Memory
 

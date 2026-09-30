@@ -145,6 +145,79 @@ end
     end
 end
 
+# a mapping KernelAbstractions doesn't know, which the index functions have to go
+# through `expand`, `in` and `linear_index` for
+struct TransposedMapping end
+Base.@propagate_inbounds function KernelAbstractions.expand(
+        ndrange::KernelAbstractions.NDRange{2, B, W, DB, DW, TransposedMapping},
+        groupidx::CartesianIndex{2}, idx::CartesianIndex{2}
+    ) where {B, W, DB, DW}
+    I = (groupidx.I .- 1) .* size(KernelAbstractions.workitems(ndrange)) .+ idx.I
+    return CartesianIndex(reverse(I))
+end
+
+# like Oceananigans: offsets kept in the dynamic workitems slot, applied by a custom `expand`
+struct ItemOffsets{N}
+    offsets::NTuple{N, Int}
+end
+Base.@propagate_inbounds function KernelAbstractions.expand(
+        ndrange::KernelAbstractions.NDRange{N, B, W, Nothing, ItemOffsets{N}},
+        groupidx::CartesianIndex{N}, idx::CartesianIndex{N}
+    ) where {N, B, W}
+    I = (groupidx.I .- 1) .* size(KernelAbstractions.workitems(ndrange)) .+ idx.I
+    return CartesianIndex(I .+ ndrange.workitems.offsets)
+end
+
+@kernel function mapped_indices!(A)
+    I = @index(Global, Cartesian)
+    @inbounds A[I] = @index(Global, Linear)
+end
+
+# host-side logic, independent of the backend
+@testset "select_launch" begin
+    Testsuite.select_launch_testsuite()
+end
+
+# the shared testsuite only covers the launch configuration POCL selects
+@testset "POCL launch configurations" begin
+    KA = KernelAbstractions
+    @testset "custom mapping, $launch" for launch in (nothing, KA.LinearLaunch{Int}(), KA.NDLaunch{Int}())
+        # a 7x5 iteration space in 4x4 workgroups, mapped onto a 5x7 ndrange
+        kernel = mapped_indices!(CPU(), (4, 4))
+        iterspace = KA.NDRange{2, KA.DynamicSize, KA.StaticSize{(4, 4)}}(
+            CartesianIndices((2, 2)), nothing, TransposedMapping()
+        )
+        A = zeros(Int, 5, 7)
+        POCL.POCLKernels.launch_kernel(kernel, launch, CartesianIndices(A), nothing, iterspace, A)
+        @test A == LinearIndices(A)
+    end
+    @testset "custom iteration space, $launch" for launch in (nothing, KA.LinearLaunch{Int}(), KA.NDLaunch{Int}())
+        # an 8x8 iteration space in 4x4 workgroups, shifted by (1, 2) onto a 7x5 ndrange
+        kernel = mapped_indices!(CPU(), (4, 4))
+        iterspace = KA.NDRange{2, KA.StaticSize{(2, 2)}, KA.StaticSize{(4, 4)}}(nothing, ItemOffsets((1, 2)))
+        ndrange = CartesianIndices((2:8, 3:7))
+        A = zeros(Int, 9, 8)
+        POCL.POCLKernels.launch_kernel(kernel, launch, ndrange, nothing, iterspace, A)
+        @test A[ndrange] == LinearIndices(ndrange)
+        A[ndrange] .= 0
+        @test all(iszero, A)
+
+        # the launch is chosen from the iteration space
+        @test KA.select_launch(kernel, nothing, iterspace) === KA.NDLaunch{Int32}()
+    end
+    for launch in (nothing, KA.LinearLaunch{Int}(), KA.NDLaunch{Int}())
+        function launcher(kernel, args...; ndrange, workgroupsize = nothing)
+            ndrange, workgroupsize, iterspace, _ = KA.launch_config(kernel, ndrange, workgroupsize)
+            # an N-d launch is limited to three dimensions
+            l = launch isa KA.NDLaunch && ndims(iterspace) > 3 ? KA.LinearLaunch{Int}() : launch
+            POCL.POCLKernels.launch_kernel(kernel, l, ndrange, workgroupsize, iterspace, args...)
+        end
+        @testset "$launch" begin
+            Testsuite.launch_testsuite(CPU, Array; launcher, zerodim = launch !== nothing)
+        end
+    end
+end
+
 @testset "CPU back-end" begin
     Testsuite.testsuite(CPU, "CPU", POCL, Array, POCL.CLDeviceArray)
 end

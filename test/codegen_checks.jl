@@ -52,6 +52,11 @@ end
     @print("index ", I, "\n")
 end
 
+@kernel function codegen_global_linear(A)
+    I = @index(Global, Linear)
+    @inbounds A[I] = I
+end
+
 # `@inbounds` is only honoured under `--check-bounds=auto`; several checks below assert
 # that it removes code, so refuse to run under anything else rather than fail obscurely.
 if Base.JLOptions().check_bounds != 0
@@ -148,6 +153,30 @@ end
             @check "define spir_kernel void @{{.*}}gpu_codegen_atomic_sum"
             @check "atomicrmw fadd"
             @device_code_llvm debuginfo = :none codegen_atomic_sum(backend, 16)(A, out, ndrange = 64)
+            KernelAbstractions.synchronize(backend)
+        end
+    end
+
+    # An N-d launch maps the work-item builtins onto a dynamic 3-D iteration space directly,
+    # without decomposing linear ids.
+    @testset "N-d launch" begin
+        B = KernelAbstractions.zeros(backend, Int, 4, 5, 6)
+        @test @filecheck implicit_check_not = "{{[us]div i(32|64)}}" begin
+            @check "define spir_kernel void @{{.*}}gpu_codegen_global_linear"
+            @check "ret void"
+            @device_code_llvm debuginfo = :none codegen_global_linear(backend)(B, ndrange = size(B))
+            KernelAbstractions.synchronize(backend)
+        end
+
+        # a linear launch does, so the test above is not vacuous
+        kernel = codegen_global_linear(backend)
+        ndrange, workgroupsize, iterspace, _ = KernelAbstractions.launch_config(kernel, size(B), nothing)
+        @test @filecheck begin
+            @check "define spir_kernel void @{{.*}}gpu_codegen_global_linear"
+            @check "udiv i32"
+            @device_code_llvm debuginfo = :none KernelAbstractions.POCL.POCLKernels.launch_kernel(
+                kernel, KernelAbstractions.LinearLaunch{Int32}(), ndrange, workgroupsize, iterspace, B
+            )
             KernelAbstractions.synchronize(backend)
         end
     end

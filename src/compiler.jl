@@ -1,18 +1,26 @@
-struct CompilerMetadata{StaticNDRange, CheckBounds, I, NDRange, Iterspace}
+"""
+    CompilerMetadata{StaticNDRange, CheckBounds, I, NDRange, Iterspace, Launch}
+
+The hidden context argument of kernels written with [`@kernel`](@ref). The `launch` field
+tells the index functions how the backend launched the kernel: `nothing` for a 1-D launch
+indexed in `Int`, or a [`LinearLaunch`](@ref) or [`NDLaunch`](@ref).
+"""
+struct CompilerMetadata{StaticNDRange, CheckBounds, I, NDRange, Iterspace, Launch}
     groupindex::I
     ndrange::NDRange
     iterspace::Iterspace
+    launch::Launch
 
     # CPU variant
     function CompilerMetadata{NDRange, CB}(idx, ndrange, iterspace) where {NDRange, CB}
         ndrange = cartesian(ndrange)
-        return new{NDRange, CB, typeof(idx), typeof(ndrange), typeof(iterspace)}(idx, ndrange, iterspace)
+        return new{NDRange, CB, typeof(idx), typeof(ndrange), typeof(iterspace), Nothing}(idx, ndrange, iterspace, nothing)
     end
 
     # GPU variante: index is given implicit
-    function CompilerMetadata{NDRange, CB}(ndrange, iterspace) where {NDRange, CB}
+    function CompilerMetadata{NDRange, CB}(ndrange, iterspace; launch = nothing) where {NDRange, CB}
         ndrange = cartesian(ndrange)
-        return new{NDRange, CB, Nothing, typeof(ndrange), typeof(iterspace)}(nothing, ndrange, iterspace)
+        return new{NDRange, CB, Nothing, typeof(ndrange), typeof(iterspace), typeof(launch)}(nothing, ndrange, iterspace, launch)
     end
 end
 
@@ -25,6 +33,7 @@ cartesian(t::Tuple) = CartesianIndices(t)
 
 @inline __iterspace(cm::CompilerMetadata) = cm.iterspace
 @inline __groupindex(cm::CompilerMetadata) = cm.groupindex
+@inline __launch(cm::CompilerMetadata) = cm.launch
 @inline __groupsize(cm::CompilerMetadata) = size(workitems(__iterspace(cm)))
 @inline __dynamic_checkbounds(::CompilerMetadata{NDRange, CB}) where {NDRange, CB} = CB <: DynamicCheck
 @inline __ndrange(::CompilerMetadata{NDRange}) where {NDRange <: StaticSize} = CartesianIndices(get(NDRange))
@@ -39,7 +48,7 @@ cartesian(t::Tuple) = CartesianIndices(t)
 function Adapt.adapt_structure(to, cm::CompilerMetadata{NDRange, CB, I}) where {NDRange, CB, I}
     iterspace = Adapt.adapt(to, cm.iterspace)
     if I === Nothing
-        return CompilerMetadata{NDRange, CB}(cm.ndrange, iterspace)
+        return CompilerMetadata{NDRange, CB}(cm.ndrange, iterspace; cm.launch)
     else
         return CompilerMetadata{NDRange, CB}(cm.groupindex, cm.ndrange, iterspace)
     end
