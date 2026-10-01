@@ -1,11 +1,10 @@
-using KernelAbstractions
 import KernelInterface as KI
 
 using StaticArrays
 using Test
 using Random
 
-include(joinpath(dirname(pathof(KernelAbstractions)), "../examples/utils.jl")) # Load backend
+include(joinpath(@__DIR__, "utils.jl")) # Load backend
 
 # We use a TILE_DIM of 16 as a safe value since while
 #  most backends support up to 1024 threads per group,
@@ -18,6 +17,10 @@ function coalesced_matmul_kernel!(
     ) where {TDIM, BANK}
     gi, gj, _ = KI.get_group_id()
     i, j, _ = KI.get_local_id()
+
+    # Actual indices
+    I = (gi - 1) * TDIM + i
+    J = (gj - 1) * TDIM + j
 
     # +1 to avoid bank conflicts on shared memory
     tile1 = KI.localmemory(eltype(output), (TDIM + BANK, TDIM))
@@ -32,10 +35,6 @@ function coalesced_matmul_kernel!(
 
     # loop over all tiles needed for this calculation
     for t in 0:(NUM_TILES - 1)
-        # Can't use @index(Global), because we use a smaller ndrange
-        I = (gi - 1) * TDIM + i
-        J = (gj - 1) * TDIM + j
-
         # load inputs into tiles, with bounds checking for non-square matrices
         if I <= N && t * TDIM + j <= R
             @inbounds tile1[i, j] = input1[I, t * TDIM + j]
@@ -51,10 +50,6 @@ function coalesced_matmul_kernel!(
         # wait for all tiles to be loaded
         KI.barrier()
 
-        # get global values again
-        I = (gi - 1) * TDIM + i
-        J = (gj - 1) * TDIM + j
-
         # calculate value of spot in output, use temporary value to allow for vectorization
         out = zero(eltype(output))
         @simd for k in 1:TDIM
@@ -64,10 +59,6 @@ function coalesced_matmul_kernel!(
 
         KI.barrier()
     end
-
-    # get global indices again
-    I = (gi - 1) * TDIM + i
-    J = (gj - 1) * TDIM + j
 
     # save if inbounds
     if I <= N && J <= M
@@ -79,14 +70,14 @@ end
 N = 1024
 R = 512
 M = 2048
-A = copyto!(allocate(backend, Float32, N, R), rand(Float32, N, R))
-B = copyto!(allocate(backend, Float32, R, M), rand(Float32, R, M))
-C = KernelAbstractions.zeros(backend, Float32, N, M)
+A = copyto!(KI.allocate(backend, Float32, N, R), rand(Float32, N, R))
+B = copyto!(KI.allocate(backend, Float32, R, M), rand(Float32, R, M))
+C = KI.zeros(backend, Float32, N, M)
 
 workgroupsize = (TILE_DIM, TILE_DIM)
 numgroups = (cld(size(C, 1), TILE_DIM), cld(size(C, 2), TILE_DIM))
 
 KI.@launch backend workgroupsize numgroups coalesced_matmul_kernel!(C, A, B, N, R, M, Val(TILE_DIM))
-KernelAbstractions.synchronize(backend)
+KI.synchronize(backend)
 
 @test isapprox(A * B, C)
