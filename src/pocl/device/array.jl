@@ -159,13 +159,16 @@ end
 # There is no SPIR-V equivalent of NVPTX's `ld.global.nc`, so instead of a dedicated
 # instruction we mark the load `!invariant.load`, which lets LLVM hoist it out of loops
 # and reorder it across stores to other objects.
-@inline function unsafe_invariant_load(ptr::LLVMPtr{T}, i::I, ::Val{align}) where {T, I, align}
+#
+# like `unsafe_load`, the index is widened to `Int` in Julia, where its signedness is known,
+# because `getelementptr` sign-extends narrower indices.
+@inline function unsafe_invariant_load(ptr::LLVMPtr{T}, i::Integer, ::Val{align}) where {T, align}
     sizeof(T) == 0 && return T.instance
     ispow2(align) || error("unsafe_invariant_load: alignment must be a power of 2, got ", align)
-    return _unsafe_invariant_load(ptr, i - one(I), Val(align))
+    return _unsafe_invariant_load(ptr, Int(i) - 1, Val(align))
 end
 @llvmgenerated builder function _unsafe_invariant_load(
-        ptr::LLVMPtr{T, AS}, i::Integer, ::Val{align}
+        ptr::LLVMPtr{T, AS}, i::Int, ::Val{align}
     )::T where {T, AS, align}
     eltyp = convert(LLVMType, T)
     # `LLVMPtr` is an `i8*` with typed pointers (with opaque pointers, this cast folds away)
