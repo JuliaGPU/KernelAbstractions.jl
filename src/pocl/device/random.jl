@@ -162,36 +162,26 @@ end
 # a hacky method of exposing constant tables as constant GPU memory
 
 function emit_constant_array(name::Symbol, data::AbstractArray{T}) where {T}
-    return @dispose ctx = Context() begin
+    return generate_llvmcall(LLVMPtr{T, AS.UniformConstant}, Tuple{}) do builder
         T_val = convert(LLVMType, T)
         T_ptr = convert(LLVMType, LLVMPtr{T, AS.UniformConstant})
 
-        # define function and get LLVM module
-        llvm_f, _ = create_function(T_ptr)
-        mod = LLVM.parent(llvm_f)
+        # get LLVM module
+        mod = current_module(builder)
 
         # create a global memory global variable
         # TODO: global_var alignment?
         T_global = LLVM.ArrayType(T_val, length(data))
         # XXX: why can't we use a single name like emit_shmem
         gv = GlobalVariable(mod, T_global, "gpu_$(name)_data", AS.UniformConstant)
-        linkage!(gv, LLVM.API.LLVMInternalLinkage)
-        initializer!(gv, ConstantArray(data))
-        alignment!(gv, 16)
+        gv.linkage = LLVM.API.LLVMInternalLinkage
+        gv.initializer = ConstantArray(data)
+        gv.alignment = 16
 
         # generate IR
-        @dispose builder = IRBuilder() begin
-            entry = BasicBlock(llvm_f, "entry")
-            position!(builder, entry)
+        ptr = gep!(builder, T_global, gv, [ConstantInt(0), ConstantInt(0)])
 
-            ptr = gep!(builder, T_global, gv, [ConstantInt(0), ConstantInt(0)])
-
-            untyped_ptr = bitcast!(builder, ptr, T_ptr)
-
-            ret!(builder, untyped_ptr)
-        end
-
-        call_function(llvm_f, LLVMPtr{T, AS.UniformConstant})
+        untyped_ptr = bitcast!(builder, ptr, T_ptr)
     end
 end
 

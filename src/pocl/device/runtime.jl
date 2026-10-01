@@ -45,40 +45,27 @@ end
 # then get propagated across function calls to the caller.
 
 function additional_arg_intr(mod::LLVM.Module, T_state, name)
-    state_intr = if haskey(functions(mod), "julia.opencl.$name")
-        functions(mod)["julia.opencl.$name"]
+    state_intr = if haskey(mod.functions, "julia.opencl.$name")
+        mod.functions["julia.opencl.$name"]
     else
         LLVM.Function(mod, "julia.opencl.$name", LLVM.FunctionType(T_state))
     end
-    push!(function_attributes(state_intr), EnumAttribute("readnone", 0))
+    push!(state_intr.function_attributes, EnumAttribute("readnone", 0))
 
     return state_intr
 end
 
 # run-time equivalent
 function additional_arg_value(state, name)
-    return @dispose ctx = Context() begin
+    return generate_llvmcall(state, Tuple{}) do builder
         T_state = convert(LLVMType, state)
 
-        # create function
-        llvm_f, _ = create_function(T_state)
-        mod = LLVM.parent(llvm_f)
-
         # get intrinsic
-        state_intr = additional_arg_intr(mod, T_state, name)
-        state_intr_ft = function_type(state_intr)
+        state_intr = additional_arg_intr(current_module(builder), T_state, name)
+        state_intr_ft = state_intr.function_type
 
         # generate IR
-        @dispose builder = IRBuilder() begin
-            entry = BasicBlock(llvm_f, "entry")
-            position!(builder, entry)
-
-            val = call!(builder, state_intr_ft, state_intr, Value[], name)
-
-            ret!(builder, val)
-        end
-
-        call_function(llvm_f, state)
+        call!(builder, state_intr_ft, state_intr, Value[], name)
     end
 end
 
