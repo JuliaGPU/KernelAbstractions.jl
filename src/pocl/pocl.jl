@@ -77,4 +77,11 @@ export POCLBackend
 
 import KernelAbstractions as KA
 
+# drop session-local state created by a precompilation workload
+function reset_session_state!()
+    empty!(_compiler_configs)
+    empty!(_kernel_instances)
+    return
+end
+
 end

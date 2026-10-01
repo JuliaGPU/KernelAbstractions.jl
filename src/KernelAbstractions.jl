@@ -710,4 +710,6 @@ synchronize(CPU())
 """
 const CPU = POCLBackend
 
+include("precompile.jl")
+
 end #module
