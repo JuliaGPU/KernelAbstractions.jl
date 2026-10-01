@@ -656,6 +656,28 @@ include("extras/extras.jl")
 
 include("reflection.jl")
 
+# Expand a kernel in a precompilation workload before this package defines any: code that
+# expanding `@kernel` compiles for the first time outside of a workload isn't cached.
+PrecompileTools.@compile_workload begin
+    macroexpand(
+        @__MODULE__, quote
+            @kernel function precompile_expansion(A, @Const(B))
+                i, j = @index(Local, NTuple)
+                I = @index(Global, Cartesian)
+                n = @uniform @groupsize()[1]
+                tile = @localmem Float32 (16, 16)
+                acc = @private Float32 (1,)
+                @inbounds begin
+                    tile[i, j] = B[I]
+                    @synchronize
+                    acc[1] = tile[j, i]
+                    A[I] = acc[1] * n
+                end
+            end
+        end
+    )
+end
+
 # CPU backend
 include("pocl/pocl.jl")
 using .POCL
@@ -687,17 +709,5 @@ synchronize(CPU())
 ```
 """
 const CPU = POCLBackend
-
-# precompile
-PrecompileTools.@compile_workload begin
-    @eval begin
-        @kernel function precompile_kernel(A, @Const(B))
-            i = @index(Global, Linear)
-            lmem = @localmem Float32 (5,)
-            pmem = @private Float32 (1,)
-            @synchronize
-        end
-    end
-end
 
 end #module
