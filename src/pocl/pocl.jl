@@ -77,6 +77,11 @@ export POCLBackend
 
 import KernelAbstractions as KA
 
+function __init__()
+    initialization_world[] = Base.get_world_counter()
+    return
+end
+
 # drop session-local state created by a precompilation workload
 function reset_session_state!()
     empty!(_compiler_configs)
