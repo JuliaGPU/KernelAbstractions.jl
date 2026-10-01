@@ -235,10 +235,12 @@ function compile_to_obj(@nospecialize(job::CompilerJob))
     return JuliaContext() do ctx
         obj, meta = invoke_frozen(GPUCompiler.compile, :obj, job)
 
-        entry = meta.entry.name
-        device_rng = haskey(meta.entry.function_attributes, "julia.opencl.rng")
-
-        (; obj, entry, device_rng)
+        # we own the IR: inspect it, then dispose of it
+        @dispose ir = meta.ir begin
+            entry = meta.entry.name
+            device_rng = haskey(meta.entry.function_attributes, "julia.opencl.rng")
+            (; obj, entry, device_rng)
+        end
     end
 end
 
