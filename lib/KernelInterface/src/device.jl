@@ -126,16 +126,20 @@ end
 ## sub-groups
 
 # Sub-group support is optional, see `supports_subgroups`. A work-group is divided into
-# sub-groups of `sub_group_size(backend)` work-items. How work-items are assigned to
-# sub-groups is unspecified, except that `(get_sub_group_id(), get_sub_group_local_id())`
-# is unique within a work-group and doesn't change during the kernel's execution.
+# sub-groups of at most `sub_group_size(backend)` work-items. Which work-items form a
+# sub-group, how many sub-groups there are and which are partial is unspecified, except
+# that `(get_sub_group_id(), get_sub_group_local_id())` is unique within a work-group and
+# doesn't change during the kernel's execution, and that a 1-D work-group of at most
+# `sub_group_size(backend)` work-items is a single sub-group. Backends that can't ensure
+# that don't report sub-group support. See the manual.
 
 """
     get_sub_group_size([::Type{T}=Int])::T
 
-The number of work-items in the sub-group: the sub-group width
-([`get_max_sub_group_size`](@ref)), or fewer for the last sub-group of a work-group whose
-size isn't a multiple of the width.
+The number of work-items in the sub-group, at most the sub-group width
+([`get_max_sub_group_size`](@ref)). Which sub-groups have fewer work-items than the width
+is unspecified: when the work-group size isn't a multiple of the width, there can be more
+than one, e.g. one per row of a multi-dimensional work-group.
 
 See [`get_local_id`](@ref) for the supported types `T`.
 
@@ -167,7 +171,10 @@ See [`get_local_id`](@ref) for the supported types `T`.
 """
     get_num_sub_groups([::Type{T}=Int])::T
 
-The number of sub-groups in the work-group: `cld(prod(get_local_size()), get_max_sub_group_size())`.
+The number of sub-groups in the work-group. It is at least
+`cld(prod(get_local_size()), get_max_sub_group_size())`, but can be larger, since more than
+one sub-group can be partial. Size storage for a value per sub-group for up to one
+sub-group per work-item.
 
 See [`get_local_id`](@ref) for the supported types `T`.
 
@@ -183,7 +190,8 @@ See [`get_local_id`](@ref) for the supported types `T`.
 """
     get_sub_group_id([::Type{T}=Int])::T
 
-The 1-based index of the sub-group within the work-group.
+The 1-based index of the sub-group within the work-group, between 1 and
+[`get_num_sub_groups`](@ref). How it relates to [`get_local_id`](@ref) is unspecified.
 
 See [`get_local_id`](@ref) for the supported types `T`.
 
@@ -199,8 +207,9 @@ See [`get_local_id`](@ref) for the supported types `T`.
 """
     get_sub_group_local_id([::Type{T}=Int])::T
 
-The 1-based index of the work-item within its sub-group (its lane). It doesn't depend on
-which work-items of the sub-group are active, e.g. in a divergent branch.
+The 1-based index of the work-item within its sub-group (its lane), between 1 and
+[`get_sub_group_size`](@ref). It doesn't depend on which work-items of the sub-group are
+active, e.g. in a divergent branch.
 
 See [`get_local_id`](@ref) for the supported types `T`.
 

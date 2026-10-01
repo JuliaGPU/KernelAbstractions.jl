@@ -149,10 +149,24 @@ get_global_size
 ### Sub-groups
 
 Sub-groups are optional ([`supports_subgroups`](@ref)). A work-group is divided into
-sub-groups of [`sub_group_size(backend)`](@ref sub_group_size) work-items, the last of which
-can be partial. How work-items are assigned to sub-groups is unspecified, but every
-work-item has a unique `(get_sub_group_id(), get_sub_group_local_id())` pair in its
-work-group, which doesn't change during the kernel.
+sub-groups of at most [`sub_group_size(backend)`](@ref sub_group_size) work-items. Which
+work-items form a sub-group, how many sub-groups there are, and which of them are partial
+is unspecified, and differs between devices and work-group shapes. For example, CUDA forms
+warps from consecutive linear work-item indices, while Intel's CPU OpenCL runtime forms
+sub-groups per row of a multi-dimensional work-group, so that a 33×2 work-group consists of
+four sub-groups of 32 and 1 work-items. What KernelInterface guarantees, and backends that
+report sub-group support have to ensure:
+
+- every work-item has a unique `(get_sub_group_id(), get_sub_group_local_id())` pair in its
+  work-group, which doesn't change during the kernel;
+- the sub-group ids are `1:get_num_sub_groups()`, and the lanes of a sub-group are
+  `1:get_sub_group_size()`;
+- a 1-D work-group of at most `sub_group_size(backend)` work-items is a single sub-group.
+
+In particular, [`get_num_sub_groups`](@ref) can be larger than
+`cld(prod(get_local_size()), get_max_sub_group_size())`. Storage for a value per sub-group
+has to be sized for up to one sub-group per work-item, and code combining those values has
+to use `get_num_sub_groups()` rather than compute the count.
 
 ```@docs
 get_sub_group_size

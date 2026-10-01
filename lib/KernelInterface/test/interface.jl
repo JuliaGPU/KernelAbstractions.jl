@@ -152,7 +152,7 @@ end
 function test_subgroup_kernel(results)
     l = KI.get_local_id()
     s = KI.get_local_size()
-    i = (l.y - 1) * s.x + l.x + (KI.get_group_id().x - 1) * s.x * s.y
+    i = ((l.z - 1) * s.y + (l.y - 1)) * s.x + l.x + (KI.get_group_id().x - 1) * s.x * s.y * s.z
 
     if i <= length(results)
         @inbounds results[i] = SubgroupData(
@@ -162,6 +162,26 @@ function test_subgroup_kernel(results)
             KI.get_sub_group_id(),
             KI.get_sub_group_local_id()
         )
+    end
+    return
+end
+
+# Combine a value per sub-group through local memory, as reductions do: the first lane of
+# every sub-group stores its size, and the first work-item adds up `get_num_sub_groups()`
+# of them. `N` is the work-group size, which bounds the number of sub-groups.
+function subgroup_combine_kernel(out, ::Val{N}) where {N}
+    partial = KI.localmemory(Int32, N)
+    if KI.get_sub_group_local_id() == 1
+        @inbounds partial[KI.get_sub_group_id()] = KI.get_sub_group_size()
+    end
+    KI.barrier()
+    l = KI.get_local_id()
+    if l.x == 1 && l.y == 1 && l.z == 1
+        total = Int32(0)
+        for i in 1:KI.get_num_sub_groups()
+            @inbounds total += partial[i]
+        end
+        @inbounds out[KI.get_group_id().x] = total
     end
     return
 end
@@ -592,67 +612,73 @@ function interface_testsuite(backend::KI.Backend, AT)
             end
         end
 
-        # checks the sub-groups of a work-group of `items` work-items
-        function check_subgroups(data, items)
+        # checks the sub-groups of a work-group of shape `dims`. Which work-items form a
+        # sub-group, and how many sub-groups there are, is unspecified.
+        function check_subgroups(data, dims)
+            items = prod(dims)
             @test all(d -> d.max_sub_group_size == sg_size, data)
-            @test all(d -> d.num_sub_groups == cld(items, sg_size), data)
-            @test all(d -> 1 <= d.sub_group_id <= cld(items, sg_size), data)
-            @test all(d -> 1 <= d.sub_group_local_id <= d.sub_group_size, data)
-            # every work-item has its own (sub-group, lane) pair
-            @test allunique(map(d -> (d.sub_group_id, d.sub_group_local_id), data))
-            # each sub-group has as many members as its size says
-            for id in unique(map(d -> d.sub_group_id, data))
+            # all work-items agree on the number of sub-groups, which is at least what full
+            # sub-groups would need
+            n = first(data).num_sub_groups
+            @test all(d -> d.num_sub_groups == n, data)
+            @test cld(items, sg_size) <= n <= items
+            # the sub-group ids are 1:n
+            @test sort(unique(map(d -> d.sub_group_id, data))) == 1:n
+            # every sub-group has as many members as its size says, and they are its lanes
+            for id in 1:n
                 members = filter(d -> d.sub_group_id == id, data)
-                @test all(d -> d.sub_group_size == length(members), members)
+                size = length(members)
+                @test 1 <= size <= sg_size
+                @test all(d -> d.sub_group_size == size, members)
+                @test sort(map(d -> d.sub_group_local_id, members)) == 1:size
+            end
+            # a 1-D work-group that fits a sub-group is one
+            if length(dims) == 1 && items <= sg_size
+                @test n == 1
             end
             return
         end
 
-        @testset "Sub-groups" begin
-            sg_n = 2
-            workgroupsize = sg_size * sg_n
+        # work-group shapes to check: 1-D ones around the width, and multi-dimensional ones
+        # whose first dimension is or isn't a multiple of the width
+        subgroup_shapes = unique(
+            [
+                (sg_size - 1,), (sg_size,), (sg_size + 1,), (2 * sg_size,), (2 * sg_size + 1,),
+                (33, 2), (sg_size, 2), (sg_size + 1, 2), (7, 5), (5, 3, 2), (sg_size, 2, 2),
+            ]
+        )
+        filter!(dims -> all(>(0), dims), subgroup_shapes)
+
+        @testset "Sub-group formation" begin
             numgroups = 2
-            N = workgroupsize * numgroups
-
-            results = AT(Vector{SubgroupData}(undef, N))
-            kernel = KI.@launch backend launch = false test_subgroup_kernel(results)
-            if fits(kernel, (workgroupsize,))
-                kernel(results; workgroupsize, numgroups)
-                KI.synchronize(backend)
-
-                host_results = Array(results)
-                @test all(d -> d.sub_group_size == sg_size, host_results)
-                for group in Iterators.partition(host_results, workgroupsize)
-                    check_subgroups(collect(group), workgroupsize)
+            @testset "$dims" for dims in subgroup_shapes
+                items = prod(dims)
+                results = AT(Vector{SubgroupData}(undef, items * numgroups))
+                kernel = KI.@launch backend launch = false test_subgroup_kernel(results)
+                if fits(kernel, dims)
+                    kernel(results; workgroupsize = dims, numgroups)
+                    KI.synchronize(backend)
+                    for group in Iterators.partition(Array(results), items)
+                        check_subgroups(collect(group), dims)
+                    end
+                else
+                    @test_skip "work-groups of $dims work-items"
                 end
-            else
-                @test_skip "work-groups of $workgroupsize work-items"
             end
         end
 
-        @testset "Partial sub-groups" begin
-            # a 2-D work-group whose size isn't a multiple of the sub-group size, or else a
-            # 1-D one with one work-item more than a sub-group
-            numgroups = 2
-            results = AT(Vector{SubgroupData}(undef, max(66, sg_size + 1) * numgroups))
-            kernel = KI.@launch backend launch = false test_subgroup_kernel(results)
-            workgroupsize = fits(kernel, (33, 2)) ? (33, 2) : (sg_size + 1,)
-            items = prod(workgroupsize)
-            if fits(kernel, workgroupsize) && items % sg_size != 0
-                kernel(results; workgroupsize, numgroups)
-                KI.synchronize(backend)
-
-                host_results = Array(results)[1:(items * numgroups)]
-                for group in Iterators.partition(host_results, items)
-                    group = collect(group)
-                    check_subgroups(group, items)
-                    # the sizes of the sub-groups add up to the work-group, with one partial one
-                    sizes = Dict(d.sub_group_id => d.sub_group_size for d in group)
-                    @test sum(values(sizes)) == items
-                    @test count(<(sg_size), values(sizes)) == (items % sg_size == 0 ? 0 : 1)
+        @testset "Combining a value per sub-group" begin
+            numgroups = 3
+            @testset "$dims" for dims in subgroup_shapes
+                out = KI.zeros(backend, Int32, numgroups)
+                kernel = KI.@launch backend launch = false subgroup_combine_kernel(out, Val(prod(dims)))
+                if fits(kernel, dims)
+                    kernel(out, Val(prod(dims)); workgroupsize = dims, numgroups)
+                    KI.synchronize(backend)
+                    @test all(==(prod(dims)), Array(out))
+                else
+                    @test_skip "work-groups of $dims work-items"
                 end
-            else
-                @test_skip "work-groups of $workgroupsize work-items"
             end
         end
 
@@ -697,7 +723,12 @@ function interface_testsuite(backend::KI.Backend, AT)
                     KI.synchronize(backend)
                     out = Array(out)
                     in_range = findall(i -> out[i, 1] + offset <= out[i, 2], 1:N)
-                    @test length(in_range) == N - (N ÷ sg_size) * offset
+                    # a work-group of one sub-group's width is a single sub-group; with more
+                    # work-items, how many are in range depends on the sub-groups' sizes
+                    if N == sg_size
+                        @test length(in_range) == N - offset
+                    end
+                    @test !isempty(in_range)
                     @test out[in_range, 3] == out[in_range, 1] .+ offset
                 end
             end
