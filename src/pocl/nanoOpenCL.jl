@@ -1588,6 +1588,10 @@ iscomplete(evt::Event) = evt.status <= CL_COMPLETE
 
 blocking_wait(evt::Event) = unchecked_clWaitForEvents(cl_uint(1), Ref(evt.id))
 
+# block the thread while waiting for commands instead, e.g., to make tests independent of
+# how a wait was performed
+const blocking_waits = Ref(false)
+
 function Base.wait(evt::Event)
     # wait without blocking the thread, so that other tasks can run in the meantime. after
     # polling briefly, PoCL notifies us when the command completes: waking a worker thread
@@ -1597,22 +1601,25 @@ function Base.wait(evt::Event)
     # this cannot be interrupted, as kernels may be using memory that callers would release:
     # an interrupt is only thrown once the kernel has completed (or waiting failed, in which
     # case we block), but host memory still needs to be synchronized before unwinding.
-    try
-        # commands only need to start executing once their queue has been flushed
-        queue = Ref{cl_command_queue}()
-        clGetEventInfo(evt, CL_EVENT_COMMAND_QUEUE, sizeof(cl_command_queue), queue, C_NULL)
-        clFlush(queue[])
+    if !blocking_waits[]
+        try
+            # commands only need to start executing once their queue has been flushed
+            queue = Ref{cl_command_queue}()
+            clGetEventInfo(evt, CL_EVENT_COMMAND_QUEUE, sizeof(cl_command_queue), queue, C_NULL)
+            clFlush(queue[])
 
-        cooperative_wait(
-            blocking_wait, evt; subscribe = subscribe_completion, isdone = iscomplete,
-            spin = 10.0e-6
-        )
-    catch
-        blocking_wait(evt)
-        rethrow()
+            cooperative_wait(
+                blocking_wait, evt; subscribe = subscribe_completion, isdone = iscomplete,
+                spin = 10.0e-6
+            )
+        catch
+            blocking_wait(evt)
+            rethrow()
+        end
     end
 
-    # synchronize host memory and report errors (without blocking anymore)
+    # synchronize host memory and report errors (without blocking anymore, unless waiting
+    # by blocking)
     err = unchecked_clWaitForEvents(cl_uint(1), Ref(evt.id))
     if err == CL_EXEC_STATUS_ERROR_FOR_EVENTS_IN_WAIT_LIST
         error("Kernel execution failed")

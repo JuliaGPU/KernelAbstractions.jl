@@ -95,11 +95,16 @@ end
     mod.launch_few(few, A)
     mod.launch_many(many, A)
     @test all(==(sum(1:40)), A)
-    # the first launch after new code has been defined (like the function below) allocates,
-    # to look up the callback that notifies it of the kernel's completion again
+    # waiting for a kernel allocates when it involves a completion callback, which depends
+    # on how long the kernel takes, so measure launches that wait by blocking instead
     allocated(launch, k, A) = @allocated launch(k, A)
-    allocated(mod.launch_many, many, A)
-    @test allocated(mod.launch_many, many, A) <= allocated(mod.launch_few, few, A)
+    POCL.cl.blocking_waits[] = true
+    try
+        allocated(mod.launch_many, many, A)
+        @test allocated(mod.launch_many, many, A) <= allocated(mod.launch_few, few, A)
+    finally
+        POCL.cl.blocking_waits[] = false
+    end
 end
 
 @testset "POCL compilation cache" begin
