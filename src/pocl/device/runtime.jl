@@ -45,14 +45,11 @@ end
 # then get propagated across function calls to the caller.
 
 function additional_arg_intr(mod::LLVM.Module, T_state, name)
-    state_intr = if haskey(mod.functions, "julia.opencl.$name")
-        mod.functions["julia.opencl.$name"]
-    else
-        LLVM.Function(mod, "julia.opencl.$name", LLVM.FunctionType(T_state))
+    return get!(mod.functions, "julia.opencl.$name") do
+        state_intr = LLVM.Function(mod, "julia.opencl.$name", LLVM.FunctionType(T_state))
+        push!(state_intr.function_attributes, EnumAttribute(:readnone))
+        state_intr
     end
-    push!(state_intr.function_attributes, EnumAttribute("readnone", 0))
-
-    return state_intr
 end
 
 # run-time equivalent
