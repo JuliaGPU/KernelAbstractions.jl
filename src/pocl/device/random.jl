@@ -159,40 +159,33 @@ function Random.rand(rng::Philox2x32{R}, ::Type{UInt64}) where {R}
 end
 
 
-# a hacky method of exposing constant tables as constant GPU memory
+# a hacky method of exposing constant tables as constant GPU memory: the table `Random.$name`
+# becomes an internal global in the constant address space. its contents are embedded in the
+# cached IR, so Random's tables are assumed to be immutable.
+@llvmgenerated builder function emit_constant_array(
+        ::Val{name}, ::Type{T}
+    )::LLVMPtr{T, AS.UniformConstant} where {name, T}
+    data = getfield(Random, name)::AbstractArray{T}
 
-function emit_constant_array(name::Symbol, data::AbstractArray{T}) where {T}
-    return generate_llvmcall(LLVMPtr{T, AS.UniformConstant}, Tuple{}) do builder
-        T_val = convert(LLVMType, T)
-        T_ptr = convert(LLVMType, LLVMPtr{T, AS.UniformConstant})
+    # create a global memory global variable
+    # TODO: global_var alignment?
+    T_global = LLVM.ArrayType(convert(LLVMType, T), length(data))
+    # XXX: why can't we use a single name like emit_shmem
+    gv = GlobalVariable(current_module(builder), T_global, "gpu_$(name)_data", AS.UniformConstant)
+    gv.linkage = LLVM.Linkage.Internal
+    gv.initializer = ConstantArray(data)
+    gv.alignment = 16
 
-        # get LLVM module
-        mod = current_module(builder)
-
-        # create a global memory global variable
-        # TODO: global_var alignment?
-        T_global = LLVM.ArrayType(T_val, length(data))
-        # XXX: why can't we use a single name like emit_shmem
-        gv = GlobalVariable(mod, T_global, "gpu_$(name)_data", AS.UniformConstant)
-        gv.linkage = LLVM.Linkage.Internal
-        gv.initializer = ConstantArray(data)
-        gv.alignment = 16
-
-        # generate IR
-        ptr = gep!(builder, T_global, gv, [ConstantInt(0), ConstantInt(0)])
-
-        untyped_ptr = bitcast!(builder, ptr, T_ptr)
-    end
+    ptr = gep!(builder, T_global, gv, [ConstantInt(0), ConstantInt(0)])
+    return bitcast!(builder, ptr, convert(LLVMType, LLVMPtr{T, AS.UniformConstant}))
 end
 
 for var in [:ki, :wi, :fi, :ke, :we, :fe]
     val = getfield(Random, var)
     gpu_var = Symbol("gpu_$var")
     arr_typ = :(CLDeviceArray{$(eltype(val)), $(ndims(val)), AS.UniformConstant})
-    @eval @inline @generated function $gpu_var()
-        ptr = emit_constant_array($(QuoteNode(var)), $val)
-        return Expr(:call, $arr_typ, $(size(val)), ptr)
-    end
+    @eval @inline $gpu_var() =
+        $arr_typ($(size(val)), emit_constant_array(Val($(QuoteNode(var))), $(eltype(val))))
 end
 
 ## randn

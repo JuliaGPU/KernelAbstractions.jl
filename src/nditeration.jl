@@ -7,6 +7,7 @@ export DynamicCheck, NoDynamicCheck
 
 import Adapt
 import Base.@pure
+import LLVM
 
 struct DynamicCheck end
 struct NoDynamicCheck end
@@ -211,21 +212,7 @@ end
 Assume that the condition `cond` is true. This is a hint to the compiler, possibly enabling
 it to optimize more aggressively.
 """
-@inline assume(cond::Bool) = Base.llvmcall(
-    (
-        """
-        declare void @llvm.assume(i1)
-
-        define void @entry(i8) #0 {
-            %cond = icmp eq i8 %0, 1
-            call void @llvm.assume(i1 %cond)
-            ret void
-        }
-
-        attributes #0 = { alwaysinline }""", "entry",
-    ),
-    Nothing, Tuple{Bool}, cond
-)
+@inline assume(cond::Bool) = LLVM.Interop.assume(cond)
 
 @inline function assume_nonzero(CI::CartesianIndices)
     return ntuple(Val(ndims(CI))) do I

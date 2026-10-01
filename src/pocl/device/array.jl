@@ -159,28 +159,23 @@ end
 # There is no SPIR-V equivalent of NVPTX's `ld.global.nc`, so instead of a dedicated
 # instruction we mark the load `!invariant.load`, which lets LLVM hoist it out of loops
 # and reorder it across stores to other objects.
-@inline @generated function unsafe_invariant_load(ptr::LLVMPtr{T, AS}, i::I, ::Val{align}) where {T, AS, I, align}
+@inline function unsafe_invariant_load(ptr::LLVMPtr{T}, i::I, ::Val{align}) where {T, I, align}
     sizeof(T) == 0 && return T.instance
-    ispow2(align) || return :(error("unsafe_invariant_load: alignment must be a power of 2, got $($align)"))
-    return generate_llvmcall(T, Tuple{LLVMPtr{T, AS}, I}, :ptr, :(i - one(I))) do builder, ptr, idx
-        eltyp = convert(LLVMType, T)
-        T_typed_ptr = LLVM.PointerType(eltyp, AS)
-
-        base = if supports_typed_pointers(LLVM.context())
-            bitcast!(builder, ptr, T_typed_ptr)
-        else
-            ptr
-        end
-        gep = inbounds_gep!(builder, eltyp, base, [idx])
-        ld = load!(builder, eltyp, gep)
-        if AS != 0
-            ld.metadata[MD_tbaa] = tbaa_addrspace(AS)
-        end
-        ld.metadata[MD_invariant_load] = MDNode(LLVM.Metadata[])
-        ld.alignment = align
-
-        ld
+    ispow2(align) || error("unsafe_invariant_load: alignment must be a power of 2, got ", align)
+    return _unsafe_invariant_load(ptr, i - one(I), Val(align))
+end
+@llvmgenerated builder function _unsafe_invariant_load(
+        ptr::LLVMPtr{T, AS}, i::Integer, ::Val{align}
+    )::T where {T, AS, align}
+    eltyp = convert(LLVMType, T)
+    # `LLVMPtr` is an `i8*` with typed pointers (with opaque pointers, this cast folds away)
+    ptr = bitcast!(builder, ptr, LLVM.PointerType(eltyp, AS))
+    ld = load!(builder, eltyp, inbounds_gep!(builder, eltyp, ptr, [i]); align)
+    if AS != 0
+        ld.metadata[MD_tbaa] = tbaa_addrspace(AS)
     end
+    ld.metadata[MD_invariant_load] = MDNode(LLVM.Metadata[])
+    return ld
 end
 
 @device_function @inline function const_arrayref(A::CLDeviceArray{T}, index::Integer) where {T}
