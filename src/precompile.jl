@@ -8,11 +8,15 @@
     @inbounds A[i] = 2 * B[i] + 1
 end
 
+# on Julia 1.11, the launch leaks GPUCompiler's runtime into the package image, which then
+# fails to link on Windows
+const launch_in_workload = !(Sys.iswindows() && v"1.11-" <= VERSION < v"1.12-")
+
 # whether the workload below launched its kernel, checked by the tests
 const precompiled_launch = Ref(false)
 
 PrecompileTools.@setup_workload begin
-    if POCL.nanoOpenCL.pocl_standalone_jll.is_available() &&
+    if launch_in_workload && POCL.nanoOpenCL.pocl_standalone_jll.is_available() &&
             POCL.SPIRV_LLVM_Backend_jll.is_available() && POCL.SPIRV_Tools_jll.is_available()
         try
             # keep PoCL's kernel cache out of the user's cache directory, and don't have it

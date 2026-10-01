@@ -23,7 +23,8 @@ end
 @testset "Precompilation" begin
     # without it, the first kernel launch on the CPU back-end takes many seconds
     workloads = Base.JLOptions().use_compiled_modules == 1 &&
-        KernelAbstractions.PrecompileTools.workload_enabled(KernelAbstractions)
+        KernelAbstractions.PrecompileTools.workload_enabled(KernelAbstractions) &&
+        KernelAbstractions.launch_in_workload
     @test KernelAbstractions.precompiled_launch[] skip = !workloads
 end
 
