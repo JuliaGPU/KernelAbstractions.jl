@@ -157,6 +157,15 @@ end
     @test count() == n + 2
 end
 
+@testset "POCL session" begin
+    # in a fresh process, to check initialization, and with threads, which the tests
+    # usually don't have
+    julia = Cmd(filter(arg -> !startswith(arg, "--code-coverage"), Base.julia_cmd().exec))
+    cmd = `$julia --startup-file=no --threads=4 --project=$(Base.active_project())
+        $(joinpath(@__DIR__, "pocl_session.jl"))`
+    @test success(pipeline(cmd; stdout, stderr))
+end
+
 @testset "CPU Codegen" begin
     Codegen.codegen_testsuite()
 end
