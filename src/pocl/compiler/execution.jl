@@ -169,9 +169,23 @@ pass_arg(@nospecialize dt) = !(GPUCompiler.isghosttype(dt) || Core.Compiler.isco
 # The arguments are passed on as a tuple: Julia doesn't turn a splat of more than 32
 # elements into a direct call, and a method with both varargs and keyword arguments splats
 # them into its body. So the keyword method is defined explicitly.
-(kernel::AbstractKernel)(args::Vararg{Any, N}) where {N} = launch_tuple(kernel, args)
+(kernel::AbstractKernel)(args::Vararg{Any, N}) where {N} = launch_and_wait(kernel, args)
 Core.kwcall(kwargs::NamedTuple, kernel::AbstractKernel, args::Vararg{Any, N}) where {N} =
-    launch_tuple(kernel, args; kwargs...)
+    launch_and_wait(kernel, args; kwargs...)
+
+# kernels operate on plain `Array`s, whose uses can't synchronize, so wait for the kernel
+# like `KI.launch` does. this also keeps the arguments alive while the kernel runs.
+function launch_and_wait(kernel::AbstractKernel, args::Tuple; kwargs...)
+    GC.@preserve args begin
+        event = launch_tuple(kernel, args; kwargs...)
+        try
+            wait(event)
+        finally
+            cl.clReleaseEvent(event)
+        end
+    end
+    return nothing
+end
 
 @inline launch_tuple(kernel::AbstractKernel, args::Tuple; global_size = (1,), local_size = nothing) =
     launch_converted(kernel, args, global_size, local_size)
