@@ -231,8 +231,9 @@ function clfunction(f::F, tt::TT = Tuple{}; kwargs...) where {F, TT}
 
         res = compile_or_lookup(job)::OpenCLResults
 
-        # Resolve the cl.Kernel for the active context. Linear scan over the
-        # session-local cache; almost always n=1, so this is one `===` compare.
+        # Resolve the cl.Kernel for the session's context. Linear scan over the
+        # session-local cache; there's one context per session, so this is almost always
+        # one `===` compare.
         ctx = context()
         cached = nothing
         @inbounds for (cached_ctx, cached_kernel) in res.kernels
@@ -254,10 +255,8 @@ function clfunction(f::F, tt::TT = Tuple{}; kwargs...) where {F, TT}
             cached
         end
 
-        h = hash(kernel, hash(f, hash(tt)))
-        return get!(_kernel_instances, h) do
-            HostKernel{F, tt}(f, kernel, res.device_rng)
-        end::HostKernel{F, tt}
+        # not cached: that would keep every callable that was ever launched alive
+        return HostKernel{F, tt}(f, kernel, res.device_rng)
     end
 end
 
@@ -286,6 +285,3 @@ end
     end
     return res
 end
-
-# cache of kernel instances
-const _kernel_instances = Dict{UInt, Any}()

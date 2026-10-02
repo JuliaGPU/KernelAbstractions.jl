@@ -9,35 +9,78 @@ include("nanoOpenCL.jl")
 
 import .nanoOpenCL as cl
 
-function platform()
-    return get!(task_local_storage(), :POCLPlatform) do
-        for p in cl.platforms()
-            if p.vendor == "The pocl project"
-                return p
-            end
+## session state
+
+# what every task shares: one context, so that kernels are only linked once per process
+struct Session
+    platform::cl.Platform
+    device::cl.Device
+    context::cl.Context
+    # querying the device allocates, so cache the limits that every launch needs
+    limits::@NamedTuple{max_work_group_size::Int, max_work_group_dims::NTuple{3, Int}, sub_group_size::Int}
+end
+
+function Session()
+    idx = findfirst(p -> p.vendor == "The pocl project", cl.platforms())
+    idx === nothing && error("POCL not available")
+    platform = cl.platforms()[idx]
+    device = cl.default_device(platform)
+    context = cl.Context(device)
+
+    sizes = device.max_work_item_size
+    # POCL can technically support any sub-group size; prefer the common GPU ones
+    sg_sizes = device.sub_group_sizes
+    common = filter(in(sg_sizes), [32, 64, 16, sg_sizes...])
+    limits = (;
+        max_work_group_size = Int(device.max_work_group_size),
+        max_work_group_dims = ntuple(d -> d <= length(sizes) ? sizes[d] : 1, 3),
+        # 0 if the device has no sub-groups
+        sub_group_size = isempty(common) ? 0 : first(common),
+    )
+
+    return Session(platform, device, context, limits)
+end
+
+# created on first use, so that loading the package doesn't initialize PoCL
+mutable struct SessionCache
+    Base.@atomic session::Union{Nothing, Session}
+    const lock::ReentrantLock
+end
+const session_cache = SessionCache(nothing, ReentrantLock())
+
+@inline function session()
+    s = Base.@atomic :acquire session_cache.session
+    s === nothing || return s
+    return init_session()
+end
+@noinline function init_session()
+    return @lock session_cache.lock begin
+        s = Base.@atomic :acquire session_cache.session
+        if s === nothing
+            s = Session()
+            Base.@atomic :release session_cache.session = s
         end
-        error("POCL not available")
-    end::cl.Platform
+        s
+    end::Session
 end
 
-function device()
-    return get!(task_local_storage(), :POCLDevice) do
-        p = platform()
-        return cl.default_device(p)
-    end::cl.Device
-end
+platform() = session().platform
+device() = session().device
+context() = session().context
+device_limits() = session().limits
 
-# TODO: add a device context dict
-function context()
-    return get!(task_local_storage(), :POCLContext) do
-        cl.Context(device())
-    end::cl.Context
-end
-
+# queues are per task, like streams on GPU back-ends, so that a task waiting for its
+# kernel doesn't hold up kernels from other tasks
 function queue()
-    return get!(task_local_storage(), :POCLQueue) do
-        cl.CmdQueue()
-    end::cl.CmdQueue
+    s = session()
+    tls = task_local_storage()
+    entry = get(tls, :POCLQueue, nothing)::Union{Nothing, Tuple{Session, cl.CmdQueue}}
+    if entry !== nothing && entry[1] === s
+        return entry[2]
+    end
+    q = cl.CmdQueue(s.context, s.device)
+    tls[:POCLQueue] = (s, q)
+    return q
 end
 
 using GPUCompiler
@@ -79,13 +122,20 @@ import KernelAbstractions as KA
 
 function __init__()
     initialization_world[] = Base.get_world_counter()
+    # there shouldn't be any session from precompilation, see `reset_session_state!`
+    Base.@atomic session_cache.session = nothing
     return
 end
 
-# drop session-local state created by a precompilation workload
+# drop session-local state created by a precompilation workload, so that no handles to
+# OpenCL objects get serialized. kernels launched before the reset can't be used anymore,
+# so this must not race with other tasks using the back-end.
 function reset_session_state!()
-    empty!(_compiler_configs)
-    empty!(_kernel_instances)
+    @lock clfunction_lock empty!(_compiler_configs)
+    @lock session_cache.lock begin
+        Base.@atomic session_cache.session = nothing
+    end
+    delete!(task_local_storage(), :POCLQueue)
     return
 end
 

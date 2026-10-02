@@ -1544,10 +1544,10 @@ end
 
 Base.unsafe_convert(::Type{cl_command_queue}, q::CmdQueue) = q.id
 
-function CmdQueue()
+function CmdQueue(ctx::Context = context(), dev::Device = device())
     flags = cl_command_queue_properties(0)
     err_code = Ref{Cint}()
-    queue_id = clCreateCommandQueue(context(), device(), flags, err_code)
+    queue_id = clCreateCommandQueue(ctx, dev, flags, err_code)
     if err_code[] != CL_SUCCESS
         if queue_id != C_NULL
             clReleaseCommandQueue(queue_id)

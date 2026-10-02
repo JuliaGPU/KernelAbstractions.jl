@@ -191,12 +191,15 @@ const _toolchain = Ref{Any}()
 const _compiler_configs = Dict{UInt, OpenCLCompilerConfig}()
 function compiler_config(dev::cl.Device; kwargs...)
     h = hash(dev, hash(kwargs))
-    config = get(_compiler_configs, h, nothing)
-    if config === nothing
-        config = _compiler_config(dev; kwargs...)
-        _compiler_configs[h] = config
+    # launches already hold this (reentrant) lock, but reflection doesn't
+    return @lock clfunction_lock begin
+        config = get(_compiler_configs, h, nothing)
+        if config === nothing
+            config = _compiler_config(dev; kwargs...)
+            _compiler_configs[h] = config
+        end
+        config
     end
-    return config
 end
 @noinline function _compiler_config(
         dev; kernel = true, name = nothing, always_inline = false,

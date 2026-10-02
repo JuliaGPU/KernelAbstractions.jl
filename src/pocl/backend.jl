@@ -2,7 +2,7 @@ module POCLKernels
 
 using ..POCL
 using ..POCL: @device_override, cl, method_table
-using ..POCL: device, clconvert, clfunction
+using ..POCL: device, device_limits, clconvert, clfunction
 
 using SPIRV_LLVM_Backend_jll, SPIRV_Tools_jll
 
@@ -169,22 +169,6 @@ end
 function KI.max_work_group_size(kernel::KI.Kernel{<:POCLBackend})::Int
     wginfo = cl.work_group_info(kernel.kern.kernel.fun, device())
     return Int(wginfo.size)
-end
-# querying the device allocates, so cache the limits that every launch needs
-function device_limits()
-    return get!(task_local_storage(), :POCLLimits) do
-        dev = device()
-        sizes = dev.max_work_item_size
-        # POCL can technically support any sub-group size; prefer the common GPU ones
-        sg_sizes = dev.sub_group_sizes
-        common = filter(in(sg_sizes), [32, 64, 16, sg_sizes...])
-        (;
-            max_work_group_size = Int(dev.max_work_group_size),
-            max_work_group_dims = ntuple(d -> d <= length(sizes) ? sizes[d] : 1, 3),
-            # 0 if the device has no sub-groups
-            sub_group_size = isempty(common) ? 0 : first(common),
-        )
-    end::@NamedTuple{max_work_group_size::Int, max_work_group_dims::NTuple{3, Int}, sub_group_size::Int}
 end
 KI.max_work_group_size(::POCLBackend)::Int = device_limits().max_work_group_size
 KI.max_work_group_dims(::POCLBackend)::NTuple{3, Int} = device_limits().max_work_group_dims
