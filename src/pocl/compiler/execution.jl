@@ -173,8 +173,9 @@ pass_arg(@nospecialize dt) = !(GPUCompiler.isghosttype(dt) || Core.Compiler.isco
 Core.kwcall(kwargs::NamedTuple, kernel::AbstractKernel, args::Vararg{Any, N}) where {N} =
     launch_and_wait(kernel, args; kwargs...)
 
-# kernels operate on plain `Array`s, whose uses can't synchronize, so wait for the kernel
-# like `KI.launch` does. this also keeps the arguments alive while the kernel runs.
+# kernels operate on plain `Array`s, whose uses can't synchronize, so every launch waits for
+# its kernel. this also keeps the arguments alive while the kernel runs. waiting yields to
+# other tasks, as `synchronize` should (see the documentation on its semantics).
 function launch_and_wait(kernel::AbstractKernel, args::Tuple; kwargs...)
     GC.@preserve args begin
         event = launch_tuple(kernel, args; kwargs...)
