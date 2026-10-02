@@ -1201,9 +1201,11 @@ end
 
 mutable struct Kernel
     const id::cl_kernel
+    # kernel arguments are state of the kernel object, see `call`
+    const lock::ReentrantLock
 
     function Kernel(k::cl_kernel)
-        kernel = new(k)
+        kernel = new(k, ReentrantLock())
         finalizer(clReleaseKernel, kernel)
         return kernel
     end
@@ -1400,20 +1402,26 @@ function enqueue_kernel(
     return Event(ret_event[])
 end
 
+# kernels are shared by all tasks, and their arguments are state of the kernel object that
+# OpenCL copies when enqueuing it. so setting them and enqueuing the kernel has to happen
+# atomically. manual use of `set_arg!`, `set_args!` or `enqueue_kernel` isn't synchronized;
+# hold `k.lock` while doing so.
 function call(
         k::Kernel, args::Tuple; global_size = (1,), local_size = nothing,
         global_work_offset = nothing,
         svm_pointers::Union{Nothing, Vector{Ptr{Cvoid}}} = nothing,
         rng_state = false
     )
-    set_args!(k, args)
-    if svm_pointers !== nothing && !isempty(svm_pointers)
-        clSetKernelExecInfo(
-            k, CL_KERNEL_EXEC_INFO_SVM_PTRS,
-            sizeof(svm_pointers), svm_pointers
-        )
+    return @lock k.lock begin
+        set_args!(k, args)
+        if svm_pointers !== nothing && !isempty(svm_pointers)
+            clSetKernelExecInfo(
+                k, CL_KERNEL_EXEC_INFO_SVM_PTRS,
+                sizeof(svm_pointers), svm_pointers
+            )
+        end
+        enqueue_kernel(k, global_size, local_size; global_work_offset, rng_state, nargs = length(args))
     end
-    return enqueue_kernel(k, global_size, local_size; global_work_offset, rng_state, nargs = length(args))
 end
 
 # convert the argument values to match the kernel's signature (specified by the user)
