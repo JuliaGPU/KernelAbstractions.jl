@@ -1489,7 +1489,8 @@ function Base.getproperty(ki::KernelWorkGroupInfo, s::Symbol)
     elseif s == :compile_size
         Int.(get(CL_KERNEL_COMPILE_WORK_GROUP_SIZE, NTuple{3, Csize_t}))
     elseif s == :local_mem_size
-        Int(get(CL_KERNEL_LOCAL_MEM_SIZE, cl_ulong))
+        # includes the size of local memory arguments, see `call`
+        @lock k.lock Int(get(CL_KERNEL_LOCAL_MEM_SIZE, cl_ulong))
     elseif s == :private_mem_size
         Int(get(CL_KERNEL_PRIVATE_MEM_SIZE, cl_ulong))
     elseif s == :prefered_size_multiple

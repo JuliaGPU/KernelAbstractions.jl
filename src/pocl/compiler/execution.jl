@@ -245,9 +245,8 @@ function clfunction(f::F, tt::TT = Tuple{}; kwargs...) where {F, TT}
 
         res = compile_or_lookup(job)::OpenCLResults
 
-        # Resolve the cl.Kernel for the session's context. Linear scan over the
-        # session-local cache; there's one context per session, so this is almost always
-        # one `===` compare.
+        # Resolve the cl.Kernel for the session's context. There's one context per
+        # session, so this is one `===` compare.
         ctx = context()
         cached = nothing
         @inbounds for (cached_ctx, cached_kernel) in res.kernels
@@ -262,6 +261,8 @@ function clfunction(f::F, tt::TT = Tuple{}; kwargs...) where {F, TT}
             # results struct is serialized into the package image along with its
             # CodeInstance, and the handles would come back dangling.
             if ccall(:jl_generating_output, Cint, ()) != 1
+                # kernels for other contexts are from before a reset of the session
+                empty!(res.kernels)
                 push!(res.kernels, (ctx, linked))
             end
             linked
