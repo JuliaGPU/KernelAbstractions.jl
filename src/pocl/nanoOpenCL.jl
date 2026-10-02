@@ -1262,13 +1262,18 @@ end
 ## when passing with `clcall`, which has pre-converted the buffer
 function set_arg!(k::Kernel, idx::Integer, arg::Union{Ptr, Core.LLVMPtr})
     arg = reinterpret(Ptr{Cvoid}, arg)
-    if arg != C_NULL
-        # XXX: this assumes that the receiving argument is pointer-typed, which is not the
-        #      case with Julia's `Ptr` ABI. Instead, one should reinterpret the pointer as a
-        #      `Core.LLVMPtr`, which _is_ pointer-valued. We retain this handling for `Ptr`
-        #      for users passing pointers to OpenCL C, and because `Ptr` is pointer-valued
-        #      starting with Julia 1.12.
-        clSetKernelArgSVMPointer(k, cl_uint(idx - 1), arg)
+    # XXX: this assumes that the receiving argument is pointer-typed, which is not the
+    #      case with Julia's `Ptr` ABI. Instead, one should reinterpret the pointer as a
+    #      `Core.LLVMPtr`, which _is_ pointer-valued. We retain this handling for `Ptr`
+    #      for users passing pointers to OpenCL C, and because `Ptr` is pointer-valued
+    #      starting with Julia 1.12.
+    err = unchecked_clSetKernelArgSVMPointer(k, cl_uint(idx - 1), arg)
+    if err == CL_INVALID_ARG_INDEX && arg == C_NULL
+        # before Julia 1.12, a `Ptr` argument is an integer. null pointers still have to be
+        # set, or the kernel would see an argument from an earlier launch.
+        set_arg!(k, idx, UInt(0))
+    elseif err != CL_SUCCESS
+        throw(CLError(err))
     end
     return k
 end
