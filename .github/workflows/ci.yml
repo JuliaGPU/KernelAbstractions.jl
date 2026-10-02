@@ -41,9 +41,10 @@ jobs:
             arch: x64
     steps:
       - uses: actions/checkout@v7
-      - uses: julia-actions/install-juliaup@v3
+      - uses: julia-actions/setup-julia@v3
         with:
-          channel: ${{ matrix.version }}
+          version: ${{ matrix.version }}
+          arch: ${{ matrix.arch }}
       - uses: julia-actions/cache@v3
       # - name: "Co-develop Enzyme and KA"
       #   run: |
@@ -122,9 +123,9 @@ jobs:
         os: [ubuntu-24.04, macOS-15, windows-2022]
     steps:
       - uses: actions/checkout@v7
-      - uses: julia-actions/install-juliaup@v3
+      - uses: julia-actions/setup-julia@v3
         with:
-          channel: ${{ matrix.version }}
+          version: ${{ matrix.version }}
       - uses: julia-actions/cache@v3
       # Tested on its own, without KernelAbstractions, to keep the sibling
       # package standalone and dependency-free.
