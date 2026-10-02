@@ -53,16 +53,18 @@ SPIRVIntrinsics.@reexport_public
 # local method table for device functions
 Base.Experimental.@MethodTable(method_table)
 
-include("compiler/compilation.jl")
-include("compiler/execution.jl")
-include("compiler/reflection.jl")
-
 import Core: LLVMPtr
 
+# the device code comes first: the compiler's generated functions use its types, and a
+# generator only sees the bindings that existed when it was defined
 include("device/array.jl")
 include("device/quirks.jl")
 include("device/runtime.jl")
 include("device/random.jl")
+
+include("compiler/compilation.jl")
+include("compiler/execution.jl")
+include("compiler/reflection.jl")
 
 function Adapt.adapt_storage(to::KernelAdaptor, xs::Array{T, N}) where {T, N}
     return CLDeviceArray{T, N, AS.CrossWorkgroup}(size(xs), reinterpret(LLVMPtr{T, AS.CrossWorkgroup}, pointer(xs)))
@@ -74,5 +76,17 @@ import .POCLKernels: POCLBackend
 export POCLBackend
 
 import KernelAbstractions as KA
+
+function __init__()
+    initialization_world[] = Base.get_world_counter()
+    return
+end
+
+# drop session-local state created by a precompilation workload
+function reset_session_state!()
+    empty!(_compiler_configs)
+    empty!(_kernel_instances)
+    return
+end
 
 end

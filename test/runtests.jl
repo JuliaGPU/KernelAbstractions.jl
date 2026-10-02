@@ -20,6 +20,14 @@ end
     Coverage.coverage_testsuite()
 end
 
+@testset "Precompilation" begin
+    # without it, the first kernel launch on the CPU back-end takes many seconds
+    workloads = Base.JLOptions().use_compiled_modules == 1 &&
+        KernelAbstractions.PrecompileTools.workload_enabled(KernelAbstractions) &&
+        KernelAbstractions.launch_in_workload
+    @test KernelAbstractions.precompiled_launch[] skip = !workloads
+end
+
 KernelAbstractions.versioninfo(POCLBackend())
 @info "Configuration" pocl = KernelAbstractions.POCL.nanoOpenCL.pocl_standalone_jll.libpocl
 

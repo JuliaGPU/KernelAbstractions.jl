@@ -75,7 +75,7 @@ function GPUCompiler.finish_module!(
         tt = Tuple{}
 
         # create a deferred compilation job for `initialize_rng_state`
-        src = methodinstance(ft, tt, GPUCompiler.tls_world_age())
+        src = methodinstance(ft, tt, job.world)
         cfg = CompilerConfig(job.config; kernel = false, name = nothing)
         job = CompilerJob(src, cfg, job.world)
         id = length(GPUCompiler.deferred_codegen_jobs) + 1
@@ -220,6 +220,17 @@ end
     return CompilerConfig(target, params; kernel, name, always_inline)
 end
 
+# The world in which this package was loaded. Running the compiler in that world reuses the
+# native code that precompilation generated for it, even when packages loaded afterwards
+# invalidate some of it (e.g. by adding methods to Base functions the compiler calls).
+# Kernels themselves are still compiled for the current world (`job.world`), but methods of
+# the compiler's interface (e.g. `GPUCompiler.finish_module!`) that are added after loading,
+# for example by Revise, aren't used. Before `__init__` runs, as during precompilation,
+# `invoke_in_world` clamps the world to the current one.
+const initialization_world = Ref{UInt}(typemax(UInt))
+
+invoke_frozen(f, args...) = Base.invoke_in_world(initialization_world[], f, args...)
+
 # run inference + LLVM codegen + SPIR-V emission. returns `(obj, entry, device_rng)`,
 # all session-portable so they survive precompilation when stored on a cached `CodeInstance`.
 const compilations = Threads.Atomic{Int}(0)
@@ -227,7 +238,7 @@ function compile_to_obj(@nospecialize(job::CompilerJob))
     compilations[] += 1
 
     return JuliaContext() do ctx
-        obj, meta = GPUCompiler.compile(:obj, job)
+        obj, meta = invoke_frozen(GPUCompiler.compile, :obj, job)
 
         entry = LLVM.name(meta.entry)
         device_rng = StringAttribute("julia.opencl.rng", "") in collect(function_attributes(meta.entry))

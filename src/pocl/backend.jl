@@ -140,13 +140,11 @@ struct POCLKernel{K, F}
 end
 
 function KI.kernel_function(backend::POCLBackend, f::F, tt::TT = Tuple{}; name = nothing, kwargs...) where {F, TT}
-    # fix the sub-group width, as `KI.sub_group_size` promises
+    # fix the sub-group width, as `KI.sub_group_size` promises. pass it even if the device
+    # has no sub-groups, so that `clfunction` is only compiled for one set of keywords.
     sub_group_size = device_limits().sub_group_size
-    kernel = if sub_group_size > 0
-        clfunction(clconvert(f), tt; name, sub_group_size, kwargs...)
-    else
-        clfunction(clconvert(f), tt; name, kwargs...)
-    end
+    sub_group_size = sub_group_size > 0 ? sub_group_size : nothing
+    kernel = clfunction(clconvert(f), tt; name, sub_group_size, kwargs...)
     kern = POCLKernel(kernel, f)
     return KI.Kernel{POCLBackend, typeof(kern)}(backend, kern)
 end
