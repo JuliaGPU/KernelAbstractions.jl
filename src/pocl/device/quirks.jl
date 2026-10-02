@@ -1,7 +1,11 @@
-# throw a device-side exception of type `name`, printing the type and `reason`
+# throw a device-side exception of type `name`, reporting it with `reason`
 macro gputhrow(name::String, reason::String)
+    escape(str) = replace(str, "%" => "%%")
+    fmt = "ERROR: $(escape(name)) during kernel execution on work-item (%ld, %ld, %ld): $(escape(reason)).\n"
     return quote
-        @println "ERROR: " $name ": " $reason "."
+        if GPUCompiler.kernel_debug_level() >= 1 && claim_output() == 1
+            SPIRVIntrinsics.@printf($fmt, get_global_id(1), get_global_id(2), get_global_id(3))
+        end
         throw(nothing)
     end
 end
