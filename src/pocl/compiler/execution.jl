@@ -169,9 +169,23 @@ pass_arg(@nospecialize dt) = !(GPUCompiler.isghosttype(dt) || Core.Compiler.isco
 # The arguments are passed on as a tuple: Julia doesn't turn a splat of more than 32
 # elements into a direct call, and a method with both varargs and keyword arguments splats
 # them into its body. So the keyword method is defined explicitly.
-(kernel::AbstractKernel)(args::Vararg{Any, N}) where {N} = launch_tuple(kernel, args)
+(kernel::AbstractKernel)(args::Vararg{Any, N}) where {N} = launch_and_wait(kernel, args)
 Core.kwcall(kwargs::NamedTuple, kernel::AbstractKernel, args::Vararg{Any, N}) where {N} =
-    launch_tuple(kernel, args; kwargs...)
+    launch_and_wait(kernel, args; kwargs...)
+
+# kernels operate on plain `Array`s, whose uses can't synchronize, so wait for the kernel
+# like `KI.launch` does. this also keeps the arguments alive while the kernel runs.
+function launch_and_wait(kernel::AbstractKernel, args::Tuple; kwargs...)
+    GC.@preserve args begin
+        event = launch_tuple(kernel, args; kwargs...)
+        try
+            wait(event)
+        finally
+            cl.clReleaseEvent(event)
+        end
+    end
+    return nothing
+end
 
 @inline launch_tuple(kernel::AbstractKernel, args::Tuple; global_size = (1,), local_size = nothing) =
     launch_converted(kernel, args, global_size, local_size)
@@ -231,8 +245,8 @@ function clfunction(f::F, tt::TT = Tuple{}; kwargs...) where {F, TT}
 
         res = compile_or_lookup(job)::OpenCLResults
 
-        # Resolve the cl.Kernel for the active context. Linear scan over the
-        # session-local cache; almost always n=1, so this is one `===` compare.
+        # Resolve the cl.Kernel for the session's context. There's one context per
+        # session, so this is one `===` compare.
         ctx = context()
         cached = nothing
         @inbounds for (cached_ctx, cached_kernel) in res.kernels
@@ -247,6 +261,8 @@ function clfunction(f::F, tt::TT = Tuple{}; kwargs...) where {F, TT}
             # results struct is serialized into the package image along with its
             # CodeInstance, and the handles would come back dangling.
             if ccall(:jl_generating_output, Cint, ()) != 1
+                # kernels for other contexts are from before a reset of the session
+                empty!(res.kernels)
                 push!(res.kernels, (ctx, linked))
             end
             linked
@@ -254,10 +270,8 @@ function clfunction(f::F, tt::TT = Tuple{}; kwargs...) where {F, TT}
             cached
         end
 
-        h = hash(kernel, hash(f, hash(tt)))
-        return get!(_kernel_instances, h) do
-            HostKernel{F, tt}(f, kernel, res.device_rng)
-        end::HostKernel{F, tt}
+        # not cached: that would keep every callable that was ever launched alive
+        return HostKernel{F, tt}(f, kernel, res.device_rng)
     end
 end
 
@@ -286,6 +300,3 @@ end
     end
     return res
 end
-
-# cache of kernel instances
-const _kernel_instances = Dict{UInt, Any}()

@@ -1201,9 +1201,11 @@ end
 
 mutable struct Kernel
     const id::cl_kernel
+    # kernel arguments are state of the kernel object, see `call`
+    const lock::ReentrantLock
 
     function Kernel(k::cl_kernel)
-        kernel = new(k)
+        kernel = new(k, ReentrantLock())
         finalizer(clReleaseKernel, kernel)
         return kernel
     end
@@ -1260,13 +1262,18 @@ end
 ## when passing with `clcall`, which has pre-converted the buffer
 function set_arg!(k::Kernel, idx::Integer, arg::Union{Ptr, Core.LLVMPtr})
     arg = reinterpret(Ptr{Cvoid}, arg)
-    if arg != C_NULL
-        # XXX: this assumes that the receiving argument is pointer-typed, which is not the
-        #      case with Julia's `Ptr` ABI. Instead, one should reinterpret the pointer as a
-        #      `Core.LLVMPtr`, which _is_ pointer-valued. We retain this handling for `Ptr`
-        #      for users passing pointers to OpenCL C, and because `Ptr` is pointer-valued
-        #      starting with Julia 1.12.
-        clSetKernelArgSVMPointer(k, cl_uint(idx - 1), arg)
+    # XXX: this assumes that the receiving argument is pointer-typed, which is not the
+    #      case with Julia's `Ptr` ABI. Instead, one should reinterpret the pointer as a
+    #      `Core.LLVMPtr`, which _is_ pointer-valued. We retain this handling for `Ptr`
+    #      for users passing pointers to OpenCL C, and because `Ptr` is pointer-valued
+    #      starting with Julia 1.12.
+    err = unchecked_clSetKernelArgSVMPointer(k, cl_uint(idx - 1), arg)
+    if err == CL_INVALID_ARG_INDEX && arg == C_NULL
+        # before Julia 1.12, a `Ptr` argument is an integer. null pointers still have to be
+        # set, or the kernel would see an argument from an earlier launch.
+        set_arg!(k, idx, UInt(0))
+    elseif err != CL_SUCCESS
+        throw(CLError(err))
     end
     return k
 end
@@ -1400,20 +1407,26 @@ function enqueue_kernel(
     return Event(ret_event[])
 end
 
+# kernels are shared by all tasks, and their arguments are state of the kernel object that
+# OpenCL copies when enqueuing it. so setting them and enqueuing the kernel has to happen
+# atomically. manual use of `set_arg!`, `set_args!` or `enqueue_kernel` isn't synchronized;
+# hold `k.lock` while doing so.
 function call(
         k::Kernel, args::Tuple; global_size = (1,), local_size = nothing,
         global_work_offset = nothing,
         svm_pointers::Union{Nothing, Vector{Ptr{Cvoid}}} = nothing,
         rng_state = false
     )
-    set_args!(k, args)
-    if svm_pointers !== nothing && !isempty(svm_pointers)
-        clSetKernelExecInfo(
-            k, CL_KERNEL_EXEC_INFO_SVM_PTRS,
-            sizeof(svm_pointers), svm_pointers
-        )
+    return @lock k.lock begin
+        set_args!(k, args)
+        if svm_pointers !== nothing && !isempty(svm_pointers)
+            clSetKernelExecInfo(
+                k, CL_KERNEL_EXEC_INFO_SVM_PTRS,
+                sizeof(svm_pointers), svm_pointers
+            )
+        end
+        enqueue_kernel(k, global_size, local_size; global_work_offset, rng_state, nargs = length(args))
     end
-    return enqueue_kernel(k, global_size, local_size; global_work_offset, rng_state, nargs = length(args))
 end
 
 # convert the argument values to match the kernel's signature (specified by the user)
@@ -1476,7 +1489,8 @@ function Base.getproperty(ki::KernelWorkGroupInfo, s::Symbol)
     elseif s == :compile_size
         Int.(get(CL_KERNEL_COMPILE_WORK_GROUP_SIZE, NTuple{3, Csize_t}))
     elseif s == :local_mem_size
-        Int(get(CL_KERNEL_LOCAL_MEM_SIZE, cl_ulong))
+        # includes the size of local memory arguments, see `call`
+        @lock k.lock Int(get(CL_KERNEL_LOCAL_MEM_SIZE, cl_ulong))
     elseif s == :private_mem_size
         Int(get(CL_KERNEL_PRIVATE_MEM_SIZE, cl_ulong))
     elseif s == :prefered_size_multiple
@@ -1531,10 +1545,10 @@ end
 
 Base.unsafe_convert(::Type{cl_command_queue}, q::CmdQueue) = q.id
 
-function CmdQueue()
+function CmdQueue(ctx::Context = context(), dev::Device = device())
     flags = cl_command_queue_properties(0)
     err_code = Ref{Cint}()
-    queue_id = clCreateCommandQueue(context(), device(), flags, err_code)
+    queue_id = clCreateCommandQueue(ctx, dev, flags, err_code)
     if err_code[] != CL_SUCCESS
         if queue_id != C_NULL
             clReleaseCommandQueue(queue_id)

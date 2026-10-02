@@ -20,11 +20,11 @@ session-dependent and wipes its entries before image serialization); `kernels` i
 session-local and never populated during precompilation. `obj === nothing`
 identifies a job that has not been compiled yet.
 
-`kernels` is a small linear cache of `(cl.Context, cl.Kernel)` pairs. The cache partition
-already covers everything that affects codegen via `GPUCompiler.cache_owner`, so the only
-runtime-visible dimension left is the OpenCL context that owns the linked `cl.Kernel`.
-A linear scan with `===` is fastest in the common case (n=1) and stays cheap for the
-rare workload that bounces between a handful of contexts on the same device.
+`kernels` holds the `cl.Kernel` linked on the session's context, paired with that context.
+The cache partition already covers everything that affects codegen via
+`GPUCompiler.cache_owner`, so the only runtime-visible dimension left is the OpenCL context
+that owns the linked `cl.Kernel`. There's one context per session, so this holds at most
+one entry; the context identifies kernels from before a reset of the session.
 """
 mutable struct OpenCLResults
     obj::Union{Nothing, Vector{UInt8}}                   # SPIR-V binary
@@ -191,12 +191,15 @@ const _toolchain = Ref{Any}()
 const _compiler_configs = Dict{UInt, OpenCLCompilerConfig}()
 function compiler_config(dev::cl.Device; kwargs...)
     h = hash(dev, hash(kwargs))
-    config = get(_compiler_configs, h, nothing)
-    if config === nothing
-        config = _compiler_config(dev; kwargs...)
-        _compiler_configs[h] = config
+    # launches already hold this (reentrant) lock, but reflection doesn't
+    return @lock clfunction_lock begin
+        config = get(_compiler_configs, h, nothing)
+        if config === nothing
+            config = _compiler_config(dev; kwargs...)
+            _compiler_configs[h] = config
+        end
+        config
     end
-    return config
 end
 @noinline function _compiler_config(
         dev; kernel = true, name = nothing, always_inline = false,
