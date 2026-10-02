@@ -115,6 +115,41 @@ end
     end
 end
 
+@testset "POCL exceptions" begin
+    @kernel function exception_kernel!(A)
+        I = @index(Global, Linear)
+        A[I + 1] = 1
+    end
+    exception_opencl!(A) = (A[POCL.get_global_id() + 1] = 1; return)
+    # the device prints details about the exception
+    quietly(f) = redirect_stdout(f, devnull)
+
+    A = zeros(Int, 4)
+    @test_throws POCL.KernelException quietly(() -> exception_kernel!(CPU())(A; ndrange = 4))
+    @test A == [0, 1, 1, 1]
+    @test_throws POCL.KernelException quietly(() -> @opencl global_size = 4 exception_opencl!(A))
+
+    # launches after it are fine
+    exception_kernel!(CPU())(A; ndrange = 3)
+
+    # and launches from other tasks don't see it
+    function launch(ndrange)
+        try
+            exception_kernel!(CPU())(zeros(Int, 4); ndrange)
+            return false
+        catch err
+            err isa POCL.KernelException || rethrow()
+            return true
+        end
+    end
+    failing, succeeding = quietly() do
+        tasks = (@async([launch(4) for _ in 1:10]), @async([launch(3) for _ in 1:10]))
+        fetch.(tasks)
+    end
+    @test all(failing)
+    @test !any(succeeding)
+end
+
 @testset "POCL compilation cache" begin
     mod = @eval module $(gensym())
     @noinline child() = return

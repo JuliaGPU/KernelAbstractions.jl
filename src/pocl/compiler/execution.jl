@@ -177,22 +177,27 @@ Core.kwcall(kwargs::NamedTuple, kernel::AbstractKernel, args::Vararg{Any, N}) wh
 # its kernel. this also keeps the arguments alive while the kernel runs. waiting yields to
 # other tasks, as `synchronize` should (see the documentation on its semantics).
 function launch_and_wait(kernel::AbstractKernel, args::Tuple; kwargs...)
-    GC.@preserve args begin
-        event = launch_tuple(kernel, args; kwargs...)
+    info = exception_info()
+    info[] = ExceptionInfo_st()
+    GC.@preserve args info begin
+        event = launch_tuple(kernel, args, Base.unsafe_convert(Ptr{ExceptionInfo_st}, info); kwargs...)
         try
             wait(event)
         finally
             cl.clReleaseEvent(event)
         end
     end
+    info[].status == 0 || throw(KernelException(device()))
     return nothing
 end
 
-@inline launch_tuple(kernel::AbstractKernel, args::Tuple; global_size = (1,), local_size = nothing) =
-    launch_converted(kernel, args, global_size, local_size)
+@inline launch_tuple(
+    kernel::AbstractKernel, args::Tuple, exception_info::Ptr;
+    global_size = (1,), local_size = nothing
+) = launch_converted(kernel, args, exception_info, global_size, local_size)
 
 @inline @generated function launch_converted(
-        kernel::AbstractKernel{F, TT}, args::Tuple, global_size, local_size
+        kernel::AbstractKernel{F, TT}, args::Tuple, exception_info, global_size, local_size
     ) where {F, TT}
     sig = Tuple{F, TT.parameters...}    # Base.signature_type with a function type
     args = (:(kernel.f), (:(clconvert(args[$i])) for i in 1:fieldcount(args))...)
@@ -211,7 +216,10 @@ end
     end
 
     pushfirst!(call_t, KernelState)
-    pushfirst!(call_args, :(KernelState(kernel.rng_state ? Base.rand(UInt32) : UInt32(0))))
+    pushfirst!(
+        call_args,
+        :(KernelState(kernel.rng_state ? Base.rand(UInt32) : UInt32(0), UInt64(UInt(exception_info))))
+    )
 
     # finalize types
     call_tt = Base.to_tuple_type(call_t)
@@ -223,6 +231,27 @@ end
         end
     end
 end
+
+
+## exceptions
+
+"""
+    KernelException
+
+An exception thrown during kernel execution on device `dev`. The kernel prints details about
+the exception when it occurs, depending on the debug level (see Julia's `-g` option).
+"""
+struct KernelException <: Exception
+    dev::cl.Device
+end
+
+Base.showerror(io::IO, err::KernelException) =
+    print(io, "KernelException: exception thrown during kernel execution on device ", err.dev.name)
+
+# where kernels report exceptions: per task, as a task waits for every kernel it launches
+exception_info() = get!(task_local_storage(), :POCLExceptionInfo) do
+    Ref(ExceptionInfo_st())
+end::Base.RefValue{ExceptionInfo_st}
 
 
 ## host-side kernels

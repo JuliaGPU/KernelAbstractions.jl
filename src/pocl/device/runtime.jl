@@ -1,4 +1,35 @@
-signal_exception() = return
+## exceptions
+
+# what a kernel reports when one of its work-items throws. it lives in host memory, which the
+# CPU device can access directly, and the task that launched the kernel checks it once the
+# kernel has completed.
+struct ExceptionInfo_st
+    # set when a work-item has thrown
+    status::Int32
+
+    ExceptionInfo_st() = new(0)
+end
+
+# a pointer to one of the fields of the launch's `ExceptionInfo_st`
+@inline @generated function exception_field(::Val{field}) where {field}
+    T = fieldtype(ExceptionInfo_st, field)
+    offset = fieldoffset(ExceptionInfo_st, Base.fieldindex(ExceptionInfo_st, field))
+    return :(reinterpret(LLVMPtr{$T, AS.CrossWorkgroup}, kernel_state().exception_info + $offset))
+end
+
+# the record is shared by all work-items on the device, and SPIRVIntrinsics' atomics only
+# have work-group scope
+@inline atomic_store_device!(ptr::LLVMPtr{Int32, AS.CrossWorkgroup}, val::Int32) =
+    @builtin_ccall(
+    "__spirv_AtomicStore", Cvoid, (LLVMPtr{Int32, AS.CrossWorkgroup}, UInt32, UInt32, Int32),
+    ptr, UInt32(Scope.Device), UInt32(MemorySemantics.CrossWorkgroupMemory | MemorySemantics.Release), val
+)
+
+# the work-item that threw stops executing after this
+function signal_exception()
+    atomic_store_device!(exception_field(Val(:status)), Int32(1))
+    return
+end
 
 malloc(sz) = C_NULL
 
@@ -32,6 +63,9 @@ end
 
 struct KernelState
     random_seed::UInt32
+    # the address of an `ExceptionInfo_st`. not a pointer, as SPIR-V doesn't allow those in
+    # kernel arguments that are passed by value.
+    exception_info::UInt64
 end
 
 @inline @generated kernel_state() = GPUCompiler.kernel_state_value(KernelState)
