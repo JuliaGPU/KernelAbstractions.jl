@@ -154,13 +154,17 @@ end
 function KI.launch(obj::KI.Kernel{POCLBackend}, groups::Dims{3}, items::Dims{3}, args::Tuple)
     # the kernel only gets pointers to the arrays in `args` and captured by `f`, so keep
     # them alive until it completes. POCL launches synchronously, see the implementation
-    # note on `synchronize`
+    # note on `synchronize`. waiting for the kernel yields to other tasks, as `synchronize`
+    # should (see the documentation on its semantics).
     f = obj.kern.f
-    event = GC.@preserve f args begin
+    GC.@preserve f args begin
         event = POCL.launch_tuple(obj.kern.kernel, args; local_size = items, global_size = groups .* items)
-        wait(event)
+        try
+            wait(event)
+        finally
+            cl.clReleaseEvent(event)
+        end
     end
-    cl.clReleaseEvent(event)
     return nothing
 end
 
