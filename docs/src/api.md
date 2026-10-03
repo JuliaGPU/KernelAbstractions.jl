@@ -15,6 +15,15 @@
 @ndrange
 ```
 
+### Reductions and scans
+
+```@docs
+@groupreduce
+@subgroupreduce
+@groupscan
+@subgroupscan
+```
+
 ## Host language
 
 !!! note

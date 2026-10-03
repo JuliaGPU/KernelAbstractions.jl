@@ -146,10 +146,12 @@ function is_scope_construct(expr::Expr)
     # expr.head === :let
 end
 
+# Whether `stmt` contains a `@synchronize`, or a collective like `@groupreduce` that all
+# work-items of the workgroup have to reach as well.
 function find_sync(stmt)
     result = Ref(false)
     postwalk(stmt) do expr
-        result[] |= is_sync(expr)
+        result[] |= is_sync(expr) || is_collective(expr)
         expr
     end
     return result[]
@@ -181,6 +183,17 @@ function split(stmts)
             continue
         end
 
+        if is_collective_stmt(stmt)
+            # executed by all work-items, the padding ones contribute the neutral element
+            loop = WorkgroupLoop(current, allocations, false, nothing)
+            push!(new_stmts, emit(loop))
+            allocations = Any[]
+            current = Any[]
+            take_line!(new_stmts)
+            push!(new_stmts, mask_collective(stmt))
+            continue
+        end
+
         has_sync = find_sync(stmt)
         if has_sync
             loop = WorkgroupLoop(current, allocations, is_sync(stmt), line)
@@ -200,6 +213,7 @@ function split(stmts)
             recurse(x) = x
             function recurse(expr::Expr)
                 expr = unblock_lines(expr)
+                is_collective(expr) && collective_error(expr)
                 if expr.head in (:if, :elseif) && find_sync(expr)
                     return split_branches(expr, recurse)
                 elseif is_scope_construct(expr) && any(find_sync, expr.args)
