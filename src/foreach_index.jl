@@ -35,6 +35,31 @@ foreach_index_kernel(backend, indices) = throw(
     )
 )
 
+# A captured variable that is assigned to after the closure was created, or in it, is stored in
+# a `Core.Box`, which a kernel cannot access. That fails to compile with an error about the
+# kernel's arguments, so catch it here with one about the variable.
+@inline function check_captures(f::F) where {F}
+    has_box(fieldtypes(F)) && boxed_capture_error(f)
+    return
+end
+
+# (`any` would not be folded by Julia 1.10)
+has_box(::Tuple{}) = false
+has_box(Ts::Tuple) = first(Ts) === Core.Box || has_box(Base.tail(Ts))
+
+@noinline function boxed_capture_error(::F) where {F}
+    names = [fieldname(F, i) for i in 1:fieldcount(F) if fieldtype(F, i) === Core.Box]
+    vars = join(("`$name`" for name in names), ", ", " and ")
+    throw(
+        ArgumentError(
+            "`foreach_index` cannot run a function that captures a variable that is reassigned " *
+                "($vars): Julia stores such a variable in a box, which a kernel cannot access. " *
+                "Capture a variable that is not reassigned instead, e.g. by wrapping the loop in " *
+                "`let $(first(names)) = $(first(names))`, and write results to an array."
+        )
+    )
+end
+
 foreach_index_ndrange(indices) = indices
 foreach_index_ndrange(::CartesianIndices{0}) = 1
 
@@ -92,8 +117,10 @@ type. Closing over a variable of the enclosing *global* scope leaves its type un
 to compile (typically with `unsupported dynamic function invocation`), which is why the example
 above wraps the loop in a function.
 
-For the same reason `f` must not assign to a captured variable, as that makes Julia box the
-capture; accumulate into a one-element array, with an atomic update if the indices race.
+For the same reason `f` cannot capture a variable that is assigned to after `f` is created, or
+in `f`, as Julia then boxes the variable. Bind the value to a new variable (e.g. with `let`)
+for `f` to capture, and accumulate results into an array, with an atomic update if the indices
+race.
 
 On the `CPU` backend `foreach_index` also launches a kernel, compiled for every new `f`. For a
 loop that runs once, or over few indices, a threaded loop (`Threads.@threads`) is cheaper.
@@ -104,6 +131,7 @@ synchronization).
 """
 function foreach_index(f::F, backend::Backend, indices; workgroupsize = nothing) where {F}
     kernel = foreach_index_kernel(backend, indices)
+    check_captures(f)
     isempty(indices) && return nothing
     kernel(f; ndrange = foreach_index_ndrange(indices), workgroupsize)
     return nothing

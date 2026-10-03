@@ -230,6 +230,12 @@ function foreach_index_testsuite(Backend, AT)
         @test_throws ArgumentError foreach_index(identity, backend, CartesianIndices((1:2:1, 1:3)))
         @test_throws ArgumentError foreach_index(identity, backend, Dict(1 => 2))
 
+        # a function capturing a boxed variable
+        s = 1
+        boxed = i -> s
+        s = 2
+        @test_throws "reassigned (`s`)" foreach_index(boxed, backend, 1:3)
+
         # a collection that is not an array has no backend, and needs the second form
         @test_throws MethodError foreach_index(identity, (1, 2, 3))
     end
