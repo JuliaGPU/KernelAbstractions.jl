@@ -190,6 +190,23 @@ function foreach_index_testsuite(Backend, AT)
         @test Array(dst) == Array(src)
     end
 
+    @testset "zero-dimensional index space" begin
+        # a single index
+        @testset "workgroupsize=$(workgroupsize)" for workgroupsize in (nothing, 4)
+            out = AT(fill(CartesianIndex(1), 1))
+            foreach_index(backend, CartesianIndices(()); workgroupsize) do I
+                @inbounds out[1] = CartesianIndex(length(I) + 2)
+            end
+            synchronize(backend)
+            @test Array(out) == [CartesianIndex(2)]
+        end
+
+        A = AT(fill(1))
+        foreach_index_fill_index!(A)
+        synchronize(backend)
+        @test Array(A)[] == 1
+    end
+
     @testset "empty index space" begin
         src = AT(Int[])
         dst = AT(Int[])

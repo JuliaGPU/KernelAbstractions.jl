@@ -17,16 +17,26 @@ end
     @inline f(I)
 end
 
+# A zero-dimensional index space has a single index. Launched as a one-dimensional `ndrange`, as
+# a workgroup size has at least one dimension.
+@kernel function foreach_index_zerodim_kernel(f)
+    @inline f(CartesianIndex())
+end
+
 # The index spaces an `ndrange` can express: a range of integers, or a product of them.
 const UnitCartesianIndices{N} = CartesianIndices{N, <:NTuple{N, AbstractUnitRange{Int}}}
 
 foreach_index_kernel(backend, ::AbstractUnitRange{<:Integer}) = foreach_index_linear_kernel(backend)
 foreach_index_kernel(backend, ::UnitCartesianIndices) = foreach_index_cartesian_kernel(backend)
+foreach_index_kernel(backend, ::CartesianIndices{0}) = foreach_index_zerodim_kernel(backend)
 foreach_index_kernel(backend, indices) = throw(
     ArgumentError(
         "`foreach_index` needs an index space that is a range of integers or a `CartesianIndices` of such ranges, got a `$(typeof(indices))`"
     )
 )
+
+foreach_index_ndrange(indices) = indices
+foreach_index_ndrange(::CartesianIndices{0}) = 1
 
 """
     foreach_index(f, A::AbstractArray, Bs::AbstractArray...)
@@ -95,7 +105,7 @@ synchronization).
 function foreach_index(f::F, backend::Backend, indices; workgroupsize = nothing) where {F}
     kernel = foreach_index_kernel(backend, indices)
     isempty(indices) && return nothing
-    kernel(f; ndrange = indices, workgroupsize)
+    kernel(f; ndrange = foreach_index_ndrange(indices), workgroupsize)
     return nothing
 end
 
