@@ -37,6 +37,8 @@ and then invoked on the arguments.
 - [`@uniform`](@ref)
 - [`@synchronize`](@ref)
 - [`@print`](@ref)
+- [`@groupreduce`](@ref)
+- [`@subgroupreduce`](@ref)
 
 # Kernel constructor
 
@@ -633,6 +635,7 @@ function __workitems_iterspace end
 end
 
 include("macros.jl")
+include("groupreduction.jl")
 include("spawn.jl")
 
 ###
