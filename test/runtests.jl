@@ -423,3 +423,11 @@ struct NewBackend <: KernelAbstractions.Backend end
 
     @test KernelAbstractions.functional(backend) === missing
 end
+
+
+# include("extensions/enzyme.jl")
+# @static if VERSION >= v"1.7.0"
+#     @testset "Enzyme" begin
+#         enzyme_testsuite(CPU, Array)
+#     end
+# end

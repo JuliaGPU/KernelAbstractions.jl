@@ -46,6 +46,24 @@ jobs:
           version: ${{ matrix.version }}
           arch: ${{ matrix.arch }}
       - uses: julia-actions/cache@v3
+      # - name: "Co-develop Enzyme and KA"
+      #   run: |
+      #     julia -e '
+      #       using Pkg
+      #       withenv("JULIA_PKG_PRECOMPILE_AUTO" => 0) do
+      #         Pkg.activate("test")
+      #         Pkg.add(["Enzyme", "EnzymeCore"])
+
+      #         # to check compatibility, also add Enzyme to the main environment
+      #         # (or Pkg.test, which merges both environments, could fail)
+      #         Pkg.activate(".")
+      #         # Try to co-develop Enzyme and KA
+      #         try
+      #           Pkg.develop([PackageSpec("Enzyme"), PackageSpec("EnzymeCore")])
+      #         catch err
+      #         end
+      #       end
+      #     '
       # Known limitation: `[sources]` is only supported from Julia 1.11 on, so on 1.10
       # the `KernelInterface = {path = "lib/KernelInterface"}` entry in Project.toml is
       # silently ignored and Pkg resolves KernelInterface from the registry instead --
