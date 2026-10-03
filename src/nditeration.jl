@@ -18,7 +18,7 @@ axis(r::Base.OneTo) = Int(length(r))
 axis(r::AbstractUnitRange) = UnitRange{Int}(r)
 
 extent(n::Integer) = Int(n)
-extent(r::AbstractUnitRange) = length(r)
+extent(r::AbstractUnitRange) = Int(length(r))
 
 axis_offset(::Integer) = 0
 axis_offset(r::AbstractUnitRange) = first(r) - 1
@@ -31,7 +31,7 @@ a `CartesianIndices`, a single range, or an integer.
 """
 extents(t::Tuple) = map(extent, t)
 extents(ci::CartesianIndices) = size(ci)
-extents(r::AbstractUnitRange) = (length(r),)
+extents(r::AbstractUnitRange) = (extent(r),)
 extents(n::Integer) = (Int(n),)
 
 """

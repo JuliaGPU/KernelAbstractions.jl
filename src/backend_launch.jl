@@ -26,7 +26,8 @@ mkcontext(kernel::Kernel, I, _ndrange, iterspace, ::Dynamic) where {Dynamic} =
 Normalize the launch arguments of `kernel`, and partition the `ndrange`. Returns the
 `ndrange` (`nothing` if it's static), the `workgroupsize` (`nothing` if it will be tuned),
 the iteration space and whether it needs bounds checks. If the workgroup size will be
-tuned, the iteration space is preliminary: it uses the `ndrange` as the workgroup size.
+tuned, the iteration space is preliminary: it uses the extents of the `ndrange` as the
+workgroup size.
 """
 function launch_config(kernel::Kernel, _ndrange, _workgroupsize)
     if _ndrange isa Integer
@@ -37,8 +38,8 @@ function launch_config(kernel::Kernel, _ndrange, _workgroupsize)
     end
 
     iterspace, dynamic = if workgroupsize(kernel) <: DynamicSize && _workgroupsize === nothing
-        # use the ndrange as preliminary workgroupsize for autotuning
-        partition(kernel, _ndrange, something(_ndrange, static_ndrange(kernel)))
+        # use the extents of the ndrange as preliminary workgroupsize for autotuning
+        partition(kernel, _ndrange, extents(something(_ndrange, static_ndrange(kernel))))
     else
         # this also checks that a given ndrange agrees with a static one
         partition(kernel, _ndrange, _workgroupsize)
