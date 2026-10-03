@@ -77,7 +77,7 @@ What a backend implements, at a glance. The docstrings below have the details.
 | **Capabilities** | | [`supports_float64`](@ref), [`supports_atomics`](@ref), [`supports_unified`](@ref), [`supports_subgroups`](@ref), [`supports_shuffle`](@ref) (all `false`) |
 | **Compilation** | [`argconvert`](@ref), [`kernel_function`](@ref), [`launch`](@ref) | |
 | **Device** | [`get_local_id`](@ref), [`get_group_id`](@ref), [`get_local_size`](@ref), [`get_num_groups`](@ref), [`localmemory`](@ref), [`barrier`](@ref) | [`get_global_id`](@ref), [`get_global_size`](@ref) (derived from the primitive queries), [`_print`](@ref KernelInterface._print) (host `print`) |
-| **Sub-groups** | if `supports_subgroups`: [`sub_group_size`](@ref), the sub-group queries, [`sub_group_barrier`](@ref); if `supports_shuffle(backend, T)`: [`shfl_down`](@ref) for `T` | |
+| **Sub-groups** | if `supports_subgroups`: [`sub_group_size`](@ref), the sub-group queries (with a constant [`get_max_sub_group_size`](@ref)), [`sub_group_barrier`](@ref), [`sub_group_any`](@ref), [`sub_group_all`](@ref), and [`sub_group_ballot`](@ref) for widths of at most 64; if `supports_shuffle(backend, T)`: [`shfl`](@ref), [`shfl_down`](@ref), [`shfl_up`](@ref), [`shfl_xor`](@ref) for primitive `T` | |
 
 Everything else, such as [`zeros`](@ref KernelInterface.zeros), [`ones`](@ref KernelInterface.ones),
 the launch-keyword handling of [`Kernel`](@ref) and [`@launch`](@ref KernelInterface.@launch),
@@ -192,7 +192,13 @@ localmemory
 ### Communication
 
 ```@docs
+shfl
 shfl_down
+shfl_up
+shfl_xor
+sub_group_any
+sub_group_all
+sub_group_ballot
 ```
 
 ### Printing

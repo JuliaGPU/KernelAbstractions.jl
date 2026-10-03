@@ -267,7 +267,9 @@ width [`sub_group_size`](@ref). See the manual for what KernelInterface guarante
 how work-groups are divided into sub-groups; a backend that can't ensure that reports
 `false`.
 
-Which types [`shfl_down`](@ref) supports is queried separately with [`supports_shuffle`](@ref).
+Sub-group support includes the votes [`sub_group_any`](@ref), [`sub_group_all`](@ref) and,
+for sub-groups of at most 64 work-items, [`sub_group_ballot`](@ref). Which types the
+shuffles support is queried separately with [`supports_shuffle`](@ref).
 
 !!! note
     Backend implementations **must** implement this function if they support sub-groups.
@@ -278,13 +280,21 @@ supports_subgroups(::Backend) = false
 """
     supports_shuffle(::Backend, ::Type{T})::Bool
 
-Whether kernels on the active device support [`shfl_down`](@ref) for values of type `T`.
+Whether kernels on the active device support the shuffles [`shfl`](@ref),
+[`shfl_down`](@ref), [`shfl_up`](@ref) and [`shfl_xor`](@ref) for values of type `T`.
+
+`isbits` structs and tuples are supported if all of their fields are.
 
 !!! note
-    Backend implementations **must** implement this function for the types they support.
-    The fallback returns `false`.
+    Backend implementations **must** implement this function for the primitive types they
+    support, with a signature that only matches those, e.g.
+    `supports_shuffle(::NewBackend, ::Type{<:Union{Int32, Float32}})`. The fallback returns
+    `false` for other primitive types, and checks the fields of other types.
 """
-supports_shuffle(::Backend, ::Type) = false
+function supports_shuffle(backend::Backend, ::Type{T}) where {T}
+    (isbitstype(T) && !isprimitivetype(T)) || return false
+    return all(i -> supports_shuffle(backend, fieldtype(T, i)), 1:fieldcount(T))
+end
 
 """
     allocate(::Backend, Type, dims...; unified=false)::AbstractArray
