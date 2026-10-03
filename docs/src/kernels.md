@@ -255,3 +255,44 @@ and `@ndrange()` returns the extents.
 
 Obtain the backend from an array with [`get_backend`](@ref) and always call [`synchronize`](@ref) before reading results on the host.
 See the [Quickstart](@ref) for a full walkthrough and the Examples section of the manual for larger patterns.
+
+## Loops without a kernel
+
+A kernel whose body is a loop over the indices of an array needs none of the kernel language
+beyond the index itself. [`foreach_index`](@ref) launches such a loop directly, with one work item
+per index of `eachindex(y, x)`:
+
+```julia
+function scale!(y, x)
+    foreach_index(y, x) do i
+        @inbounds y[i] = 2 * x[i] + 1
+    end
+    return y
+end
+```
+
+The body is an ordinary Julia function, and it receives the index a `for i in eachindex(y, x)`
+loop would: a linear index if the arrays have `IndexLinear` style, a `CartesianIndex` otherwise.
+Passing every array the body indexes makes sure the index is valid for each, and that they all
+live on the same backend. The launch is asynchronous like any other, and bounds checks are not
+elided.
+
+To loop over other indices than those of an array, give the backend and the index space, a range
+or a `CartesianIndices` like an `ndrange`. The body then receives these indices as they are,
+e.g. those of the interior of a matrix:
+
+```julia
+function smooth!(B, A)
+    interior = CartesianIndices((2:size(A, 1)-1, 2:size(A, 2)-1))
+    foreach_index(get_backend(A), interior) do I
+        i, j = Tuple(I)
+        @inbounds B[I] = (A[i-1, j] + A[i+1, j] + A[i, j-1] + A[i, j+1]) / 4
+    end
+    return B
+end
+```
+
+Because the body becomes a kernel, every value it captures must have a known type — which is why
+the examples wrap the loop in a function, and why the body must not assign to a captured variable.
+Write the kernel out with [`@kernel`](@ref) when it needs more than an index: workgroup-level
+indices, local memory, or synchronization.

@@ -50,6 +50,23 @@ function offsets_testsuite(Backend, AT)
         @test Array(out) == ref
     end
 
+    @testset "dynamic workgroupsize" begin
+        # the workgroup size is tuned, starting from the extents of the ndrange
+        @testset for ndrange in (ranges, CartesianIndices(ranges))
+            out = fresh()
+            offsets_fill_indices!(backend)(out, lo; ndrange)
+            synchronize(backend)
+            @test Array(out) == ref
+        end
+
+        @testset for ndrange in (5:20, UInt(5):UInt(20))
+            out = AT(zeros(Int, 16))
+            offsets_fill_indices!(backend)(out, (5,); ndrange)
+            synchronize(backend)
+            @test Array(out) == 1:16
+        end
+    end
+
     @testset "mixed extents and ranges" begin
         out = fresh()
         offsets_fill_indices!(backend, (4, 4))(out, (1, 2); ndrange = (8, 2:11))

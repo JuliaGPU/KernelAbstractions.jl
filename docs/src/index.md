@@ -153,6 +153,8 @@ end
 - The `CPU` backend runs kernels on as many threads as Julia was started with (`julia -t`),
   like the thread-based `CPU` backend of 0.9 did, and no longer on one thread per hardware
   thread. Set `JULIA_KA_CPU_THREADS` to use a different number of threads; see [`CPU`](@ref).
+- `foreach_index(f, A)` runs `f` once per index of the array `A` without writing a kernel out,
+  and `foreach_index(f, backend, indices)` once per index in a range or `CartesianIndices`.
 
 ## Semantic differences
 
