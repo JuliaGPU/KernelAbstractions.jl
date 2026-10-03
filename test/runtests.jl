@@ -423,3 +423,9 @@ struct NewBackend <: KernelAbstractions.Backend end
 
     @test KernelAbstractions.functional(backend) === missing
 end
+
+@testset "Deprecated GPU alias" begin
+    @test KernelAbstractions.GPU === KernelAbstractions.Backend
+    @test CPU() isa KernelAbstractions.GPU
+    @test NewBackend <: KernelAbstractions.GPU
+end
