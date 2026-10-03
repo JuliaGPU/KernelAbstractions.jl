@@ -150,6 +150,9 @@ end
   backends, and no longer as the original exception (e.g., a `BoundsError`). Depending on
   the debug level (`julia -g`), the kernel prints which exception it threw, on which
   work-item, and with `-g2` a backtrace.
+- The `CPU` backend runs kernels on as many threads as Julia was started with (`julia -t`),
+  like the thread-based `CPU` backend of 0.9 did, and no longer on one thread per hardware
+  thread. Set `JULIA_KA_CPU_THREADS` to use a different number of threads; see [`CPU`](@ref).
 
 ## Semantic differences
 

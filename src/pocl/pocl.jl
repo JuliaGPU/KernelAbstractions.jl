@@ -123,6 +123,8 @@ function __init__()
     initialization_world[] = Base.get_world_counter()
     # there shouldn't be any session from precompilation, see `reset_session_state!`
     Base.@atomic session_cache.session = nothing
+    # the precompilation workload may have initialized PoCL in another process
+    cl.initialized[] = false
     return
 end
 

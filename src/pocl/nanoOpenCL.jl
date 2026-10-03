@@ -750,39 +750,48 @@ end
 
 # Init
 
-# lazy initialization
-const initialized = Ref{Bool}(false)
+# lazy initialization, before the first API call
+const initialized = Threads.Atomic{Bool}(false)
+const initialization_lock = ReentrantLock()
 @noinline function initialize()
-    initialized[] = true
-    return nothing
+    @lock initialization_lock begin
+        initialized[] && return
+        # PoCL sizes its thread pool when it initializes its devices, which the first call
+        # querying them does. don't use the wrappers here, as they'd call `initialize()`.
+        threads = cpu_threads()
+        if threads !== nothing
+            platform = Ref{cl_platform_id}()
+            @gcsafe_ccall libopencl.POclGetPlatformIDs(
+                1::cl_uint, platform::Ptr{cl_platform_id}, C_NULL::Ptr{cl_uint}
+            )::cl_int
+            err = @gcsafe_ccall libopencl.POclSetCPUMaxComputeUnitsPOCL(
+                platform[]::cl_platform_id, threads::cl_uint
+            )::cl_int
+            err == CL_SUCCESS || throw(CLError(err))
+        end
+        initialized[] = true
+    end
+    return
+end
 
-    # @static if Sys.iswindows()
-    #     if is_high_integrity_level()
-    #         @warn """Running at high integrity level, preventing OpenCL.jl from loading drivers from JLLs.
-
-    #         Only system drivers will be available. To enable JLL drivers, do not run Julia as an administrator."""
-    #     end
-    # end
-
-    # ocd_filenames = join(OpenCL_jll.drivers, ':')
-    # if haskey(ENV, "OCL_ICD_FILENAMES")
-    #     ocd_filenames *= ":" * ENV["OCL_ICD_FILENAMES"]
-    # end
-
-    # return withenv("OCL_ICD_FILENAMES" => ocd_filenames) do
-    #     num_platforms = Ref{Cuint}()
-    #     @ccall libopencl.POclGetPlatformIDs(
-    #         0::cl_uint, C_NULL::Ptr{cl_platform_id},
-    #         num_platforms::Ptr{cl_uint}
-    #     )::cl_int
-
-    #     if num_platforms[] == 0 && isempty(OpenCL_jll.drivers)
-    #         @error """No OpenCL drivers available, either system-wide or provided by a JLL.
-
-    #         Please install a system-wide OpenCL driver, or load one together with OpenCL.jl,
-    #         e.g., by doing `using OpenCL, pocl_jll`."""
-    #     end
-    # end
+# by default, PoCL starts a worker thread for every hardware thread, which oversubscribes
+# the CPU when Julia uses several processes (e.g., with MPI), and makes small kernels pay
+# for waking up all of them. so default to as many workers as Julia has threads, unless
+# PoCL has been configured with its own environment variables. returns `nothing` to leave
+# the choice to PoCL.
+const pocl_thread_variables =
+    ("POCL_MAX_PTHREAD_COUNT", "POCL_CPU_MAX_CU_COUNT", "POCL_MAX_COMPUTE_UNITS")
+function cpu_threads()
+    str = get(ENV, "JULIA_KA_CPU_THREADS", nothing)
+    if str !== nothing
+        threads = tryparse(Int, str)
+        if threads === nothing || !(1 <= threads <= typemax(Cint))
+            error("Invalid value for JULIA_KA_CPU_THREADS: $(repr(str)); expected a positive integer")
+        end
+        return threads
+    end
+    any(var -> haskey(ENV, var), pocl_thread_variables) && return nothing
+    return Threads.nthreads(:default)
 end
 
 # Julia API
