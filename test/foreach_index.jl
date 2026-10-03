@@ -58,7 +58,7 @@ end
 
 function foreach_index_sum_range!(out, range, backend)
     foreach_index(backend, range) do i
-        @inbounds @atomic out[1] += i
+        @inbounds @atomic out[1] += i % eltype(out)
     end
     return out
 end
@@ -112,7 +112,8 @@ function foreach_index_testsuite(Backend, AT)
 
     @testset "index space without device memory" begin
         # a range carries no backend of its own, so it has to be given
-        out = AT(zeros(Int, 1))
+        # (32-bit atomics, as not every backend has 64-bit ones)
+        out = AT(zeros(Int32, 1))
         foreach_index_sum_range!(out, 1:100, backend)
         synchronize(backend)
         @test Array(out)[1] == sum(1:100)
@@ -214,7 +215,7 @@ function foreach_index_testsuite(Backend, AT)
         synchronize(backend)
         @test isempty(Array(dst))
 
-        out = AT(zeros(Int, 1))
+        out = AT(zeros(Int32, 1))
         foreach_index_sum_range!(out, 5:4, backend)
         foreach_index_record!(out, backend, CartesianIndices((1:2, 3:2)))
         synchronize(backend)
