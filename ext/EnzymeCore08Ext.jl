@@ -25,7 +25,7 @@ _augmented_return(::Kernel, subtape, arg_refs, tape_type) =
     AugmentedReturn{Nothing, Nothing, Any}(nothing, nothing, (subtape, arg_refs, tape_type))
 
 function _create_tape_kernel(
-        kernel::Kernel{<:GPU},
+        kernel::Kernel,
         Mode,
         FT,
         ctxTy,
