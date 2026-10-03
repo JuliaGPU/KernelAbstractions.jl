@@ -109,7 +109,37 @@ struct WorkgroupLoop
     sync_line::Union{Nothing, LineNumberNode}
 end
 
-is_sync(expr) = @capture(expr, @synchronize() | @synchronize(a_))
+# Whether `expr` calls the kernel-language macro `name`. Also recognizes qualified uses,
+# e.g. `KA.@synchronize()`, which would otherwise not be split or hoisted.
+function is_macrocall(expr, name::Symbol)
+    isexpr(expr, :macrocall) || return false
+    callee = expr.args[1]
+    if isexpr(callee, :.)
+        callee = callee.args[end]
+        callee isa QuoteNode && (callee = callee.value)
+    elseif callee isa GlobalRef
+        callee = callee.name
+    end
+    return callee === name
+end
+
+is_sync(expr) = is_macrocall(expr, Symbol("@synchronize"))
+
+# Split the branches of an `if` that contains a `@synchronize`. The conditions run on all
+# lanes, but every branch needs to be guarded, including those without a `@synchronize`.
+function split_branches(expr, recurse)
+    cond = expr.args[1]
+    find_sync(cond) && (cond = recurse(cond))
+    branches = map(expr.args[2:end]) do branch
+        if isexpr(branch, :elseif)
+            split_branches(branch, recurse)
+        else
+            stmts = isexpr(branch, :block) ? branch.args : Any[branch]
+            Expr(:block, split(stmts)...)
+        end
+    end
+    return Expr(expr.head, cond, branches...)
+end
 
 function is_scope_construct(expr::Expr)
     return expr.head === :block # ||
@@ -170,7 +200,9 @@ function split(stmts)
             recurse(x) = x
             function recurse(expr::Expr)
                 expr = unblock_lines(expr)
-                if is_scope_construct(expr) && any(find_sync, expr.args)
+                if expr.head in (:if, :elseif) && find_sync(expr)
+                    return split_branches(expr, recurse)
+                elseif is_scope_construct(expr) && any(find_sync, expr.args)
                     return Expr(expr.head, split(expr.args)...)
                 else
                     return Expr(expr.head, map(recurse, expr.args)...)
@@ -181,23 +213,25 @@ function split(stmts)
             continue
         end
 
-        if @capture(stmt, @uniform x_)
+        if is_macrocall(stmt, Symbol("@uniform"))
             take_line!(allocations)
             push!(allocations, stmt)
             continue
-        elseif @capture(stmt, @private lhs_ = rhs_)
+        elseif is_macrocall(stmt, Symbol("@private")) && length(stmt.args) == 3 &&
+                isexpr(stmt.args[3], :(=))
+            # `@private lhs = rhs`
             take_line!(allocations)
-            push!(allocations, :($lhs = $rhs))
+            push!(allocations, stmt.args[3])
             continue
         elseif @capture(stmt, lhs_ = rhs_ | (vs__, lhs_ = rhs_))
-            if @capture(rhs, @localmem(args__) | @uniform(args__))
+            if is_macrocall(rhs, Symbol("@localmem")) || is_macrocall(rhs, Symbol("@uniform"))
                 take_line!(allocations)
                 push!(allocations, stmt)
                 continue
-            elseif @capture(rhs, @private(T_, dims_))
+            elseif is_macrocall(rhs, Symbol("@private")) && length(rhs.args) == 4
                 # Implement the legacy `mem = @private T dims` as
                 # mem = Scratchpad(T, Val(dims))
-
+                T, dims = rhs.args[3], rhs.args[4]
                 if dims isa Integer
                     dims = (dims,)
                 end
@@ -212,8 +246,8 @@ function split(stmts)
         push!(current, stmt)
     end
 
-    # everything since the last `@synchronize`
-    if !isempty(current)
+    # everything since the last `@synchronize`, including hoisted statements
+    if !isempty(current) || !isempty(allocations)
         loop = WorkgroupLoop(current, allocations, false, nothing)
         push!(new_stmts, emit(loop))
     end

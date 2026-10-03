@@ -185,25 +185,19 @@ end
     @localmem T dims
 
 Declare storage that is local to a workgroup.
+
+Like [`@uniform`](@ref), the allocation is also executed by padding work-items that fall
+outside of the `ndrange`.
 """
 macro localmem(T, dims)
-    # Stay in sync with CUDAnative
-    id = gensym("static_shmem")
-
-    return :($SharedMemory($(esc(T)), Val($(esc(dims))), Val($(QuoteNode(id)))))
+    return :($KI.localmemory($(esc(T)), Val($(esc(dims)))))
 end
 
 """
     @private T dims
 
-Declare storage that is local to each item in the workgroup. This can be safely used
-across [`@synchronize`](@ref) statements. On a CPU, this will allocate additional implicit
-dimensions to ensure correct localization.
-
-For storage that only persists between `@synchronize` statements, an `MArray` can be used
-instead.
-
-See also [`@uniform`](@ref).
+Declare storage that is private to each work-item. It is preserved across
+[`@synchronize`](@ref) statements.
 """
 macro private(T, dims)
     if dims isa Integer
@@ -213,10 +207,10 @@ macro private(T, dims)
 end
 
 """
-    @private mem = 1
+    @private var = expr
 
-Creates a private local of `mem` per item in the workgroup. This can be safely used
-across [`@synchronize`](@ref) statements.
+Equivalent to [`@uniform`](@ref) `var = expr`. Ordinary variables are already private to
+each work-item, and keep their value across [`@synchronize`](@ref) statements.
 """
 macro private(expr)
     return esc(expr)
@@ -225,8 +219,31 @@ end
 """
     @uniform expr
 
-`expr` is evaluated outside the workitem scope. This is useful for variable declarations
-that span workitems, or are reused across `@synchronize` statements.
+Evaluate `expr` on every work-item of the workgroup, including padding work-items that
+fall outside of the `ndrange`. This only applies to `@uniform` statements at the top level
+of the kernel, or directly in control flow that contains a [`@synchronize`](@ref).
+Elsewhere, `@uniform` has no effect.
+
+When the `ndrange` is not a multiple of the workgroup size, `@kernel` only runs the
+kernel body on work-items inside the `ndrange`. Padding work-items do still need to
+reach every [`@synchronize`](@ref), so control flow that contains a `@synchronize`
+runs on all work-items. Values used by such control flow, like the bounds of a loop,
+must therefore be computed with `@uniform`:
+
+```julia
+@kernel function f(A, n)
+    i = @index(Global)
+    @uniform iterations = 2n
+    for j in 1:iterations
+        A[i] += j
+        @synchronize()
+    end
+end
+```
+
+`@uniform` statements are hoisted to the start of the code between two `@synchronize`
+statements. `expr` must be safe to evaluate on padding work-items, so it should not
+depend on the work-item's index.
 """
 macro uniform(value)
     return esc(value)
@@ -239,8 +256,11 @@ After a `@synchronize` statement all read and writes to global and local memory
 from each thread in the workgroup are visible in from all other threads in the
 workgroup.
 
-!!! note
-    `@synchronize()` must be encountered by all workitems of a work-group executing the kernel or by none at all.
+`@synchronize` must be reached by all work-items of a workgroup. To ensure that padding
+work-items outside of the `ndrange` reach it too, `@kernel` treats it specially, so it
+has to appear directly in the kernel body, and not in a function called by the kernel
+(unless the kernel uses `unsafe_indices=true`). Control flow containing it must be
+uniform across the workgroup, see [`@uniform`](@ref).
 """
 macro synchronize()
     return :($__synchronize())
@@ -620,7 +640,6 @@ include("spawn.jl")
 ###
 
 function Scratchpad end
-SharedMemory(::Type{T}, dims::Val{Dims}, id::Val{Id}) where {T, Dims, Id} = KI.localmemory(T, dims)
 
 __synchronize() = KI.barrier()
 

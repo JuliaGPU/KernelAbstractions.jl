@@ -31,6 +31,7 @@ include("atomics.jl")
 include("hostinterface.jl")
 include("localmem.jl")
 include("private.jl")
+include("barriers.jl")
 include("unroll.jl")
 include("nditeration.jl")
 include("offsets.jl")
@@ -67,6 +68,10 @@ function testsuite(backend, backend_str, backend_mod, AT, DAT; skip_tests = Set{
 
     @conditional_testset "Private" skip_tests begin
         private_testsuite(backend, AT)
+    end
+
+    @conditional_testset "Barriers" skip_tests begin
+        barrier_testsuite(backend, AT)
     end
 
     @conditional_testset "Unroll" skip_tests begin
