@@ -25,6 +25,7 @@ SPIRV_Tools_jll = "6ac6d60f-d740-5983-97d7-a4482c0689f4"
 pocl_standalone_jll = "54f56a70-6062-5590-a942-1226658f6c83"
 
 [weakdeps]
+EnzymeCore = "f151be2c-9106-41f4-ab19-57ee4f262869"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
@@ -33,6 +34,7 @@ StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 KernelInterface = {path = "lib/KernelInterface"}
 
 [extensions]
+EnzymeExt = "EnzymeCore"
 LinearAlgebraExt = "LinearAlgebra"
 SparseArraysExt = "SparseArrays"
 StaticArraysExt = "StaticArrays"
@@ -40,6 +42,7 @@ StaticArraysExt = "StaticArrays"
 [compat]
 Adapt = "0.4, 1.0, 2.0, 3.0, 4"
 Atomix = "1.2.1"
+EnzymeCore = "0.7, 0.8.1"
 GPUCompiler = "2.10"
 GPUToolbox = "3.3.2"
 KernelInterface = "0.4"
@@ -60,5 +63,6 @@ julia = "1.10"
 pocl_standalone_jll = "7.2.1"
 
 [extras]
+EnzymeCore = "f151be2c-9106-41f4-ab19-57ee4f262869"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
