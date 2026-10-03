@@ -103,6 +103,16 @@ function Base.show(io::IO, ::Type{GeneratedKernelError{Msg}}) where {Msg}
     return print(io, "KernelAbstractions.GeneratedKernelError(", repr(String(Msg)), ")")
 end
 
+# The left-hand side of a short-form method definition, `f(x) = ...`, possibly
+# wrapped in `where` clauses and a return type annotation: `f(x)::T where {T} = ...`.
+function is_short_def_lhs(lhs)
+    while isexpr(lhs, :where) || isexpr(lhs, :(::))
+        isempty(lhs.args) && return false
+        lhs = lhs.args[1]
+    end
+    return isexpr(lhs, :call)
+end
+
 # Runs inside the generator: makes sure the generated body is something Julia
 # accepts as the result of a generated function. Julia itself only rejects a
 # closure, comprehension or generator when lowering the body, which happens
@@ -113,7 +123,7 @@ function check_generated(mod::Module, body)
     MacroTools.postwalk(ex) do node
         if isexpr(node, :->) || isexpr(node, :function) || isexpr(node, :do) ||
                 isexpr(node, :comprehension) || isexpr(node, :generator) ||
-                isexpr(node, :flatten) || (isexpr(node, :(=)) && isexpr(node.args[1], :call))
+                isexpr(node, :flatten) || (isexpr(node, :(=)) && is_short_def_lhs(node.args[1]))
             found = replace(string(MacroTools.striplines(node)), r"\s+" => " ")
             error(
                 "the body of a `generated=true` kernel cannot contain a closure, " *
@@ -143,7 +153,16 @@ function generated_error_message(err)
     return first(Base.split(msg, '\n'))
 end
 
-generated_error_body(err) = :(return $(GeneratedKernelError(generated_error_message(err))))
+function generated_error_body(err)
+    msg = try
+        generated_error_message(err)
+    catch
+        string(typeof(err))
+    end
+    # A `Symbol` cannot contain NUL characters.
+    msg = replace(msg, '\0' => "\\0")
+    return :(return $(GeneratedKernelError(msg)))
+end
 
 # The easy case, transform the function for GPU execution
 # - mark constant arguments by applying `constify`.
