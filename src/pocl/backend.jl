@@ -174,9 +174,11 @@ function KI.multiprocessor_count(::POCLBackend)::Int
 end
 
 KI.supports_subgroups(::POCLBackend) = device_limits().sub_group_size > 0
-function KI.supports_shuffle(backend::POCLBackend, ::Type{T}) where {T}
+# the types `sub_group_shuffle` supports; other types are shuffled field by field
+const ShuffleTypes = Union{SPIRVIntrinsics.gentypes...}
+
+function KI.supports_shuffle(backend::POCLBackend, ::Type{T}) where {T <: ShuffleTypes}
     KI.supports_subgroups(backend) || return false
-    T in SPIRVIntrinsics.gentypes || return false
     T === Float64 && return "cl_khr_fp64" in device().extensions
     T === Float16 && return "cl_khr_fp16" in device().extensions
     return true
@@ -247,8 +249,25 @@ end
     sub_group_barrier(POCL.LOCAL_MEM_FENCE | POCL.GLOBAL_MEM_FENCE)
 end
 
-@device_override function KI.shfl_down(val::T, offset::Integer) where {T}
-    sub_group_shuffle(val, get_sub_group_local_id() + offset)
+@device_override KI.shfl(val::T, lane::Integer) where {T <: ShuffleTypes} =
+    POCL.shuffle(val, lane)
+
+@device_override KI.shfl_down(val::T, offset::Integer) where {T <: ShuffleTypes} =
+    POCL.shuffle(val, get_sub_group_local_id() + offset)
+
+@device_override KI.shfl_up(val::T, offset::Integer) where {T <: ShuffleTypes} =
+    POCL.shuffle(val, get_sub_group_local_id() - offset)
+
+@device_override KI.shfl_xor(val::T, mask::Integer) where {T <: ShuffleTypes} =
+    sub_group_shuffle_xor(val, mask % UInt32)
+
+@device_override KI.sub_group_any(pred::Bool) = POCL.sub_group_any(pred)
+
+@device_override KI.sub_group_all(pred::Bool) = POCL.sub_group_all(pred)
+
+@device_override function KI.sub_group_ballot(pred::Bool)
+    mask = POCL.sub_group_ballot(pred)
+    return UInt64(mask[1].value) | (UInt64(mask[2].value) << 32)
 end
 
 @device_override @inline function KI._print(args...)

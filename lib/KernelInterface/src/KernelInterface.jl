@@ -31,7 +31,9 @@ include("host.jl")
             :get_group_id, :get_num_groups,
             :get_sub_group_size, :get_max_sub_group_size, :get_num_sub_groups,
             :get_sub_group_id, :get_sub_group_local_id,
-            :localmemory, :shfl_down, :barrier, :sub_group_barrier, :_print,
+            :localmemory, :shfl, :shfl_down, :shfl_up, :shfl_xor,
+            :sub_group_any, :sub_group_all, :sub_group_ballot,
+            :barrier, :sub_group_barrier, :_print,
             # compilation and launch
             :Kernel, :kernel_function, :argconvert, :launch, Symbol("@launch"),
             :launch_configuration, :max_work_group_size, :max_work_group_dims,
