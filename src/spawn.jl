@@ -54,6 +54,12 @@ more than one device implement this with a cross-device
     Order later work by waiting on the task, or by spawning again.
 
 !!! note
+    The ordering is between work queued on `backend`; it does not wait for that work on the
+    host. Before `expr` accesses the results of the spawning task's work through something
+    that doesn't queue on `backend`, e.g., by passing a buffer to MPI, call
+    [`synchronize`](@ref) to wait until it has finished.
+
+!!! note
     Prefer `device=` over calling [`device!`](@ref KernelAbstractions.device!) inside
     `expr`. A `device!` in the body carries no ordering of its own, so work queued after it
     is ordered neither against the spawning task nor against what the body queued before
