@@ -44,6 +44,7 @@ include("convert.jl")
 include("specialfunctions.jl")
 include("random.jl")
 include("spawn.jl")
+include("groupreduce.jl")
 
 function testsuite(backend, backend_str, backend_mod, AT, DAT; skip_tests = Set{String}())
     @conditional_testset "Unittests" skip_tests begin
@@ -116,6 +117,10 @@ function testsuite(backend, backend_str, backend_mod, AT, DAT; skip_tests = Set{
 
     @conditional_testset "Spawn" skip_tests begin
         spawn_testsuite(backend, AT)
+    end
+
+    @conditional_testset "Group reductions" skip_tests begin
+        groupreduce_testsuite(backend, AT)
     end
 
     return
