@@ -145,6 +145,11 @@ end
   was a subtype), and backends now subtype `KernelAbstractions.Backend` directly. Code
   dispatching on `::GPU` should dispatch on `::Backend`, on concrete backend types, or on a
   capability such as `KernelAbstractions.supports_float64`.
+- An exception thrown in a kernel on the `CPU` backend is reported as a
+  `KernelAbstractions.POCL.KernelException` when the kernel has completed, like on GPU
+  backends, and no longer as the original exception (e.g., a `BoundsError`). Depending on
+  the debug level (`julia -g`), the kernel prints which exception it threw, on which
+  work-item, and with `-g2` a backtrace.
 
 ## Semantic differences
 

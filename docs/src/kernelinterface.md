@@ -293,11 +293,9 @@ optional methods where it can do better than the fallback. In particular:
    ```julia
    function KI.launch(k::KI.Kernel{POCLBackend}, groups::Dims{3}, items::Dims{3}, args::Tuple)
        f = k.kern.f
-       event = GC.@preserve f args begin
-           event = POCL.launch_tuple(k.kern.kernel, args; local_size = items, global_size = groups .* items)
-           wait(event)
-       end
-       cl.clReleaseEvent(event)
+       GC.@preserve f POCL.launch_and_wait(
+           k.kern.kernel, args; local_size = items, global_size = groups .* items
+       )
        return nothing
    end
    ```

@@ -115,6 +115,66 @@ end
     end
 end
 
+@testset "POCL exceptions" begin
+    @kernel function exception_kernel!(A)
+        I = @index(Global, Linear)
+        A[I + 1] = 1
+    end
+    exception_opencl!(A) = (A[POCL.get_global_id() + 1] = 1; return)
+    # the device prints details about the exception
+    quietly(f) = redirect_stdout(f, devnull)
+
+    A = zeros(Int, 4)
+    @test_throws POCL.KernelException quietly(() -> exception_kernel!(CPU())(A; ndrange = 4))
+    @test A == [0, 1, 1, 1]
+    @test_throws POCL.KernelException quietly(() -> @opencl global_size = 4 exception_opencl!(A))
+
+    # launches after it are fine
+    exception_kernel!(CPU())(A; ndrange = 3)
+
+    # and launches from other tasks don't see it
+    function launch(ndrange)
+        try
+            exception_kernel!(CPU())(zeros(Int, 4); ndrange)
+            return false
+        catch err
+            err isa POCL.KernelException || rethrow()
+            return true
+        end
+    end
+    failing, succeeding = quietly() do
+        tasks = (@async([launch(4) for _ in 1:10]), @async([launch(3) for _ in 1:10]))
+        fetch.(tasks)
+    end
+    @test all(failing)
+    @test !any(succeeding)
+end
+
+@testset "POCL exception output" begin
+    exception_kernel!(A) = (A[POCL.get_global_id() + 4] = 1; return)
+    function output(debug_level)
+        return mktemp() do path, io
+            redirect_stdout(io) do
+                # in many work-groups, which all throw
+                @test_throws POCL.KernelException @opencl global_size = 64 local_size = 1 debug_level exception_kernel!(zeros(Int, 4))
+                Libc.flush_cstdio()
+            end
+            close(io)
+            read(path, String)
+        end
+    end
+
+    @test isempty(output(0))
+    # of all work-items that throw, only one reports the exception
+    out = output(1)
+    @test count("ERROR: ", out) == 1
+    @test occursin("BoundsError", out)
+    out = output(2)
+    @test count("ERROR: ", out) == 1
+    @test occursin("Stacktrace:", out)
+    @test occursin("throw_boundserror", out)
+end
+
 @testset "POCL compilation cache" begin
     mod = @eval module $(gensym())
     @noinline child() = return

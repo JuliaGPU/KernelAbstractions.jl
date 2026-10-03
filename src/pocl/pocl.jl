@@ -136,6 +136,7 @@ function reset_session_state!()
         Base.@atomic session_cache.session = nothing
     end
     delete!(task_local_storage(), :POCLQueue)
+    delete!(task_local_storage(), :POCLExceptionInfo)
     return
 end
 
