@@ -18,8 +18,7 @@ using KernelInterface: KernelInterface, Backend, get_backend, functional, synchr
 import KernelInterface as KI
 export KernelInterface
 
-# `GPU` was removed in 0.10: it did not mean GPU hardware (the `CPU` backend subtyped it),
-# and backends now subtype `Backend` directly. Keep the name working for code written
+# `GPU` is deprecated in 0.10:  and backends ends now subtype `Backend` directly. Keep the name working for code written
 # against 0.9, both `x::GPU` and `struct MyBackend <: GPU`.
 Base.@deprecate_binding GPU Backend
 
