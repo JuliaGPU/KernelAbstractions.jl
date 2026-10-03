@@ -244,6 +244,65 @@ function shfl_down_lanes_kernel(out, ::Type{T}, offset) where {T}
     return
 end
 
+# Every lane reads the lane `shift` further, wrapping around: the rotation of a tile.
+function shfl_rotate_kernel(out, a::AbstractArray{T}, shift) where {T}
+    lane = KI.get_sub_group_local_id()
+    width = KI.get_sub_group_size()
+    val = @inbounds a[lane]
+    @inbounds out[lane] = KI.shfl(val, mod1(lane + shift, width))
+    return
+end
+
+function shfl_up_lanes_kernel(out, ::Type{T}, offset) where {T}
+    lane = KI.get_sub_group_local_id()
+    shuffled = KI.shfl_up(T(lane), offset)
+    @inbounds out[lane] = shuffled
+    return
+end
+
+# An all-reduce with a butterfly: every lane gets the sum of the sub-group. `N` is the
+# width, and the work-group is one sub-group.
+function shfl_xor_sum_kernel(out, a, ::Val{N}) where {N}
+    lane = KI.get_sub_group_local_id()
+    val = @inbounds a[lane]
+    mask = N >> 1
+    while mask > 0
+        val += KI.shfl_xor(val, mask)
+        mask >>= 1
+    end
+    @inbounds out[lane] = val
+    return
+end
+
+struct ShuffleStruct
+    a::Float32
+    b::Int64
+    c::NTuple{3, Int32}
+end
+
+function shfl_struct_kernel(out, a)
+    lane = KI.get_sub_group_local_id()
+    width = KI.get_sub_group_size()
+    val = @inbounds a[lane]
+    @inbounds out[lane] = KI.shfl(val, mod1(lane + 1, width))
+    return
+end
+
+function vote_kernel(out, pred)
+    lane = KI.get_sub_group_local_id()
+    p = @inbounds pred[lane]
+    any = KI.sub_group_any(p)
+    all = KI.sub_group_all(p)
+    ballot = KI.sub_group_ballot(p)
+    @inbounds begin
+        out[lane, 1] = any
+        out[lane, 2] = all
+        out[lane, 3] = ballot
+        out[lane, 4] = KI.get_max_sub_group_size()
+    end
+    return
+end
+
 # Every lane writes local and global memory, and reads another lane's write after a
 # sub-group barrier. `N` is the sub-group width; the work-group is one sub-group.
 function sub_group_barrier_kernel(scratch, out, ::Val{N}) where {N}
@@ -696,6 +755,71 @@ function interface_testsuite(backend::KI.Backend, AT)
             end
         end
 
+        @testset "shuffles" begin
+            candidates = (Int32, Int64, UInt32, Float32, Float64)
+            types = filter(T -> KI.supports_shuffle(backend, T), candidates)
+            @testset "$T" for T in types
+                a = T.(rand(1:100, sg_size))
+                @testset "shfl, shift $shift" for shift in unique((0, 1, sg_size - 1))
+                    out = AT(zeros(T, sg_size))
+                    KI.@launch backend workgroupsize = sg_size shfl_rotate_kernel(out, AT(a), shift)
+                    KI.synchronize(backend)
+                    @test Array(out) == circshift(a, -shift)
+                end
+
+                @testset "shfl_up, offset $offset" for offset in unique((1, 3, sg_size ÷ 2))
+                    1 <= offset < sg_size || continue
+                    out = AT(zeros(T, sg_size))
+                    KI.@launch backend workgroupsize = sg_size shfl_up_lanes_kernel(out, T, offset)
+                    KI.synchronize(backend)
+                    @test Array(out)[(offset + 1):end] == T.(1:(sg_size - offset))
+                end
+
+                if ispow2(sg_size)
+                    out = AT(zeros(T, sg_size))
+                    KI.@launch backend workgroupsize = sg_size shfl_xor_sum_kernel(out, AT(a), Val(sg_size))
+                    KI.synchronize(backend)
+                    @test all(==(sum(a)), Array(out))
+                end
+            end
+
+            @testset "structs" begin
+                T = ShuffleStruct
+                @test KI.supports_shuffle(backend, T) ==
+                    all(S -> KI.supports_shuffle(backend, S), (Float32, Int64, Int32))
+                @test !KI.supports_shuffle(backend, Ref{Int})
+                if KI.supports_shuffle(backend, T)
+                    a = [T(i, -i, (i, 2i, 3i)) for i in 1:sg_size]
+                    out = AT(fill(T(0, 0, (0, 0, 0)), sg_size))
+                    KI.@launch backend workgroupsize = sg_size shfl_struct_kernel(out, AT(a))
+                    KI.synchronize(backend)
+                    @test Array(out) == circshift(a, -1)
+                end
+            end
+        end
+
+        @testset "votes" begin
+            patterns = (
+                "none" => falses(sg_size),
+                "all" => trues(sg_size),
+                "some" => [i % 3 == 1 for i in 1:sg_size],
+                "last" => [i == sg_size for i in 1:sg_size],
+            )
+            @testset "$name" for (name, pred) in patterns
+                out = AT(zeros(UInt64, sg_size, 4))
+                KI.@launch backend workgroupsize = sg_size vote_kernel(out, AT(collect(pred)))
+                KI.synchronize(backend)
+                out = Array(out)
+                @test all(==(any(pred)), out[:, 1])
+                @test all(==(all(pred)), out[:, 2])
+                @test all(==(sg_size), out[:, 4])
+                if sg_size <= 64
+                    mask = reduce(|, (UInt64(1) << (i - 1) for i in 1:sg_size if pred[i]); init = UInt64(0))
+                    @test all(==(mask), out[:, 3])
+                end
+            end
+        end
+
         @testset "shfl_down" begin
             candidates = (
                 Int8, Int16, Int32, Int64, UInt8, UInt16, UInt32, UInt64,
@@ -751,6 +875,8 @@ function contract_testsuite(backend::KI.Backend, AT)
     @test hasmethod(KI.max_num_groups, Tuple{B})
     if KI.supports_subgroups(backend)
         @test hasmethod(KI.sub_group_size, Tuple{B})
+        # the device functions are overlays, so they can't be checked here; the sub-group
+        # testsuite runs them
     end
     return
 end
