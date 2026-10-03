@@ -39,6 +39,15 @@ which backends can support with two optional functions:
   `wait(task)` in any other task implies that all work queued by the spawned task has
   completed.
 
+Backends that track which queue last used an array, and synchronize when another queue
+uses it, **should** treat `wait_event` as establishing that order: as far as ordering is
+concerned, data whose last use the event covers can be used on the waiting queue without
+synchronizing the queue that used it (other reasons to synchronize, e.g., making memory
+accessible from another device, still apply).
+Otherwise, the spawned task's first use of an array shared with its parent waits for
+everything the parent has queued, including work queued after `@spawn`, defeating the
+point of using separate queues.
+
 A new Julia task does not inherit the device of the task that spawned it: backends keep the
 active device in task-local state, which Julia does not copy into a child task, so the task
 Backends with more than one device
