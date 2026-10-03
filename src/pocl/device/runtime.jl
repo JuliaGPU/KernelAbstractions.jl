@@ -122,44 +122,19 @@ end
 # then get propagated across function calls to the caller.
 
 function additional_arg_intr(mod::LLVM.Module, T_state, name)
-    state_intr = if haskey(functions(mod), "julia.opencl.$name")
-        functions(mod)["julia.opencl.$name"]
-    else
-        LLVM.Function(mod, "julia.opencl.$name", LLVM.FunctionType(T_state))
+    return get!(mod.functions, "julia.opencl.$name") do
+        state_intr = LLVM.Function(mod, "julia.opencl.$name", LLVM.FunctionType(T_state))
+        state_intr.memory_effects = MemoryEffects(:none)
+        state_intr
     end
-    push!(function_attributes(state_intr), EnumAttribute("readnone", 0))
-
-    return state_intr
 end
 
 # run-time equivalent
-function additional_arg_value(state, name)
-    return @dispose ctx = Context() begin
-        T_state = convert(LLVMType, state)
-
-        # create function
-        llvm_f, _ = create_function(T_state)
-        mod = LLVM.parent(llvm_f)
-
-        # get intrinsic
-        state_intr = additional_arg_intr(mod, T_state, name)
-        state_intr_ft = function_type(state_intr)
-
-        # generate IR
-        @dispose builder = IRBuilder() begin
-            entry = BasicBlock(llvm_f, "entry")
-            position!(builder, entry)
-
-            val = call!(builder, state_intr_ft, state_intr, Value[], name)
-
-            ret!(builder, val)
-        end
-
-        call_function(llvm_f, state)
-    end
+@llvmgenerated builder function additional_arg_value(::Type{T}, ::Val{name})::T where {T, name}
+    state_intr = additional_arg_intr(current_module(builder), convert(LLVMType, T), name)
+    call!(builder, state_intr.function_type, state_intr, Value[], String(name))
 end
 
 for name in [:random_keys, :random_counters]
-    @eval @inline @generated $name() =
-        additional_arg_value(LLVMPtr{UInt32, AS.Workgroup}, $(String(name)))
+    @eval @inline $name() = additional_arg_value(LLVMPtr{UInt32, AS.Workgroup}, Val($(QuoteNode(name))))
 end
