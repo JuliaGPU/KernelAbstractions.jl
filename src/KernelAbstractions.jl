@@ -707,6 +707,15 @@ A = ones(Float32, 1024)
 mul2_kernel(CPU(), 64)(A, ndrange=length(A))
 synchronize(CPU())
 ```
+
+# Threads
+
+Kernels run on as many threads as Julia's default thread pool has (`julia -t N`). These are
+POCL's own threads, so launching a kernel doesn't occupy Julia's. To use a different number,
+set the `JULIA_KA_CPU_THREADS` environment variable before the backend is first used, e.g.,
+`JULIA_KA_CPU_THREADS=8 julia -t1`. POCL's own variables (e.g., `POCL_CPU_MAX_CU_COUNT`) are
+respected too, but also affect other users of POCL, like OpenCL.jl. The device reports the
+number as its compute units: `KernelAbstractions.POCL.device().max_compute_units`.
 """
 const CPU = POCLBackend
 

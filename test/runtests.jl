@@ -42,6 +42,27 @@ end
     KernelInterfaceTests.Testsuite.testsuite(POCLBackend(), Array)
 end
 
+@testset "POCL thread count" begin
+    # in fresh processes, as PoCL only reads its configuration once
+    julia = Cmd(filter(arg -> !startswith(arg, "--code-coverage"), Base.julia_cmd().exec))
+    script = "using KernelAbstractions: POCL; print(POCL.device().max_compute_units)"
+    vars = ("JULIA_KA_CPU_THREADS", POCL.cl.pocl_thread_variables...)
+    function compute_units(env...; threads = 2)
+        cmd = `$julia --startup-file=no --threads=$threads
+            --project=$(Base.active_project()) -e $script`
+        cmd_env = filter(kv -> !(first(kv) in vars), copy(ENV))
+        return parse(Int, readchomp(setenv(cmd, cmd_env..., env...)))
+    end
+
+    # as many workers as Julia has threads
+    @test compute_units(threads = 3) == 3
+    # unless PoCL is configured otherwise
+    @test compute_units("POCL_CPU_MAX_CU_COUNT" => "5") == 5
+    # but KernelAbstractions' variable takes precedence
+    @test compute_units("JULIA_KA_CPU_THREADS" => "4") == 4
+    @test compute_units("JULIA_KA_CPU_THREADS" => "4", "POCL_MAX_PTHREAD_COUNT" => "5") == 4
+end
+
 @testset "POCL float atomics" begin
     # pocl's CPU device natively supports float add and min/max atomics in both global
     # and local memory, so the SPIR-V extensions guarding them must be permitted
