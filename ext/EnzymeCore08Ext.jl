@@ -133,7 +133,14 @@ function EnzymeRules.augmented_primal(
     arg_refs = ntuple(Val(N)) do i
         Base.@_inline_meta
         if args[i] isa Active
-            error("Active kernel arguments not supported")
+            error(
+                """
+                Active kernel arguments not supported, got
+                \n$(typeof(args[i]))
+                \nFor argument $i of kernel
+                \n$(func.val).
+                """
+            )
         else
             nothing
         end
