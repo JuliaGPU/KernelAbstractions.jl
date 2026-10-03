@@ -22,7 +22,7 @@ Adapt.adapt_structure(to, v::OffsetVec) = OffsetVec(adapt(to, v.data), v.r)
 # `foreach_index` docstring requires.
 
 function foreach_index_copy!(dst, src)
-    foreach_index(src) do i
+    foreach_index(dst, src) do i
         @inbounds dst[i] = src[i]
     end
     return dst
@@ -145,6 +145,33 @@ function foreach_index_testsuite(Backend, AT)
         foreach_index_record!(out, backend, indices)
         synchronize(backend)
         @test Array(out) == collect(indices)
+    end
+
+    @testset "several arrays" begin
+        # linear indices if all arrays have them
+        A = AT(collect(reshape(1:12, 3, 4)))
+        B = AT(zeros(Int, 3, 4))
+        foreach_index_copy!(B, A)
+        synchronize(backend)
+        @test Array(B) == Array(A)
+
+        # Cartesian indices otherwise
+        C = AT(zeros(Int, 6, 4))
+        v = view(C, 1:2:6, :)
+        @test eachindex(v, A) isa CartesianIndices
+        foreach_index_copy!(v, A)
+        synchronize(backend)
+        @test Array(C)[1:2:6, :] == Array(A)
+        @test all(iszero, Array(C)[2:2:6, :])
+
+        # arrays whose indices differ
+        @test_throws DimensionMismatch foreach_index_copy!(AT(zeros(Int, 4, 3)), view(C, 1:2:6, :))
+
+        # arrays on different backends, or without one
+        if get_backend(AT(Int[])) != get_backend(Int[])
+            @test_throws ArgumentError foreach_index_copy!(AT(zeros(Int, 3)), zeros(Int, 3))
+        end
+        @test_throws ArgumentError foreach_index_copy!(AT(zeros(Int, 3)), Base.OneTo(3))
     end
 
     @testset "workgroupsize" begin

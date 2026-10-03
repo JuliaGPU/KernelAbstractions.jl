@@ -260,20 +260,22 @@ See the [Quickstart](@ref) for a full walkthrough and the Examples section of th
 
 A kernel whose body is a loop over the indices of an array needs none of the kernel language
 beyond the index itself. [`foreach_index`](@ref) launches such a loop directly, with one work item
-per index of `eachindex(A)`:
+per index of `eachindex(y, x)`:
 
 ```julia
 function scale!(y, x)
-    foreach_index(y) do i
+    foreach_index(y, x) do i
         @inbounds y[i] = 2 * x[i] + 1
     end
     return y
 end
 ```
 
-The body is an ordinary Julia function, and it receives the index a `for i in eachindex(y)` loop
-would: a linear index for an array with `IndexLinear` style, a `CartesianIndex` otherwise. The
-launch is asynchronous like any other, and bounds checks are not elided.
+The body is an ordinary Julia function, and it receives the index a `for i in eachindex(y, x)`
+loop would: a linear index if the arrays have `IndexLinear` style, a `CartesianIndex` otherwise.
+Passing every array the body indexes makes sure the index is valid for each, and that they all
+live on the same backend. The launch is asynchronous like any other, and bounds checks are not
+elided.
 
 To loop over other indices than those of an array, give the backend and the index space, a range
 or a `CartesianIndices` like an `ndrange`. The body then receives these indices as they are,

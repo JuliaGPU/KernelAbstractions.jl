@@ -29,10 +29,10 @@ foreach_index_kernel(backend, indices) = throw(
 )
 
 """
-    foreach_index(f, A::AbstractArray)
+    foreach_index(f, A::AbstractArray, Bs::AbstractArray...)
     foreach_index(f, backend::Backend, indices)
 
-Call `f(i)` once for every index `i` of the array `A`, or for every index `i` in `indices`,
+Call `f(i)` once for every index `i` of the arrays `A, Bs...`, or for every index `i` in `indices`,
 with one work item per index. Returns `nothing`; the iterations run asynchronously.
 
 This is a `for` loop over indices without a kernel to write out: the body is an ordinary Julia
@@ -40,7 +40,7 @@ function, which becomes the body of a kernel.
 
 ```julia
 function scale!(y, x)
-    foreach_index(y) do i
+    foreach_index(y, x) do i
         @inbounds y[i] = 2 * x[i] + 1
     end
     return y
@@ -50,9 +50,10 @@ scale!(y, x)
 synchronize(get_backend(y))
 ```
 
-The first form runs on the backend of `A`, over `eachindex(A)`: `f` receives the index that a
-`for i in eachindex(A)` loop would, a linear index if `A` has `IndexLinear` style and a
-`CartesianIndex` otherwise.
+The first form runs on the backend of the arrays, which must all have the same one, over
+`eachindex(A, Bs...)`: `f` receives the index that a `for i in eachindex(A, Bs...)` loop would,
+a linear index if the arrays have `IndexLinear` style and a `CartesianIndex` otherwise. Pass
+every array that the body indexes with `i`, so that the index is valid for each of them.
 
 The second form runs on `backend`, over the given `indices`: a range of integers such as
 `1:n` or `axes(A, 2)`, for which `f` receives an `Int`, or a `CartesianIndices` of such ranges,
@@ -98,6 +99,14 @@ function foreach_index(f::F, backend::Backend, indices; workgroupsize = nothing)
     return nothing
 end
 
-function foreach_index(f::F, A::AbstractArray; workgroupsize = nothing) where {F}
-    return foreach_index(f, get_backend(A), eachindex(A); workgroupsize)
+function foreach_index(f::F, A::AbstractArray, Bs::AbstractArray...; workgroupsize = nothing) where {F}
+    backend = get_backend(A)
+    for B in Bs
+        get_backend(B) == backend || throw(
+            ArgumentError(
+                "`foreach_index` needs arrays with the same backend, got a `$(typeof(A))` on $(backend) and a `$(typeof(B))` on $(get_backend(B))"
+            )
+        )
+    end
+    return foreach_index(f, backend, eachindex(A, Bs...); workgroupsize)
 end
