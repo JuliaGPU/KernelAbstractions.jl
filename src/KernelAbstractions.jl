@@ -18,6 +18,10 @@ using KernelInterface: KernelInterface, Backend, get_backend, functional, synchr
 import KernelInterface as KI
 export KernelInterface
 
+# `GPU` is deprecated in 0.10:  and backends ends now subtype `Backend` directly. Keep the name working for code written
+# against 0.9, both `x::GPU` and `struct MyBackend <: GPU`.
+Base.@deprecate_binding GPU Backend
+
 """
     @kernel function f(args) end
 
