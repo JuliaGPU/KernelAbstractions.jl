@@ -29,7 +29,7 @@ function foreach_index_copy!(dst, src)
 end
 
 function foreach_index_copy_backend!(dst, src, backend)
-    foreach_index(src, backend) do i
+    foreach_index(backend, eachindex(src)) do i
         @inbounds dst[i] = src[i]
     end
     return dst
@@ -57,8 +57,17 @@ function foreach_index_mark!(out, itr)
 end
 
 function foreach_index_sum_range!(out, range, backend)
-    foreach_index(range, backend) do i
+    foreach_index(backend, range) do i
         @inbounds @atomic out[1] += i
+    end
+    return out
+end
+
+# Record every index of the index space `indices` in `out`, an array indexed from 1.
+function foreach_index_record!(out, backend, indices; workgroupsize = nothing)
+    offset = first(indices) - oneunit(first(indices))
+    foreach_index(backend, indices; workgroupsize) do I
+        @inbounds out[I - offset] = I
     end
     return out
 end
@@ -109,6 +118,35 @@ function foreach_index_testsuite(Backend, AT)
         @test Array(out)[1] == sum(1:100)
     end
 
+    @testset "index space as given" begin
+        # the values of the index space, not its own indices
+        @testset "$(indices)" for indices in (
+                5:20, -3:4, Base.IdentityUnitRange(-3:4), Int32(2):Int32(9), UInt(2):UInt(9),
+            )
+            out = AT(zeros(Int, length(indices)))
+            foreach_index_record!(out, backend, indices)
+            synchronize(backend)
+            @test Array(out) == collect(indices)
+        end
+
+        # e.g. the interior of an array, with default and explicit workgroup sizes
+        @testset "$(indices), workgroupsize=$(workgroupsize)" for indices in (
+                CartesianIndices((2:9, 2:7)), CartesianIndices((-1:3, 0:0, 4:6)),
+            ), workgroupsize in (nothing, 4, (4, 4))
+            out = AT(fill(CartesianIndex(ntuple(_ -> 0, ndims(indices))), size(indices)))
+            foreach_index_record!(out, backend, indices; workgroupsize)
+            synchronize(backend)
+            @test Array(out) == collect(indices)
+        end
+
+        # indices beyond the range of `Int32`
+        indices = (typemax(Int32) + 1):(typemax(Int32) + 10)
+        out = AT(zeros(Int, 10))
+        foreach_index_record!(out, backend, indices)
+        synchronize(backend)
+        @test Array(out) == collect(indices)
+    end
+
     @testset "workgroupsize" begin
         src = AT(collect(1:1000))
         dst = AT(zeros(Int, 1000))
@@ -131,11 +169,25 @@ function foreach_index_testsuite(Backend, AT)
         @test foreach_index_copy!(dst, src) === dst
         synchronize(backend)
         @test isempty(Array(dst))
+
+        out = AT(zeros(Int, 1))
+        foreach_index_sum_range!(out, 5:4, backend)
+        foreach_index_record!(out, backend, CartesianIndices((1:2, 3:2)))
+        synchronize(backend)
+        @test Array(out) == [0]
     end
 
     @testset "errors" begin
-        # an index space that is neither linear nor cartesian
-        @test_throws ArgumentError foreach_index(identity, Dict(1 => 2), backend)
+        # index spaces that an `ndrange` cannot express, also when they are empty
+        @test_throws ArgumentError foreach_index(identity, backend, [1, 2, 3])
+        @test_throws ArgumentError foreach_index(identity, backend, Int[])
+        @test_throws ArgumentError foreach_index(identity, backend, 1:2:9)
+        @test_throws ArgumentError foreach_index(identity, backend, CartesianIndices((1:2:9, 1:3)))
+        @test_throws ArgumentError foreach_index(identity, backend, CartesianIndices((1:2:1, 1:3)))
+        @test_throws ArgumentError foreach_index(identity, backend, Dict(1 => 2))
+
+        # a collection that is not an array has no backend, and needs the second form
+        @test_throws MethodError foreach_index(identity, (1, 2, 3))
     end
     return
 end

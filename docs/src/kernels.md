@@ -260,22 +260,37 @@ See the [Quickstart](@ref) for a full walkthrough and the Examples section of th
 
 A kernel whose body is a loop over the indices of an array needs none of the kernel language
 beyond the index itself. [`foreach_index`](@ref) launches such a loop directly, with one work item
-per index of `eachindex(itr)`:
+per index of `eachindex(A)`:
 
 ```julia
 function scale!(y, x)
-    foreach_index(x) do i
+    foreach_index(y) do i
         @inbounds y[i] = 2 * x[i] + 1
     end
     return y
 end
 ```
 
-The body is an ordinary Julia function, and it receives the index a `for i in eachindex(itr)` loop
+The body is an ordinary Julia function, and it receives the index a `for i in eachindex(y)` loop
 would: a linear index for an array with `IndexLinear` style, a `CartesianIndex` otherwise. The
 launch is asynchronous like any other, and bounds checks are not elided.
 
+To loop over other indices than those of an array, give the backend and the index space, a range
+or a `CartesianIndices` like an `ndrange`. The body then receives these indices as they are,
+e.g. those of the interior of a matrix:
+
+```julia
+function smooth!(B, A)
+    interior = CartesianIndices((2:size(A, 1)-1, 2:size(A, 2)-1))
+    foreach_index(get_backend(A), interior) do I
+        i, j = Tuple(I)
+        @inbounds B[I] = (A[i-1, j] + A[i+1, j] + A[i, j-1] + A[i, j+1]) / 4
+    end
+    return B
+end
+```
+
 Because the body becomes a kernel, every value it captures must have a known type — which is why
-the example wraps the loop in a function, and why the body must not assign to a captured variable.
+the examples wrap the loop in a function, and why the body must not assign to a captured variable.
 Write the kernel out with [`@kernel`](@ref) when it needs more than an index: workgroup-level
 indices, local memory, or synchronization.
