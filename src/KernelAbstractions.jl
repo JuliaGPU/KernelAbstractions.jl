@@ -39,6 +39,8 @@ and then invoked on the arguments.
 - [`@print`](@ref)
 - [`@groupreduce`](@ref)
 - [`@subgroupreduce`](@ref)
+- [`@groupscan`](@ref)
+- [`@subgroupscan`](@ref)
 
 # Kernel constructor
 

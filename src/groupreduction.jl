@@ -1,10 +1,12 @@
 ###
-# Group and sub-group reductions
+# Group and sub-group reductions and scans
 # - @groupreduce
 # - @subgroupreduce
+# - @groupscan
+# - @subgroupscan
 ###
 
-export @groupreduce, @subgroupreduce
+export @groupreduce, @subgroupreduce, @groupscan, @subgroupscan
 
 """
     @groupreduce(op, val, neutral[, groupsize]; subgroups = false)
@@ -78,6 +80,87 @@ macro subgroupreduce(op, val, neutral)
     return :($__subgroupreduce($(esc(op)), $(esc(val)), $(esc(neutral))))
 end
 
+"""
+    @groupscan(op, val, neutral[, groupsize]; inclusive = true)
+
+Scan `val` over the work-items of the workgroup with the binary operator `op`, in the order
+of `@index(Local, Linear)`: the work-item with local index `i` gets
+`op(...op(op(val₁, val₂), val₃)..., valᵢ)` (inclusive), or the same up to `valᵢ₋₁` and
+`neutral` for the first work-item (with `inclusive = false`). `op` has to be associative,
+and `neutral` its neutral element (`op(neutral, x) == op(x, neutral) == x`). The result has
+the type of `neutral`, which `val` is converted to.
+
+Work-items that are not part of the `ndrange` (padding of a partial workgroup) contribute
+`neutral`, and don't evaluate `val`. Like [`@synchronize`](@ref), `@groupscan` must be
+reached by all work-items of the workgroup, and has to be used as a statement on its own:
+`res = @groupscan(op, val, neutral)`.
+
+The scan uses local memory for two values per work-item, sized like for
+[`@groupreduce`](@ref): either the kernel has a static workgroup size, or `groupsize` gives
+an upper bound of the workgroup size. `inclusive` has to be a constant as well.
+
+For example, to compact the elements of `x` that satisfy `pred` within each workgroup:
+
+```julia
+@kernel function compact!(out, counts, @Const(x), pred)
+    i = @index(Global, Linear)
+    keep = pred(x[i])
+    offset = @groupscan(+, Int32(keep), Int32(0); inclusive = false)
+    total = @groupreduce(+, Int32(keep), Int32(0))
+    base = (@index(Group, Linear) - 1) * prod(@groupsize())
+    if keep
+        out[base + offset + 1] = x[i]
+    end
+    if @index(Local, Linear) == 1
+        counts[@index(Group, Linear)] = total
+    end
+end
+```
+"""
+macro groupscan(args...)
+    positional, options = split_options(args, (:groupsize, :inclusive))
+    3 <= length(positional) <= 4 ||
+        error("@groupscan expects `op`, `val`, `neutral` and optionally `groupsize`")
+    op, val, neutral = positional
+    groupsize = length(positional) == 4 ? positional[4] : Base.get(options, :groupsize, nothing)
+    bound = groupsize === nothing ? :($__static_groupsize($(esc(:__ctx__)))) :
+        :(Val($(esc(groupsize))))
+    inclusive = Base.get(options, :inclusive, true)
+    return quote
+        $__groupscan(
+            $(esc(:__ctx__)), $(esc(op)), $(esc(val)), $(esc(neutral)),
+            $bound, Val($(esc(inclusive))),
+        )
+    end
+end
+
+"""
+    @subgroupscan(op, val, neutral; inclusive = true)
+
+Scan `val` over the work-items of the sub-group with the binary operator `op`, in the order
+of `KernelInterface.get_sub_group_local_id()`, using [`KernelInterface.shfl_up`](@ref).
+Like [`@groupscan`](@ref), the scan is inclusive by default, and with `inclusive = false`
+exclusive. `op` has to be associative, and `neutral` its neutral element. The result has the
+type of `neutral`.
+
+How the work-items of a workgroup form sub-groups is unspecified, so the order of a
+sub-group's lanes doesn't need to match `@index(Local, Linear)`.
+
+Work-items that are not part of the `ndrange` contribute `neutral`. `@subgroupscan` must be
+reached by all work-items of the sub-group, and has to be used as a statement on its own:
+`res = @subgroupscan(op, val, neutral)`.
+
+It must only be used on backends that support shuffles of the type of `neutral`, see
+[`KernelInterface.supports_shuffle`](@ref).
+"""
+macro subgroupscan(args...)
+    positional, options = split_options(args, (:inclusive,))
+    length(positional) == 3 || error("@subgroupscan expects `op`, `val` and `neutral`")
+    op, val, neutral = positional
+    inclusive = Base.get(options, :inclusive, true)
+    return :($__subgroupscan($(esc(op)), $(esc(val)), $(esc(neutral)), Val($(esc(inclusive)))))
+end
+
 # Separate `key = value` options (also after a `;`) from the positional macro arguments.
 function split_options(args, keys)
     positional = Any[]
@@ -100,7 +183,10 @@ function split_options(args, keys)
     return positional, options
 end
 
-const COLLECTIVES = (Symbol("@groupreduce"), Symbol("@subgroupreduce"))
+const COLLECTIVES = (
+    Symbol("@groupreduce"), Symbol("@subgroupreduce"),
+    Symbol("@groupscan"), Symbol("@subgroupscan"),
+)
 
 # Whether `expr` is a collective that all work-items of a workgroup take part in.
 is_collective(expr) = any(name -> is_macrocall(expr, name), COLLECTIVES)
@@ -144,7 +230,7 @@ end
 @inline __static_groupsize(::NDRange{N, B, W}) where {N, B, W <: StaticSize} = Val(prod(get(W)))
 @inline __static_groupsize(::NDRange) = throw(
     ArgumentError(
-        "@groupreduce requires a static workgroup size or an upper bound of it"
+        "group reductions and scans require a static workgroup size or an upper bound of it"
     )
 )
 
@@ -226,6 +312,62 @@ end
             val = op(val, other)
         end
         offset <<= 1
+    end
+    return val
+end
+
+@inline function __groupscan(ctx, op, val, neutral::T, ::Val{N}, ::Val{inclusive}) where {T, N, inclusive}
+    n = prod(groupsize(ctx))
+    n <= N || throw(ArgumentError("@groupscan: the workgroup size exceeds the given upper bound"))
+    # two buffers, the scan reads from one and writes to the other
+    storage = KI.localmemory(T, Val(2 * N))
+    lid = __index_Local_Linear(ctx)
+
+    # Hillis-Steele: after the step with distance `d`, every work-item holds the scan of the
+    # (up to) `2d` values ending at its own
+    src = 0
+    @inbounds storage[lid] = convert(T, val)
+    KI.barrier()
+    d = 1
+    while d < n
+        x = @inbounds storage[src + lid]
+        if lid > d
+            x = op(@inbounds(storage[src + lid - d]), x)
+        end
+        @inbounds storage[(N - src) + lid] = x
+        KI.barrier()
+        src = N - src
+        d <<= 1
+    end
+
+    if inclusive
+        res = @inbounds storage[src + lid]
+    else
+        res = lid == 1 ? neutral : @inbounds storage[src + lid - 1]
+    end
+    # all work-items have to read their result before the storage can be reused
+    KI.barrier()
+    return res
+end
+
+# Hillis-Steele with shuffles: after the step with `offset`, every lane holds the scan of the
+# (up to) `2offset` lanes ending at its own.
+@inline function __subgroupscan(op, val, neutral::T, ::Val{inclusive}) where {T, inclusive}
+    val = convert(T, val)
+    lane = KI.get_sub_group_local_id()
+    sgsize = KI.get_sub_group_size()
+    offset = 1
+    while offset < sgsize
+        other = KI.shfl_up(val, offset)
+        # the result of shuffling from before the start of the sub-group is unspecified
+        if lane > offset
+            val = op(other, val)
+        end
+        offset <<= 1
+    end
+    if !inclusive
+        prev = KI.shfl_up(val, 1)
+        val = lane == 1 ? neutral : prev
     end
     return val
 end
