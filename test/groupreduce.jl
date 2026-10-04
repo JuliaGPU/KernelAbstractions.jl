@@ -48,6 +48,41 @@ end
     sgs[i] = (@index(Group, Linear), KernelInterface.get_sub_group_id())
 end
 
+# `val` of another type than `neutral`: the padding work-items contribute `neutral`, so the
+# value is a `Union` of both types, and the call of the collective must not be union-split
+@kernel function groupreduce_mixed!(out, @Const(x), ::Val{S}) where {S}
+    i = @index(Global, Linear)
+    res = @groupreduce(+, x[i], 0.0; subgroups = S)
+    out[i] = res
+end
+
+# an accumulator that stays `Float32` on some work-items, and becomes `Float64` on others
+@kernel function subgroupreduce_union!(out, sgs, @Const(x))
+    i = @index(Global, Linear)
+    acc = 0.0f0
+    for k in 1:2
+        if x[i] > 50
+            acc += Float64(x[i])
+        end
+    end
+    res = @subgroupreduce(+, acc, 0.0f0)
+    out[i] = res
+    sgs[i] = (@index(Group, Linear), KernelInterface.get_sub_group_id())
+end
+
+@kernel function groupscan_mixed!(out, @Const(x))
+    i = @index(Global, Linear)
+    res = @groupscan(+, x[i], 0)
+    out[i] = res
+end
+
+@kernel function subgroupscan_mixed!(out, lanes, @Const(x))
+    i = @index(Global, Linear)
+    res = @subgroupscan(+, x[i], 0)
+    out[i] = res
+    lanes[i] = KernelInterface.get_sub_group_local_id()
+end
+
 # the composition of affine maps `x -> a * x + b`, first `f` then `g`: associative, but not
 # commutative, so that the scans have to combine the values in order
 compose(f, g) = (g[1] * f[1], g[1] * f[2] + g[2])
@@ -167,6 +202,13 @@ function groupreduce_testsuite(backend, AT)
             groupreduce_unsafe!(b, 64)(out, AT(x), Val(S); ndrange = 128)
             @test Array(out) == groupwise(+, x, 64)
         end
+
+        @testset "mixed types" begin
+            x = Float32.(rand(1:100, 100))
+            out = AT(zeros(Float64, 100))
+            groupreduce_mixed!(b, 64)(out, AT(x), Val(S); ndrange = 100)
+            @test Array(out) == groupwise(+, Float64.(x), 64)
+        end
     end
 
     if KI.supports_subgroups(b) && KI.supports_shuffle(b, Float32)
@@ -180,6 +222,12 @@ function groupreduce_testsuite(backend, AT)
                 out, sgs = Array(out), Array(sgs)
                 # padding work-items contribute zero
                 @test all(i -> out[i] == sum(x[j] for j in 1:n if sgs[j] == sgs[i]), 1:n)
+
+                out = AT(fill(-1.0f0, n))
+                sgs = AT(fill((0, 0), n))
+                subgroupreduce_union!(b, groupsize)(out, sgs, AT(x); ndrange = n)
+                out, sgs = Array(out), Array(sgs)
+                @test all(i -> out[i] == sum(2x[j] for j in 1:n if sgs[j] == sgs[i] && x[j] > 50; init = 0.0f0), 1:n)
             end
         end
     end
@@ -222,6 +270,13 @@ function groupreduce_testsuite(backend, AT)
             groupscan_loop!(b, 64)(out, AT(x); ndrange = 100)
             @test Array(out) == 6 .* groupwise_scan(+, x, 64, 0, true) .+ groupwise_scan(+, x, 64, 0, false)
         end
+
+        @testset "mixed types" begin
+            x = Int32.(rand(1:100, 100))
+            out = AT(zeros(Int, 100))
+            groupscan_mixed!(b, 64)(out, AT(x); ndrange = 100)
+            @test Array(out) == groupwise_scan(+, Int.(x), 64, 0, true)
+        end
     end
 
     if KI.supports_subgroups(b) && KI.supports_shuffle(b, Int)
@@ -246,6 +301,24 @@ function groupreduce_testsuite(backend, AT)
                 end
                 @test out == ref
             end
+        end
+
+        @testset "@subgroupscan, mixed types" begin
+            width = KI.sub_group_size(b)
+            n = 2width + 5
+            x = Int32.(rand(1:100, n))
+            out = AT(zeros(Int, n))
+            lanes = AT(zeros(Int, n))
+            subgroupscan_mixed!(b, width)(out, lanes, AT(x); ndrange = n)
+            out, lanes = Array(out), Array(lanes)
+            ref = similar(out)
+            for first in 1:width:n
+                group = first:min(first + width - 1, n)
+                for i in group
+                    ref[i] = sum(Int(x[j]) for j in group if lanes[j] <= lanes[i])
+                end
+            end
+            @test out == ref
         end
     end
 

@@ -53,10 +53,11 @@ macro groupreduce(args...)
     bound = groupsize === nothing ? :($__static_groupsize($(esc(:__ctx__)))) :
         :(Val($(esc(groupsize))))
     subgroups = Base.get(options, :subgroups, false)
-    return quote
-        $__groupreduce(
-            $(esc(:__ctx__)), $(esc(op)), $(esc(val)), $(esc(neutral)),
-            $bound, Val($(esc(subgroups))),
+    return __collective_call(neutral, val) do neutral, val
+        :(
+            $__groupreduce(
+                $(esc(:__ctx__)), $(esc(op)), $val, $neutral, $bound, Val($(esc(subgroups))),
+            )
         )
     end
 end
@@ -83,7 +84,9 @@ It must only be used on backends that support shuffles of the type of `neutral`,
     `@kernel unsafe_indices=true` for such kernels.
 """
 macro subgroupreduce(op, val, neutral)
-    return :($__subgroupreduce($(esc(op)), $(esc(val)), $(esc(neutral))))
+    return __collective_call(neutral, val) do neutral, val
+        :($__subgroupreduce($(esc(op)), $val, $neutral))
+    end
 end
 
 """
@@ -132,10 +135,11 @@ macro groupscan(args...)
     bound = groupsize === nothing ? :($__static_groupsize($(esc(:__ctx__)))) :
         :(Val($(esc(groupsize))))
     inclusive = Base.get(options, :inclusive, true)
-    return quote
-        $__groupscan(
-            $(esc(:__ctx__)), $(esc(op)), $(esc(val)), $(esc(neutral)),
-            $bound, Val($(esc(inclusive))),
+    return __collective_call(neutral, val) do neutral, val
+        :(
+            $__groupscan(
+                $(esc(:__ctx__)), $(esc(op)), $val, $neutral, $bound, Val($(esc(inclusive))),
+            )
         )
     end
 end
@@ -164,7 +168,24 @@ macro subgroupscan(args...)
     length(positional) == 3 || error("@subgroupscan expects `op`, `val` and `neutral`")
     op, val, neutral = positional
     inclusive = Base.get(options, :inclusive, true)
-    return :($__subgroupscan($(esc(op)), $(esc(val)), $(esc(neutral)), Val($(esc(inclusive)))))
+    return __collective_call(neutral, val) do neutral, val
+        :($__subgroupscan($(esc(op)), $val, $neutral, Val($(esc(inclusive)))))
+    end
+end
+
+# Convert `val` to the type of `neutral` *before* the call of the collective. The type of
+# `val` may differ between the work-items, e.g. `Union{Float32, Float64}` for an accumulator
+# that only some work-items added a `Float64` to, or because padding work-items contribute
+# `neutral` instead of `val` (see `mask_collective`). Julia union-splits a call with such an
+# argument into one call per type, so the work-items would execute different copies of the
+# collective, and its barriers and shuffles. Only the `convert` may be split this way.
+function __collective_call(f, neutral, val)
+    n, v = gensym(:neutral), gensym(:val)
+    return quote
+        let $v = $(esc(val)), $n = $(esc(neutral))
+            $(f(n, :($convert($typeof($n), $v))))
+        end
+    end
 end
 
 # Separate `key = value` options (also after a `;`) from the positional macro arguments.
