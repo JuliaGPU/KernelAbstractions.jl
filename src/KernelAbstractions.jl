@@ -686,6 +686,7 @@ automatically when a kernel is launched.
 argconvert(k::Kernel{T}, arg) where {T} =
     error("Don't know how to convert arguments for Kernel{$T}")
 
+include("profiling.jl")
 include("backend_launch.jl")
 
 # Enzyme support
@@ -764,7 +765,6 @@ number as its compute units: `KernelAbstractions.POCL.device().max_compute_units
 """
 const CPU = POCLBackend
 
-include("profiling.jl")
 include("profiler.jl")
 include("precompile.jl")
 
