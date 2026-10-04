@@ -598,6 +598,15 @@ end
             task = only(r.task for r in results.ranges if r.name == "task $i")
             @test count(r -> r.name == "profiling_fill!" && r.task == task, results.ranges) == 1
         end
+        # `@spawn` ranges are named after the call site, and belong to the spawned task
+        spawns = filter(r -> startswith(r.name, "@spawn runtests.jl:"), results.ranges)
+        @test sort([r.task for r in spawns]) == 2:4
+        for r in spawns
+            child = only(c for c in results.ranges if c.task == r.task && startswith(c.name, "task "))
+            @test r.start <= child.start <= child.stop <= r.stop
+        end
+        named = KernelAbstractions.@profile wait(KernelAbstractions.@spawn CPU() name = "named" nothing)
+        @test only(named.ranges).name == "named"
         trace = sprint(show, MIME"text/plain"(), KernelAbstractions.ProfileResults(results.start, results.stop, results.ranges, results.markers, true))
         @test occursin("task 1 (thread ", trace)
 
@@ -634,7 +643,7 @@ end
         # ranges of tasks that outlive the profile are lost, with a warning
         started, finish = Channel{Nothing}(1), Channel{Nothing}(1)
         local task
-        results = @test_logs (:warn, r"1 profiled ranges were still open") KernelAbstractions.@profile begin
+        results = @test_logs (:warn, r"1 profiled range still open") KernelAbstractions.@profile begin
             task = Threads.@spawn @profiling_range "outlives" begin
                 put!(started, nothing)
                 take!(finish)
@@ -644,6 +653,14 @@ end
         put!(finish, nothing)
         wait(task)
         @test isempty(results.ranges)
+
+        # also for a `@spawn` task that hasn't started yet, as its range starts at `@spawn`
+        go = Channel{Nothing}(1)
+        results = @test_logs (:warn, r"1 profiled range still open") KernelAbstractions.@profile begin
+            task = KernelAbstractions.@spawn CPU() take!(go)
+        end
+        put!(go, nothing)
+        wait(task)
     end
 
     @test KernelAbstractions.format_time(5) == "5 ns"

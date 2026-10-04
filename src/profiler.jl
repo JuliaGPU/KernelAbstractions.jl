@@ -6,7 +6,9 @@ using ScopedValues: ScopedValue, with
 ###
 
 # `task` numbers the tasks of a profile in the order they first recorded something, starting
-# with 1 for the task that ran `@profile`; `thread` is the thread a range started on
+# with 1 for the task that ran `@profile`. A range belongs to the task, and thread, it ended
+# on: the range of a `KernelAbstractions.@spawn` starts in the spawning task, and ends in
+# the spawned one.
 struct ProfileRange
     name::String
     start::UInt64
@@ -54,12 +56,12 @@ profile_name(label, domain) = domain == "KernelAbstractions" ? label : string(do
 function trace_range_start(tracer::ProfileTracer, label, domain)
     in_scope(tracer) || return nothing
     Threads.atomic_add!(tracer.open, 1)
-    return (profile_name(label, domain), time_ns(), task_number(tracer), Threads.threadid())
+    return (profile_name(label, domain), time_ns())
 end
 
 trace_range_end(::ProfileTracer, ::Nothing) = nothing
-function trace_range_end(tracer::ProfileTracer, (name, start, task, thread))
-    range = ProfileRange(name, start, time_ns(), task, thread)
+function trace_range_end(tracer::ProfileTracer, (name, start))
+    range = ProfileRange(name, start, time_ns(), task_number(tracer), Threads.threadid())
     @lock tracer.lock push!(tracer.ranges, range)
     Threads.atomic_sub!(tracer.open, 1)
     return nothing
@@ -155,12 +157,14 @@ function profile(f; trace::Bool = false, synchronize::Bool = true)
     end
     stop = time_ns()
     open = tracer.open[]
-    open > 0 && @warn "$open profiled ranges were still open when `@profile` finished; wait for the tasks spawned within it, e.g. with `@sync`"
+    open > 0 && @warn "$(plural(open, "profiled range")) still open when `@profile` finished; wait for the tasks spawned within it, e.g. with `@sync`"
     return @lock tracer.lock ProfileResults(start, stop, copy(tracer.ranges), copy(tracer.markers), trace)
 end
 
 
 ## report
+
+plural(n, what) = string(n, " ", what, n == 1 ? "" : "s")
 
 function format_time(ns::Real)
     # switch units where three significant digits would round up to the next one
