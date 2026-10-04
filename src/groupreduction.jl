@@ -75,6 +75,12 @@ reached by all work-items of the sub-group, and has to be used as a statement on
 
 It must only be used on backends that support shuffles of the type of `neutral`, see
 [`KernelInterface.supports_shuffle`](@ref).
+
+!!! note
+    Unlike `@subgroupreduce`, calls of KernelInterface's sub-group functions (e.g.
+    `KernelInterface.sub_group_reduce`) in a `@kernel` aren't executed by the work-items
+    that pad a partial workgroup, see [Reductions, scans, and sub-groups](@ref). Use
+    `@kernel unsafe_indices=true` for such kernels.
 """
 macro subgroupreduce(op, val, neutral)
     return :($__subgroupreduce($(esc(op)), $(esc(val)), $(esc(neutral))))

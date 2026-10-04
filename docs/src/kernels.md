@@ -213,6 +213,36 @@ statements, and [`@uniform`](@ref) evaluates an expression outside the work-item
 can be reused across `@synchronize` statements. For scratch storage that does not need to
 survive across `@synchronize`, an `MArray` can be used instead.
 
+## Reductions, scans, and sub-groups
+
+[`@groupreduce`](@ref) and [`@groupscan`](@ref) reduce and scan values over the workgroup,
+and [`@subgroupreduce`](@ref) and [`@subgroupscan`](@ref) over a sub-group. Like
+[`@synchronize`](@ref), they are collectives: all work-items take part, including the ones
+that pad a partial workgroup, which contribute the neutral element. They have to be used as
+statements of their own, e.g. `res = @groupreduce(+, val, zero(T))`.
+
+For other sub-group operations, kernels can call the functions of
+[KernelInterface](@ref kernelinterface) directly, e.g. `KernelInterface.shfl` or
+`KernelInterface.sub_group_ballot`. These have to be executed by all work-items of the
+sub-group as well, but `@kernel` only knows about its own collectives: in a kernel with
+the default bounds checking, every other statement only runs on the work-items that are part
+of the `ndrange`, so a partial workgroup leaves out the padding work-items. Use
+`@kernel unsafe_indices=true` for kernels that call KernelInterface's sub-group functions,
+and derive and check the indices yourself (without `@index(Global)`):
+
+```julia
+# the sums of the sub-groups of every workgroup, in `out[sub-group, workgroup]`
+@kernel unsafe_indices=true function sub_group_sums!(out, @Const(x))
+    N = @uniform prod(@groupsize())
+    i = (@index(Group, Linear) - 1) * N + @index(Local, Linear)
+    val = i <= length(x) ? x[i] : zero(eltype(x))
+    total = KernelInterface.sub_group_reduce(+, val)
+    if KernelInterface.get_sub_group_local_id() == 1
+        out[KernelInterface.get_sub_group_id(), @index(Group, Linear)] = total
+    end
+end
+```
+
 ## Launching kernels
 
 Construct a kernel by calling the kernel function on a backend and optional static sizes, then
