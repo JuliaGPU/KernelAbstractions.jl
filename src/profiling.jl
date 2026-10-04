@@ -212,16 +212,11 @@ literal(x::String) = QuoteNode(Symbol(x))
 literal(x::QuoteNode) = x
 literal(x) = esc(x)
 
-# the name kernel launches are annotated with: `@kernel function f` compiles to `gpu_f`
-# (computed once per kernel function type)
-const KERNEL_LABELS = IdDict{Any, Symbol}()
-const KERNEL_LABELS_LOCK = ReentrantLock()
-function kernel_label(f)
-    return @lock KERNEL_LABELS_LOCK get!(KERNEL_LABELS, typeof(f)) do
-        f isa Function || return Symbol(typeof(f))
-        name = string(nameof(f))
-        return Symbol(startswith(name, "gpu_") ? name[5:end] : name)
-    end
+# the name kernel launches are annotated with: `@kernel function f` compiles to `gpu_f`. It
+# only depends on the type of the function, so it is a constant.
+@generated function kernel_label(f)
+    name = string(f <: Function && isdefined(f, :instance) ? nameof(f.instance) : nameof(f))
+    return QuoteNode(Symbol(startswith(name, "gpu_") ? name[5:end] : name))
 end
 
 
