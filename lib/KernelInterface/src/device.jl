@@ -357,7 +357,16 @@ the supported types.
 """
 @inline shfl_xor(val, mask::Integer) = shfl_fields(x -> shfl_xor(x, mask), val)
 
-# Shuffle a value that the backend doesn't support directly field by field.
+# The expression that shuffles `ex::S` field by field, calling `f` on the primitive fields
+function shfl_fields_expr(S, ex)
+    isprimitivetype(S) && return :(f($ex))
+    fields = (shfl_fields_expr(fieldtype(S, i), :(getfield($ex, $i))) for i in 1:fieldcount(S))
+    return Expr(:new, S, fields...)
+end
+
+# Shuffle a value that the backend doesn't support directly field by field. Nested fields are
+# unrolled here, rather than shuffled with a recursive call, which inference gives up on
+# (on Julia 1.10), so that `f` is only called on the primitive types.
 @inline @generated function shfl_fields(f, val::T) where {T}
     if !isbitstype(T) || isprimitivetype(T)
         return :(
@@ -368,8 +377,7 @@ the supported types.
             )
         )
     end
-    fields = (:(f(getfield(val, $i))) for i in 1:fieldcount(T))
-    return Expr(:new, T, fields...)
+    return shfl_fields_expr(T, :val)
 end
 
 """
