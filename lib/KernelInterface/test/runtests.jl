@@ -34,7 +34,6 @@ KI.supports_shuffle(::WordShuffleBackend, ::Type{UInt32}) = true
     # These have no fallback on purpose: a backend that forgets to `@device_override`
     # them should get a MethodError rather than silently wrong behaviour.
     stubs = [
-        KI.sub_group_any, KI.sub_group_all, KI.sub_group_ballot,
         KI.max_work_group_size, KI.max_work_group_dims, KI.max_num_groups,
         KI.sub_group_size, KI.argconvert, KI.kernel_function, KI.launch,
         # Host-side stubs: required backend methods with no sensible fallback.
@@ -42,6 +41,13 @@ KI.supports_shuffle(::WordShuffleBackend, ::Type{UInt32}) = true
     ]
     for stub in stubs
         @test isempty(methods(stub))
+    end
+
+    # The votes only have the fallbacks within segments of a `width`, built on the votes
+    # of the whole sub-group that backends implement.
+    for vote in [KI.sub_group_any, KI.sub_group_all, KI.sub_group_ballot]
+        @test !hasmethod(vote, Tuple{Bool})
+        @test hasmethod(vote, Tuple{Bool, Int})
     end
 
     # The shuffles only have the fallback that shuffles structs field by field, which
