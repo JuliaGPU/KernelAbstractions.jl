@@ -64,10 +64,10 @@ end
 """
     @subgroupreduce(op, val, neutral)
 
-Reduce `val` over the work-items of the sub-group with the binary operator `op`, using
-[`KernelInterface.shfl_down`](@ref). The result is only defined on the first work-item of
-the sub-group (`KernelInterface.get_sub_group_local_id() == 1`). `op` has to be associative,
-and `neutral` its neutral element. The result has the type of `neutral`.
+Reduce `val` over the work-items of the sub-group with the binary operator `op`, in the order
+of the lanes, with [`KernelInterface.sub_group_reduce`](@ref), and return the result on every
+work-item of the sub-group. `op` has to be associative, and `neutral` its neutral element. The
+result has the type of `neutral`.
 
 Work-items that are not part of the `ndrange` contribute `neutral`. `@subgroupreduce` must be
 reached by all work-items of the sub-group, and has to be used as a statement on its own:
@@ -138,7 +138,7 @@ end
     @subgroupscan(op, val, neutral; inclusive = true)
 
 Scan `val` over the work-items of the sub-group with the binary operator `op`, in the order
-of `KernelInterface.get_sub_group_local_id()`, using [`KernelInterface.shfl_up`](@ref).
+of `KernelInterface.get_sub_group_local_id()`, with [`KernelInterface.sub_group_scan`](@ref).
 Like [`@groupscan`](@ref), the scan is inclusive by default, and with `inclusive = false`
 exclusive. `op` has to be associative, and `neutral` its neutral element. The result has the
 type of `neutral`.
@@ -298,23 +298,8 @@ end
     return @inbounds storage[1]
 end
 
-# Combine contiguous ranges of lanes of doubling length, so that the first lane ends up with
-# the reduction of the sub-group. Only requires `op` to be associative.
-@inline function __subgroupreduce(op, val, neutral::T) where {T}
-    val = convert(T, val)
-    lane = KI.get_sub_group_local_id()
-    sgsize = KI.get_sub_group_size()
-    offset = 1
-    while offset < sgsize
-        other = KI.shfl_down(val, offset)
-        # the result of shuffling from past the end of the sub-group is unspecified
-        if lane + offset <= sgsize
-            val = op(val, other)
-        end
-        offset <<= 1
-    end
-    return val
-end
+# backends can implement `KI.sub_group_reduce` with native operations
+@inline __subgroupreduce(op, val, neutral::T) where {T} = KI.sub_group_reduce(op, convert(T, val))
 
 @inline function __groupscan(ctx, op, val, neutral::T, ::Val{N}, ::Val{inclusive}) where {T, N, inclusive}
     n = prod(groupsize(ctx))
@@ -350,22 +335,11 @@ end
     return res
 end
 
-# Hillis-Steele with shuffles: after the step with `offset`, every lane holds the scan of the
-# (up to) `2offset` lanes ending at its own.
+# backends can implement `KI.sub_group_scan` with native operations
 @inline function __subgroupscan(op, val, neutral::T, ::Val{inclusive}) where {T, inclusive}
-    val = convert(T, val)
-    lane = KI.get_sub_group_local_id()
-    sgsize = KI.get_sub_group_size()
-    offset = 1
-    while offset < sgsize
-        other = KI.shfl_up(val, offset)
-        # the result of shuffling from before the start of the sub-group is unspecified
-        if lane > offset
-            val = op(other, val)
-        end
-        offset <<= 1
-    end
+    val = KI.sub_group_scan(op, convert(T, val))
     if !inclusive
+        lane = KI.get_sub_group_local_id()
         prev = KI.shfl_up(val, 1)
         val = lane == 1 ? neutral : prev
     end

@@ -40,12 +40,12 @@ end
     end
 end
 
-@kernel function subgroupreduce!(out, @Const(x))
+# every work-item gets the reduction of its sub-group; `sgs` records the sub-group
+@kernel function subgroupreduce!(out, sgs, @Const(x))
     i = @index(Global, Linear)
     res = @subgroupreduce(+, x[i], zero(eltype(out)))
-    if KernelInterface.get_sub_group_local_id() == 1
-        out[i] = res
-    end
+    out[i] = res
+    sgs[i] = (@index(Group, Linear), KernelInterface.get_sub_group_id())
 end
 
 # the composition of affine maps `x -> a * x + b`, first `f` then `g`: associative, but not
@@ -131,6 +131,17 @@ function groupreduce_testsuite(backend, AT)
             end
         end
 
+        @testset "argmin" begin
+            # (value, index) pairs, the smallest value with the smallest index
+            for (groupsize, n) in ((64, 256), (32, 100), (7, 23))
+                x = [(Float32(rand(1:20)), Int32(i)) for i in 1:n]
+                neutral = (Inf32, typemax(Int32))
+                out = AT(fill(neutral, n))
+                groupreduce_static!(b, groupsize)(out, AT(x), min, neutral, Val(S); ndrange = n)
+                @test Array(out) == groupwise(min, x, groupsize)
+            end
+        end
+
         @testset "loop" begin
             x = rand(1:100, 100)
             out = AT(zeros(Int, 100))
@@ -164,12 +175,11 @@ function groupreduce_testsuite(backend, AT)
             for (groupsize, n) in ((width, 4width), (2width, 2width + 5))
                 x = Float32.(rand(1:100, n))
                 out = AT(fill(-1.0f0, n))
-                subgroupreduce!(b, groupsize)(out, AT(x); ndrange = n)
-                ref = fill(-1.0f0, n)
-                for i in 1:width:n
-                    ref[i] = sum(x[i:min(i + width - 1, n)])
-                end
-                @test Array(out) == ref
+                sgs = AT(fill((0, 0), n))
+                subgroupreduce!(b, groupsize)(out, sgs, AT(x); ndrange = n)
+                out, sgs = Array(out), Array(sgs)
+                # padding work-items contribute zero
+                @test all(i -> out[i] == sum(x[j] for j in 1:n if sgs[j] == sgs[i]), 1:n)
             end
         end
     end
