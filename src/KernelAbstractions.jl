@@ -6,6 +6,7 @@ export @index, @groupsize, @ndrange
 export @print
 export Backend, CPU
 export synchronize, get_backend, allocate
+export @profiling_range, profiling_mark
 
 import PrecompileTools
 
@@ -742,6 +743,12 @@ number as its compute units: `KernelAbstractions.POCL.device().max_compute_units
 """
 const CPU = POCLBackend
 
+include("profiling.jl")
 include("precompile.jl")
+
+function __init__()
+    init_profiling()
+    return
+end
 
 end #module

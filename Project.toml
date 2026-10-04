@@ -25,7 +25,10 @@ SPIRV_Tools_jll = "6ac6d60f-d740-5983-97d7-a4482c0689f4"
 pocl_standalone_jll = "54f56a70-6062-5590-a942-1226658f6c83"
 
 [weakdeps]
+AMDGPU = "21141c5a-9bdb-4563-92ae-f87d6854732e"
+IntelITT = "c9b2f978-7543-4802-ae44-75068f23ee64"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+NVTX = "5da4648a-3479-48b8-97b9-01cb529c0a1f"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 
@@ -33,19 +36,25 @@ StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 KernelInterface = {path = "lib/KernelInterface"}
 
 [extensions]
+IntelITTExt = "IntelITT"
 LinearAlgebraExt = "LinearAlgebra"
+NVTXExt = "NVTX"
+ROCTXExt = "AMDGPU"
 SparseArraysExt = "SparseArrays"
 StaticArraysExt = "StaticArrays"
 
 [compat]
+AMDGPU = "2"
 Adapt = "0.4, 1.0, 2.0, 3.0, 4"
 Atomix = "1.2.1"
 GPUCompiler = "2.10"
 GPUToolbox = "3.3.2"
+IntelITT = "0.2"
 KernelInterface = "0.4"
 LLVM = "10"
 LinearAlgebra = "1.6"
 MacroTools = "0.5"
+NVTX = "0.3, 1"
 PrecompileTools = "1"
 Printf = "<0.0.1, 1"
 Random = "1"

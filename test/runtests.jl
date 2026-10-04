@@ -429,3 +429,159 @@ end
     @test CPU() isa KernelAbstractions.GPU
     @test NewBackend <: KernelAbstractions.GPU
 end
+
+@testset "Profiling" begin
+    RecordingTracer, with_tracer = Testsuite.RecordingTracer, Testsuite.with_tracer
+    # nothing is registered unless running under a profiler (or with `JULIA_KA_NVTXT`)
+    @test KernelAbstractions.profiling_active() == !isempty(KernelAbstractions.tracers())
+
+    if !KernelAbstractions.profiling_active()
+        @testset "inactive" begin
+            @test KernelAbstractions.profiling_range_start("label") === nothing
+            @test KernelAbstractions.profiling_range_end(nothing) === nothing
+            @test profiling_mark("label") === nothing
+            # the label isn't evaluated when nobody listens
+            @test (@profiling_range error("label") 1 + 2) == 3
+        end
+    end
+
+    @testset "macro" begin
+        @test (@profiling_range "label" 1 + 2) == 3
+        @test (@profiling_range "label" domain = "Custom" 1 + 2) == 3
+        @test_throws ErrorException @profiling_range "label" error("boom")
+        # assignments remain visible, as with `@time`
+        @profiling_range "assign" y = 42
+        @test y == 42
+
+        @test_throws ArgumentError macroexpand(@__MODULE__, :(@profiling_range "label" foo = 1 2))
+    end
+
+    @testset "registration" begin
+        tracer = RecordingTracer()
+        with_tracer(tracer) do tracer
+            @test KernelAbstractions.profiling_active()
+            # registering twice doesn't duplicate
+            KernelAbstractions.register_tracer!(tracer)
+            @test count(t -> t === tracer, KernelAbstractions.tracers()) == 1
+        end
+        @test !(tracer in KernelAbstractions.tracers())
+    end
+
+    @testset "ranges and markers" begin
+        tracer = with_tracer() do tracer
+            @test (
+                @profiling_range "outer" domain = "Trixi" begin
+                    profiling_mark("inside")
+                    @profiling_range "inner $(1 + 1)" 7
+                end
+            ) == 7
+            id = KernelAbstractions.profiling_range_start("explicit"; domain = "X")
+            KernelAbstractions.profiling_range_end(id)
+        end
+        @test tracer.events == [
+            (:start, "outer", "Trixi"), (:mark, "inside", "KernelAbstractions"),
+            (:start, "inner 2", "KernelAbstractions"), (:end, "inner 2"), (:end, "outer"),
+            (:start, "explicit", "X"), (:end, "explicit"),
+        ]
+
+        # ranges end when the expression throws
+        tracer = with_tracer() do tracer
+            @test_throws ErrorException @profiling_range "throws" error("boom")
+        end
+        @test tracer.events == [(:start, "throws", "KernelAbstractions"), (:end, "throws")]
+
+        # ranges end with the tracers they started with
+        tracer = KernelAbstractions.register_tracer!(RecordingTracer())
+        id = KernelAbstractions.profiling_range_start("open")
+        KernelAbstractions.unregister_tracer!(tracer)
+        KernelAbstractions.profiling_range_end(id)
+        @test tracer.events == [(:start, "open", "KernelAbstractions"), (:end, "open")]
+
+        # from many tasks at once
+        tracer = with_tracer() do tracer
+            @sync for i in 1:16
+                Threads.@spawn @profiling_range "task $i" (yield(); i)
+            end
+        end
+        @test count(e -> e[1] === :start, tracer.events) == 16
+        @test count(e -> e[1] === :end, tracer.events) == 16
+    end
+
+    @testset "multiple tracers" begin
+        a, b = RecordingTracer(), RecordingTracer()
+        with_tracer(a) do _
+            with_tracer(b) do _
+                @profiling_range "both" nothing
+            end
+        end
+        @test a.events == b.events == [(:start, "both", "KernelAbstractions"), (:end, "both")]
+    end
+
+    # with a profiler listening
+    with_tracer() do _
+        Testsuite.profiling_testsuite(CPU, Array)
+    end
+end
+
+@testset "NVTXT" begin
+    @test KernelAbstractions.nvtxt_path("1") == "ka-$(getpid()).nvtxt"
+    @test KernelAbstractions.nvtxt_path("/tmp/trace-%p.nvtxt") == "/tmp/trace-$(getpid()).nvtxt"
+
+    mktempdir() do dir
+        path = joinpath(dir, "trace.nvtxt")
+        tracer = KernelAbstractions.NVTXTTracer(path)
+        Testsuite.with_tracer(tracer) do _
+            @profiling_range "range" nothing
+            @profiling_range "say \"hi\"\n" domain = "Trixi" nothing
+            profiling_mark("marker")
+            Testsuite.profiling_fill!(CPU())(zeros(Float32, 4), 1.0f0; ndrange = 4)
+        end
+        close(tracer)
+        # recording after closing is harmless
+        KernelAbstractions.trace_mark(tracer, "late", "KernelAbstractions")
+
+        lines = readlines(path)
+        @test lines[1] == "SetFileDisplayName, KernelAbstractions"
+        @test "ProcessId = $(getpid())" in lines
+        records = filter(l -> startswith(l, "RangeStartEnd, ") || startswith(l, "Marker, "), lines)
+        @test length(records) == 4
+        r = match(r"^RangeStartEnd, (\d+), (\d+), (\d+), \"range\"$", records[1])
+        @test r !== nothing && parse(UInt64, r[1]) <= parse(UInt64, r[2])
+        @test endswith(records[2], ", \"Trixi: say 'hi' \"")
+        @test match(r"^Marker, \d+, \d+, \"marker\"$", records[3]) !== nothing
+        @test endswith(records[4], ", \"profiling_fill!\"")
+    end
+
+    # enabled with an environment variable
+    mktempdir() do dir
+        julia = Cmd(filter(arg -> !startswith(arg, "--code-coverage"), Base.julia_cmd().exec))
+        script = """
+        using KernelAbstractions
+        @profiling_range "from env" nothing
+        print(getpid())
+        """
+        cmd = `$julia --startup-file=no --project=$(Base.active_project()) -e $script`
+        env = ("JULIA_KA_NVTXT" => joinpath(dir, "env-%p.nvtxt"),)
+        pid = readchomp(setenv(cmd, copy(ENV)..., env...; dir))
+        trace = read(joinpath(dir, "env-$pid.nvtxt"), String)
+        @test occursin("\"from env\"", trace)
+    end
+end
+
+import IntelITT, NVTX
+@testset "Profiler extensions" begin
+    # only registered under the profiler
+    itt = Base.get_extension(KernelAbstractions, :IntelITTExt)
+    @test isassigned(itt.TRACER) == IntelITT.isactive()
+    nvtx = Base.get_extension(KernelAbstractions, :NVTXExt)
+    @test isassigned(nvtx.TRACER) == NVTX.isactive()
+
+    # but work without it
+    for tracer in (itt.ITTTracer(), nvtx.NVTXTracer())
+        Testsuite.with_tracer(tracer) do _
+            @test (@profiling_range "range" domain = "Ext" 1) == 1
+            @test profiling_mark("mark") === nothing
+            Testsuite.profiling_fill!(CPU())(zeros(Float32, 4), 1.0f0; ndrange = 4)
+        end
+    end
+end

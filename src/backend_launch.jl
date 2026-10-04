@@ -83,6 +83,24 @@ Core.kwcall(kwargs::NamedTuple, obj::Kernel{<:KI.Backend}, args::Vararg{Any, N})
     launch_tuple(obj, args; kwargs...)
 
 function launch_tuple(obj::Kernel, args::Tuple; ndrange = nothing, workgroupsize = nothing)
+    if profiling_active()
+        return launch_traced(obj, args, ndrange, workgroupsize)
+    end
+    return launch_untraced(obj, args, ndrange, workgroupsize)
+end
+
+# out of line, to keep the profiler out of the common path
+@noinline function launch_traced(obj::Kernel, args::Tuple, ndrange, workgroupsize)
+    id = profiling_range_start(kernel_label(obj.f))
+    try
+        launch_untraced(obj, args, ndrange, workgroupsize)
+    finally
+        profiling_range_end(id)
+    end
+    return nothing
+end
+
+function launch_untraced(obj::Kernel, args::Tuple, ndrange, workgroupsize)
     ndrange, workgroupsize, iterspace, dynamic = launch_config(obj, ndrange, workgroupsize)
     # nothing to launch (or compile) for an empty ndrange
     any(iszero, size(blocks(iterspace))) && return nothing
