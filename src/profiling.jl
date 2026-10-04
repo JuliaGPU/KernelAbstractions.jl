@@ -125,9 +125,12 @@ synchronizes_launches(::Nothing) = false
 
 Record an instantaneous marker named `label` in `domain`.
 """
-function profiling_mark(label; domain = "KernelAbstractions")
+# the check is inlined into the caller, so that a marker costs nothing when nobody listens
+@inline profiling_mark(label; domain = "KernelAbstractions") =
+    profiling_active() ? record_mark(label, domain) : nothing
+
+@noinline function record_mark(label, domain)
     current = tracers()
-    isempty(current) && return nothing
     label, domain = String(label), String(domain)
     for tracer in current
         trace_mark(tracer, label, domain)
@@ -142,6 +145,10 @@ Evaluate `expr` inside a profiler range named `label`, and return its value. `la
 only evaluated if a profiler is listening (see [`profiling_active`](@ref)), so it can be
 built with string interpolation at no cost to unprofiled runs. The range is ended if `expr`
 throws. Assignments in `expr` are visible after the macro, as with `@time`.
+
+`expr` is compiled twice, for when a profiler listens and for when none does, so that the
+latter costs no more than a check. It therefore can't define labels: `@goto` and `@label`
+are not supported in `expr`.
 
 ```julia
 @profiling_range "volume integral" begin
@@ -169,14 +176,18 @@ macro profiling_range(label, args...)
         end
     end
     id = gensym(:id)
+    # unlike `try`, `tryfinally` doesn't introduce a scope
+    traced = Expr(:tryfinally, esc(expr), :($profiling_range_end($id)))
+    # Entering the exception handler that ends the range costs more than checking for a
+    # profiler, so it is only entered when one listens, at the price of compiling `expr`
+    # twice.
     return quote
-        local $id = if $profiling_active()
-            $profiling_range_start($(esc(label)); domain = $(esc(domain)))
+        if $profiling_active()
+            local $id = $profiling_range_start($(esc(label)); domain = $(esc(domain)))
+            $traced
         else
-            nothing
+            $(esc(expr))
         end
-        # unlike `try`, `tryfinally` doesn't introduce a scope
-        $(Expr(:tryfinally, esc(expr), :($profiling_range_end($id))))
     end
 end
 

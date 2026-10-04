@@ -453,6 +453,11 @@ end
         @profiling_range "assign" y = 42
         @test y == 42
 
+        # the expression is evaluated once
+        count = Ref(0)
+        @test (@profiling_range "once" (count[] += 1)) == 1
+        @test count[] == 1
+
         @test_throws ArgumentError macroexpand(@__MODULE__, :(@profiling_range "label" foo = 1 2))
     end
 

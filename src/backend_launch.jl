@@ -89,8 +89,11 @@ function launch_tuple(obj::Kernel, args::Tuple; ndrange = nothing, workgroupsize
     return launch_untraced(obj, args, ndrange, workgroupsize)
 end
 
-# out of line, to keep the profiler out of the common path
-@noinline function launch_traced(obj::Kernel, args::Tuple, ndrange, workgroupsize)
+# Out of line, to keep the profiler out of the common path, and inferred only once rather
+# than for every kernel, which would slow down every first launch.
+Base.@nospecializeinfer @noinline function launch_traced(
+        @nospecialize(obj::Kernel), @nospecialize(args::Tuple), @nospecialize(ndrange), @nospecialize(workgroupsize)
+    )
     id = profiling_range_start(kernel_label(obj.f))
     try
         launch_untraced(obj, args, ndrange, workgroupsize)
