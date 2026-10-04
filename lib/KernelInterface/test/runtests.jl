@@ -25,6 +25,8 @@ end
 
 struct ShuffleBackend <: KI.Backend end
 KI.supports_shuffle(::ShuffleBackend, ::Type{Int32}) = true
+struct WordShuffleBackend <: KI.Backend end
+KI.supports_shuffle(::WordShuffleBackend, ::Type{UInt32}) = true
 
 # NOTE: this runs before the mock backend below defines methods on `argconvert`
 # and `kernel_function`.
@@ -49,6 +51,11 @@ KI.supports_shuffle(::ShuffleBackend, ::Type{Int32}) = true
         @test_throws ArgumentError shfl((1.0f0, 2), 1)
         @test_throws ArgumentError shfl(Ref(1), 1)
     end
+    # primitive types are shuffled as `UInt32` words, if the backend supports `UInt32`
+    @test KI.supports_shuffle(WordShuffleBackend(), Bool)
+    @test KI.supports_shuffle(WordShuffleBackend(), Float64)
+    @test KI.supports_shuffle(WordShuffleBackend(), Tuple{Char, Int128})
+    @test !KI.supports_shuffle(WordShuffleBackend(), Ref{Int})
     @test !KI.supports_shuffle(ShuffleBackend(), Float32)
     @test !KI.supports_shuffle(ShuffleBackend(), Tuple{Float32, Int})
     @test KI.supports_shuffle(ShuffleBackend(), Int32)

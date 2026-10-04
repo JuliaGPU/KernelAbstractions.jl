@@ -132,6 +132,11 @@ end
 # doesn't change during the kernel's execution, and that a 1-D work-group of at most
 # `sub_group_size(backend)` work-items is a single sub-group. Backends that can't ensure
 # that don't report sub-group support. See the manual.
+#
+# In a partial sub-group, the lanes `get_sub_group_size()+1:get_max_sub_group_size()` have no
+# work-item: shuffles from them give unspecified values, and the votes, `sub_group_match_any`,
+# `sub_group_reduce` and `sub_group_scan` only take the work-items of the sub-group into
+# account.
 
 """
     get_sub_group_size([::Type{T}=Int])::T
@@ -264,8 +269,8 @@ localmemory(::Type{T}, ::Val) where {T} =
 ## communication
 
 # Shuffles exchange values between the work-items of a sub-group. Backends implement them for
-# the primitive types for which `supports_shuffle` returns `true`; the fallbacks below
-# shuffle other `isbits` types field by field.
+# the primitive types for which `supports_shuffle` returns `true`. The fallbacks below shuffle
+# other primitive types as `UInt32` words, and other `isbits` types field by field.
 
 """
     shfl(val::T, lane::Integer)::T
@@ -278,18 +283,21 @@ but they may read from different lanes.
 
 `shfl` exchanges values, not memory: it is not a memory fence.
 
-Types for which [`supports_shuffle`](@ref) returns `true` are supported, as well as `isbits`
-structs and tuples of such types, which are shuffled field by field.
+Types for which [`supports_shuffle`](@ref) returns `true` are supported. Besides the types a
+backend supports natively, that includes other primitive types of 1, 2 or a multiple of 4
+bytes (e.g. `Bool`, `Char` or `Int64`) if the backend supports `UInt32`, which are shuffled
+as `UInt32` words, and `isbits` structs and tuples of supported types, which are shuffled
+field by field.
 
 !!! note
-    Backend implementations **must** implement this for every primitive type `T` for which
-    [`supports_shuffle`](@ref) returns `true`, and only for those, so that other types reach
-    the fallback that shuffles structs field by field:
+    Backend implementations **must** implement this for the primitive types they support
+    natively, which have to include `UInt32`, and only for those, so that other types reach
+    the fallbacks:
     ```
     @device_override shfl(val::T, lane::Integer) where {T <: Union{...}}
     ```
 """
-@inline shfl(val, lane::Integer) = shfl_fields(x -> shfl(x, lane), val)
+@inline shfl(val, lane::Integer) = shfl_fallback(x -> shfl(x, lane), val)
 
 """
     shfl_down(val::T, offset::Integer)::T
@@ -310,7 +318,7 @@ the supported types.
     @device_override shfl_down(val::T, offset::Integer) where {T <: Union{...}}
     ```
 """
-@inline shfl_down(val, offset::Integer) = shfl_fields(x -> shfl_down(x, offset), val)
+@inline shfl_down(val, offset::Integer) = shfl_fallback(x -> shfl_down(x, offset), val)
 
 """
     shfl_up(val::T, offset::Integer)::T
@@ -331,7 +339,7 @@ the supported types.
     @device_override shfl_up(val::T, offset::Integer) where {T <: Union{...}}
     ```
 """
-@inline shfl_up(val, offset::Integer) = shfl_fields(x -> shfl_up(x, offset), val)
+@inline shfl_up(val, offset::Integer) = shfl_fallback(x -> shfl_up(x, offset), val)
 
 """
     shfl_xor(val::T, mask::Integer)::T
@@ -355,7 +363,45 @@ the supported types.
     @device_override shfl_xor(val::T, mask::Integer) where {T <: Union{...}}
     ```
 """
-@inline shfl_xor(val, mask::Integer) = shfl_fields(x -> shfl_xor(x, mask), val)
+@inline shfl_xor(val, mask::Integer) = shfl_fallback(x -> shfl_xor(x, mask), val)
+
+# Shuffle a value of a type that the backend doesn't support natively, with `f` shuffling a
+# value of a type it does support. The fallbacks are separate functions for primitive and for
+# other types, so that the fallback of a struct with a field the backend doesn't support
+# natively, e.g. an `Int64` on Metal, doesn't call itself, which inference gives up on (on
+# Julia 1.10).
+@inline function shfl_fallback(f, val::T) where {T}
+    return isprimitivetype(T) ? shfl_words(f, val) : shfl_fields(f, val)
+end
+
+shfl_unsupported(T) = throw(
+    ArgumentError(
+        "Shuffling values of type $T is not supported by this backend, see `supports_shuffle`"
+    )
+)
+
+# Whether a primitive type that a backend doesn't support natively can be shuffled as `UInt32`
+# words
+shuffle_as_words(T) = T !== UInt32 && sizeof(T) in (1, 2, 4, 8, 16)
+
+# The unsigned integer type of the size of a primitive type `T`
+const word_types = Dict(1 => UInt8, 2 => UInt16, 4 => UInt32, 8 => UInt64, 16 => UInt128)
+
+# Shuffle a primitive value as `UInt32` words: smaller values are zero-extended, larger ones
+# split into words.
+@inline @generated function shfl_words(f, val::T) where {T}
+    shuffle_as_words(T) || return :(shfl_unsupported($T))
+    U = word_types[sizeof(T)]
+    if sizeof(T) <= 4
+        return :(reinterpret($T, f(reinterpret($U, val) % UInt32) % $U))
+    end
+    n = sizeof(T) ÷ 4
+    words = (:((f((bits >> $(32 * (i - 1))) % UInt32) % $U) << $(32 * (i - 1))) for i in 1:n)
+    return quote
+        bits = reinterpret($U, val)
+        return reinterpret($T, |($(words...)))
+    end
+end
 
 # The expression that shuffles `ex::S` field by field, calling `f` on the primitive fields
 function shfl_fields_expr(S, ex)
@@ -368,16 +414,62 @@ end
 # unrolled here, rather than shuffled with a recursive call, which inference gives up on
 # (on Julia 1.10), so that `f` is only called on the primitive types.
 @inline @generated function shfl_fields(f, val::T) where {T}
-    if !isbitstype(T) || isprimitivetype(T)
-        return :(
-            throw(
-                ArgumentError(
-                    $("Shuffling values of type $T is not supported by this backend, see `supports_shuffle`")
-                )
-            )
-        )
-    end
+    isbitstype(T) || return :(shfl_unsupported($T))
     return shfl_fields_expr(T, :val)
+end
+
+# The shuffles within segments of `width` lanes, implemented with `shfl` from a lane.
+
+"""
+    shfl(val::T, lane::Integer, width::Integer)::T
+    shfl_down(val::T, offset::Integer, width::Integer)::T
+    shfl_up(val::T, offset::Integer, width::Integer)::T
+    shfl_xor(val::T, mask::Integer, width::Integer)::T
+
+Shuffles within segments of `width` consecutive lanes of the sub-group, as if each segment
+were a sub-group of its own: `lane` is the lane within the segment (between 1 and `width`, and
+taken modulo `width` otherwise), and `shfl_down`, `shfl_up` and `shfl_xor` read from lanes of
+the same segment. Where these would read from outside of the segment, they return `val` of the
+work-item itself (rather than an unspecified value, as without `width`), like CUDA's
+shuffles with a `width`. Reading from a lane of the segment that has no work-item (in a
+partial sub-group) gives an unspecified value.
+
+`width` has to be a power of two of at most the sub-group width
+[`get_max_sub_group_size`](@ref), and the same for all work-items of the sub-group.
+
+!!! note
+    Backends **may** implement these, e.g. if they have native shuffles with a width. The
+    fallbacks use [`shfl`](@ref) from a lane.
+"""
+@inline function shfl(val, lane::Integer, width::Integer)
+    l0 = get_sub_group_local_id(Int32) - Int32(1)
+    w = width % Int32
+    base = l0 & ~(w - Int32(1))
+    return shfl(val, base + ((lane % Int32 - Int32(1)) & (w - Int32(1))) + Int32(1))
+end
+
+@inline function shfl_down(val, offset::Integer, width::Integer)
+    l0 = get_sub_group_local_id(Int32) - Int32(1)
+    w = width % Int32
+    d = offset % Int32
+    src = ifelse((l0 & (w - Int32(1))) + d < w, l0 + d, l0)
+    return shfl(val, src + Int32(1))
+end
+
+@inline function shfl_up(val, offset::Integer, width::Integer)
+    l0 = get_sub_group_local_id(Int32) - Int32(1)
+    w = width % Int32
+    d = offset % Int32
+    src = ifelse((l0 & (w - Int32(1))) >= d, l0 - d, l0)
+    return shfl(val, src + Int32(1))
+end
+
+@inline function shfl_xor(val, mask::Integer, width::Integer)
+    l0 = get_sub_group_local_id(Int32) - Int32(1)
+    w = width % Int32
+    x = l0 ⊻ (mask % Int32)
+    src = ifelse((x & ~(w - Int32(1))) == (l0 & ~(w - Int32(1))), x, l0)
+    return shfl(val, src + Int32(1))
 end
 
 """
@@ -434,6 +526,99 @@ divergent branch). Only sub-groups of at most 64 work-items are supported.
     ```
 """
 function sub_group_ballot end
+
+"""
+    sub_group_match_any(val)::UInt64
+
+A mask of the work-items of the sub-group whose `val` is the same as the one of this
+work-item (compared bitwise, with `===`), in the format of [`sub_group_ballot`](@ref). Work-items
+with different values get different masks: e.g. `trailing_zeros(mask) + 1` is the lane of
+the first work-item with the same value, and `count_ones(mask)` the number of them.
+
+All work-items of the sub-group have to execute `sub_group_match_any` together (not in a
+divergent branch). Values of the types that the shuffles support are supported, see
+[`supports_shuffle`](@ref).
+
+!!! note
+    Backends **may** implement this, e.g. with CUDA's `match.any.sync`. The fallback finds
+    the groups of equal values one by one with [`shfl`](@ref) and [`sub_group_ballot`](@ref),
+    so it takes as many steps as there are distinct values.
+"""
+@inline function sub_group_match_any(val)
+    remaining = sub_group_ballot(true)
+    mask = zero(UInt64)
+    # uniform: every step removes the group of the lowest remaining lane from `remaining`
+    while remaining != zero(UInt64)
+        leader = trailing_zeros(remaining) + 1
+        same = val === shfl(val, leader)
+        group = sub_group_ballot(same)
+        mask = ifelse(same, group, mask)
+        remaining &= ~group
+    end
+    return mask
+end
+
+"""
+    sub_group_reduce(op, val::T)::T
+
+Reduce `val` over the work-items of the sub-group with the associative binary operator `op`,
+in the order of the lanes. All work-items of the sub-group get the result.
+
+All work-items of the sub-group have to execute `sub_group_reduce` together (not in a
+divergent branch). Values of the types that the shuffles support are supported, see
+[`supports_shuffle`](@ref).
+
+!!! note
+    Backends **may** implement this for operators and types with a native reduction (e.g.
+    `+` on `Float32`), dispatching on `typeof(op)`. The fallback combines ranges of doubling
+    length with [`shfl_down`](@ref), and broadcasts the result of the first lane with
+    [`shfl`](@ref).
+"""
+@inline function sub_group_reduce(op, val)
+    lane = get_sub_group_local_id(Int32)
+    sgsize = get_sub_group_size(Int32)
+    offset = Int32(1)
+    while offset < sgsize
+        other = shfl_down(val, offset)
+        # the result of shuffling from past the end of the sub-group is unspecified
+        if lane + offset <= sgsize
+            val = op(val, other)
+        end
+        offset <<= 1
+    end
+    return shfl(val, 1)
+end
+
+"""
+    sub_group_scan(op, val::T)::T
+
+The inclusive scan of `val` over the work-items of the sub-group with the associative binary
+operator `op`, in the order of the lanes: the work-item in lane `i` gets the reduction of the
+values of lanes `1` to `i`.
+
+All work-items of the sub-group have to execute `sub_group_scan` together (not in a divergent
+branch). Values of the types that the shuffles support are supported, see
+[`supports_shuffle`](@ref).
+
+!!! note
+    Backends **may** implement this for operators and types with a native scan (e.g. `+` on
+    `Float32`), dispatching on `typeof(op)`. The fallback is a Hillis-Steele scan with
+    [`shfl_up`](@ref).
+"""
+@inline function sub_group_scan(op, val)
+    lane = get_sub_group_local_id(Int32)
+    sgsize = get_sub_group_size(Int32)
+    offset = Int32(1)
+    while offset < sgsize
+        other = shfl_up(val, offset)
+        # the result of shuffling from before the start of the sub-group is unspecified
+        if lane > offset
+            val = op(other, val)
+        end
+        offset <<= 1
+    end
+    return val
+end
 
 
 ## synchronization
