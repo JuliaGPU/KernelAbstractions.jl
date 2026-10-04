@@ -287,7 +287,8 @@ end
 # floats, and `min`/`max` on integers (OpenCL's `min` and `max` treat NaN and the sign of zero
 # differently from Julia's).
 #
-# Disabled until `pocl_standalone_jll` includes pocl/pocl#2373: in PoCL 7.2, a collective after
+# Disabled until `pocl_standalone_jll` includes pocl/pocl#2239 (JuliaPackaging/Yggdrasil#15001):
+# in PoCL 7.2, a collective after
 # a branch with an early exit (as bounds checks emit) gets wrong values, because WorkitemLoops
 # gives the peeled first work-item its own copy of the collective's scratch memory. Until
 # then, `KI.sub_group_reduce` and `KI.sub_group_scan` use KernelInterface's fallbacks.
