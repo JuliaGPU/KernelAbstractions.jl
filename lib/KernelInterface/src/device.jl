@@ -481,6 +481,8 @@ get the same result.
 All work-items of the sub-group have to execute `sub_group_any` together (not in a divergent
 branch).
 
+It exchanges values, not memory: it is not a memory fence, see [`sub_group_barrier`](@ref).
+
 !!! note
     Backend implementations that support sub-groups **must** implement:
     ```
@@ -497,6 +499,8 @@ sub-group get the same result.
 
 All work-items of the sub-group have to execute `sub_group_all` together (not in a divergent
 branch).
+
+It exchanges values, not memory: it is not a memory fence, see [`sub_group_barrier`](@ref).
 
 !!! note
     Backend implementations that support sub-groups **must** implement:
@@ -518,6 +522,8 @@ one.
 All work-items of the sub-group have to execute `sub_group_ballot` together (not in a
 divergent branch). Only sub-groups of at most 64 work-items are supported.
 
+It exchanges values, not memory: it is not a memory fence, see [`sub_group_barrier`](@ref).
+
 !!! note
     Backend implementations that support sub-groups with a width of at most 64 **must**
     implement:
@@ -538,6 +544,8 @@ the first work-item with the same value, and `count_ones(mask)` the number of th
 All work-items of the sub-group have to execute `sub_group_match_any` together (not in a
 divergent branch). Values of the types that the shuffles support are supported, see
 [`supports_shuffle`](@ref).
+
+It exchanges values, not memory: it is not a memory fence, see [`sub_group_barrier`](@ref).
 
 !!! note
     Backends **may** implement this, e.g. with CUDA's `match.any.sync`. The fallback finds
@@ -567,6 +575,8 @@ in the order of the lanes. All work-items of the sub-group get the result.
 All work-items of the sub-group have to execute `sub_group_reduce` together (not in a
 divergent branch). Values of the types that the shuffles support are supported, see
 [`supports_shuffle`](@ref).
+
+It exchanges values, not memory: it is not a memory fence, see [`sub_group_barrier`](@ref).
 
 !!! note
     Backends **may** implement this for operators and types with a native reduction (e.g.
@@ -599,6 +609,8 @@ values of lanes `1` to `i`.
 All work-items of the sub-group have to execute `sub_group_scan` together (not in a divergent
 branch). Values of the types that the shuffles support are supported, see
 [`supports_shuffle`](@ref).
+
+It exchanges values, not memory: it is not a memory fence, see [`sub_group_barrier`](@ref).
 
 !!! note
     Backends **may** implement this for operators and types with a native scan (e.g. `+` on

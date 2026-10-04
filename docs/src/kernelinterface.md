@@ -197,6 +197,12 @@ localmemory
 
 ### Communication
 
+The shuffles, votes and collectives below exchange values between the work-items of a
+sub-group, not memory: they don't order or make visible the work-items' accesses to local
+or global memory. To communicate through memory within a sub-group, e.g. a work-item reading
+what another one wrote to local memory, use [`sub_group_barrier`](@ref) between the write
+and the read.
+
 ```@docs
 shfl
 shfl_down
