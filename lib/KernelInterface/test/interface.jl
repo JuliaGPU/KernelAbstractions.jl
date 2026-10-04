@@ -370,6 +370,19 @@ function segmented_vote_kernel(out, lanes, pred, vals, width)
     return
 end
 
+# the sub-group and lane of every work-item, by its linear index (x fastest)
+function sub_group_layout_kernel(out)
+    l = KI.get_local_id()
+    sz = KI.get_local_size()
+    lin = l.x + (l.y - 1) * sz.x + (l.z - 1) * sz.x * sz.y
+    @inbounds begin
+        out[1, lin] = KI.get_sub_group_id()
+        out[2, lin] = KI.get_sub_group_local_id()
+        out[3, lin] = KI.get_sub_group_size()
+    end
+    return
+end
+
 struct FallbackStruct
     flag::Bool
     c::Char
@@ -510,6 +523,30 @@ function segmented_vote_testsuite(backend, AT, n, width)
         @test out[i, 2] == all(pred[j] for (_, j) in seg)
         @test out[i, 3] == ballot
         @test out[i, 4] == match
+    end
+    return
+end
+
+# 1-D work-groups and ones whose x extent is a multiple of the sub-group width form
+# sub-groups from consecutive work-items, x fastest
+function sub_group_layout_testsuite(backend, AT, sg_size, fits)
+    shapes = ((sg_size + 5,), (3 * sg_size,), (sg_size, 4), (2 * sg_size, 2), (sg_size, 2, 2))
+    for dims in shapes
+        n = prod(dims)
+        out = AT(zeros(Int, 3, n))
+        kernel = KI.@launch backend launch = false sub_group_layout_kernel(out)
+        if !fits(kernel, dims)
+            @test_skip "work-groups of $dims work-items"
+            continue
+        end
+        kernel(out; workgroupsize = dims)
+        KI.synchronize(backend)
+        out = Array(out)
+        @testset "$dims" begin
+            @test out[1, :] == [(lin - 1) ÷ sg_size + 1 for lin in 1:n]
+            @test out[2, :] == [(lin - 1) % sg_size + 1 for lin in 1:n]
+            @test out[3, :] == [min(sg_size, n - (lin - 1) ÷ sg_size * sg_size) for lin in 1:n]
+        end
     end
     return
 end
@@ -940,6 +977,10 @@ function interface_testsuite(backend::KI.Backend, AT)
         # whether `kernel` can be launched with work-groups of size `dims`
         fits(kernel, dims) = all(dims .<= max_dims[1:length(dims)]) && prod(dims) <= KI.max_work_group_size(kernel)
 
+        @testset "Sub-group layout" begin
+            sub_group_layout_testsuite(backend, AT, sg_size, fits)
+        end
+
         @testset "Sub-group return types" begin
             @test sg_size isa Int && sg_size >= 1
 
@@ -1060,6 +1101,8 @@ function interface_testsuite(backend::KI.Backend, AT)
                     KI.@launch backend workgroupsize = sg_size shfl_up_lanes_kernel(out, T, offset)
                     KI.synchronize(backend)
                     @test Array(out)[(offset + 1):end] == T.(1:(sg_size - offset))
+                    # lanes without a lane `offset` earlier get their own value
+                    @test Array(out)[1:offset] == T.(1:offset)
                 end
 
                 if ispow2(sg_size)
@@ -1143,6 +1186,11 @@ function interface_testsuite(backend::KI.Backend, AT)
                     end
                     @test !isempty(in_range)
                     @test out[in_range, 3] == out[in_range, 1] .+ offset
+                    # a 1-D work-group forms full sub-groups (but the last one), and lanes
+                    # past the sub-group width get their own value
+                    past = findall(i -> out[i, 1] + offset > sg_size, 1:N)
+                    @test !isempty(past)
+                    @test out[past, 3] == out[past, 1]
                 end
             end
         end

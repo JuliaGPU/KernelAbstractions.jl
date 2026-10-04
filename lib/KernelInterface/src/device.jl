@@ -129,9 +129,10 @@ end
 # sub-groups of at most `sub_group_size(backend)` work-items. Which work-items form a
 # sub-group, how many sub-groups there are and which are partial is unspecified, except
 # that `(get_sub_group_id(), get_sub_group_local_id())` is unique within a work-group and
-# doesn't change during the kernel's execution, and that a 1-D work-group of at most
-# `sub_group_size(backend)` work-items is a single sub-group. Backends that can't ensure
-# that don't report sub-group support. See the manual.
+# doesn't change during the kernel's execution, and that sub-groups are formed from
+# consecutive work-items, x fastest, if the work-group is 1-D or its x extent is a multiple of
+# the sub-group width (see the manual). Backends that can't ensure that don't report sub-group
+# support.
 #
 # In a partial sub-group, the lanes `get_sub_group_size()+1:get_max_sub_group_size()` have no
 # work-item: shuffles from them give unspecified values, and the votes, `sub_group_match_any`,
@@ -303,8 +304,11 @@ field by field.
     shfl_down(val::T, offset::Integer)::T
 
 Return `val` of the work-item `offset` lanes further in the sub-group, i.e. with
-[`get_sub_group_local_id`](@ref) equal to `get_sub_group_local_id() + offset`. When there is
-no such work-item, the result is an unspecified value (of type `T`).
+[`get_sub_group_local_id`](@ref) equal to `get_sub_group_local_id() + offset`, for an `offset`
+of at least 0. When that lane is past the sub-group width, i.e.
+`get_sub_group_local_id() + offset > get_max_sub_group_size()`, the result is `val` of the
+work-item itself, like CUDA's `shfl_down_sync`. When the lane is within the width but has no
+work-item, in a partial sub-group, the result is an unspecified value (of type `T`).
 
 All work-items of the sub-group have to execute `shfl_down` together (not in a divergent
 branch), with the same `offset`.
@@ -324,8 +328,9 @@ the supported types.
     shfl_up(val::T, offset::Integer)::T
 
 Return `val` of the work-item `offset` lanes earlier in the sub-group, i.e. with
-[`get_sub_group_local_id`](@ref) equal to `get_sub_group_local_id() - offset`. When there is
-no such work-item, the result is an unspecified value (of type `T`).
+[`get_sub_group_local_id`](@ref) equal to `get_sub_group_local_id() - offset`, for an `offset`
+of at least 0. When there is no such lane, i.e. `get_sub_group_local_id() <= offset`, the
+result is `val` of the work-item itself, like CUDA's `shfl_up_sync`.
 
 All work-items of the sub-group have to execute `shfl_up` together (not in a divergent
 branch), with the same `offset`.
@@ -346,8 +351,9 @@ the supported types.
 
 Return `val` of the work-item whose 0-based lane id is the 0-based lane id of this work-item
 xor `mask`, i.e. with [`get_sub_group_local_id`](@ref) equal to
-`((get_sub_group_local_id() - 1) ⊻ mask) + 1`. When there is no such work-item, the result is
-an unspecified value (of type `T`).
+`((get_sub_group_local_id() - 1) ⊻ mask) + 1`, for a `mask` between 0 and
+`get_max_sub_group_size() - 1`. When that lane has no work-item, in a partial sub-group, the
+result is an unspecified value (of type `T`).
 
 All work-items of the sub-group have to execute `shfl_xor` together (not in a divergent
 branch), with the same `mask`. A butterfly over the masks `width ÷ 2, …, 2, 1` (for the
@@ -430,9 +436,9 @@ Shuffles within segments of `width` consecutive lanes of the sub-group, as if ea
 were a sub-group of its own: `lane` is the lane within the segment (between 1 and `width`, and
 taken modulo `width` otherwise), and `shfl_down`, `shfl_up` and `shfl_xor` read from lanes of
 the same segment. Where these would read from outside of the segment, they return `val` of the
-work-item itself (rather than an unspecified value, as without `width`), like CUDA's
-shuffles with a `width`. Reading from a lane of the segment that has no work-item (in a
-partial sub-group) gives an unspecified value.
+work-item itself, like CUDA's shuffles with a `width` (and like `shfl_down` and `shfl_up`
+without a `width` past the sub-group width). Reading from a lane of the segment that has no
+work-item (in a partial sub-group) gives an unspecified value.
 
 `width` has to be a power of two of at most the sub-group width
 [`get_max_sub_group_size`](@ref), and the same for all work-items of the sub-group.
