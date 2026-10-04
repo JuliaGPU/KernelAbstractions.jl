@@ -544,7 +544,12 @@ end
 # 1-D work-groups and ones whose x extent is a multiple of the sub-group width form
 # sub-groups from consecutive work-items, x fastest
 function sub_group_layout_testsuite(backend, AT, sg_size, fits)
-    shapes = ((sg_size + 5,), (3 * sg_size,), (sg_size, 4), (2 * sg_size, 2), (sg_size, 2, 2))
+    # including one with a partial last sub-group past 256 work-items, which catches 8-bit
+    # arithmetic in the index computations
+    shapes = (
+        (sg_size + 5,), (3 * sg_size,), (9 * sg_size + 5,),
+        (sg_size, 4), (2 * sg_size, 2), (sg_size, 2, 2),
+    )
     for dims in shapes
         n = prod(dims)
         out = AT(zeros(Int, 3, n))
