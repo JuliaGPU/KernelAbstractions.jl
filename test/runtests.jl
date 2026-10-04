@@ -115,6 +115,23 @@ end
     @test occursin("store i64 $width", ir)
 end
 
+# the native sub-group collectives are used where they have Julia's semantics
+function sub_group_reduce_kernel(out, x)
+    i = KernelAbstractions.KernelInterface.get_global_id().x
+    out[i] = KernelAbstractions.KernelInterface.sub_group_reduce(+, x[i])
+    return
+end
+@testset "POCL native sub-group collectives" begin
+    for (T, native) in ((Int32, true), (Float32, true))
+        x, out = ones(T, 32), zeros(T, 32)
+        ir = sprint() do io
+            @device_code_llvm io = io debuginfo = :none @opencl local_size = 32 global_size = 32 sub_group_reduce_kernel(out, x)
+        end
+        @test all(==(32), out)
+        @test occursin("sub_group_reduce_add", ir) == (native && POCL.POCLKernels.NATIVE_COLLECTIVES)
+    end
+end
+
 # Julia doesn't turn a splat of more than 32 elements into a direct call, so a launch with
 # many arguments allocates unless every layer passes them on as a tuple
 @testset "POCL launch with many arguments" begin
