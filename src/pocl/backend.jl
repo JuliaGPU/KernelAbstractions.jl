@@ -270,6 +270,25 @@ end
     return UInt64(mask[1].value) | (UInt64(mask[2].value) << 32)
 end
 
+# native reductions and scans of `cl_khr_subgroups`. Only `+` for floats: OpenCL's `min` and
+# `max` treat NaN and the sign of zero differently from Julia's.
+const CollectiveIntTypes = Union{Int32, UInt32, Int64, UInt64}
+const CollectiveTypes = Union{CollectiveIntTypes, Float16, Float32, Float64}
+
+@device_override KI.sub_group_reduce(::typeof(+), val::CollectiveTypes) =
+    SPIRVIntrinsics.sub_group_reduce_add(val)
+@device_override KI.sub_group_reduce(::typeof(min), val::CollectiveIntTypes) =
+    SPIRVIntrinsics.sub_group_reduce_min(val)
+@device_override KI.sub_group_reduce(::typeof(max), val::CollectiveIntTypes) =
+    SPIRVIntrinsics.sub_group_reduce_max(val)
+
+@device_override KI.sub_group_scan(::typeof(+), val::CollectiveTypes) =
+    SPIRVIntrinsics.sub_group_scan_inclusive_add(val)
+@device_override KI.sub_group_scan(::typeof(min), val::CollectiveIntTypes) =
+    SPIRVIntrinsics.sub_group_scan_inclusive_min(val)
+@device_override KI.sub_group_scan(::typeof(max), val::CollectiveIntTypes) =
+    SPIRVIntrinsics.sub_group_scan_inclusive_max(val)
+
 @device_override @inline function KI._print(args...)
     POCL._print(args...)
 end

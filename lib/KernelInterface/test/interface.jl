@@ -429,8 +429,9 @@ function reduce_scan_testsuite(backend, AT, op, a)
     red, scan, lanes = Array(red), Array(scan), Array(lanes)
     # in the order of the lanes
     order = sortperm(lanes)
-    @test all(==(foldl(op, a[order])), red)
-    @test all(i -> scan[order[i]] == foldl(op, a[order[1:i]]), 1:n)
+    # `isequal`, as the results may be NaN
+    @test all(isequal(foldl(op, a[order])), red)
+    @test all(i -> isequal(scan[order[i]], foldl(op, a[order[1:i]])), 1:n)
     return
 end
 
@@ -498,6 +499,13 @@ function subgroup_communication_testsuite(backend::KI.Backend, AT, sg_size)
     for n in unique((sg_size, max(sg_size - 3, 1)))
         @testset "sub_group_reduce and sub_group_scan, $n work-items" begin
             reduce_scan_testsuite(backend, AT, +, Int32.(rand(1:100, n)))
+            # operators and types that backends may implement natively
+            reduce_scan_testsuite(backend, AT, min, Int64.(rand(-100:100, n)))
+            reduce_scan_testsuite(backend, AT, max, UInt32.(rand(1:100, n)))
+            KI.supports_shuffle(backend, Float32) &&
+                reduce_scan_testsuite(backend, AT, +, Float32.(rand(1:100, n)))
+            KI.supports_shuffle(backend, Float32) &&
+                reduce_scan_testsuite(backend, AT, max, Float32[i == 2 ? NaN32 : rand(1:100) for i in 1:n])
             reduce_scan_testsuite(
                 backend, AT, compose_affine,
                 [(Int32(rand((-1, 1, 2))), Int32(rand(-5:5))) for _ in 1:n]
