@@ -89,6 +89,12 @@ function spawn_testsuite(Backend, AT)
 
         # A top-level assignment in the body is a body, not a `device=` argument.
         @test fetch(KernelAbstractions.@spawn backend y = 41 + 1) == 42
+
+        # `name=` labels the task's profiler range, and combines with `device=`.
+        @test fetch(KernelAbstractions.@spawn backend name = "labelled" 1) == 1
+        @test fetch(KernelAbstractions.@spawn backend device = dev name = "label $dev" 2) == 2
+        @test_throws ArgumentError macroexpand(@__MODULE__, :(KernelAbstractions.@spawn $backend name = "a" name = "b" 1))
+        @test_throws ArgumentError macroexpand(@__MODULE__, :(KernelAbstractions.@spawn $backend name = "a"))
     end
 
     @testset "@sync" begin

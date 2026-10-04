@@ -457,3 +457,319 @@ end
     @test CPU() isa KernelAbstractions.GPU
     @test NewBackend <: KernelAbstractions.GPU
 end
+
+@testset "Profiling" begin
+    RecordingTracer, with_tracer = Testsuite.RecordingTracer, Testsuite.with_tracer
+    # nothing is registered unless running under a profiler (or with `JULIA_KA_NVTXT`)
+    @test KernelAbstractions.profiling_active() == !isempty(KernelAbstractions.tracers())
+
+    if !KernelAbstractions.profiling_active()
+        @testset "inactive" begin
+            @test KernelAbstractions.profiling_range_start("label") === nothing
+            @test KernelAbstractions.profiling_range_end(nothing) === nothing
+            @test profiling_mark("label") === nothing
+            # the label isn't evaluated when nobody listens
+            @test (@profiling_range error("label") 1 + 2) == 3
+        end
+    end
+
+    @testset "macro" begin
+        @test (@profiling_range "label" 1 + 2) == 3
+        @test (@profiling_range "label" domain = "Custom" 1 + 2) == 3
+        @test_throws ErrorException @profiling_range "label" error("boom")
+        # assignments remain visible, as with `@time`
+        @profiling_range "assign" y = 42
+        @test y == 42
+
+        # the expression is evaluated once
+        count = Ref(0)
+        @test (@profiling_range "once" (count[] += 1)) == 1
+        @test count[] == 1
+
+        @test_throws ArgumentError macroexpand(@__MODULE__, :(@profiling_range "label" foo = 1 2))
+    end
+
+    @testset "registration" begin
+        tracer = RecordingTracer()
+        with_tracer(tracer) do tracer
+            @test KernelAbstractions.profiling_active()
+            # registering twice doesn't duplicate
+            KernelAbstractions.register_tracer!(tracer)
+            @test count(t -> t === tracer, KernelAbstractions.tracers()) == 1
+        end
+        @test !(tracer in KernelAbstractions.tracers())
+    end
+
+    @testset "ranges and markers" begin
+        tracer = with_tracer() do tracer
+            @test (
+                @profiling_range "outer" domain = "Trixi" begin
+                    profiling_mark("inside")
+                    @profiling_range "inner $(1 + 1)" 7
+                end
+            ) == 7
+            id = KernelAbstractions.profiling_range_start("explicit"; domain = "X")
+            KernelAbstractions.profiling_range_end(id)
+        end
+        @test tracer.events == [
+            (:start, "outer", "Trixi"), (:mark, "inside", "KernelAbstractions"),
+            (:start, "inner 2", "KernelAbstractions"), (:end, "inner 2"), (:end, "outer"),
+            (:start, "explicit", "X"), (:end, "explicit"),
+        ]
+
+        # labels fixed in the code are `Symbol`s, which tracers may cache; others `String`s
+        @test tracer.types[1:3] == [(Symbol, Symbol), (String, Symbol), (String, Symbol)]
+        tracer = with_tracer() do tracer
+            Testsuite.profiling_fill!(CPU())(zeros(Float32, 4), 1.0f0; ndrange = 4)
+            wait(KernelAbstractions.@spawn CPU() nothing)
+        end
+        @test all(==((Symbol, Symbol)), tracer.types)
+        @test KernelAbstractions.kernel_label(Testsuite.gpu_profiling_fill!) === :profiling_fill!
+
+        # ranges end when the expression throws
+        tracer = with_tracer() do tracer
+            @test_throws ErrorException @profiling_range "throws" error("boom")
+        end
+        @test tracer.events == [(:start, "throws", "KernelAbstractions"), (:end, "throws")]
+
+        # ranges end with the tracers they started with
+        tracer = KernelAbstractions.register_tracer!(RecordingTracer())
+        id = KernelAbstractions.profiling_range_start("open")
+        KernelAbstractions.unregister_tracer!(tracer)
+        KernelAbstractions.profiling_range_end(id)
+        @test tracer.events == [(:start, "open", "KernelAbstractions"), (:end, "open")]
+
+        # from many tasks at once
+        tracer = with_tracer() do tracer
+            @sync for i in 1:16
+                Threads.@spawn @profiling_range "task $i" (yield(); i)
+            end
+        end
+        @test count(e -> e[1] === :start, tracer.events) == 16
+        @test count(e -> e[1] === :end, tracer.events) == 16
+    end
+
+    @testset "multiple tracers" begin
+        a, b = RecordingTracer(), RecordingTracer()
+        with_tracer(a) do _
+            with_tracer(b) do _
+                @profiling_range "both" nothing
+            end
+        end
+        @test a.events == b.events == [(:start, "both", "KernelAbstractions"), (:end, "both")]
+    end
+
+    # with a profiler listening
+    with_tracer() do _
+        Testsuite.profiling_testsuite(CPU, Array)
+    end
+end
+
+@testset "@profile" begin
+    kfill! = Testsuite.profiling_fill!
+    A = zeros(Float32, 64)
+
+    results = KernelAbstractions.@profile for i in 1:3
+        @profiling_range "step" domain = "Demo" begin
+            kfill!(CPU())(A, Float32(i); ndrange = length(A))
+            profiling_mark("half")
+            kfill!(CPU())(A, Float32(i); ndrange = length(A))
+        end
+    end
+    @test !KernelAbstractions.profiling_active()
+    @test all(==(3), A)
+    @test count(r -> r.name == "Demo: step", results.ranges) == 3
+    @test count(r -> r.name == "profiling_fill!", results.ranges) == 6
+    @test length(results.markers) == 3
+    @test all(r -> results.start <= r.start <= r.stop <= results.stop, results.ranges)
+
+    summary = sprint(show, MIME"text/plain"(), results)
+    @test startswith(summary, "Profiled ")
+    @test occursin("recording 9 ranges and 3 markers.", summary)
+    lines = split(summary, '\n')
+    @test occursin("Total time", lines[3])
+    # sorted by total time
+    @test endswith(lines[5], "Demo: step") && endswith(lines[6], "profiling_fill!")
+    @test any(l -> occursin(r"^ +3  half$", l), lines)
+
+    trace = sprint(
+        show, MIME"text/plain"(), KernelAbstractions.@profile trace = true begin
+            @profiling_range "outer" begin
+                profiling_mark("mark")
+                @profiling_range "inner" nothing
+            end
+        end
+    )
+    lines = split(trace, '\n')
+    @test occursin("Duration", lines[3])
+    @test endswith(lines[5], "  outer") && endswith(lines[6], "    ◆ mark") && endswith(lines[7], "    inner")
+
+    @test occursin("recording 0 ranges.", sprint(show, MIME"text/plain"(), KernelAbstractions.@profile 1 + 1))
+
+    # launches synchronize their backend only if asked to
+    tracer = KernelAbstractions.ProfileTracer(true)
+    # only for the tasks it profiles
+    @test !KernelAbstractions.synchronizes_launches(tracer)
+    @test KernelAbstractions.with(KernelAbstractions.PROFILERS => [tracer]) do
+        KernelAbstractions.synchronizes_launches(tracer)
+    end
+    @test !KernelAbstractions.synchronizes_launches(KernelAbstractions.ProfileTracer(false))
+    @test !KernelAbstractions.synchronizes_launches(Testsuite.RecordingTracer())
+    results = KernelAbstractions.@profile synchronize = false kfill!(CPU())(A, 1.0f0; ndrange = length(A))
+    @test only(results.ranges).name == "profiling_fill!"
+
+    # the profiler stops when the expression throws
+    @test_throws ErrorException KernelAbstractions.@profile error("boom")
+    @test !KernelAbstractions.profiling_active()
+    @test_throws ArgumentError macroexpand(@__MODULE__, :(KernelAbstractions.@profile foo = 1 2))
+
+    @testset "tasks" begin
+        As = [zeros(Float32, 64) for _ in 1:3]
+        work(i) = @profiling_range "task $i" kfill!(CPU())(As[i], 1.0f0; ndrange = length(As[i]))
+
+        # spawned tasks are recorded, and numbered after the profiling task
+        results = KernelAbstractions.@profile @profiling_range "parent" begin
+            @sync for i in 1:3
+                KernelAbstractions.@spawn CPU() work(i)
+            end
+        end
+        @test only(r.task for r in results.ranges if r.name == "parent") == 1
+        @test sort([r.task for r in results.ranges if startswith(r.name, "task ")]) == 2:4
+        # each kernel range is on the task that launched it
+        for i in 1:3
+            task = only(r.task for r in results.ranges if r.name == "task $i")
+            @test count(r -> r.name == "profiling_fill!" && r.task == task, results.ranges) == 1
+        end
+        # `@spawn` ranges are named after the call site, and belong to the spawned task
+        spawns = filter(r -> startswith(r.name, "@spawn runtests.jl:"), results.ranges)
+        @test sort([r.task for r in spawns]) == 2:4
+        for r in spawns
+            child = only(c for c in results.ranges if c.task == r.task && startswith(c.name, "task "))
+            @test r.start <= child.start <= child.stop <= r.stop
+        end
+        named = KernelAbstractions.@profile wait(KernelAbstractions.@spawn CPU() name = "named" nothing)
+        @test only(named.ranges).name == "named"
+        trace = sprint(show, MIME"text/plain"(), KernelAbstractions.ProfileResults(results.start, results.stop, results.ranges, results.markers, true))
+        @test occursin("task 1 (thread ", trace)
+
+        # other tasks aren't
+        stop = Threads.Atomic{Bool}(false)
+        other = Threads.@spawn while !stop[]
+            @profiling_range "unrelated" yield()
+        end
+        results = KernelAbstractions.@profile for _ in 1:10
+            @profiling_range "related" yield()
+        end
+        stop[] = true
+        wait(other)
+        @test all(r -> r.name == "related", results.ranges)
+        @test length(results.ranges) == 10
+
+        # nor are other profiles, at the same time or nested
+        t1 = Threads.@spawn KernelAbstractions.@profile for _ in 1:5
+            @profiling_range "one" yield()
+        end
+        t2 = Threads.@spawn KernelAbstractions.@profile for _ in 1:7
+            @profiling_range "two" yield()
+        end
+        r1, r2 = fetch(t1), fetch(t2)
+        @test all(r -> r.name == "one", r1.ranges) && length(r1.ranges) == 5
+        @test all(r -> r.name == "two", r2.ranges) && length(r2.ranges) == 7
+        local inner
+        outer = KernelAbstractions.@profile @profiling_range "outer" begin
+            inner = KernelAbstractions.@profile @profiling_range "inner" nothing
+        end
+        @test sort([r.name for r in outer.ranges]) == ["inner", "outer"]
+        @test [r.name for r in inner.ranges] == ["inner"]
+
+        # ranges of tasks that outlive the profile are lost, with a warning
+        started, finish = Channel{Nothing}(1), Channel{Nothing}(1)
+        local task
+        results = @test_logs (:warn, r"1 profiled range still open") KernelAbstractions.@profile begin
+            task = Threads.@spawn @profiling_range "outlives" begin
+                put!(started, nothing)
+                take!(finish)
+            end
+            take!(started)
+        end
+        put!(finish, nothing)
+        wait(task)
+        @test isempty(results.ranges)
+
+        # also for a `@spawn` task that hasn't started yet, as its range starts at `@spawn`
+        go = Channel{Nothing}(1)
+        results = @test_logs (:warn, r"1 profiled range still open") KernelAbstractions.@profile begin
+            task = KernelAbstractions.@spawn CPU() take!(go)
+        end
+        put!(go, nothing)
+        wait(task)
+    end
+
+    @test KernelAbstractions.format_time(5) == "5 ns"
+    @test KernelAbstractions.format_time(999.7) == "1 µs"
+    @test KernelAbstractions.format_time(1.234e6) == "1.23 ms"
+    @test KernelAbstractions.format_time(2.5e9) == "2.5 s"
+end
+
+@testset "NVTXT" begin
+    @test KernelAbstractions.nvtxt_path("1") == "ka-$(getpid()).nvtxt"
+    @test KernelAbstractions.nvtxt_path("/tmp/trace-%p.nvtxt") == "/tmp/trace-$(getpid()).nvtxt"
+
+    mktempdir() do dir
+        path = joinpath(dir, "trace.nvtxt")
+        tracer = KernelAbstractions.NVTXTTracer(path)
+        Testsuite.with_tracer(tracer) do _
+            @profiling_range "range" nothing
+            @profiling_range "say \"hi\"\n" domain = "Trixi" nothing
+            profiling_mark("marker")
+            Testsuite.profiling_fill!(CPU())(zeros(Float32, 4), 1.0f0; ndrange = 4)
+        end
+        close(tracer)
+        # recording after closing is harmless
+        KernelAbstractions.trace_mark(tracer, "late", :KernelAbstractions)
+
+        lines = readlines(path)
+        @test lines[1] == "SetFileDisplayName, KernelAbstractions"
+        @test "ProcessId = $(getpid())" in lines
+        records = filter(l -> startswith(l, "RangeStartEnd, ") || startswith(l, "Marker, "), lines)
+        @test length(records) == 4
+        r = match(r"^RangeStartEnd, (\d+), (\d+), (\d+), \"range\"$", records[1])
+        @test r !== nothing && parse(UInt64, r[1]) <= parse(UInt64, r[2])
+        @test endswith(records[2], ", \"Trixi: say 'hi' \"")
+        @test match(r"^Marker, \d+, \d+, \"marker\"$", records[3]) !== nothing
+        @test endswith(records[4], ", \"profiling_fill!\"")
+    end
+
+    # enabled with an environment variable
+    mktempdir() do dir
+        julia = Cmd(filter(arg -> !startswith(arg, "--code-coverage"), Base.julia_cmd().exec))
+        script = """
+        using KernelAbstractions
+        @profiling_range "from env" nothing
+        print(getpid())
+        """
+        cmd = `$julia --startup-file=no --project=$(Base.active_project()) -e $script`
+        env = ("JULIA_KA_NVTXT" => joinpath(dir, "env-%p.nvtxt"),)
+        pid = readchomp(setenv(cmd, copy(ENV)..., env...; dir))
+        trace = read(joinpath(dir, "env-$pid.nvtxt"), String)
+        @test occursin("\"from env\"", trace)
+    end
+end
+
+import IntelITT, NVTX
+@testset "Profiler extensions" begin
+    # only registered under the profiler
+    itt = Base.get_extension(KernelAbstractions, :IntelITTExt)
+    @test isassigned(itt.TRACER) == IntelITT.isactive()
+    nvtx = Base.get_extension(KernelAbstractions, :NVTXExt)
+    @test isassigned(nvtx.TRACER) == NVTX.isactive()
+
+    # but work without it
+    for tracer in (itt.ITTTracer(), nvtx.NVTXTracer())
+        Testsuite.with_tracer(tracer) do _
+            @test (@profiling_range "range" domain = "Ext" 1) == 1
+            @test profiling_mark("mark") === nothing
+            Testsuite.profiling_fill!(CPU())(zeros(Float32, 4), 1.0f0; ndrange = 4)
+        end
+    end
+end

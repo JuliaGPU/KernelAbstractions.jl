@@ -41,6 +41,7 @@ function main()
             "Extras" => [
                 "extras/unrolling.md",
                 "extras/pocl_debugging.md",
+                "extras/profiling.md",
             ], # Extras
             "Notes for implementations" => "implementations.md",
         ], # pages
