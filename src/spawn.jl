@@ -103,7 +103,9 @@ macro spawn(args...)
         end
     end
     device = Base.get(kwargs, :device, nothing)
+    # a literal name, like the default, is a `Symbol` label (see `Tracer`)
     name = Base.get(kwargs, :name, "@spawn $(basename(string(__source__.file))):$(__source__.line)")
+    name isa String && (name = QuoteNode(Symbol(name)))
 
     if length(positional) == 1
         threadpool = nothing

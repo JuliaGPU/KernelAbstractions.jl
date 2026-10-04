@@ -1,17 +1,22 @@
-# records the ranges and markers it is given
+# records the ranges and markers it is given, with labels and domains as strings, and the
+# types of the labels in `types`
 struct RecordingTracer <: KernelAbstractions.Tracer
     events::Vector{Any}
+    types::Vector{Any}
     lock::ReentrantLock
 end
-RecordingTracer() = RecordingTracer([], ReentrantLock())
+RecordingTracer() = RecordingTracer([], [], ReentrantLock())
 function KernelAbstractions.trace_range_start(t::RecordingTracer, label, domain)
-    @lock t.lock push!(t.events, (:start, label, domain))
-    return label
+    @lock t.lock begin
+        push!(t.events, (:start, String(label), String(domain)))
+        push!(t.types, (typeof(label), typeof(domain)))
+    end
+    return String(label)
 end
 KernelAbstractions.trace_range_end(t::RecordingTracer, id) =
     @lock t.lock push!(t.events, (:end, id))
 KernelAbstractions.trace_mark(t::RecordingTracer, label, domain) =
-    @lock t.lock push!(t.events, (:mark, label, domain))
+    @lock t.lock push!(t.events, (:mark, String(label), String(domain)))
 
 function with_tracer(f, tracer = RecordingTracer())
     KernelAbstractions.register_tracer!(tracer)

@@ -51,7 +51,7 @@ end
 synchronizes_launches(tracer::ProfileTracer) = tracer.synchronize && in_scope(tracer)
 
 # like NVTXT, without domains of their own
-profile_name(label, domain) = domain == "KernelAbstractions" ? label : string(domain, ": ", label)
+profile_name(label, domain) = domain === DEFAULT_DOMAIN ? String(label) : string(domain, ": ", label)
 
 function trace_range_start(tracer::ProfileTracer, label, domain)
     in_scope(tracer) || return nothing

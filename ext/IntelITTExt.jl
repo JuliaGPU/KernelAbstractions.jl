@@ -5,17 +5,17 @@ import IntelITT
 
 # forwards ranges to Intel VTune as ITT tasks, one ITT domain per domain
 struct ITTTracer <: KA.Tracer
-    domains::Dict{String, IntelITT.Domain}
+    domains::IdDict{Symbol, IntelITT.Domain}
     lock::ReentrantLock
 end
-ITTTracer() = ITTTracer(Dict{String, IntelITT.Domain}(), ReentrantLock())
+ITTTracer() = ITTTracer(IdDict{Symbol, IntelITT.Domain}(), ReentrantLock())
 
-domain(tracer::ITTTracer, name::String) =
-    @lock tracer.lock get!(() -> IntelITT.Domain(name), tracer.domains, name)
+domain(tracer::ITTTracer, name::Symbol) =
+    @lock tracer.lock get!(() -> IntelITT.Domain(String(name)), tracer.domains, name)
 
 function KA.trace_range_start(tracer::ITTTracer, label, domain_name)
     # overlapped tasks may end on another thread, and needn't nest
-    task = IntelITT.Task(domain(tracer, domain_name), label)
+    task = IntelITT.Task(domain(tracer, domain_name), String(label))
     IntelITT.start(task)
     return task
 end

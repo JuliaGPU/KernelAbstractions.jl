@@ -489,6 +489,15 @@ end
             (:start, "explicit", "X"), (:end, "explicit"),
         ]
 
+        # labels fixed in the code are `Symbol`s, which tracers may cache; others `String`s
+        @test tracer.types[1:3] == [(Symbol, Symbol), (String, Symbol), (String, Symbol)]
+        tracer = with_tracer() do tracer
+            Testsuite.profiling_fill!(CPU())(zeros(Float32, 4), 1.0f0; ndrange = 4)
+            wait(KernelAbstractions.@spawn CPU() nothing)
+        end
+        @test all(==((Symbol, Symbol)), tracer.types)
+        @test KernelAbstractions.kernel_label(Testsuite.gpu_profiling_fill!) === :profiling_fill!
+
         # ranges end when the expression throws
         tracer = with_tracer() do tracer
             @test_throws ErrorException @profiling_range "throws" error("boom")
@@ -689,7 +698,7 @@ end
         end
         close(tracer)
         # recording after closing is harmless
-        KernelAbstractions.trace_mark(tracer, "late", "KernelAbstractions")
+        KernelAbstractions.trace_mark(tracer, "late", :KernelAbstractions)
 
         lines = readlines(path)
         @test lines[1] == "SetFileDisplayName, KernelAbstractions"

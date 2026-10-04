@@ -6,7 +6,7 @@ using Base.Libc: Libdl
 
 # forwards ranges to rocprof as roctx ranges. like NVTX, roctx annotates host threads, and
 # rocprof attributes the GPU work launched within them. roctx has no domains, so ranges in a
-# domain other than "KernelAbstractions" are prefixed with it.
+# domain other than `:KernelAbstractions` are prefixed with it.
 struct ROCTXTracer <: KA.Tracer
     range_start::Ptr{Cvoid}
     range_stop::Ptr{Cvoid}
@@ -27,7 +27,8 @@ function ROCTXTracer(library::AbstractString)
     )
 end
 
-roctx_message(label, domain) = domain == "KernelAbstractions" ? label : string(domain, ": ", label)
+# a `Symbol` is passed to C as its name, without allocating
+roctx_message(label, domain) = domain === KA.DEFAULT_DOMAIN ? label : string(domain, ": ", label)
 
 # process ranges, rather than push/pop, since they may end on another thread
 KA.trace_range_start(tracer::ROCTXTracer, label, domain) =

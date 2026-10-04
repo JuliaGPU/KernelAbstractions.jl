@@ -83,18 +83,10 @@ Core.kwcall(kwargs::NamedTuple, obj::Kernel{<:KI.Backend}, args::Vararg{Any, N})
     launch_tuple(obj, args; kwargs...)
 
 function launch_tuple(obj::Kernel, args::Tuple; ndrange = nothing, workgroupsize = nothing)
-    if profiling_active()
-        return launch_traced(obj, args, ndrange, workgroupsize)
-    end
-    return launch_untraced(obj, args, ndrange, workgroupsize)
-end
-
-# Out of line, to keep the profiler out of the common path, and inferred only once rather
-# than for every kernel, which would slow down every first launch.
-Base.@nospecializeinfer @noinline function launch_traced(
-        @nospecialize(obj::Kernel), @nospecialize(args::Tuple), @nospecialize(ndrange), @nospecialize(workgroupsize)
-    )
-    id = profiling_range_start(kernel_label(obj.f))
+    profiling_active() || return launch_untraced(obj, args, ndrange, workgroupsize)
+    # The traced launch calls the same `launch_untraced`, so that it isn't inferred twice for
+    # every kernel. The helpers around it are only inferred once.
+    id = start_launch_range(obj)
     try
         launch_untraced(obj, args, ndrange, workgroupsize)
         # a profiler that measures kernels rather than launches
@@ -104,6 +96,9 @@ Base.@nospecializeinfer @noinline function launch_traced(
     end
     return nothing
 end
+
+Base.@nospecializeinfer @noinline start_launch_range(@nospecialize(obj::Kernel)) =
+    profiling_range_start(kernel_label(obj.f))
 
 function launch_untraced(obj::Kernel, args::Tuple, ndrange, workgroupsize)
     ndrange, workgroupsize, iterspace, dynamic = launch_config(obj, ndrange, workgroupsize)
