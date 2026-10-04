@@ -94,6 +94,8 @@ end
     id = profiling_range_start(kernel_label(obj.f))
     try
         launch_untraced(obj, args, ndrange, workgroupsize)
+        # a profiler that measures kernels rather than launches
+        synchronizes_launches(id) && KI.synchronize(backend(obj))
     finally
         profiling_range_end(id)
     end

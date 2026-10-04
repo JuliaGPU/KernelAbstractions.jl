@@ -28,6 +28,33 @@ event, use [`profiling_mark`](@ref), and for ranges that don't follow the struct
 code, [`profiling_range_start`](@ref KernelAbstractions.profiling_range_start) and
 [`profiling_range_end`](@ref KernelAbstractions.profiling_range_end).
 
+## Built-in profiler
+
+To see where time goes without an external profiler, run code under
+[`KernelAbstractions.@profile`](@ref KernelAbstractions.@profile). It records the ranges
+and kernel launches of an expression, and summarizes them:
+
+```julia-repl
+julia> KernelAbstractions.@profile for i in 1:10
+           @profiling_range "step" begin
+               mul2(backend)(A; ndrange = length(A))
+               add(backend)(A, B; ndrange = length(A))
+           end
+       end
+Profiled 6.04 ms, recording 30 ranges.
+
+ Time (%)  Total time  Calls  Avg time  Min time  Max time  Name
+ ────────  ──────────  ─────  ────────  ────────  ────────  ────
+   92.6 %     5.59 ms     10    559 µs    298 µs    2.9 ms  step
+   57.6 %     3.48 ms     10    348 µs    109 µs   2.48 ms  mul2
+   37.6 %     2.27 ms     10    227 µs    179 µs    400 µs  add
+```
+
+Kernel launches synchronize their backend while profiling, so that their ranges measure the
+kernel rather than its launch; pass `synchronize = false` to measure launches. Pass
+`trace = true` to list every range in order instead. The first call of a kernel includes
+its compilation, so profile a warmed-up run.
+
 ## Profilers
 
 Ranges are recorded on the host threads of the process, which is how NVTX, ITT and
@@ -70,6 +97,8 @@ Other profilers are supported by subtyping
 ```@docs
 @profiling_range
 profiling_mark
+KernelAbstractions.@profile
+KernelAbstractions.ProfileResults
 KernelAbstractions.profiling_active
 KernelAbstractions.profiling_range_start
 KernelAbstractions.profiling_range_end

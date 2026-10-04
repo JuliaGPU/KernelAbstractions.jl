@@ -523,6 +523,65 @@ end
     end
 end
 
+@testset "@profile" begin
+    kfill! = Testsuite.profiling_fill!
+    A = zeros(Float32, 64)
+
+    results = KernelAbstractions.@profile for i in 1:3
+        @profiling_range "step" domain = "Demo" begin
+            kfill!(CPU())(A, Float32(i); ndrange = length(A))
+            profiling_mark("half")
+            kfill!(CPU())(A, Float32(i); ndrange = length(A))
+        end
+    end
+    @test !KernelAbstractions.profiling_active()
+    @test all(==(3), A)
+    @test count(r -> r.name == "Demo: step", results.ranges) == 3
+    @test count(r -> r.name == "profiling_fill!", results.ranges) == 6
+    @test length(results.markers) == 3
+    @test all(r -> results.start <= r.start <= r.stop <= results.stop, results.ranges)
+
+    summary = sprint(show, MIME"text/plain"(), results)
+    @test startswith(summary, "Profiled ")
+    @test occursin("recording 9 ranges and 3 markers.", summary)
+    lines = split(summary, '\n')
+    @test occursin("Total time", lines[3])
+    # sorted by total time
+    @test endswith(lines[5], "Demo: step") && endswith(lines[6], "profiling_fill!")
+    @test any(l -> occursin(r"^ +3  half$", l), lines)
+
+    trace = sprint(
+        show, MIME"text/plain"(), KernelAbstractions.@profile trace = true begin
+            @profiling_range "outer" begin
+                profiling_mark("mark")
+                @profiling_range "inner" nothing
+            end
+        end
+    )
+    lines = split(trace, '\n')
+    @test occursin("Duration", lines[3])
+    @test endswith(lines[5], "  outer") && endswith(lines[6], "    ◆ mark") && endswith(lines[7], "    inner")
+
+    @test occursin("recording 0 ranges.", sprint(show, MIME"text/plain"(), KernelAbstractions.@profile 1 + 1))
+
+    # launches synchronize their backend only if asked to
+    @test KernelAbstractions.synchronizes_launches(KernelAbstractions.ProfileTracer(true))
+    @test !KernelAbstractions.synchronizes_launches(KernelAbstractions.ProfileTracer(false))
+    @test !KernelAbstractions.synchronizes_launches(Testsuite.RecordingTracer())
+    results = KernelAbstractions.@profile synchronize = false kfill!(CPU())(A, 1.0f0; ndrange = length(A))
+    @test only(results.ranges).name == "profiling_fill!"
+
+    # the profiler stops when the expression throws
+    @test_throws ErrorException KernelAbstractions.@profile error("boom")
+    @test !KernelAbstractions.profiling_active()
+    @test_throws ArgumentError macroexpand(@__MODULE__, :(KernelAbstractions.@profile foo = 1 2))
+
+    @test KernelAbstractions.format_time(5) == "5 ns"
+    @test KernelAbstractions.format_time(999.7) == "1 µs"
+    @test KernelAbstractions.format_time(1.234e6) == "1.23 ms"
+    @test KernelAbstractions.format_time(2.5e9) == "2.5 s"
+end
+
 @testset "NVTXT" begin
     @test KernelAbstractions.nvtxt_path("1") == "ka-$(getpid()).nvtxt"
     @test KernelAbstractions.nvtxt_path("/tmp/trace-%p.nvtxt") == "/tmp/trace-$(getpid()).nvtxt"

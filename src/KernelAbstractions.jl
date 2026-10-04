@@ -744,6 +744,7 @@ number as its compute units: `KernelAbstractions.POCL.device().max_compute_units
 const CPU = POCLBackend
 
 include("profiling.jl")
+include("profiler.jl")
 include("precompile.jl")
 
 function __init__()

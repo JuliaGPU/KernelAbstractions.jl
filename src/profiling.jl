@@ -20,6 +20,10 @@ Subtypes implement
     trace_range_start(tracer, label::String, domain::String) -> id
     trace_range_end(tracer, id)
     trace_mark(tracer, label::String, domain::String)     # optional
+    synchronizes_launches(tracer)::Bool                     # optional, default `false`
+
+If `synchronizes_launches` is `true`, kernel launches synchronize their backend before their
+range ends, so that the range measures the kernel's execution rather than its launch.
 
 Ranges may end on a different thread than they started on, and may overlap without nesting,
 so implementations should use the profiler's start/end API (e.g. `nvtxRangeStartEx`) rather
@@ -33,6 +37,7 @@ abstract type Tracer end
 function trace_range_start end
 function trace_range_end end
 trace_mark(::Tracer, label, domain) = nothing
+synchronizes_launches(::Tracer) = false
 
 # copy-on-write, so that checking for tracers is a single atomic load
 mutable struct Tracers
@@ -111,6 +116,9 @@ function profiling_range_end(range::ProfilingRange)
     return nothing
 end
 profiling_range_end(::Nothing) = nothing
+
+synchronizes_launches(range::ProfilingRange) = any(synchronizes_launches, range.tracers)
+synchronizes_launches(::Nothing) = false
 
 """
     profiling_mark(label::AbstractString; domain = "KernelAbstractions")
