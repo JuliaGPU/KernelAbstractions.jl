@@ -290,6 +290,49 @@ end
     return UInt64(mask[1].value) | (UInt64(mask[2].value) << 32)
 end
 
+# The fallbacks of `KI.sub_group_reduce` and `KI.sub_group_scan` loop over the constant
+# sub-group width, and PoCL 7.2 miscompiles the unrolled shuffles after a branch with an early
+# exit (as bounds checks emit), like the native collectives below (fixed by pocl/pocl#2239,
+# JuliaPackaging/Yggdrasil#15001). Until `pocl_standalone_jll` includes the fix, loop to a
+# bound that isn't a constant, but is the same for all sub-groups of the work-group, which
+# PoCL needs (see `POCLBackend`): the smaller of the width and the work-group size. Reduce by
+# combining ranges of doubling length with `shfl_down`, skipping the lanes without a
+# work-item, and broadcast the result of the first lane.
+@inline function uniform_sub_group_bound()
+    sz = KI.get_local_size(Int32)
+    return min(KI.get_max_sub_group_size(Int32), sz.x * sz.y * sz.z)
+end
+
+@device_override @inline function KI.sub_group_reduce(op, val)
+    lane = KI.get_sub_group_local_id(Int32)
+    sgsize = KI.get_sub_group_size(Int32)
+    offset = Int32(1)
+    bound = uniform_sub_group_bound()
+    while offset < bound
+        other = KI.shfl_down(val, offset)
+        if lane + offset <= sgsize
+            val = op(val, other)
+        end
+        offset <<= 1
+    end
+    return KI.shfl(val, 1)
+end
+
+# likewise for `KI.sub_group_scan`
+@device_override @inline function KI.sub_group_scan(op, val)
+    lane = KI.get_sub_group_local_id(Int32)
+    offset = Int32(1)
+    bound = uniform_sub_group_bound()
+    while offset < bound
+        other = KI.shfl_up(val, offset)
+        if lane > offset
+            val = op(other, val)
+        end
+        offset <<= 1
+    end
+    return val
+end
+
 # Native reductions and scans of `cl_khr_subgroups`, for `+` on 32- and 64-bit integers and
 # floats, and `min`/`max` on integers (OpenCL's `min` and `max` treat NaN and the sign of zero
 # differently from Julia's).
