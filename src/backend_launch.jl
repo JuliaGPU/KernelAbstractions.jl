@@ -85,19 +85,25 @@ Core.kwcall(kwargs::NamedTuple, obj::Kernel{<:KI.Backend}, args::Vararg{Any, N})
 function launch_tuple(obj::Kernel, args::Tuple; ndrange = nothing, workgroupsize = nothing)
     profiling_active() || return launch_untraced(obj, args, ndrange, workgroupsize)
     # The traced launch calls the same `launch_untraced`, so that it isn't inferred twice for
-    # every kernel; the helpers around it are small.
-    id = start_launch_range(obj)
+    # every kernel. The label is a constant, and the helpers only take it and the range, so
+    # they are compiled once rather than for every kernel.
+    id = start_launch_range(kernel_label(obj.f))
     try
         launch_untraced(obj, args, ndrange, workgroupsize)
-        # a profiler that measures kernels rather than launches
-        synchronizes_launches(id) && KI.synchronize(backend(obj))
+        synchronize_launch(id, backend(obj))
     finally
         profiling_range_end(id)
     end
     return nothing
 end
 
-@noinline start_launch_range(obj::Kernel) = profiling_range_start(kernel_label(obj.f))
+@noinline start_launch_range(label::Symbol) = profiling_range_start(label)
+
+# for a profiler that measures kernels rather than launches
+@noinline function synchronize_launch(id, backend)
+    synchronizes_launches(id) && KI.synchronize(backend)
+    return nothing
+end
 
 function launch_untraced(obj::Kernel, args::Tuple, ndrange, workgroupsize)
     ndrange, workgroupsize, iterspace, dynamic = launch_config(obj, ndrange, workgroupsize)
