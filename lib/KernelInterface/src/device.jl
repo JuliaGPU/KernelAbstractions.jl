@@ -566,6 +566,57 @@ It exchanges values, not memory: it is not a memory fence, see [`sub_group_barri
     return mask
 end
 
+# The votes within segments of `width` lanes, implemented with `sub_group_ballot`.
+
+# The 0-based lane of the first work-item of this work-item's segment of `width` lanes
+@inline segment_base(width) = (get_sub_group_local_id(Int32) - Int32(1)) & ~(width % Int32 - Int32(1))
+
+# The bits of the segment of `width` lanes starting at `base` of a mask, moved to the bottom
+@inline function segment_bits(mask::UInt64, base, width)
+    w = width % UInt32
+    bits = w >= UInt32(64) ? typemax(UInt64) : (UInt64(1) << w) - UInt64(1)
+    return (mask >> (base % UInt32)) & bits
+end
+
+"""
+    sub_group_any(pred::Bool, width::Integer)::Bool
+    sub_group_all(pred::Bool, width::Integer)::Bool
+    sub_group_ballot(pred::Bool, width::Integer)::UInt64
+    sub_group_match_any(val, width::Integer)::UInt64
+
+Votes within segments of `width` consecutive lanes of the sub-group, as if each segment were a
+sub-group of its own (like the shuffles with a `width`, e.g. [`shfl`](@ref
+shfl(::Any, ::Integer, ::Integer))): the work-items of a segment get the result for the
+work-items of their segment. The masks of `sub_group_ballot` and `sub_group_match_any` have a
+bit per lane of the segment: bit `i - 1` for its `i`-th lane, i.e. the lane
+`get_sub_group_local_id()` with `(get_sub_group_local_id() - 1) % width == i - 1`. In a
+partial sub-group, only the work-items of the segment take part.
+
+`width` has to be a power of two of at most the sub-group width
+[`get_max_sub_group_size`](@ref) (and of at most 64), and the same for all work-items of the
+sub-group, which all have to execute the vote together (not in a divergent branch).
+
+It exchanges values, not memory: it is not a memory fence, see [`sub_group_barrier`](@ref).
+
+!!! note
+    Backends **may** implement these. The fallbacks use [`sub_group_ballot`](@ref) and
+    [`sub_group_match_any`](@ref) of the whole sub-group.
+"""
+@inline sub_group_ballot(pred::Bool, width::Integer) =
+    segment_bits(sub_group_ballot(pred), segment_base(width), width)
+
+@inline sub_group_any(pred::Bool, width::Integer) = sub_group_ballot(pred, width) != zero(UInt64)
+
+@inline function sub_group_all(pred::Bool, width::Integer)
+    # compare with the work-items of the segment, which may be partial
+    base = segment_base(width)
+    return segment_bits(sub_group_ballot(pred), base, width) ==
+        segment_bits(sub_group_ballot(true), base, width)
+end
+
+@inline sub_group_match_any(val, width::Integer) =
+    segment_bits(sub_group_match_any(val), segment_base(width), width)
+
 """
     sub_group_reduce(op, val::T)::T
 

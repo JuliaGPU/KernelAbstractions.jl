@@ -351,6 +351,25 @@ function reduce_divergent_kernel(red, scan, a, m)
     return
 end
 
+# the votes within segments of `width` lanes; a work-group of `length(pred)` work-items, i.e. a
+# single (possibly partial) sub-group
+function segmented_vote_kernel(out, lanes, pred, vals, width)
+    i = KI.get_local_id().x
+    p = @inbounds pred[i]
+    any = KI.sub_group_any(p, width)
+    all = KI.sub_group_all(p, width)
+    ballot = KI.sub_group_ballot(p, width)
+    match = KI.sub_group_match_any(@inbounds(vals[i]), width)
+    @inbounds begin
+        out[i, 1] = any
+        out[i, 2] = all
+        out[i, 3] = ballot
+        out[i, 4] = match
+        lanes[i] = KI.get_sub_group_local_id()
+    end
+    return
+end
+
 struct FallbackStruct
     flag::Bool
     c::Char
@@ -459,6 +478,42 @@ function reduce_divergent_testsuite(backend, AT, sg_size, ::Type{T}) where {T}
     return
 end
 
+function segmented_vote_testsuite(backend, AT, n, width)
+    pred = [rand(Bool) for _ in 1:n]
+    # make some segments all true and some all false
+    for i in 1:n
+        seg = (i - 1) ÷ width
+        seg % 3 == 1 && (pred[i] = true)
+        seg % 3 == 2 && (pred[i] = false)
+    end
+    vals = Int32.(rand(1:3, n))
+    out = AT(zeros(UInt64, n, 4))
+    lanes = AT(zeros(Int, n))
+    KI.@launch backend workgroupsize = n segmented_vote_kernel(out, lanes, AT(pred), AT(vals), width)
+    KI.synchronize(backend)
+    out, lanes = Array(out), Array(lanes)
+    by_lane = zeros(Int, maximum(lanes))
+    for i in 1:n
+        by_lane[lanes[i]] = i
+    end
+    for i in 1:n
+        base = (lanes[i] - 1) ÷ width * width
+        # the work-items of the segment, by their position in the segment
+        seg = [(l - base, by_lane[l]) for l in (base + 1):min(base + width, length(by_lane)) if by_lane[l] != 0]
+        ballot = UInt64(0)
+        match = UInt64(0)
+        for (k, j) in seg
+            pred[j] && (ballot |= UInt64(1) << (k - 1))
+            vals[j] == vals[i] && (match |= UInt64(1) << (k - 1))
+        end
+        @test out[i, 1] == any(pred[j] for (_, j) in seg)
+        @test out[i, 2] == all(pred[j] for (_, j) in seg)
+        @test out[i, 3] == ballot
+        @test out[i, 4] == match
+    end
+    return
+end
+
 function subgroup_communication_testsuite(backend::KI.Backend, AT, sg_size)
     @testset "shuffles of other types" begin
         # primitive types that backends need not support natively are shuffled as words
@@ -517,6 +572,17 @@ function subgroup_communication_testsuite(backend::KI.Backend, AT, sg_size)
                 backend, AT, sg_size,
                 Float32[isodd(i) ? NaN32 : (i % 4 == 0 ? -0.0f0 : 0.0f0) for i in 1:sg_size]
             )
+        end
+    end
+
+    if sg_size <= 64
+        @testset "votes with a width" begin
+            for n in unique((sg_size, max(sg_size - 3, 1))), w in (1, 2, 4, 8, 16, 32, 64)
+                (w <= sg_size && sg_size % w == 0) || continue
+                @testset "$n work-items, width $w" begin
+                    segmented_vote_testsuite(backend, AT, n, w)
+                end
+            end
         end
     end
 
