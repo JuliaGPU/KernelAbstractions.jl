@@ -43,6 +43,16 @@ using KernelAbstractions, Test
 
 end
 
+# https://github.com/JuliaGPU/KernelAbstractions.jl/issues/829
+# LLVM turns these into `sitofp i1`, where `true` must convert to `-1`.
+@kernel function bool_to_signed_float_kernel!(B, A)
+    tid = @index(Global, Linear)
+    @inbounds x = A[tid]
+    @inbounds B[tid, 1] = ifelse(x < 2, 0, -1)
+    @inbounds B[tid, 2] = -Int(x >= 2)
+    @inbounds B[tid, 3] = ifelse(x < 2, Int32(0), Int32(-1))
+end
+
 function convert_testsuite(backend, ArrayT)
     ET = KernelAbstractions.supports_float64(backend()) ? Float64 : Float32
 
@@ -66,6 +76,14 @@ function convert_testsuite(backend, ArrayT)
             @test d_B[:, i + 10] == floor.(d_A)
             @test d_B[:, i + 20] == round.(d_A)
         end
+    end
+
+    @testset "signed i1 to float" begin
+        d_A = ArrayT(ET[1, 3])
+        d_B = ArrayT(zeros(ET, 2, 3))
+        bool_to_signed_float_kernel!(backend())(d_B, d_A, ndrange = 2)
+        synchronize(backend())
+        @test Array(d_B) == ET[0 0 0; -1 -1 -1]
     end
     return
 end
