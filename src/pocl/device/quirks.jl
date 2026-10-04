@@ -46,6 +46,18 @@ end
         @gputhrow "BoundsError" "Out-of-bounds array access"
 end
 
+# range.jl
+# From Metal.jl to avoid widemul and Int128, which the SPIR-V back-end cannot lower.
+# Unlike Metal.jl, this covers all the types Base's method does: `widemul` of a range of
+# `Int32` and an `Int64` index widens to `Int128` as well.
+@static if VERSION >= v"1.12.0-DEV.1736" # Partially reverts JuliaLang/julia PR #56750
+    const BitInteger64 = Union{Int8, Int16, Int32, Int64, UInt8, UInt16, UInt32, UInt64}
+    @device_override function Base.checkbounds(::Type{Bool}, v::StepRange{<:BitInteger64, <:BitInteger64}, i::BitInteger64)
+        @inline
+        return checkindex(Bool, eachindex(IndexLinear(), v), i)
+    end
+end
+
 # trig.jl
 @device_override @noinline Base.Math.sincos_domain_error(x) =
     @gputhrow "DomainError" "sincos(x) is only defined for finite x"

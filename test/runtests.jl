@@ -76,6 +76,34 @@ end
     @test config.target.extensions == "+SPV_KHR_expect_assume"
 end
 
+# Julia 1.12 checks the bounds of a `StepRange` in 128-bit integers, which the SPIR-V back-end
+# cannot lower; this is reached e.g. by indexing a strided view with `--check-bounds=yes`
+@testset "POCL bounds checks of a StepRange" begin
+    @kernel function steprange_checkbounds!(out, r)
+        I = @index(Global, Linear)
+        @inbounds out[I] = checkbounds(Bool, r, I - 2)
+    end
+    @testset "$(typeof(r))" for r in (1:2:8, 9:-3:1, UInt64(1):UInt64(2):UInt64(8), Int32(1):Int32(2):Int32(8))
+        n = Int(length(r))
+        out = zeros(Bool, n + 3)
+        steprange_checkbounds!(CPU())(out, r; ndrange = length(out))
+        synchronize(CPU())
+        @test out == [checkbounds(Bool, r, i) for i in -1:(n + 1)]
+    end
+
+    A = zeros(Int, 8, 10)
+    v = view(A, 1:2:8, 2:2:10)
+    @kernel function strided_view_fill!(v)
+        I = @index(Global, Cartesian)
+        v[I] = 1
+    end
+    strided_view_fill!(CPU())(v; ndrange = size(v))
+    synchronize(CPU())
+    ref = zeros(Int, 8, 10)
+    ref[1:2:8, 2:2:10] .= 1
+    @test A == ref
+end
+
 # `randn`/`randexp` for Float16 route through Random's table-free fallback, whose polar
 # transform overflows in Float16 and whose `log1p` isn't available for Float16 on the
 # device. The device overlays compute in Float32 and convert, so results stay finite.
