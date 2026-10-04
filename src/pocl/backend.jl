@@ -250,23 +250,23 @@ end
 end
 
 @device_override KI.shfl(val::T, lane::Integer) where {T <: ShuffleTypes} =
-    POCL.shuffle(val, lane)
+    sub_group_shuffle(val, lane)
 
 @device_override KI.shfl_down(val::T, offset::Integer) where {T <: ShuffleTypes} =
-    POCL.shuffle(val, get_sub_group_local_id() + offset)
+    sub_group_shuffle(val, get_sub_group_local_id() + offset)
 
 @device_override KI.shfl_up(val::T, offset::Integer) where {T <: ShuffleTypes} =
-    POCL.shuffle(val, get_sub_group_local_id() - offset)
+    sub_group_shuffle(val, get_sub_group_local_id() - offset)
 
 @device_override KI.shfl_xor(val::T, mask::Integer) where {T <: ShuffleTypes} =
-    sub_group_shuffle_xor(val, mask % UInt32)
+    sub_group_shuffle_xor(val, mask)
 
-@device_override KI.sub_group_any(pred::Bool) = POCL.sub_group_any(pred)
+@device_override KI.sub_group_any(pred::Bool) = SPIRVIntrinsics.sub_group_any(pred)
 
-@device_override KI.sub_group_all(pred::Bool) = POCL.sub_group_all(pred)
+@device_override KI.sub_group_all(pred::Bool) = SPIRVIntrinsics.sub_group_all(pred)
 
 @device_override function KI.sub_group_ballot(pred::Bool)
-    mask = POCL.sub_group_ballot(pred)
+    mask = SPIRVIntrinsics.sub_group_ballot(pred)
     return UInt64(mask[1].value) | (UInt64(mask[2].value) << 32)
 end
 

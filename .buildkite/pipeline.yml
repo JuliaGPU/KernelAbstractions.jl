@@ -24,7 +24,9 @@ steps:
       julia -e 'println("--- :julia: Instantiating project")
                 using Pkg
                 Pkg.develop([PackageSpec(; name="KernelAbstractions", path=pwd()),
-                PackageSpec(; name="KernelInterface", path=joinpath(pwd(), "lib", "KernelInterface"))])' || exit 3
+                PackageSpec(; name="KernelInterface", path=joinpath(pwd(), "lib", "KernelInterface"))])
+                # TODO: remove once JuliaGPU/OpenCL.jl#526 is released ([sources] needs Julia 1.11)
+                Pkg.add(url="https://github.com/JuliaGPU/OpenCL.jl", rev="vc/subgroup-votes", subdir="lib/intrinsics")' || exit 3
       julia -e 'println("--- :julia: Developing CUDA")
                 using Pkg
                 url="https://github.com/JuliaGPU/CUDA.jl"
@@ -64,7 +66,9 @@ steps:
       julia -e 'println("--- :julia: Instantiating project")
                 using Pkg
                 Pkg.develop([PackageSpec(; name="KernelAbstractions", path=pwd()),
-                PackageSpec(; name="KernelInterface", path=joinpath(pwd(), "lib", "KernelInterface"))])' || exit 3
+                PackageSpec(; name="KernelInterface", path=joinpath(pwd(), "lib", "KernelInterface"))])
+                # TODO: remove once JuliaGPU/OpenCL.jl#526 is released ([sources] needs Julia 1.11)
+                Pkg.add(url="https://github.com/JuliaGPU/OpenCL.jl", rev="vc/subgroup-votes", subdir="lib/intrinsics")' || exit 3
       julia -e 'println("--- :julia: Developing Metal")
                 using Pkg
                 Pkg.add([(; url="https://github.com/JuliaGPU/Metal.jl", rev="ka-0.10")])' || exit 3
@@ -100,7 +104,9 @@ steps:
       julia -e 'println("--- :julia: Instantiating project")
                 using Pkg
                 Pkg.develop([PackageSpec(; name="KernelAbstractions", path=pwd()),
-                PackageSpec(; name="KernelInterface", path=joinpath(pwd(), "lib", "KernelInterface"))])' || exit 3
+                PackageSpec(; name="KernelInterface", path=joinpath(pwd(), "lib", "KernelInterface"))])
+                # TODO: remove once JuliaGPU/OpenCL.jl#526 is released ([sources] needs Julia 1.11)
+                Pkg.add(url="https://github.com/JuliaGPU/OpenCL.jl", rev="vc/subgroup-votes", subdir="lib/intrinsics")' || exit 3
       julia -e 'println("--- :julia: Developing oneAPI")
                 using Pkg
                 Pkg.add(url="https://github.com/JuliaGPU/AcceleratedKernels.jl", rev="main")
@@ -139,7 +145,9 @@ steps:
                 using Pkg
                 println("--- :julia: Instantiating project")
                 Pkg.develop([PackageSpec(; name="KernelAbstractions", path=pwd()),
-                PackageSpec(; name="KernelInterface", path=joinpath(pwd(), "lib", "KernelInterface"))])' || exit 3
+                PackageSpec(; name="KernelInterface", path=joinpath(pwd(), "lib", "KernelInterface"))])
+                # TODO: remove once JuliaGPU/OpenCL.jl#526 is released ([sources] needs Julia 1.11)
+                Pkg.add(url="https://github.com/JuliaGPU/OpenCL.jl", rev="vc/subgroup-votes", subdir="lib/intrinsics")' || exit 3
       julia -e 'println("--- :julia: Developing AMDGPU")
                 using Pkg
                 Pkg.add(url="https://github.com/JuliaGPU/AcceleratedKernels.jl", rev="main")
@@ -178,11 +186,14 @@ steps:
       julia -e 'println("--- :julia: Instantiating project")
                 using Pkg
                 Pkg.develop([PackageSpec(; name="KernelAbstractions", path=pwd()),
-                PackageSpec(; name="KernelInterface", path=joinpath(pwd(), "lib", "KernelInterface"))])' || exit 3
+                PackageSpec(; name="KernelInterface", path=joinpath(pwd(), "lib", "KernelInterface"))])
+                # TODO: remove once JuliaGPU/OpenCL.jl#526 is released ([sources] needs Julia 1.11)
+                Pkg.add(url="https://github.com/JuliaGPU/OpenCL.jl", rev="vc/subgroup-votes", subdir="lib/intrinsics")' || exit 3
       julia -e 'println("--- :julia: Developing OpenCL")
                 using Pkg
                 Pkg.add(url="https://github.com/JuliaGPU/OpenCL.jl", rev="ka-0.10")
-                Pkg.develop(; name="SPIRVIntrinsics")' || exit 3
+                # TODO: develop the ka-0.10 copy again once JuliaGPU/OpenCL.jl#526 is merged
+                Pkg.add(url="https://github.com/JuliaGPU/OpenCL.jl", rev="vc/subgroup-votes", subdir="lib/intrinsics")' || exit 3
 
       julia -e 'println("+++ :julia: Running tests")
                 using Pkg
