@@ -217,7 +217,7 @@ Like [`@uniform`](@ref), the allocation is also executed by padding work-items t
 outside of the `ndrange`.
 """
 macro localmem(T, dims)
-    return :($KI.localmemory($(esc(T)), Val($(esc(dims)))))
+    return :($(KI.localmemory)($(esc(T)), Val($(esc(dims)))))
 end
 
 """
