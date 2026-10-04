@@ -85,20 +85,32 @@ This allows for the following configurations:
 1. `cpu={true, false}`: **Deprecated** in KernelAbstractions 0.11; this option is ignored.
 2. `inbounds={false, true}`: Enables a forced `@inbounds` macro around the function definition in the case the user is using too many `@inbounds` already in their kernel. Note that this can lead to incorrect results, crashes, etc and is fundamentally unsafe. Be careful!
 3. `unsafe_indices={false, true}`: Disables the implicit validation of indices, users must avoid `@index(Global)`.
-4. `generated={false, true}`: Turns the kernel into a [generated function](https://docs.julialang.org/en/v1/manual/metaprogramming/#Generated-functions).
-   The kernel body is treated as a quoted expression, so `\$` interpolation is available and
-   `where`-parameters are bound to their values, e.g. to unroll a loop `\$N` times with `@unroll \$N for ...`.
-   This is meant for macros that need a literal, such as `@unroll \$N`, `Base.Cartesian.@nexprs \$N`
-   or `@ntuple \$N`; plain `where`-parameters are compile-time constants in every kernel already.
-   Configuration parameters must therefore be passed as types (`::Val{N}`) to be usable inside `\$`.
-   Inside `\$(...)` the argument names refer to the *types* of the arguments, not their values,
-   as in any generated function, and the body cannot contain closures, comprehensions or
-   generators (`x -> ...`, `do` blocks, `[f(i) for i in ...]`); use the Cartesian macros above instead.
+4. `generated={false, true}`: Turns the kernel into a [generated function](https://docs.julialang.org/en/v1/manual/metaprogramming/#Generated-functions), see *Generated* below.
 
 - [`@context`](@ref)
 
 !!! warning
     This is an experimental feature.
+
+### Generated
+
+With `generated=true` the kernel body is treated as a quoted expression, so `\$` interpolation is
+available and `where`-parameters are bound to their values, e.g. to unroll a loop `\$N` times:
+
+```julia
+@kernel generated = true function kernel_unroll!(a, ::Val{N}) where {N}
+    @unroll \$N for i in 1:5
+        @inbounds a[i] = i * \$N
+    end
+end
+```
+
+This is meant for macros that need a literal, such as `@unroll \$N`, `Base.Cartesian.@nexprs \$N`
+or `@ntuple \$N`; plain `where`-parameters are compile-time constants in every kernel already.
+Configuration parameters must therefore be passed as types (`::Val{N}`) to be usable inside `\$`.
+Inside `\$(...)` the argument names refer to the *types* of the arguments, not their values,
+as in any generated function, and the body cannot contain closures, comprehensions or
+generators (`x -> ...`, `do` blocks, `[f(i) for i in ...]`); use the Cartesian macros above instead.
 """
 macro kernel(ex...)
     if length(ex) == 1
