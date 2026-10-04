@@ -74,32 +74,51 @@ synchronize(dev)
 ```
 """
 macro kernel(expr)
-    return __kernel(expr, __source__, #=force_inbounds=# false, #=unsafe_indices=# false)
+    return __kernel(expr, __source__, __module__, #=force_inbounds=# false, #=unsafe_indices=# false, #=generated=# false)
 end
 
 """
     @kernel config function f(args) end
 
-This allows for two different configurations:
+This allows for the following configurations:
 
-1. `cpu={true, false}`: Disables code-generation of the CPU function. This relaxes semantics such that KernelAbstractions primitives can be used in non-kernel functions.
+1. `cpu={true, false}`: **Deprecated** in KernelAbstractions 0.11; this option is ignored.
 2. `inbounds={false, true}`: Enables a forced `@inbounds` macro around the function definition in the case the user is using too many `@inbounds` already in their kernel. Note that this can lead to incorrect results, crashes, etc and is fundamentally unsafe. Be careful!
 3. `unsafe_indices={false, true}`: Disables the implicit validation of indices, users must avoid `@index(Global)`.
+4. `generated={false, true}`: Turns the kernel into a [generated function](https://docs.julialang.org/en/v1/manual/metaprogramming/#Generated-functions), see *Generated* below.
 
 - [`@context`](@ref)
 
 !!! warning
     This is an experimental feature.
 
-!!! note
-    `cpu={true, false}` is deprecated for KernelAbstractions 1.0
+### Generated
+
+With `generated=true` the kernel body is treated as a quoted expression, so `\$` interpolation is
+available and `where`-parameters are bound to their values, e.g. to unroll a loop `\$N` times:
+
+```julia
+@kernel generated = true function kernel_unroll!(a, ::Val{N}) where {N}
+    @unroll \$N for i in 1:5
+        @inbounds a[i] = i * \$N
+    end
+end
+```
+
+This is meant for macros that need a literal, such as `@unroll \$N`, `Base.Cartesian.@nexprs \$N`
+or `@ntuple \$N`; plain `where`-parameters are compile-time constants in every kernel already.
+Configuration parameters must therefore be passed as types (`::Val{N}`) to be usable inside `\$`.
+Inside `\$(...)` the argument names refer to the *types* of the arguments, not their values,
+as in any generated function, and the body cannot contain closures, comprehensions or
+generators (`x -> ...`, `do` blocks, `[f(i) for i in ...]`); use the Cartesian macros above instead.
 """
 macro kernel(ex...)
     if length(ex) == 1
-        return __kernel(ex[1], __source__, false, false)
+        return __kernel(ex[1], __source__, __module__, false, false, false)
     else
         unsafe_indices = false
         force_inbounds = false
+        generated = false
         for i in 1:(length(ex) - 1)
             if ex[i] isa Expr && ex[i].head == :(=) &&
                     ex[i].args[1] == :cpu && ex[i].args[2] isa Bool
@@ -110,17 +129,21 @@ macro kernel(ex...)
             elseif ex[i] isa Expr && ex[i].head == :(=) &&
                     ex[i].args[1] == :unsafe_indices && ex[i].args[2] isa Bool
                 unsafe_indices = ex[i].args[2]
+            elseif ex[i] isa Expr && ex[i].head == :(=) &&
+                    ex[i].args[1] == :generated && ex[i].args[2] isa Bool
+                generated = ex[i].args[2]
             else
                 error(
                     "Configuration should be of form:\n" *
                         "* `cpu=false`\n" *
                         "* `inbounds=true`\n" *
                         "* `unsafe_indices=true`\n" *
+                        "* `generated=true`\n" *
                         "got `", ex[i], "`",
                 )
             end
         end
-        return __kernel(ex[end], __source__, force_inbounds, unsafe_indices)
+        return __kernel(ex[end], __source__, __module__, force_inbounds, unsafe_indices, generated)
     end
 end
 
@@ -295,18 +318,16 @@ end
 
 Access the hidden context object used by KernelAbstractions.
 
-!!! warning
-    Only valid to be used from a kernel with `cpu=false`.
+!!! compat "KernelAbstractions 0.10"
+    `@context` is supported on all backends since KernelAbstractions 0.10.
 
-!!! note
-    `@context` will be supported on all backends in KernelAbstractions 1.0
 ```
 function f(@context, a)
     I = @index(Global, Linear)
     a[I]
 end
 
-@kernel cpu=false function my_kernel(a)
+@kernel function my_kernel(a)
     f(@context, a)
 end
 ```
