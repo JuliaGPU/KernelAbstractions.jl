@@ -55,6 +55,11 @@ kernel rather than its launch; pass `synchronize = false` to measure launches. P
 `trace = true` to list every range in order instead. The first call of a kernel includes
 its compilation, so profile a warmed-up run.
 
+`@profile` records the task running the expression and the tasks it spawns, e.g. with
+[`KernelAbstractions.@spawn`](@ref KernelAbstractions.@spawn), but not other tasks, so
+profiles can run concurrently. Wait for spawned tasks within the expression, e.g. with
+`@sync`, as what they record after it returns is lost.
+
 ## Profilers
 
 Ranges are recorded on the host threads of the process, which is how NVTX, ITT and

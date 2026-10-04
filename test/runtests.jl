@@ -565,7 +565,12 @@ end
     @test occursin("recording 0 ranges.", sprint(show, MIME"text/plain"(), KernelAbstractions.@profile 1 + 1))
 
     # launches synchronize their backend only if asked to
-    @test KernelAbstractions.synchronizes_launches(KernelAbstractions.ProfileTracer(true))
+    tracer = KernelAbstractions.ProfileTracer(true)
+    # only for the tasks it profiles
+    @test !KernelAbstractions.synchronizes_launches(tracer)
+    @test KernelAbstractions.with(KernelAbstractions.PROFILERS => [tracer]) do
+        KernelAbstractions.synchronizes_launches(tracer)
+    end
     @test !KernelAbstractions.synchronizes_launches(KernelAbstractions.ProfileTracer(false))
     @test !KernelAbstractions.synchronizes_launches(Testsuite.RecordingTracer())
     results = KernelAbstractions.@profile synchronize = false kfill!(CPU())(A, 1.0f0; ndrange = length(A))
@@ -575,6 +580,71 @@ end
     @test_throws ErrorException KernelAbstractions.@profile error("boom")
     @test !KernelAbstractions.profiling_active()
     @test_throws ArgumentError macroexpand(@__MODULE__, :(KernelAbstractions.@profile foo = 1 2))
+
+    @testset "tasks" begin
+        As = [zeros(Float32, 64) for _ in 1:3]
+        work(i) = @profiling_range "task $i" kfill!(CPU())(As[i], 1.0f0; ndrange = length(As[i]))
+
+        # spawned tasks are recorded, and numbered after the profiling task
+        results = KernelAbstractions.@profile @profiling_range "parent" begin
+            @sync for i in 1:3
+                KernelAbstractions.@spawn CPU() work(i)
+            end
+        end
+        @test only(r.task for r in results.ranges if r.name == "parent") == 1
+        @test sort([r.task for r in results.ranges if startswith(r.name, "task ")]) == 2:4
+        # each kernel range is on the task that launched it
+        for i in 1:3
+            task = only(r.task for r in results.ranges if r.name == "task $i")
+            @test count(r -> r.name == "profiling_fill!" && r.task == task, results.ranges) == 1
+        end
+        trace = sprint(show, MIME"text/plain"(), KernelAbstractions.ProfileResults(results.start, results.stop, results.ranges, results.markers, true))
+        @test occursin("task 1 (thread ", trace)
+
+        # other tasks aren't
+        stop = Threads.Atomic{Bool}(false)
+        other = Threads.@spawn while !stop[]
+            @profiling_range "unrelated" yield()
+        end
+        results = KernelAbstractions.@profile for _ in 1:10
+            @profiling_range "related" yield()
+        end
+        stop[] = true
+        wait(other)
+        @test all(r -> r.name == "related", results.ranges)
+        @test length(results.ranges) == 10
+
+        # nor are other profiles, at the same time or nested
+        t1 = Threads.@spawn KernelAbstractions.@profile for _ in 1:5
+            @profiling_range "one" yield()
+        end
+        t2 = Threads.@spawn KernelAbstractions.@profile for _ in 1:7
+            @profiling_range "two" yield()
+        end
+        r1, r2 = fetch(t1), fetch(t2)
+        @test all(r -> r.name == "one", r1.ranges) && length(r1.ranges) == 5
+        @test all(r -> r.name == "two", r2.ranges) && length(r2.ranges) == 7
+        local inner
+        outer = KernelAbstractions.@profile @profiling_range "outer" begin
+            inner = KernelAbstractions.@profile @profiling_range "inner" nothing
+        end
+        @test sort([r.name for r in outer.ranges]) == ["inner", "outer"]
+        @test [r.name for r in inner.ranges] == ["inner"]
+
+        # ranges of tasks that outlive the profile are lost, with a warning
+        started, finish = Channel{Nothing}(1), Channel{Nothing}(1)
+        local task
+        results = @test_logs (:warn, r"1 profiled ranges were still open") KernelAbstractions.@profile begin
+            task = Threads.@spawn @profiling_range "outlives" begin
+                put!(started, nothing)
+                take!(finish)
+            end
+            take!(started)
+        end
+        put!(finish, nothing)
+        wait(task)
+        @test isempty(results.ranges)
+    end
 
     @test KernelAbstractions.format_time(5) == "5 ns"
     @test KernelAbstractions.format_time(999.7) == "1 µs"
