@@ -379,3 +379,33 @@ block until it has completed. For a simple, synchronous copy, use `Base.copyto!`
     device-to-device copies.
 """
 function copyto! end
+
+"""
+    record_timestamp(backend::Backend)
+
+Enqueue a timestamp on the calling task's queue of `backend`'s active device, without
+blocking, and return a handle for [`elapsed_time`](@ref). Returns `nothing` if the backend
+doesn't support timestamps.
+
+Profilers use this to measure the device time of kernels without synchronizing the host
+with the device.
+
+!!! note
+    Backend implementations **may** implement this function, e.g. with a CUDA event that
+    records timing. The fallback returns `nothing`.
+"""
+record_timestamp(::Backend) = nothing
+
+"""
+    elapsed_time(backend::Backend, start, stop)::Int64
+
+The device time in nanoseconds between the timestamps `start` and `stop`, returned by
+[`record_timestamp`](@ref) on the same device. Waits for `stop` to be reached, as
+cooperatively as [`synchronize`](@ref) does. The result may be negative if `stop` was
+reached before `start`, e.g. when they were recorded on different queues.
+
+!!! note
+    Backend implementations **must** implement this function if they implement
+    [`record_timestamp`](@ref).
+"""
+function elapsed_time end

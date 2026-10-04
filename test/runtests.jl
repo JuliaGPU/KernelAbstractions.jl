@@ -555,14 +555,29 @@ end
     @test length(results.markers) == 3
     @test all(r -> results.start <= r.start <= r.stop <= results.stop, results.ranges)
 
+    # on a backend without timestamps, kernels are timed on the host
+    @test count(k -> k.name == "profiling_fill!", results.kernels) == 6
+    @test all(k -> k.host_timed && k.device == "POCLBackend 1", results.kernels)
+    @test all(k -> results.start <= k.start <= k.stop <= results.stop, results.kernels)
+
     summary = sprint(show, MIME"text/plain"(), results)
     @test startswith(summary, "Profiled ")
-    @test occursin("recording 9 ranges and 3 markers.", summary)
+    @test occursin("recording 9 ranges, 3 markers and 6 kernels.", summary)
     lines = split(summary, '\n')
-    @test occursin("Total time", lines[3])
+    host = findfirst(==("Host-side activity:"), lines)
+    device = findfirst(==("Device-side activity:"), lines)
+    @test host !== nothing && device !== nothing && host < device
+    @test occursin("Total time", lines[host + 1])
     # sorted by total time
-    @test endswith(lines[5], "Demo: step") && endswith(lines[6], "profiling_fill!")
+    @test endswith(lines[host + 3], "Demo: step") && endswith(lines[host + 4], "profiling_fill!")
+    @test endswith(lines[device + 3], "profiling_fill! *")
+    @test any(l -> occursin("timed on the host", l), lines)
     @test any(l -> occursin(r"^ +3  half$", l), lines)
+
+    # without device timing, there are only host ranges
+    results = KernelAbstractions.@profile device = false kfill!(CPU())(A, 1.0f0; ndrange = length(A))
+    @test isempty(results.kernels) && length(results.ranges) == 1
+    @test KernelAbstractions.KI.record_timestamp(NewBackend()) === nothing
 
     trace = sprint(
         show, MIME"text/plain"(), KernelAbstractions.@profile trace = true begin
@@ -586,6 +601,11 @@ end
         KernelAbstractions.synchronizes_launches(tracer)
     end
     @test !KernelAbstractions.synchronizes_launches(KernelAbstractions.ProfileTracer(false))
+    tracer = KernelAbstractions.ProfileTracer(false, true)
+    @test !KernelAbstractions.records_kernels(tracer)
+    @test KernelAbstractions.with(KernelAbstractions.PROFILERS => [tracer]) do
+        KernelAbstractions.records_kernels(tracer)
+    end
     @test !KernelAbstractions.synchronizes_launches(Testsuite.RecordingTracer())
     results = KernelAbstractions.@profile synchronize = false kfill!(CPU())(A, 1.0f0; ndrange = length(A))
     @test only(results.ranges).name == "profiling_fill!"
@@ -612,6 +632,8 @@ end
             task = only(r.task for r in results.ranges if r.name == "task $i")
             @test count(r -> r.name == "profiling_fill!" && r.task == task, results.ranges) == 1
         end
+        # as is each kernel, on its task's queue
+        @test sort([k.task for k in results.kernels]) == 2:4
         # `@spawn` ranges are named after the call site, and belong to the spawned task
         spawns = filter(r -> startswith(r.name, "@spawn runtests.jl:"), results.ranges)
         @test sort([r.task for r in spawns]) == 2:4
@@ -621,8 +643,9 @@ end
         end
         named = KernelAbstractions.@profile wait(KernelAbstractions.@spawn CPU() name = "named" nothing)
         @test only(named.ranges).name == "named"
-        trace = sprint(show, MIME"text/plain"(), KernelAbstractions.ProfileResults(results.start, results.stop, results.ranges, results.markers, true))
+        trace = sprint(show, MIME"text/plain"(), KernelAbstractions.ProfileResults(results.start, results.stop, results.ranges, results.markers, results.kernels, true))
         @test occursin("task 1 (thread ", trace)
+        @test occursin("POCLBackend 1, task 2", trace)
 
         # other tasks aren't
         stop = Threads.Atomic{Bool}(false)

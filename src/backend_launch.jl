@@ -93,12 +93,22 @@ end
 Base.@nospecializeinfer @noinline function launch_traced(
         @nospecialize(obj::Kernel), @nospecialize(args::Tuple), @nospecialize(ndrange), @nospecialize(workgroupsize)
     )
-    id = start_launch_range(kernel_label(obj.f))
+    label = kernel_label(obj.f)
+    id = start_launch_range(label)
+    # time the kernel on the device, if a tracer wants that
+    timer = records_kernels(id) ? KernelTimer() : nothing
     try
-        launch_untraced(obj, args, ndrange, workgroupsize)
+        if timer === nothing
+            launch_untraced(obj, args, ndrange, workgroupsize)
+        else
+            # passed to `launch_kernel` in a scoped value rather than an argument, so that
+            # the launch path is inferred once for timed and other launches
+            with(() -> launch_untraced(obj, args, ndrange, workgroupsize), KERNEL_TIMER => timer)
+        end
         synchronize_launch(id, backend(obj))
     finally
         profiling_range_end(id)
+        timer === nothing || timer.issued == 0 || trace_kernel(id, label, timer)
     end
     return nothing
 end
@@ -146,11 +156,15 @@ function launch_kernel(obj::Kernel, launch, ndrange, _workgroupsize, iterspace, 
     # launching through the `KI.Kernel` validates the sizes against the kernel's limits
     groups = size(blocks(iterspace))
     items = size(workitems(iterspace))
+    # timed around the launch alone, so that compilation isn't counted as device time; the
+    # timer comes from `launch_traced`
+    timer = start_kernel_timing(b)
     if launch isa NDLaunch
         call_kernel(kernel, ctx, args, groups, items)
     else
         call_kernel(kernel, ctx, args, prod(groups), prod(items))
     end
+    stop_kernel_timing(timer, b)
     return nothing
 end
 

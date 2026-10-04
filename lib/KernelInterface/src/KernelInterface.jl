@@ -39,6 +39,7 @@ include("host.jl")
             # host side
             :allocate, :zeros, :ones, :copyto!, :pagelock!, :unsafe_free!,
             :synchronize, :record_event, :wait_event, :priority!,
+            :record_timestamp, :elapsed_time,
             :device, :ndevices, :device!,
             :functional, :versioninfo,
             :supports_unified, :supports_atomics, :supports_float64,

@@ -8,6 +8,8 @@
 # none registered, an annotation costs one atomic load.
 ###
 
+using ScopedValues: ScopedValue, with
+
 """
     Tracer
 
@@ -21,9 +23,15 @@ Subtypes implement
     trace_range_end(tracer, id)
     trace_mark(tracer, label::Label, domain::Symbol)     # optional
     synchronizes_launches(tracer)::Bool                     # optional, default `false`
+    records_kernels(tracer)::Bool                           # optional, default `false`
+    trace_kernel(tracer, label::Symbol, timer::KernelTimer) # if `records_kernels`
 
 If `synchronizes_launches` is `true`, kernel launches synchronize their backend before their
 range ends, so that the range measures the kernel's execution rather than its launch.
+
+If `records_kernels` is `true`, kernel launches are timed on the device without
+synchronizing, and passed to `trace_kernel` as a [`KernelTimer`](@ref), to be resolved
+later with [`elapsed`](@ref).
 
 A `Label` is a `Symbol` for labels that are fixed in the code: literals in
 [`@profiling_range`](@ref), kernel names and `@spawn` call sites. As there are only so many
@@ -54,6 +62,8 @@ function trace_range_start end
 function trace_range_end end
 trace_mark(::Tracer, label, domain) = nothing
 synchronizes_launches(::Tracer) = false
+records_kernels(::Tracer) = false
+function trace_kernel end
 
 # copy-on-write, so that checking for tracers is a single atomic load
 mutable struct Tracers
@@ -135,6 +145,82 @@ profiling_range_end(::Nothing) = nothing
 
 synchronizes_launches(range::ProfilingRange) = any(synchronizes_launches, range.tracers)
 synchronizes_launches(::Nothing) = false
+records_kernels(range::ProfilingRange) = any(records_kernels, range.tracers)
+records_kernels(::Nothing) = false
+function trace_kernel(range::ProfilingRange, label, timer)
+    for tracer in range.tracers
+        records_kernels(tracer) && trace_kernel(tracer, label, timer)
+    end
+    return nothing
+end
+
+"""
+    KernelTimer
+
+The device time of a kernel launch, for tracers that record kernels. It holds the
+backend's timestamps (see `KernelInterface.record_timestamp`) around the launch, which are
+resolved by [`elapsed`](@ref). On backends without timestamps, the launch synchronizes, and
+the timer holds host times instead.
+
+- `backend`, `device`: where the kernel ran
+- `issued`: the host time (`time_ns()`) at which the kernel was launched
+- `start`, `stop`: the timestamps, or host times if `host_timed`
+"""
+mutable struct KernelTimer
+    backend::Any
+    device::Int
+    issued::UInt64
+    start::Any
+    stop::Any
+    host_timed::Bool
+    KernelTimer() = new(nothing, 0, 0, nothing, nothing, false)
+end
+
+# the timer of the launch the current task is tracing, if any
+const KERNEL_TIMER = ScopedValue{Union{Nothing, KernelTimer}}(nothing)
+
+# Called around every kernel launch, out of line to keep the code of every kernel's launch
+# small: with tracing off, all that is compiled for a kernel is these two calls.
+@noinline function start_kernel_timing(backend)
+    profiling_active() || return nothing
+    timer = KERNEL_TIMER[]
+    timer === nothing || start_timing!(timer, backend)
+    return timer
+end
+@noinline function stop_kernel_timing(timer, backend)
+    timer === nothing || stop_timing!(timer, backend)
+    return nothing
+end
+
+@noinline function start_timing!(timer::KernelTimer, backend)
+    timer.backend = backend
+    timer.device = KI.device(backend)
+    timer.issued = time_ns()
+    timer.start = KI.record_timestamp(backend)
+    if timer.start === nothing
+        timer.host_timed = true
+        timer.start = timer.issued
+    end
+    return
+end
+
+@noinline function stop_timing!(timer::KernelTimer, backend)
+    if timer.host_timed
+        KI.synchronize(backend)
+        timer.stop = time_ns()
+    else
+        timer.stop = KI.record_timestamp(backend)
+    end
+    return
+end
+
+"""
+    elapsed(timer::KernelTimer)::Int64
+
+The device time of the kernel in nanoseconds, waiting for it to complete.
+"""
+elapsed(timer::KernelTimer) = timer.host_timed ? Int64(timer.stop - timer.start) :
+    KI.elapsed_time(timer.backend, timer.start, timer.stop)
 
 """
     profiling_mark(label; domain = :KernelAbstractions)
