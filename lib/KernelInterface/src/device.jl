@@ -638,22 +638,48 @@ It exchanges values, not memory: it is not a memory fence, see [`sub_group_barri
 !!! note
     Backends **may** implement this for operators and types with a native reduction (e.g.
     `+` on `Float32`), dispatching on `typeof(op)`. The fallback combines ranges of doubling
-    length with [`shfl_down`](@ref), and broadcasts the result of the first lane with
-    [`shfl`](@ref).
+    length with a butterfly of [`shfl_xor`](@ref), and in a partial sub-group broadcasts the
+    result of the first lane with [`shfl`](@ref).
 """
 @inline function sub_group_reduce(op, val)
-    lane = get_sub_group_local_id(Int32)
+    width = get_max_sub_group_size(Int32)
     sgsize = get_sub_group_size(Int32)
-    offset = Int32(1)
-    while offset < sgsize
-        other = shfl_down(val, offset)
-        # the result of shuffling from past the end of the sub-group is unspecified
-        if lane + offset <= sgsize
-            val = op(val, other)
+    lane0 = get_sub_group_local_id(Int32) - Int32(1)
+    if ispow2(width)
+        # A butterfly with `shfl_xor`, which unrolls for the constant width. Each step combines
+        # the block of a work-item with the neighboring block, the lower one first, so that
+        # only associativity is needed. In a full sub-group, every work-item ends up with the
+        # reduction; in a partial one, blocks without work-items are skipped, which keeps the
+        # result of the first lane correct, and it is broadcast. All sub-groups run the same
+        # shuffles, since some backends (PoCL) need that across the sub-groups of a work-group.
+        mask = Int32(1)
+        while mask < width
+            other = shfl_xor(val, mask)
+            if (lane0 ⊻ mask) < sgsize
+                if lane0 & mask == Int32(0)
+                    val = op(val, other)
+                else
+                    val = op(other, val)
+                end
+            end
+            mask <<= 1
         end
-        offset <<= 1
+        first = shfl(val, 1)
+        return ifelse(sgsize == width, val, first)
+    else
+        # combine ranges of doubling length with `shfl_down`, skipping the lanes without a
+        # work-item, and broadcast the result of the first lane
+        lane = lane0 + Int32(1)
+        offset = Int32(1)
+        while offset < width
+            other = shfl_down(val, offset)
+            if lane + offset <= sgsize
+                val = op(val, other)
+            end
+            offset <<= 1
+        end
+        return shfl(val, 1)
     end
-    return shfl(val, 1)
 end
 
 """
@@ -676,11 +702,12 @@ It exchanges values, not memory: it is not a memory fence, see [`sub_group_barri
 """
 @inline function sub_group_scan(op, val)
     lane = get_sub_group_local_id(Int32)
-    sgsize = get_sub_group_size(Int32)
+    # loop to the constant width, so that the loop unrolls: the lanes `shfl_up` reads from
+    # always have a work-item, also in a partial sub-group
+    width = get_max_sub_group_size(Int32)
     offset = Int32(1)
-    while offset < sgsize
+    while offset < width
         other = shfl_up(val, offset)
-        # the result of shuffling from before the start of the sub-group is unspecified
         if lane > offset
             val = op(other, val)
         end
