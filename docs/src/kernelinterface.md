@@ -151,17 +151,26 @@ get_global_size
 Sub-groups are optional ([`supports_subgroups`](@ref)). A work-group is divided into
 sub-groups of at most [`sub_group_size(backend)`](@ref sub_group_size) work-items. Which
 work-items form a sub-group, how many sub-groups there are, and which of them are partial
-is unspecified, and differs between devices and work-group shapes. For example, CUDA forms
-warps from consecutive linear work-item indices, while Intel's CPU OpenCL runtime forms
-sub-groups per row of a multi-dimensional work-group, so that a 33×2 work-group consists of
-four sub-groups of 32 and 1 work-items. What KernelInterface guarantees, and backends that
-report sub-group support have to ensure:
+can differ between devices and work-group shapes. For example, CUDA forms warps from
+consecutive linear work-item indices, while Intel's CPU OpenCL runtime forms sub-groups per
+row of a multi-dimensional work-group, so that a 33×2 work-group consists of four sub-groups
+of 32 and 1 work-items. What KernelInterface guarantees, and backends that report sub-group
+support have to ensure:
 
 - every work-item has a unique `(get_sub_group_id(), get_sub_group_local_id())` pair in its
   work-group, which doesn't change during the kernel;
 - the sub-group ids are `1:get_num_sub_groups()`, and the lanes of a sub-group are
   `1:get_sub_group_size()`;
-- a 1-D work-group of at most `sub_group_size(backend)` work-items is a single sub-group.
+- if the work-group is 1-D, or its x extent `get_local_size().x` is a multiple of the
+  sub-group width `W` ([`get_max_sub_group_size`](@ref)), sub-groups are formed from
+  consecutive work-items, x fastest: the work-item with the linear index
+  `lin = x + (y - 1) * size.x + (z - 1) * size.x * size.y` (for `(; x, y, z) =
+  get_local_id()` and `size = get_local_size()`) is in sub-group `(lin - 1) ÷ W + 1`, lane
+  `(lin - 1) % W + 1`. Only the last sub-group can be partial. In particular, a 1-D
+  work-group of at most `W` work-items is a single sub-group.
+
+Other shapes can form sub-groups differently, e.g. per row of the work-group: for portable
+code, make the x extent of multi-dimensional work-groups a multiple of the sub-group width.
 
 A sub-group is partial when it has fewer work-items than the sub-group width: the lanes
 `get_sub_group_size()+1:get_max_sub_group_size()` have no work-item. Shuffles from those lanes
