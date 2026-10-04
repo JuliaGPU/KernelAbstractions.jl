@@ -340,6 +340,17 @@ primitive type Bits16 16 end
 Bits64(x::Integer) = reinterpret(Bits64, x % UInt64)
 Bits16(x::Integer) = reinterpret(Bits16, x % UInt16)
 
+# the values come from a divergent branch, like for the padding work-items of a `@kernel`
+function reduce_divergent_kernel(red, scan, a, m)
+    i = KI.get_local_id().x
+    val = i <= m ? (@inbounds a[i]) : zero(eltype(a))
+    r = KI.sub_group_reduce(+, val)
+    s = KI.sub_group_scan(+, val)
+    @inbounds red[i] = r
+    @inbounds scan[i] = s
+    return
+end
+
 struct FallbackStruct
     flag::Bool
     c::Char
@@ -435,6 +446,19 @@ function reduce_scan_testsuite(backend, AT, op, a)
     return
 end
 
+function reduce_divergent_testsuite(backend, AT, sg_size, ::Type{T}) where {T}
+    m = max(sg_size - 5, 1)
+    a = T.(rand(1:20, sg_size))
+    red = AT(zeros(T, sg_size))
+    scan = AT(zeros(T, sg_size))
+    KI.@launch backend workgroupsize = sg_size reduce_divergent_kernel(red, scan, AT(a), m)
+    KI.synchronize(backend)
+    # the sum doesn't depend on the order of the lanes
+    @test all(==(sum(a[1:m])), Array(red))
+    @test maximum(Array(scan)) == sum(a[1:m])
+    return
+end
+
 function subgroup_communication_testsuite(backend::KI.Backend, AT, sg_size)
     @testset "shuffles of other types" begin
         # primitive types that backends need not support natively are shuffled as words
@@ -494,6 +518,11 @@ function subgroup_communication_testsuite(backend::KI.Backend, AT, sg_size)
                 Float32[isodd(i) ? NaN32 : (i % 4 == 0 ? -0.0f0 : 0.0f0) for i in 1:sg_size]
             )
         end
+    end
+
+    @testset "sub_group_reduce and sub_group_scan of divergent values" begin
+        reduce_divergent_testsuite(backend, AT, sg_size, Int32)
+        KI.supports_shuffle(backend, Float32) && reduce_divergent_testsuite(backend, AT, sg_size, Float32)
     end
 
     for n in unique((sg_size, max(sg_size - 3, 1)))
