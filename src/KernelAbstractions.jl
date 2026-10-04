@@ -82,7 +82,7 @@ end
 
 This allows for the following configurations:
 
-1. `cpu={true, false}`: Disables code-generation of the CPU function. This relaxes semantics such that KernelAbstractions primitives can be used in non-kernel functions.
+1. `cpu={true, false}`: **Deprecated** in KernelAbstractions 0.11; this option is ignored.
 2. `inbounds={false, true}`: Enables a forced `@inbounds` macro around the function definition in the case the user is using too many `@inbounds` already in their kernel. Note that this can lead to incorrect results, crashes, etc and is fundamentally unsafe. Be careful!
 3. `unsafe_indices={false, true}`: Disables the implicit validation of indices, users must avoid `@index(Global)`.
 4. `generated={false, true}`: Turns the kernel into a [generated function](https://docs.julialang.org/en/v1/manual/metaprogramming/#Generated-functions).
@@ -99,9 +99,6 @@ This allows for the following configurations:
 
 !!! warning
     This is an experimental feature.
-
-!!! note
-    `cpu={true, false}` is deprecated for KernelAbstractions 1.0
 """
 macro kernel(ex...)
     if length(ex) == 1
@@ -309,18 +306,16 @@ end
 
 Access the hidden context object used by KernelAbstractions.
 
-!!! warning
-    Only valid to be used from a kernel with `cpu=false`.
+!!! compat "KernelAbstractions 0.10"
+    `@context` is supported on all backends since KernelAbstractions 0.10.
 
-!!! note
-    `@context` will be supported on all backends in KernelAbstractions 1.0
 ```
 function f(@context, a)
     I = @index(Global, Linear)
     a[I]
 end
 
-@kernel cpu=false function my_kernel(a)
+@kernel function my_kernel(a)
     f(@context, a)
 end
 ```
