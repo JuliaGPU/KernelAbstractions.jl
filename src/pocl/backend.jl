@@ -290,59 +290,59 @@ end
     return UInt64(mask[1].value) | (UInt64(mask[2].value) << 32)
 end
 
-# The fallbacks of `KI.sub_group_reduce` and `KI.sub_group_scan` loop over the constant
-# sub-group width, and PoCL 7.2 miscompiles the unrolled shuffles after a branch with an early
-# exit (as bounds checks emit), like the native collectives below (fixed by pocl/pocl#2239,
-# JuliaPackaging/Yggdrasil#15001). Until `pocl_standalone_jll` includes the fix, loop to a
-# bound that isn't a constant, but is the same for all sub-groups of the work-group, which
-# PoCL needs (see `POCLBackend`): the smaller of the width and the work-group size. Reduce by
-# combining ranges of doubling length with `shfl_down`, skipping the lanes without a
-# work-item, and broadcast the result of the first lane.
-@inline function uniform_sub_group_bound()
-    sz = KI.get_local_size(Int32)
-    return min(KI.get_max_sub_group_size(Int32), sz.x * sz.y * sz.z)
-end
+# PoCL 7.2 miscompiles sub-group operations after a branch with an early exit (as bounds checks
+# emit), because WorkitemLoops gives the peeled first work-item its own copy of their scratch
+# memory: the native collectives below, and the unrolled shuffles of KernelInterface's
+# fallbacks of `KI.sub_group_reduce` and `KI.sub_group_scan`. `pocl_standalone_jll` includes
+# the fix (pocl/pocl#2239) since 7.2.1+1 (JuliaPackaging/Yggdrasil#15001).
+const POCL_REPLICA_FIX = pkgversion(cl.pocl_standalone_jll) >= v"7.2.1+1"
 
-@device_override @inline function KI.sub_group_reduce(op, val)
-    lane = KI.get_sub_group_local_id(Int32)
-    sgsize = KI.get_sub_group_size(Int32)
-    offset = Int32(1)
-    bound = uniform_sub_group_bound()
-    while offset < bound
-        other = KI.shfl_down(val, offset)
-        if lane + offset <= sgsize
-            val = op(val, other)
-        end
-        offset <<= 1
+@static if !POCL_REPLICA_FIX
+    # Without the fix, loop to a bound that isn't a constant, but is the same for all
+    # sub-groups of the work-group, which PoCL needs (see `POCLBackend`): the smaller of the
+    # width and the work-group size. Reduce by combining ranges of doubling length with
+    # `shfl_down`, skipping the lanes without a work-item, and broadcast the result of the
+    # first lane.
+    @inline function uniform_sub_group_bound()
+        sz = KI.get_local_size(Int32)
+        return min(KI.get_max_sub_group_size(Int32), sz.x * sz.y * sz.z)
     end
-    return KI.shfl(val, 1)
-end
 
-# likewise for `KI.sub_group_scan`
-@device_override @inline function KI.sub_group_scan(op, val)
-    lane = KI.get_sub_group_local_id(Int32)
-    offset = Int32(1)
-    bound = uniform_sub_group_bound()
-    while offset < bound
-        other = KI.shfl_up(val, offset)
-        if lane > offset
-            val = op(other, val)
+    @device_override @inline function KI.sub_group_reduce(op, val)
+        lane = KI.get_sub_group_local_id(Int32)
+        sgsize = KI.get_sub_group_size(Int32)
+        offset = Int32(1)
+        bound = uniform_sub_group_bound()
+        while offset < bound
+            other = KI.shfl_down(val, offset)
+            if lane + offset <= sgsize
+                val = op(val, other)
+            end
+            offset <<= 1
         end
-        offset <<= 1
+        return KI.shfl(val, 1)
     end
-    return val
+
+    # likewise for `KI.sub_group_scan`
+    @device_override @inline function KI.sub_group_scan(op, val)
+        lane = KI.get_sub_group_local_id(Int32)
+        offset = Int32(1)
+        bound = uniform_sub_group_bound()
+        while offset < bound
+            other = KI.shfl_up(val, offset)
+            if lane > offset
+                val = op(other, val)
+            end
+            offset <<= 1
+        end
+        return val
+    end
 end
 
 # Native reductions and scans of `cl_khr_subgroups`, for `+` on 32- and 64-bit integers and
 # floats, and `min`/`max` on integers (OpenCL's `min` and `max` treat NaN and the sign of zero
-# differently from Julia's).
-#
-# Disabled until `pocl_standalone_jll` includes pocl/pocl#2239 (JuliaPackaging/Yggdrasil#15001):
-# in PoCL 7.2, a collective after
-# a branch with an early exit (as bounds checks emit) gets wrong values, because WorkitemLoops
-# gives the peeled first work-item its own copy of the collective's scratch memory. Until
-# then, `KI.sub_group_reduce` and `KI.sub_group_scan` use KernelInterface's fallbacks.
-const NATIVE_COLLECTIVES = false
+# differently from Julia's), with the fix for PoCL's peeling.
+const NATIVE_COLLECTIVES = POCL_REPLICA_FIX
 
 @static if NATIVE_COLLECTIVES
     const CollectiveIntTypes = Union{Int32, UInt32, Int64, UInt64}
