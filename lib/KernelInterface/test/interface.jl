@@ -383,6 +383,20 @@ function sub_group_layout_kernel(out)
     return
 end
 
+# reductions and scans in a 1-D work-group of several sub-groups, the last one partial
+function reduce_scan_multi_kernel(red, scan, sgs, a)
+    i = KI.get_local_id().x
+    val = @inbounds a[i]
+    r = KI.sub_group_reduce(+, val)
+    s = KI.sub_group_scan(+, val)
+    @inbounds begin
+        red[i] = r
+        scan[i] = s
+        sgs[i] = KI.get_sub_group_id()
+    end
+    return
+end
+
 struct FallbackStruct
     flag::Bool
     c::Char
@@ -551,6 +565,24 @@ function sub_group_layout_testsuite(backend, AT, sg_size, fits)
     return
 end
 
+function reduce_scan_multi_testsuite(backend, AT, sg_size, ::Type{T}) where {T}
+    n = 2 * sg_size + 5
+    a = T.(rand(1:20, n))
+    red, scan, sgs = AT(zeros(T, n)), AT(zeros(T, n)), AT(zeros(Int, n))
+    kernel = KI.@launch backend launch = false reduce_scan_multi_kernel(red, scan, sgs, AT(a))
+    n <= KI.max_work_group_size(kernel) || return
+    kernel(red, scan, sgs, AT(a); workgroupsize = n)
+    KI.synchronize(backend)
+    red, scan, sgs = Array(red), Array(scan), Array(sgs)
+    for i in 1:n
+        group = findall(==(sgs[i]), sgs)
+        @test red[i] == sum(a[group])
+    end
+    # 1-D work-groups form sub-groups from consecutive work-items
+    @test scan == [sum(a[((i - 1) ÷ sg_size * sg_size + 1):i]) for i in 1:n]
+    return
+end
+
 function subgroup_communication_testsuite(backend::KI.Backend, AT, sg_size)
     @testset "shuffles of other types" begin
         # primitive types that backends need not support natively are shuffled as words
@@ -621,6 +653,11 @@ function subgroup_communication_testsuite(backend::KI.Backend, AT, sg_size)
                 end
             end
         end
+    end
+
+    @testset "sub_group_reduce and sub_group_scan, several sub-groups" begin
+        reduce_scan_multi_testsuite(backend, AT, sg_size, Int32)
+        KI.supports_shuffle(backend, Float32) && reduce_scan_multi_testsuite(backend, AT, sg_size, Float32)
     end
 
     @testset "sub_group_reduce and sub_group_scan of divergent values" begin
