@@ -77,7 +77,7 @@ What a backend implements, at a glance. The docstrings below have the details.
 | **Capabilities** | | [`supports_float64`](@ref), [`supports_atomics`](@ref), [`supports_unified`](@ref), [`supports_subgroups`](@ref), [`supports_shuffle`](@ref) (all `false`) |
 | **Compilation** | [`argconvert`](@ref), [`kernel_function`](@ref), [`launch`](@ref) | |
 | **Device** | [`get_local_id`](@ref), [`get_group_id`](@ref), [`get_local_size`](@ref), [`get_num_groups`](@ref), [`localmemory`](@ref), [`barrier`](@ref) | [`get_global_id`](@ref), [`get_global_size`](@ref) (derived from the primitive queries), [`_print`](@ref KernelInterface._print) (host `print`) |
-| **Sub-groups** | if `supports_subgroups`: [`sub_group_size`](@ref), the sub-group queries (with a constant [`get_max_sub_group_size`](@ref)), [`sub_group_barrier`](@ref), [`sub_group_any`](@ref), [`sub_group_all`](@ref), and [`sub_group_ballot`](@ref) for widths of at most 64; if `supports_shuffle(backend, T)`: [`shfl`](@ref), [`shfl_down`](@ref), [`shfl_up`](@ref), [`shfl_xor`](@ref) for primitive `T` | |
+| **Sub-groups** | if `supports_subgroups`: [`sub_group_size`](@ref), the sub-group queries (with a constant [`get_max_sub_group_size`](@ref)), [`sub_group_barrier`](@ref), [`sub_group_any`](@ref), [`sub_group_all`](@ref), and [`sub_group_ballot`](@ref) for widths of at most 64; if `supports_shuffle(backend, T)`: [`shfl`](@ref), [`shfl_down`](@ref), [`shfl_up`](@ref), [`shfl_xor`](@ref) for the primitive `T` supported natively, including `UInt32` | shuffles with a `width`, [`sub_group_match_any`](@ref), [`sub_group_reduce`](@ref), [`sub_group_scan`](@ref) (built on the shuffles and votes); shuffles of other primitive types (as `UInt32` words) and of structs (field by field) |
 
 Everything else, such as [`zeros`](@ref KernelInterface.zeros), [`ones`](@ref KernelInterface.ones),
 the launch-keyword handling of [`Kernel`](@ref) and [`@launch`](@ref KernelInterface.@launch),
@@ -163,6 +163,12 @@ report sub-group support have to ensure:
   `1:get_sub_group_size()`;
 - a 1-D work-group of at most `sub_group_size(backend)` work-items is a single sub-group.
 
+A sub-group is partial when it has fewer work-items than the sub-group width: the lanes
+`get_sub_group_size()+1:get_max_sub_group_size()` have no work-item. Shuffles from those lanes
+give unspecified values, and the votes, [`sub_group_match_any`](@ref),
+[`sub_group_reduce`](@ref) and [`sub_group_scan`](@ref) only take the work-items of the
+sub-group into account.
+
 In particular, [`get_num_sub_groups`](@ref) can be larger than
 `cld(prod(get_local_size()), get_max_sub_group_size())`. Storage for a value per sub-group
 has to be sized for up to one sub-group per work-item, and code combining those values has
@@ -196,9 +202,13 @@ shfl
 shfl_down
 shfl_up
 shfl_xor
+shfl(::Any, ::Integer, ::Integer)
 sub_group_any
 sub_group_all
 sub_group_ballot
+sub_group_match_any
+sub_group_reduce
+sub_group_scan
 ```
 
 ### Printing

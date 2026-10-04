@@ -303,6 +303,50 @@ function vote_kernel(out, pred)
     return
 end
 
+# Each work-item shuffles its value with `op` (`shfl`, `shfl_down`, `shfl_up`, `shfl_xor`) and
+# a `width`, recording its lane.
+function shfl_width_kernel(out, lanes, a, op, arg, width)
+    lane = KI.get_sub_group_local_id()
+    val = @inbounds a[lane]
+    @inbounds out[lane] = op(val, arg, width)
+    @inbounds lanes[lane] = lane
+    return
+end
+
+# `pred` determines which values are equal, `vals` gives the values
+function match_any_kernel(out, vals)
+    lane = KI.get_sub_group_local_id()
+    @inbounds out[lane] = KI.sub_group_match_any(vals[lane])
+    return
+end
+
+# a work-group of `length(a)` work-items, which is a single (possibly partial) sub-group
+function reduce_scan_kernel(red, scan, lanes, a, op)
+    i = KI.get_local_id().x
+    val = @inbounds a[i]
+    r = KI.sub_group_reduce(op, val)
+    s = KI.sub_group_scan(op, val)
+    @inbounds begin
+        red[i] = r
+        scan[i] = s
+        lanes[i] = KI.get_sub_group_local_id()
+    end
+    return
+end
+
+# primitive types that no backend supports natively, shuffled as `UInt32` words
+primitive type Bits64 64 end
+primitive type Bits16 16 end
+Bits64(x::Integer) = reinterpret(Bits64, x % UInt64)
+Bits16(x::Integer) = reinterpret(Bits16, x % UInt16)
+
+struct FallbackStruct
+    flag::Bool
+    c::Char
+    x::Bits64
+    limbs::NTuple{4, Float64}
+end
+
 # Every lane writes local and global memory, and reads another lane's write after a
 # sub-group barrier. `N` is the sub-group width; the work-group is one sub-group.
 function sub_group_barrier_kernel(scratch, out, ::Val{N}) where {N}
@@ -322,6 +366,146 @@ function captured_array_kernel(backend, AT, out)
     a = AT(Int32[42])
     kernel = KI.@launch backend launch = false (() -> (@inbounds out[1] = a[1]; nothing))()
     return kernel, WeakRef(a)
+end
+
+# an associative but not commutative operator: the composition of affine maps
+compose_affine(f, g) = (g[1] * f[1], g[1] * f[2] + g[2])
+# the (value, index) of the smallest value, the first one of equal values
+argmin_op(x, y) = ifelse(y[1] < x[1], y, x)
+
+# The sub-group operations that are built on the shuffles and votes. Separate functions, so
+# that `interface_testsuite` doesn't get too large to compile.
+
+# rotating values of type `T` by one lane, `f(i)` giving the value of lane `i`
+function shfl_type_testsuite(backend, AT, sg_size, ::Type{T}, f) where {T}
+    a = T[f(i) for i in 1:sg_size]
+    out = AT(fill(f(0), sg_size))
+    KI.@launch backend workgroupsize = sg_size shfl_rotate_kernel(out, AT(a), 1)
+    KI.synchronize(backend)
+    @test Array(out) == circshift(a, -1)
+    return
+end
+
+# `ref(lane, arg, width)` is the lane that `op(val, arg, width)` reads from
+function shfl_width_testsuite(backend, AT, sg_size, op, ref, width, arg)
+    a = Int32.(1:sg_size) .* Int32(10)
+    out = AT(zeros(Int32, sg_size))
+    lanes = AT(zeros(Int, sg_size))
+    KI.@launch backend workgroupsize = sg_size shfl_width_kernel(out, lanes, AT(a), op, arg, width)
+    KI.synchronize(backend)
+    out, lanes = Array(out), Array(lanes)
+    @test all(i -> out[i] == a[ref(lanes[i], arg, width)], 1:sg_size)
+    return
+end
+
+shfl_width_ref(l, arg, w) = (l - 1) ÷ w * w + mod1(arg, w)
+shfl_down_width_ref(l, arg, w) = (l - 1) % w + arg < w ? l + arg : l
+shfl_up_width_ref(l, arg, w) = (l - 1) % w >= arg ? l - arg : l
+shfl_xor_width_ref(l, arg, w) = (((l - 1) ⊻ arg) ÷ w == (l - 1) ÷ w) ? ((l - 1) ⊻ arg) + 1 : l
+
+function match_any_testsuite(backend, AT, sg_size, vals)
+    out = AT(zeros(UInt64, sg_size))
+    KI.@launch backend workgroupsize = sg_size match_any_kernel(out, AT(vals))
+    KI.synchronize(backend)
+    out = Array(out)
+    for i in 1:sg_size
+        expected = UInt64(0)
+        for j in 1:sg_size
+            vals[j] === vals[i] && (expected |= UInt64(1) << (j - 1))
+        end
+        @test out[i] == expected
+    end
+    return
+end
+
+# a work-group of `length(a)` work-items, i.e. a single sub-group, possibly partial
+function reduce_scan_testsuite(backend, AT, op, a)
+    n = length(a)
+    red = AT(similar(a))
+    scan = AT(similar(a))
+    lanes = AT(zeros(Int, n))
+    KI.@launch backend workgroupsize = n reduce_scan_kernel(red, scan, lanes, AT(a), op)
+    KI.synchronize(backend)
+    red, scan, lanes = Array(red), Array(scan), Array(lanes)
+    # in the order of the lanes
+    order = sortperm(lanes)
+    @test all(==(foldl(op, a[order])), red)
+    @test all(i -> scan[order[i]] == foldl(op, a[order[1:i]]), 1:n)
+    return
+end
+
+function subgroup_communication_testsuite(backend::KI.Backend, AT, sg_size)
+    @testset "shuffles of other types" begin
+        # primitive types that backends need not support natively are shuffled as words
+        if KI.supports_shuffle(backend, UInt32)
+            @test KI.supports_shuffle(backend, Bool)
+            @test KI.supports_shuffle(backend, Char)
+            @test KI.supports_shuffle(backend, Bits64)
+            @test KI.supports_shuffle(backend, Bits16)
+            @test KI.supports_shuffle(backend, FallbackStruct)
+        end
+        @test !KI.supports_shuffle(backend, Ref{Int})
+        @testset "Bool" begin
+            KI.supports_shuffle(backend, Bool) && shfl_type_testsuite(backend, AT, sg_size, Bool, isodd)
+        end
+        @testset "Char" begin
+            KI.supports_shuffle(backend, Char) &&
+                shfl_type_testsuite(backend, AT, sg_size, Char, i -> Char(0x0001F600 + i))
+        end
+        @testset "Bits64" begin
+            KI.supports_shuffle(backend, Bits64) &&
+                shfl_type_testsuite(backend, AT, sg_size, Bits64, i -> Bits64((UInt64(i) << 40) - i))
+        end
+        @testset "Bits16" begin
+            KI.supports_shuffle(backend, Bits16) &&
+                shfl_type_testsuite(backend, AT, sg_size, Bits16, i -> Bits16(0xa000 + i))
+        end
+        @testset "struct" begin
+            KI.supports_shuffle(backend, FallbackStruct) && shfl_type_testsuite(
+                backend, AT, sg_size, FallbackStruct,
+                i -> FallbackStruct(isodd(i), Char(64 + i), Bits64(-i), (i, -i, 1 / i, 2.0^i))
+            )
+        end
+    end
+
+    KI.supports_shuffle(backend, Int32) || return
+
+    @testset "shuffles with a width" begin
+        for w in (1, 2, 4, 8, 16, 32, 64)
+            (w <= sg_size && sg_size % w == 0) || continue
+            for arg in unique((1, 3, w - 1, w + 2))
+                @testset "width $w, $arg" begin
+                    shfl_width_testsuite(backend, AT, sg_size, KI.shfl, shfl_width_ref, w, arg)
+                    shfl_width_testsuite(backend, AT, sg_size, KI.shfl_down, shfl_down_width_ref, w, arg)
+                    shfl_width_testsuite(backend, AT, sg_size, KI.shfl_up, shfl_up_width_ref, w, arg)
+                    shfl_width_testsuite(backend, AT, sg_size, KI.shfl_xor, shfl_xor_width_ref, w, arg)
+                end
+            end
+        end
+    end
+
+    if sg_size <= 64
+        @testset "sub_group_match_any" begin
+            match_any_testsuite(backend, AT, sg_size, Int32[i % 3 for i in 1:sg_size])
+            # bitwise comparison, so NaN matches NaN, and -0.0 doesn't match 0.0
+            match_any_testsuite(
+                backend, AT, sg_size,
+                Float32[isodd(i) ? NaN32 : (i % 4 == 0 ? -0.0f0 : 0.0f0) for i in 1:sg_size]
+            )
+        end
+    end
+
+    for n in unique((sg_size, max(sg_size - 3, 1)))
+        @testset "sub_group_reduce and sub_group_scan, $n work-items" begin
+            reduce_scan_testsuite(backend, AT, +, Int32.(rand(1:100, n)))
+            reduce_scan_testsuite(
+                backend, AT, compose_affine,
+                [(Int32(rand((-1, 1, 2))), Int32(rand(-5:5))) for _ in 1:n]
+            )
+            reduce_scan_testsuite(backend, AT, argmin_op, [(Float32(rand(1:20)), Int32(i)) for i in 1:n])
+        end
+    end
+    return
 end
 
 function interface_testsuite(backend::KI.Backend, AT)
@@ -797,6 +981,8 @@ function interface_testsuite(backend::KI.Backend, AT)
                 end
             end
         end
+
+        subgroup_communication_testsuite(backend, AT, sg_size)
 
         @testset "votes" begin
             patterns = (
