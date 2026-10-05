@@ -25,6 +25,12 @@ function Session()
     idx === nothing && error("POCL not available")
     platform = cl.platforms()[idx]
     device = cl.default_device(platform)
+    # PoCL's thread pool can only be sized with environment variables, so use a sub-device
+    # to run kernels on fewer threads. its other threads stay asleep.
+    threads = cl.cpu_threads()
+    if threads !== nothing && threads < device.max_compute_units && device.max_sub_devices > 0
+        device = cl.sub_device(device, threads)
+    end
     context = cl.Context(device)
 
     sizes = device.max_work_item_size
@@ -123,8 +129,6 @@ function __init__()
     initialization_world[] = Base.get_world_counter()
     # there shouldn't be any session from precompilation, see `reset_session_state!`
     Base.@atomic session_cache.session = nothing
-    # the precompilation workload may have initialized PoCL in another process
-    cl.initialized[] = false
     return
 end
 

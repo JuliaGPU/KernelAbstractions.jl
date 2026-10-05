@@ -239,6 +239,10 @@ const CL_DEVICE_PARTITION_AFFINITY_DOMAIN = 0x1045
 
 const CL_DEVICE_PARTITION_TYPE = 0x1046
 
+const CL_DEVICE_PARTITION_BY_COUNTS = 0x1087
+
+const CL_DEVICE_PARTITION_BY_COUNTS_LIST_END = 0x0
+
 const CL_DEVICE_REFERENCE_COUNT = 0x1047
 
 const CL_DEVICE_PREFERRED_INTEROP_USER_SYNC = 0x1048
@@ -484,6 +488,8 @@ const cl_device_info = cl_uint
 
 const cl_context_properties = intptr_t
 
+const cl_device_partition_property = intptr_t
+
 const cl_context_info = cl_uint
 
 const cl_build_status = cl_int
@@ -536,6 +542,16 @@ end
         platform::cl_platform_id, device_type::cl_device_type,
         num_entries::cl_uint, devices::Ptr{cl_device_id},
         num_devices::Ptr{cl_uint}
+    )::cl_int
+end
+
+@checked function clCreateSubDevices(
+        in_device, properties, num_devices, out_devices, num_devices_ret
+    )
+    @gcsafe_ccall libopencl.POclCreateSubDevices(
+        in_device::cl_device_id, properties::Ptr{cl_device_partition_property},
+        num_devices::cl_uint, out_devices::Ptr{cl_device_id},
+        num_devices_ret::Ptr{cl_uint}
     )::cl_int
 end
 
@@ -750,35 +766,17 @@ end
 
 # Init
 
-# lazy initialization, before the first API call
-const initialized = Threads.Atomic{Bool}(false)
-const initialization_lock = ReentrantLock()
+# lazy initialization
+const initialized = Ref{Bool}(false)
 @noinline function initialize()
-    @lock initialization_lock begin
-        initialized[] && return
-        # PoCL sizes its thread pool when it initializes its devices, which the first call
-        # querying them does. don't use the wrappers here, as they'd call `initialize()`.
-        threads = cpu_threads()
-        if threads !== nothing
-            platform = Ref{cl_platform_id}()
-            @gcsafe_ccall libopencl.POclGetPlatformIDs(
-                1::cl_uint, platform::Ptr{cl_platform_id}, C_NULL::Ptr{cl_uint}
-            )::cl_int
-            err = @gcsafe_ccall libopencl.POclSetCPUMaxComputeUnitsPOCL(
-                platform[]::cl_platform_id, threads::cl_uint
-            )::cl_int
-            err == CL_SUCCESS || throw(CLError(err))
-        end
-        initialized[] = true
-    end
+    initialized[] = true
     return
 end
 
-# by default, PoCL starts a worker thread for every hardware thread, which oversubscribes
-# the CPU when Julia uses several processes (e.g., with MPI), and makes small kernels pay
-# for waking up all of them. so default to as many workers as Julia has threads, unless
-# PoCL has been configured with its own environment variables. returns `nothing` to leave
-# the choice to PoCL.
+# by default, PoCL's CPU device runs kernels on every hardware thread. that oversubscribes
+# the CPU when Julia uses several processes (e.g., with MPI), so default to as many threads
+# as Julia has, unless PoCL has been configured with its own environment variables.
+# returns `nothing` to use the whole device.
 const pocl_thread_variables =
     ("POCL_MAX_PTHREAD_COUNT", "POCL_CPU_MAX_CU_COUNT", "POCL_MAX_COMPUTE_UNITS")
 function cpu_threads()
@@ -887,6 +885,17 @@ end
 
 devices(p::Platform) = devices(p, CL_DEVICE_TYPE_ALL)
 
+# a sub-device that runs commands on `compute_units` of the device's compute units
+function sub_device(d::Device, compute_units::Integer)
+    properties = cl_device_partition_property[
+        CL_DEVICE_PARTITION_BY_COUNTS, compute_units,
+        CL_DEVICE_PARTITION_BY_COUNTS_LIST_END, 0,
+    ]
+    sub = Ref{cl_device_id}()
+    clCreateSubDevices(d, properties, 1, sub, C_NULL)
+    return Device(sub[])
+end
+
 @inline function Base.getproperty(d::Device, s::Symbol)
     # simple string properties
     version_re = r"OpenCL (?<major>\d+)\.(?<minor>\d+)(?<vendor>.+)"
@@ -929,6 +938,8 @@ devices(p::Platform) = devices(p, CL_DEVICE_TYPE_ALL)
         return get_scalar(CL_DEVICE_VENDOR_ID, cl_uint)
     elseif s === :max_compute_units
         return get_scalar(CL_DEVICE_MAX_COMPUTE_UNITS, cl_uint)
+    elseif s === :max_sub_devices
+        return get_scalar(CL_DEVICE_PARTITION_MAX_SUB_DEVICES, cl_uint)
     elseif s === :max_work_item_dims
         return get_scalar(CL_DEVICE_MAX_WORK_ITEM_DIMENSIONS, cl_uint)
     elseif s === :max_clock_frequency

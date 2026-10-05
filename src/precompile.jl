@@ -19,10 +19,14 @@ PrecompileTools.@setup_workload begin
     if launch_in_workload && POCL.nanoOpenCL.pocl_standalone_jll.is_available() &&
             POCL.SPIRV_LLVM_Backend_jll.is_available() && POCL.SPIRV_Tools_jll.is_available()
         try
-            # keep PoCL's kernel cache out of the user's cache directory. precompilation runs
-            # with a single thread, so by default PoCL starts a single worker too.
+            # keep PoCL's kernel cache out of the user's cache directory, and don't have it
+            # start a thread per core in every process that precompiles this package
             mktempdir() do cache_dir
-                withenv("POCL_CACHE_DIR" => cache_dir) do
+                env = (
+                    "POCL_CACHE_DIR" => cache_dir,
+                    "POCL_CPU_MAX_CU_COUNT" => "1", "POCL_MAX_PTHREAD_COUNT" => "1",
+                )
+                withenv(env...) do
                     PrecompileTools.@compile_workload begin
                         A = Base.zeros(Float32, 4)
                         B = Base.ones(Float32, 4)
