@@ -85,16 +85,16 @@ hidden context (a `KernelAbstractions.CompilerMetadata`), compiles the kernel wi
 launches it with [`KI.launch`](@ref KernelInterface.launch). A backend doesn't implement any
 of that itself, but it needs KernelInterface's typed index queries and an N-d
 [`KI.launch`](@ref KernelInterface.launch), and it must not override KernelAbstractions' index
-functions (see below). It **may** customize the launch through:
+functions (see below). [`@private`](@ref) storage is implemented by an overlay in
+`GPUCompiler.SHARED_METHOD_TABLE`, so a GPUCompiler-based backend has to include that table:
+it should return its method tables from `GPUCompiler.method_tables` rather than override
+`GPUCompiler.method_table_view`. It **may** customize the launch through:
 
 - [`KI.launch_configuration`](@ref KernelInterface.launch_configuration): the workgroup size
   used when the kernel has no static or given one. It receives the number of work-items in
   the `ndrange` as `nitems`, e.g. to prefer more workgroups over larger ones.
 - [`KernelAbstractions.compiler_options`](@ref): compiler options for a kernel, e.g. a
   register hint derived from its static workgroup size.
-- `KernelAbstractions.Scratchpad`, which backs [`@private`](@ref) arrays and has to be
-  implemented (`@device_override`) for a backend's device: e.g. a stack allocation, or a
-  `StaticArrays.MArray`.
 - `Adapt.adapt_storage(::KernelAbstractions.ConstAdaptor, x)` for the backend's device
   arrays, which implements [`@Const`](@ref).
 

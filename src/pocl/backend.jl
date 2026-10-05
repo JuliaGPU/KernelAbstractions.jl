@@ -221,18 +221,10 @@ end
 
 @device_override KI.get_sub_group_local_id(::Type{T}) where {T} = get_sub_group_local_id() % T
 
-## Shared and Scratch Memory
+## Shared Memory
 
 @device_override @inline function KI.localmemory(::Type{T}, ::Val{Dims}) where {T, Dims}
     ptr = POCL.emit_localmemory(T, Val(prod(Dims)))
-    CLDeviceArray(Dims, ptr)
-end
-
-@device_override @inline function KA.Scratchpad(ctx, ::Type{T}, ::Val{Dims}) where {T, Dims}
-    # private per-workitem scratch: a stack `alloca` (lowered by GPUCompiler) wrapped in a
-    # device array. the slot lives in OpenCL "Function" storage (LLVM addrspace 0), which is
-    # where the SPIR-V target places allocas.
-    ptr = POCL.GPUCompiler.alloca(T, Val(prod(Dims)), Val(POCL.AS.Function))
     CLDeviceArray(Dims, ptr)
 end
 

@@ -16,6 +16,7 @@
 using FileCheck
 using KernelAbstractions
 using KernelAbstractions: @atomic
+using StaticArrays
 using Test
 
 import KernelAbstractions.POCL: @device_code_llvm
@@ -50,6 +51,26 @@ end
 @kernel function codegen_print()
     I = @index(Global, Linear)
     @print("index ", I, "\n")
+end
+
+@kernel function codegen_private_reduce(A)
+    I = @index(Global, Linear)
+    priv = @private Float32 (8,)
+    for j in 1:8
+        @inbounds priv[j] = A[I] * j
+    end
+    @inbounds A[I] = sum(priv) + maximum(priv) + foldl(-, priv)
+end
+
+@noinline private_consume(priv) = @inbounds priv[1] + priv[8]
+
+@kernel function codegen_private_escape(A)
+    I = @index(Global, Linear)
+    priv = @private Float32 (8,)
+    for j in 1:8
+        @inbounds priv[j] = A[I] * j
+    end
+    @inbounds A[I] = private_consume(priv)
 end
 
 @kernel function codegen_global_linear(A)
@@ -177,6 +198,26 @@ end
             @device_code_llvm debuginfo = :none KernelAbstractions.launch_kernel(
                 kernel, KernelAbstractions.LinearLaunch{Int32}(), ndrange, workgroupsize, iterspace, (B,)
             )
+            KernelAbstractions.synchronize(backend)
+        end
+    end
+
+    # With StaticArrays loaded, whole-array reductions over `@private` storage are unrolled,
+    # so the stack slot is promoted to registers rather than read through memory.
+    @testset "private" begin
+        @test @filecheck implicit_check_not = "alloca" begin
+            @check "define spir_kernel void @{{.*}}gpu_codegen_private_reduce"
+            @check "ret void"
+            @device_code_llvm debuginfo = :none codegen_private_reduce(backend, 16)(A, ndrange = 64)
+            KernelAbstractions.synchronize(backend)
+        end
+
+        # storage passed to a function that isn't inlined stays on the stack, so the test
+        # above is not vacuous
+        @test @filecheck begin
+            @check "define spir_kernel void @{{.*}}gpu_codegen_private_escape"
+            @check "alloca"
+            @device_code_llvm debuginfo = :none codegen_private_escape(backend, 16)(A, ndrange = 64)
             KernelAbstractions.synchronize(backend)
         end
     end
