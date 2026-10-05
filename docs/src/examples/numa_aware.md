@@ -2,6 +2,22 @@
 
 This example demonstrates how to define and run a SAXPY kernel (single-precision `Y[i] = a * X[i] + Y[i]`) such that it runs efficiently on a system with multiple memory domains ([NUMA](https://en.wikipedia.org/wiki/Non-uniform_memory_access)) using multithreading. (You likely will need to fine-tune the value of `N` on your system of interest if you care about the particular measurement.)
 
+!!! compat "KernelAbstractions 0.10"
+    This page describes the thread-based `CPU` backend of KernelAbstractions 0.9, and the
+    numbers below were measured with it. Since KernelAbstractions 0.10 the `CPU` backend
+    runs kernels with PoCL on PoCL's own threads, which changes the remarks below:
+
+    1) ThreadPinning.jl pins Julia's threads, not the threads that run the kernels. Set
+       PoCL's `POCL_AFFINITY=1` environment variable before the backend is first used to
+       pin each of PoCL's threads to a core.
+    2) `CPU(; static=true)` no longer exists: there is no dynamic task scheduling to opt
+       out of, so the example only measures `CPU()`.
+    3) `KernelAbstractions.zeros(backend, dtype, N)` fills the array from the calling
+       thread. To initialize the data with the access pattern of the computational kernel,
+       allocate it with `KernelAbstractions.allocate` and fill it with a kernel.
+
+    The example has not been measured again with KernelAbstractions 0.10.
+
 ````@eval
 using Markdown
 using KernelAbstractions

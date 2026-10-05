@@ -133,6 +133,24 @@ end
 ```
 
 ### 0.10
+- KernelAbstractions requires Julia 1.10 or later.
+- The `CPU` backend is an OpenCL backend: `CPU` is an alias of `POCLBackend`, which compiles
+  kernels like the GPU backends do and runs them with [PoCL](https://portablecl.org) on
+  PoCL's own threads, and no longer on Julia tasks. `CPU(; static=true)` has been removed,
+  as there is no dynamic task scheduling to opt out of anymore.
+- KernelAbstractions is built on [KernelInterface](@ref kernelinterface), which defines
+  `Backend` and the host-side functions (`allocate`, `synchronize`, …) that
+  KernelAbstractions re-exports. User code is unaffected, but backends have to implement
+  KernelInterface, so KernelAbstractions 0.10 needs a release of the backend package that
+  supports it; see the [notes for backend implementations](@ref implementations_notes).
+- The Enzyme extension has been removed temporarily, and is planned to return in a later
+  0.10 release. Code that differentiates kernels with Enzyme has to stay on
+  KernelAbstractions 0.9 until then.
+- [`KernelAbstractions.@spawn`](@ref) launches kernels from a task like `Threads.@spawn`
+  does, and additionally orders them after the work the spawning task has queued, and can
+  select the device the task uses; see the [Quickstart](@ref).
+- `KernelAbstractions.isgpu` has been removed. Like for `GPU` below, query a capability
+  instead.
 - `ndrange` entries may be index ranges, given statically (`kernel(backend, workgroupsize, (-2:N+3, 0:M+1))`)
   or at launch (`ndrange=(-2:N+3, 0:M+1)`, a single range, or a `CartesianIndices`).
   `@index(Global, Cartesian)` and `@index(Global, NTuple)` return the shifted indices.
