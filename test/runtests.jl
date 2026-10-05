@@ -54,13 +54,15 @@ end
         return parse(Int, readchomp(setenv(cmd, cmd_env..., env...)))
     end
 
-    # as many workers as Julia has threads
-    @test compute_units(threads = 3) == 3
+    # as many threads as Julia has
+    @test compute_units(threads = 2) == 2
     # unless PoCL is configured otherwise
     @test compute_units("POCL_CPU_MAX_CU_COUNT" => "5") == 5
     # but KernelAbstractions' variable takes precedence
-    @test compute_units("JULIA_KA_CPU_THREADS" => "4") == 4
-    @test compute_units("JULIA_KA_CPU_THREADS" => "4", "POCL_MAX_PTHREAD_COUNT" => "5") == 4
+    @test compute_units("JULIA_KA_CPU_THREADS" => "3") == 3
+    @test compute_units("JULIA_KA_CPU_THREADS" => "3", "POCL_MAX_PTHREAD_COUNT" => "5") == 3
+    # up to the size of PoCL's device
+    @test compute_units("JULIA_KA_CPU_THREADS" => "6", "POCL_MAX_PTHREAD_COUNT" => "5") == 5
 end
 
 @testset "POCL float atomics" begin
