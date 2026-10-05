@@ -88,7 +88,9 @@ synchronize(get_backend(y))
 The first form runs on the backend of the arrays, which must all have the same one, over
 `eachindex(A, Bs...)`: `f` receives the index that a `for i in eachindex(A, Bs...)` loop would,
 a linear index if the arrays have `IndexLinear` style and a `CartesianIndex` otherwise. Pass
-every array that the body indexes with `i`, so that the index is valid for each of them.
+every array that the body indexes with `i`, so that the index is valid for each of them. Ranges,
+`CartesianIndices` and `LinearIndices`, and views or reshapes of them, have no backend and run
+on that of the other arrays; if none of the arrays has a backend, use the second form.
 
 The second form runs on `backend`, over the given `indices`: a range of integers such as
 `1:n` or `axes(A, 2)`, for which `f` receives an `Int`, or a `CartesianIndices` of such ranges,
@@ -137,14 +139,31 @@ function foreach_index(f::F, backend::Backend, indices; workgroupsize = nothing)
     return nothing
 end
 
+# The backend of the arrays passed to `foreach_index`. Ranges, `CartesianIndices` and
+# `LinearIndices` are computed rather than stored, as are Base's views, reshapes and permutations
+# of them: they have no backend and do not decide the one the loop runs on. This is what
+# AcceleratedKernels.jl does.
+array_backend(A::AbstractArray) = get_backend(A)
+array_backend(::Union{AbstractRange, CartesianIndices, LinearIndices}) = nothing
+array_backend(A::Union{SubArray, Base.ReshapedArray, PermutedDimsArray}) = array_backend(parent(A))
+
+common_backend() = nothing
+common_backend(A, Bs...) = merge_backend(array_backend(A), common_backend(Bs...))
+
+merge_backend(::Nothing, ::Nothing) = nothing
+merge_backend(a, ::Nothing) = a
+merge_backend(::Nothing, b) = b
+function merge_backend(a, b)
+    a == b || throw(ArgumentError("`foreach_index` needs arrays with the same backend, got arrays on $a and on $b"))
+    return a
+end
+
 function foreach_index(f::F, A::AbstractArray, Bs::AbstractArray...; workgroupsize = nothing) where {F}
-    backend = get_backend(A)
-    for B in Bs
-        get_backend(B) == backend || throw(
-            ArgumentError(
-                "`foreach_index` needs arrays with the same backend, got a `$(typeof(A))` on $(backend) and a `$(typeof(B))` on $(get_backend(B))"
-            )
+    backend = common_backend(A, Bs...)
+    backend === nothing && throw(
+        ArgumentError(
+            "`foreach_index` cannot determine a backend from arrays that are not stored, such as ranges; pass it explicitly, as in `foreach_index(f, backend, eachindex(A, Bs...))`"
         )
-    end
+    )
     return foreach_index(f, backend, eachindex(A, Bs...); workgroupsize)
 end

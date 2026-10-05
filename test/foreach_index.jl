@@ -28,6 +28,13 @@ function foreach_index_copy!(dst, src)
     return dst
 end
 
+function foreach_index_copy_from_first!(src, dst)
+    foreach_index(src, dst) do i
+        @inbounds dst[i] = src[i]
+    end
+    return dst
+end
+
 function foreach_index_copy_backend!(dst, src, backend)
     foreach_index(backend, eachindex(src)) do i
         @inbounds dst[i] = src[i]
@@ -168,11 +175,33 @@ function foreach_index_testsuite(Backend, AT)
         # arrays whose indices differ
         @test_throws DimensionMismatch foreach_index_copy!(AT(zeros(Int, 4, 3)), view(C, 1:2:6, :))
 
-        # arrays on different backends, or without one
+        # arrays on different backends
         if get_backend(AT(Int[])) != get_backend(Int[])
             @test_throws ArgumentError foreach_index_copy!(AT(zeros(Int, 3)), zeros(Int, 3))
         end
-        @test_throws ArgumentError foreach_index_copy!(AT(zeros(Int, 3)), Base.OneTo(3))
+
+        # ranges, and views of them, run on the backend of the other arrays
+        for r in (Base.OneTo(3), 4:6, view(reshape(1:12, 3, 4), :, 2))
+            dst = AT(zeros(Int, 3))
+            foreach_index_copy!(dst, r)
+            synchronize(backend)
+            @test Array(dst) == collect(r)
+        end
+        dst = AT(zeros(Int, 2, 3))
+        foreach_index_copy!(dst, reshape(1:6, 2, 3))
+        synchronize(backend)
+        @test Array(dst) == reshape(1:6, 2, 3)
+        dst = AT(zeros(Int, 2, 3))
+        foreach_index_copy!(dst, LinearIndices((2, 3)))
+        synchronize(backend)
+        @test Array(dst) == collect(LinearIndices((2, 3)))
+        # ... also as the first argument
+        dst = AT(zeros(Int, 3))
+        foreach_index_copy_from_first!(2:4, dst)
+        synchronize(backend)
+        @test Array(dst) == 2:4
+        # ... and need one if there are no other arrays
+        @test_throws "pass it explicitly" foreach_index_copy!(1:3, 4:6)
     end
 
     @testset "workgroupsize" begin
