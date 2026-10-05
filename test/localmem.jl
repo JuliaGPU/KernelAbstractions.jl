@@ -64,7 +64,28 @@ end
     end
 end
 
+# A kernel whose `@localmem` was expanded before `@kernel` saw it, as tools that generate
+# kernels (e.g. ParallelStencil.jl) do. `@kernel` copies the definition with `deepcopy`,
+# which fails for expansions that contain a module.
+const pre_expanded_localmem = macroexpand(@__MODULE__, :(KernelAbstractions.@localmem Int (16,)))
+@eval @kernel function localmem_pre_expanded(A)
+    i = @index(Local, Linear)
+    I = @index(Global, Linear)
+    lmem = $pre_expanded_localmem
+    lmem[i] = i
+    @synchronize
+    @inbounds A[I] = lmem[16 - i + 1]
+end
+
 function localmem_testsuite(backend, ArrayT)
+    @testset "pre-expanded @localmem" begin
+        @test deepcopy(pre_expanded_localmem) == pre_expanded_localmem
+        A = ArrayT{Int}(undef, 32)
+        localmem_pre_expanded(backend(), 16)(A, ndrange = size(A))
+        synchronize(backend())
+        @test Array(A) == [17 .- (1:16); 17 .- (1:16)]
+    end
+
     @testset "kernels" begin
         @testset for kernel! in (localmem(backend(), 16), localmem2(backend(), 16), localmem_unsafe_indices(backend(), 16), many_localmem(backend(), 16))
             A = ArrayT{Int}(undef, 64)

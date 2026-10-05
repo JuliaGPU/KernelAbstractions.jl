@@ -105,10 +105,10 @@ macro spawn(args...)
     # `device!` comes first because `wait_event` acts on the queue of the device that is
     # active when it is called: selecting the device afterwards would leave it unordered.
     body = quote
-        $KI.device!($b, $dev)
-        $KI.wait_event($b, $event)
+        $(KI.device!)($b, $dev)
+        $(KI.wait_event)($b, $event)
         local $result = $expr
-        $KI.synchronize($b)
+        $(KI.synchronize)($b)
         $result
     end
     task = if threadpool === nothing
@@ -122,8 +122,8 @@ macro spawn(args...)
     return esc(
         quote
             local $b = $backend
-            local $dev = $(device === nothing ? :($KI.device($b)) : device)
-            local $event = $KI.record_event($b)
+            local $dev = $(device === nothing ? :($(KI.device)($b)) : device)
+            local $event = $(KI.record_event)($b)
             $task
         end
     )
