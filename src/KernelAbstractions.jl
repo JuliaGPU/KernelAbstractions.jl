@@ -226,6 +226,17 @@ end
 
 Declare storage that is private to each work-item. It is preserved across
 [`@synchronize`](@ref) statements.
+
+This returns a statically sized `StaticArraysCore.StaticArray` (a
+[`KernelAbstractions.PrivateArray`](@ref)) in stack storage, which supports indexing and
+in-place operations on non-overlapping regions. Load StaticArrays for static-array arithmetic,
+slicing and unrolled whole-array reductions. Without it, these fall back to generic
+`AbstractArray` methods: operations that return a new array fail to compile, and reductions
+may spill to local memory or fail to compile, depending on the back-end and size.
+
+Assignment shares storage, and each `@private` declaration reuses its storage across loop
+iterations. `copy`, `similar` and other operations that allocate are not guaranteed to work,
+and neither is assigning between overlapping views of the same array.
 """
 macro private(T, dims)
     if dims isa Integer
@@ -666,7 +677,7 @@ include("foreach_index.jl")
 # Backends/Interface
 ###
 
-function Scratchpad end
+include("private.jl")
 
 __synchronize() = KI.barrier()
 
