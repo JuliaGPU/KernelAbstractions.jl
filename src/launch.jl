@@ -263,7 +263,7 @@ if builtin(iterspace) && ndrange isa CartesianIndices
     T = index_type(launch)
     widen_index(linearize(T, narrow(T, size(ndrange)), blocked_position(ctx, launch)))
 else
-    linear_index(ndrange, global_cartesian(ctx, launch, iterspace, ndrange))
+    linear_index(iterspace, ndrange, group_index(ctx, launch), local_index(ctx, launch))
 end
 
 @inline validindex(ctx, launch::Launch, iterspace, ndrange) =

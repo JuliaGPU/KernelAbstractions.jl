@@ -1,3 +1,4 @@
+using Adapt
 using KernelAbstractions
 using KernelAbstractions.NDIteration
 import KernelAbstractions.KernelInterface as KI
@@ -43,6 +44,48 @@ const MANY_ARGS = [Symbol(:x, i) for i in 1:40]
 @eval @kernel function launch_many!(A, $(MANY_ARGS...))
     I = @index(Global, Linear)
     @inbounds A[I] = $(foldl((a, b) -> :($a + $b), MANY_ARGS))
+end
+
+# A custom iteration space: one work-item per index in a list, whose linear index is its
+# position in the list (as Oceananigans launches kernels over the active cells of a grid)
+struct IndexList{V <: AbstractVector}
+    indices::V
+end
+Adapt.@adapt_structure IndexList
+
+# the `ndrange` of the context: every index but `UNLISTED` is part of the space
+struct ListedIndices
+    length::Int
+end
+const UNLISTED = CartesianIndex(typemin(Int), typemin(Int))
+Base.in(I::CartesianIndex{2}, ::ListedIndices) = I != UNLISTED
+
+const ListNDRange = NDRange{1, <:Any, <:Any, <:Any, <:Any, <:IndexList}
+
+function KernelAbstractions.partition(kernel::KernelAbstractions.Kernel, list::IndexList, workgroupsize)
+    static_workgroupsize = KernelAbstractions.workgroupsize(kernel)
+    items = NDIteration.get(static_workgroupsize)
+    blocks, _, dynamic = NDIteration.partition((length(list.indices),), items)
+    return NDRange{1, DynamicSize, static_workgroupsize}(CartesianIndices(blocks), nothing, list), dynamic
+end
+KernelAbstractions.cartesian(list::IndexList) = ListedIndices(length(list.indices))
+KernelAbstractions.cartesian(r::ListedIndices) = r
+
+@inline list_position(r::ListNDRange, g::CartesianIndex{1}, i::CartesianIndex{1}) =
+    (g[1] - 1) * length(workitems(r)) + i[1]
+@inline function NDIteration.expand(r::ListNDRange, g::CartesianIndex{1}, i::CartesianIndex{1})
+    p = list_position(r, g, i)
+    return p <= length(r.mapping.indices) ? (@inbounds r.mapping.indices[p]) : UNLISTED
+end
+@inline NDIteration.linear_index(r::ListNDRange, ::ListedIndices, g::CartesianIndex{1}, i::CartesianIndex{1}) =
+    list_position(r, g, i)
+
+@kernel function launch_listed!(visits, position)
+    I = @index(Global, Cartesian)
+    @inbounds begin
+        visits[I] += 1
+        position[I] = @index(Global, Linear)
+    end
 end
 
 default_launcher(kernel, args...; ndrange, workgroupsize = nothing) =
@@ -138,6 +181,19 @@ function launch_testsuite(backend, AT; launcher = default_launcher, skip_tests =
         launcher(launch_many!(backend()), A, 1:40...; ndrange = length(A))
         synchronize(backend())
         @test all(==(sum(1:40)), Array(A))
+    end
+
+    @testset "custom iteration space" begin
+        shape = (7, 5)
+        # 18 indices: the last workgroup of 4 work-items is partial
+        listed = [I for I in CartesianIndices(shape) if isodd(sum(Tuple(I)))]
+        visits = AT(zeros(Int, shape))
+        position = AT(zeros(Int, shape))
+        launcher(launch_listed!(backend(), 4), visits, position; ndrange = IndexList(AT(listed)))
+        synchronize(backend())
+        visits, position = Array(visits), Array(position)
+        @test all(I -> visits[I] == (I in listed), CartesianIndices(shape))
+        @test all(p -> position[listed[p]] == p, eachindex(listed))
     end
 
     @testset "synchronize with padding lanes" begin
