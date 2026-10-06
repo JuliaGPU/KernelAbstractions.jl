@@ -271,7 +271,7 @@ localmemory(::Type{T}, ::Val) where {T} =
 
 # Shuffles exchange values between the work-items of a sub-group. Backends implement them for
 # the primitive types for which `supports_shuffle` returns `true`. The fallbacks below shuffle
-# other primitive types as `UInt32` words, and other `isbits` types field by field.
+# other primitive types as unsigned words, and other `isbits` types field by field.
 
 """
     shfl(val::T, lane::Integer)::T
@@ -286,9 +286,10 @@ but they may read from different lanes.
 
 Types for which [`supports_shuffle`](@ref) returns `true` are supported. Besides the types a
 backend supports natively, that includes other primitive types of 1, 2, 4, 8 or 16 bytes
-(e.g. `Bool`, `Char` or `Int64`) if the backend supports `UInt32`, which are shuffled
-as `UInt32` words, and `isbits` structs and tuples of supported types, which are shuffled
-field by field.
+(e.g. `Bool`, `Char` or `Int64`) if the backend supports `UInt32`, and `isbits` structs and
+tuples of supported types, which are shuffled field by field. Primitive types of up to 4
+bytes are shuffled as a `UInt32`, and larger ones as `UInt64` words, each of which is shuffled
+natively if the backend supports `UInt64`, and as two `UInt32` words otherwise.
 
 !!! note
     Backend implementations **must** implement this for the primitive types they support
@@ -386,23 +387,28 @@ shfl_unsupported(T) = throw(
     )
 )
 
-# Whether a primitive type that a backend doesn't support natively can be shuffled as `UInt32`
+# Whether a primitive type that a backend doesn't support natively can be shuffled as unsigned
 # words
 shuffle_as_words(T) = T !== UInt32 && sizeof(T) in (1, 2, 4, 8, 16)
 
 # The unsigned integer type of the size of a primitive type `T`
 const word_types = Dict(1 => UInt8, 2 => UInt16, 4 => UInt32, 8 => UInt64, 16 => UInt128)
 
-# Shuffle a primitive value as `UInt32` words: smaller values are zero-extended, larger ones
-# split into words.
+# Shuffle a primitive value as unsigned words: values of up to 4 bytes are zero-extended to a
+# `UInt32`. Other 8-byte values are shuffled as a `UInt64`, which the backend may support
+# natively, and a `UInt64` it doesn't is split into two `UInt32` words. 16-byte values are
+# split into two `UInt64` words.
 @inline @generated function shfl_words(f, val::T) where {T}
     shuffle_as_words(T) || return :(shfl_unsupported($T))
     U = word_types[sizeof(T)]
     if sizeof(T) <= 4
         return :(reinterpret($T, f(reinterpret($U, val) % UInt32) % $U))
+    elseif sizeof(T) == 8 && T !== UInt64
+        return :(reinterpret($T, f(reinterpret(UInt64, val))))
     end
-    n = sizeof(T) ÷ 4
-    words = (:((f((bits >> $(32 * (i - 1))) % UInt32) % $U) << $(32 * (i - 1))) for i in 1:n)
+    W = sizeof(T) == 8 ? UInt32 : UInt64
+    nbits = 8 * sizeof(W)
+    words = (:((f((bits >> $(nbits * (i - 1))) % $W) % $U) << $(nbits * (i - 1))) for i in 1:2)
     return quote
         bits = reinterpret($U, val)
         return reinterpret($T, |($(words...)))
