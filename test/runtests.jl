@@ -266,7 +266,7 @@ end
             @device_code_llvm io = io debuginfo = :none @opencl local_size = 32 global_size = 32 sub_group_reduce_kernel(out, x)
         end
         @test all(==(32), out)
-        @test occursin("sub_group_reduce_add", ir) == POCL.POCLKernels.POCL_REPLICA_FIX
+        @test occursin("sub_group_reduce_add", ir)
     end
 end
 
