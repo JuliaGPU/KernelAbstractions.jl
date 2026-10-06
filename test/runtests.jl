@@ -260,13 +260,13 @@ function sub_group_reduce_kernel(out, x)
     return
 end
 @testset "POCL native sub-group collectives" begin
-    for (T, native) in ((Int32, true), (Float32, true))
+    for T in (Int32, Float32)
         x, out = ones(T, 32), zeros(T, 32)
         ir = sprint() do io
             @device_code_llvm io = io debuginfo = :none @opencl local_size = 32 global_size = 32 sub_group_reduce_kernel(out, x)
         end
         @test all(==(32), out)
-        @test occursin("sub_group_reduce_add", ir) == (native && POCL.POCLKernels.NATIVE_COLLECTIVES)
+        @test occursin("sub_group_reduce_add", ir) == POCL.POCLKernels.POCL_REPLICA_FIX
     end
 end
 

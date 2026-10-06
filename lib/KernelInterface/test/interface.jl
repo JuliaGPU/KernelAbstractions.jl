@@ -397,6 +397,13 @@ function reduce_scan_multi_kernel(red, scan, sgs, a)
     return
 end
 
+# `sub_group_match_any` in a 1-D work-group of several sub-groups, the last one partial
+function match_any_multi_kernel(out, vals)
+    i = KI.get_local_id().x
+    @inbounds out[i] = KI.sub_group_match_any(vals[i])
+    return
+end
+
 struct FallbackStruct
     flag::Bool
     c::Char
@@ -588,6 +595,29 @@ function reduce_scan_multi_testsuite(backend, AT, sg_size, ::Type{T}) where {T}
     return
 end
 
+# sub-groups with different numbers of distinct values, which the fallback takes different
+# numbers of steps for
+function match_any_multi_testsuite(backend, AT, sg_size)
+    n = 2 * sg_size + 5
+    vals = Int32[i <= sg_size ? i : (i <= 2 * sg_size ? 7 : i % 3) for i in 1:n]
+    out = AT(zeros(UInt64, n))
+    kernel = KI.@launch backend launch = false match_any_multi_kernel(out, AT(vals))
+    n <= KI.max_work_group_size(kernel) || return
+    kernel(out, AT(vals); workgroupsize = n)
+    KI.synchronize(backend)
+    out = Array(out)
+    # 1-D work-groups form sub-groups from consecutive work-items
+    for i in 1:n
+        base = (i - 1) ÷ sg_size * sg_size
+        expected = UInt64(0)
+        for j in (base + 1):min(base + sg_size, n)
+            vals[j] === vals[i] && (expected |= UInt64(1) << (j - 1 - base))
+        end
+        @test out[i] == expected
+    end
+    return
+end
+
 function subgroup_communication_testsuite(backend::KI.Backend, AT, sg_size)
     @testset "shuffles of other types" begin
         # primitive types that backends need not support natively are shuffled as words
@@ -657,6 +687,12 @@ function subgroup_communication_testsuite(backend::KI.Backend, AT, sg_size)
                     segmented_vote_testsuite(backend, AT, n, w)
                 end
             end
+        end
+    end
+
+    if sg_size <= 64
+        @testset "sub_group_match_any, several sub-groups" begin
+            match_any_multi_testsuite(backend, AT, sg_size)
         end
     end
 

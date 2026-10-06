@@ -283,7 +283,8 @@ Whether kernels on the active device support the shuffles [`shfl`](@ref),
 [`shfl_down`](@ref), [`shfl_up`](@ref) and [`shfl_xor`](@ref) for values of type `T`.
 
 Other primitive types of 1, 2, 4, 8 or 16 bytes are supported if `UInt32` is, and `isbits`
-structs and tuples if all of their fields are.
+structs and tuples if all of their fields are (and, for those without fields, if `UInt32`
+is).
 
 !!! note
     Backend implementations **must** implement this function for the primitive types they
@@ -294,6 +295,8 @@ structs and tuples if all of their fields are.
 function supports_shuffle(backend::Backend, ::Type{T}) where {T}
     isprimitivetype(T) && return shuffle_as_words(T) && supports_shuffle(backend, UInt32)
     (isbitstype(T) && !isprimitivetype(T)) || return false
+    # not `true` for a type without fields on a backend without shuffles
+    fieldcount(T) == 0 && return supports_shuffle(backend, UInt32)
     return all(i -> supports_shuffle(backend, fieldtype(T, i)), 1:fieldcount(T))
 end
 

@@ -285,8 +285,8 @@ but they may read from different lanes.
 `shfl` exchanges values, not memory: it is not a memory fence.
 
 Types for which [`supports_shuffle`](@ref) returns `true` are supported. Besides the types a
-backend supports natively, that includes other primitive types of 1, 2 or a multiple of 4
-bytes (e.g. `Bool`, `Char` or `Int64`) if the backend supports `UInt32`, which are shuffled
+backend supports natively, that includes other primitive types of 1, 2, 4, 8 or 16 bytes
+(e.g. `Bool`, `Char` or `Int64`) if the backend supports `UInt32`, which are shuffled
 as `UInt32` words, and `isbits` structs and tuples of supported types, which are shuffled
 field by field.
 

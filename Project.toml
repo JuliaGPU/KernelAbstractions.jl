@@ -33,8 +33,6 @@ StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 
 [sources]
 KernelInterface = {path = "lib/KernelInterface"}
-# TODO: remove once JuliaGPU/OpenCL.jl#526 is released
-SPIRVIntrinsics = {url = "https://github.com/JuliaGPU/OpenCL.jl", rev = "vc/subgroup-votes", subdir = "lib/intrinsics"}
 
 [extensions]
 LinearAlgebraExt = "LinearAlgebra"

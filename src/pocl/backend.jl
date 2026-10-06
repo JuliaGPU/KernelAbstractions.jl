@@ -290,6 +290,35 @@ end
     return UInt64(mask[1].value) | (UInt64(mask[2].value) << 32)
 end
 
+# The smaller of the width and the work-group size: a bound for loops over the lanes that isn't
+# a constant, but is the same for all sub-groups of the work-group, which PoCL needs (see
+# `POCLBackend`).
+@inline function uniform_sub_group_bound()
+    sz = KI.get_local_size(Int32)
+    return min(KI.get_max_sub_group_size(Int32), sz.x * sz.y * sz.z)
+end
+
+# KernelInterface's fallback of `KI.sub_group_match_any` takes a step per distinct value, which
+# differs between the sub-groups of a work-group. Take the same number of steps in all of them,
+# as PoCL needs.
+@device_override @inline function KI.sub_group_match_any(val)
+    remaining = KI.sub_group_ballot(true)
+    mask = zero(UInt64)
+    step = Int32(0)
+    bound = uniform_sub_group_bound()
+    while step < bound
+        done = remaining == zero(UInt64)
+        leader = ifelse(done, Int32(1), trailing_zeros(remaining) % Int32 + Int32(1))
+        other = KI.shfl(val, leader)
+        same = !done & (val === other)
+        group = KI.sub_group_ballot(same)
+        mask = ifelse(same, group, mask)
+        remaining &= ~group
+        step += Int32(1)
+    end
+    return mask
+end
+
 # PoCL 7.2 miscompiles sub-group operations after a branch with an early exit (as bounds checks
 # emit), because WorkitemLoops gives the peeled first work-item its own copy of their scratch
 # memory: the native collectives below, and the unrolled shuffles of KernelInterface's
@@ -297,17 +326,30 @@ end
 # the fix (pocl/pocl#2239) since 7.2.1+1 (JuliaPackaging/Yggdrasil#15001).
 const POCL_REPLICA_FIX = pkgversion(cl.pocl_standalone_jll) >= v"7.2.1+1"
 
-@static if !POCL_REPLICA_FIX
-    # Without the fix, loop to a bound that isn't a constant, but is the same for all
-    # sub-groups of the work-group, which PoCL needs (see `POCLBackend`): the smaller of the
-    # width and the work-group size. Reduce by combining ranges of doubling length with
-    # `shfl_down`, skipping the lanes without a work-item, and broadcast the result of the
-    # first lane.
-    @inline function uniform_sub_group_bound()
-        sz = KI.get_local_size(Int32)
-        return min(KI.get_max_sub_group_size(Int32), sz.x * sz.y * sz.z)
-    end
+@static if POCL_REPLICA_FIX
+    # Native reductions and scans of `cl_khr_subgroups`, for `+` on 32- and 64-bit integers
+    # and floats, and `min`/`max` on integers (OpenCL's `min` and `max` treat NaN and the sign
+    # of zero differently from Julia's).
+    const CollectiveIntTypes = Union{Int32, UInt32, Int64, UInt64}
+    const CollectiveTypes = Union{CollectiveIntTypes, Float16, Float32, Float64}
 
+    @device_override KI.sub_group_reduce(::typeof(+), val::CollectiveTypes) =
+        SPIRVIntrinsics.sub_group_reduce_add(val)
+    @device_override KI.sub_group_reduce(::typeof(min), val::CollectiveIntTypes) =
+        SPIRVIntrinsics.sub_group_reduce_min(val)
+    @device_override KI.sub_group_reduce(::typeof(max), val::CollectiveIntTypes) =
+        SPIRVIntrinsics.sub_group_reduce_max(val)
+
+    @device_override KI.sub_group_scan(::typeof(+), val::CollectiveTypes) =
+        SPIRVIntrinsics.sub_group_scan_inclusive_add(val)
+    @device_override KI.sub_group_scan(::typeof(min), val::CollectiveIntTypes) =
+        SPIRVIntrinsics.sub_group_scan_inclusive_min(val)
+    @device_override KI.sub_group_scan(::typeof(max), val::CollectiveIntTypes) =
+        SPIRVIntrinsics.sub_group_scan_inclusive_max(val)
+else
+    # Without the fix, loop to `uniform_sub_group_bound()` rather than to the constant width.
+    # Reduce by combining ranges of doubling length with `shfl_down`, skipping the lanes
+    # without a work-item, and broadcast the result of the first lane.
     @device_override @inline function KI.sub_group_reduce(op, val)
         lane = KI.get_sub_group_local_id(Int32)
         sgsize = KI.get_sub_group_size(Int32)
@@ -337,30 +379,6 @@ const POCL_REPLICA_FIX = pkgversion(cl.pocl_standalone_jll) >= v"7.2.1+1"
         end
         return val
     end
-end
-
-# Native reductions and scans of `cl_khr_subgroups`, for `+` on 32- and 64-bit integers and
-# floats, and `min`/`max` on integers (OpenCL's `min` and `max` treat NaN and the sign of zero
-# differently from Julia's), with the fix for PoCL's peeling.
-const NATIVE_COLLECTIVES = POCL_REPLICA_FIX
-
-@static if NATIVE_COLLECTIVES
-    const CollectiveIntTypes = Union{Int32, UInt32, Int64, UInt64}
-    const CollectiveTypes = Union{CollectiveIntTypes, Float16, Float32, Float64}
-
-    @device_override KI.sub_group_reduce(::typeof(+), val::CollectiveTypes) =
-        SPIRVIntrinsics.sub_group_reduce_add(val)
-    @device_override KI.sub_group_reduce(::typeof(min), val::CollectiveIntTypes) =
-        SPIRVIntrinsics.sub_group_reduce_min(val)
-    @device_override KI.sub_group_reduce(::typeof(max), val::CollectiveIntTypes) =
-        SPIRVIntrinsics.sub_group_reduce_max(val)
-
-    @device_override KI.sub_group_scan(::typeof(+), val::CollectiveTypes) =
-        SPIRVIntrinsics.sub_group_scan_inclusive_add(val)
-    @device_override KI.sub_group_scan(::typeof(min), val::CollectiveIntTypes) =
-        SPIRVIntrinsics.sub_group_scan_inclusive_min(val)
-    @device_override KI.sub_group_scan(::typeof(max), val::CollectiveIntTypes) =
-        SPIRVIntrinsics.sub_group_scan_inclusive_max(val)
 end
 
 @device_override @inline function KI._print(args...)
