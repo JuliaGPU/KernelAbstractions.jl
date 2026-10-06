@@ -41,7 +41,7 @@ StaticArraysExt = "StaticArrays"
 [compat]
 Adapt = "0.4, 1.0, 2.0, 3.0, 4"
 Atomix = "1.5"
-GPUCompiler = "2.12"
+GPUCompiler = "2.13"
 GPUToolbox = "3.3.2"
 KernelInterface = "0.4"
 LLVM = "10"
