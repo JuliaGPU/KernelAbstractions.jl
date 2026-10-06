@@ -139,8 +139,8 @@ function foreach_index_testsuite(Backend, AT)
 
         # e.g. the interior of an array, with default and explicit workgroup sizes
         @testset "$(indices), workgroupsize=$(workgroupsize)" for indices in (
-                CartesianIndices((2:9, 2:7)), CartesianIndices((-1:3, 0:0, 4:6)),
-            ), workgroupsize in (nothing, 4, (4, 4))
+                    CartesianIndices((2:9, 2:7)), CartesianIndices((-1:3, 0:0, 4:6)),
+                ), workgroupsize in (nothing, 4, (4, 4))
             out = AT(fill(CartesianIndex(ntuple(_ -> 0, ndims(indices))), size(indices)))
             foreach_index_record!(out, backend, indices; workgroupsize)
             synchronize(backend)

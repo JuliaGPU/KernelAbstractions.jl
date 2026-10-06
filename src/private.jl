@@ -17,17 +17,17 @@ implementations, or StaticArrays' if that package is loaded. See [`@private`](@r
 that means in a kernel. It cannot be constructed from values, so `copy`, `zero` and other
 methods that construct a new array of the same type are not supported.
 """
-struct PrivateArray{T,S<:Tuple,N,L} <: StaticArray{S,T,N}
+struct PrivateArray{T, S <: Tuple, N, L} <: StaticArray{S, T, N}
     # GPUCompiler places the alloca in the target's alloca address space and casts it to the
     # requested one. LLVM's default address space is valid everywhere: private memory on
     # SPIR-V and Metal, and a generic pointer on NVPTX and AMDGPU, which LLVM infers back to
     # private memory. A `Ptr` would not do: it is an integer in LLVM IR before Julia 1.12, which
     # keeps the alloca from being promoted, and its loads are not aligned.
-    ptr::LLVMPtr{T,0}
+    ptr::LLVMPtr{T, 0}
 
     # only from a pointer: constructing one from values would need an allocation that
     # outlives the constructor
-    PrivateArray{T,S,N,L}(ptr::LLVMPtr{T,0}) where {T,S,N,L} = new{T,S,N,L}(ptr)
+    PrivateArray{T, S, N, L}(ptr::LLVMPtr{T, 0}) where {T, S, N, L} = new{T, S, N, L}(ptr)
 end
 
 # Allocates the storage for `@private`. It takes the kernel context so that it can only be used
@@ -36,14 +36,15 @@ end
 # an alloca that can't be lowered.
 function Scratchpad end
 Base.Experimental.@overlay GPUCompiler.SHARED_METHOD_TABLE @inline function Scratchpad(
-        ctx, ::Type{T}, ::Val{Dims}) where {T,Dims}
+        ctx, ::Type{T}, ::Val{Dims}
+    ) where {T, Dims}
     L = prod(Dims)
     ptr = GPUCompiler.alloca(T, Val(L), Val(0))
-    return PrivateArray{T,Tuple{Dims...},length(Dims),L}(ptr)
+    return PrivateArray{T, Tuple{Dims...}, length(Dims), L}(ptr)
 end
 
-Base.size(::PrivateArray{T,S}) where {T,S} = size_to_tuple(S)
-Base.length(::PrivateArray{T,S,N,L}) where {T,S,N,L} = L
+Base.size(::PrivateArray{T, S}) where {T, S} = size_to_tuple(S)
+Base.length(::PrivateArray{T, S, N, L}) where {T, S, N, L} = L
 Base.IndexStyle(::Type{<:PrivateArray}) = IndexLinear()
 
 @inline function Base.getindex(p::PrivateArray{T}, i::Int) where {T}
