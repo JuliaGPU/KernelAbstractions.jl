@@ -237,6 +237,13 @@ end
 end
 
 
+## Bounds checks
+
+# PoCL vectorizes over the work-items of a workgroup, and masks the whole body of a kernel
+# whose work-items may be outside the ndrange. Run full workgroups without the mask.
+@device_override @inline KA.__fullgroup(ctx) = KA.__fullgroup_check(ctx)
+
+
 ## Synchronization and Printing
 
 @device_override @inline function KI.barrier()

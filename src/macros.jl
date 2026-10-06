@@ -178,6 +178,7 @@ function transform_gpu!(def, constargs, force_inbounds, unsafe_indices)
     new_stmts = Any[]
     body = MacroTools.flatten(def[:body])
     if !unsafe_indices
+        push!(new_stmts, :(__full_group__ = $__fullgroup(__ctx__)))
         push!(new_stmts, :(__active_lane__ = $__validindex(__ctx__)))
     end
     if force_inbounds
@@ -358,7 +359,14 @@ function emit(loop)
     stmts = Any[]
 
     append!(stmts, loop.allocations)
-    push!(stmts, Expr(:if, :__active_lane__, Expr(:block, loop.stmts...)))
+    # The body is emitted twice: without a mask for workgroups that lie entirely inside the
+    # ndrange (the branch is the same for all their work-items), and masked for the others.
+    push!(
+        stmts, Expr(
+            :if, :__full_group__, Expr(:block, loop.stmts...),
+            Expr(:elseif, :__active_lane__, Expr(:block, deepcopy(loop.stmts)...))
+        )
+    )
     if loop.terminated_in_sync
         loop.sync_line === nothing || push!(stmts, loop.sync_line)
         push!(stmts, :($__synchronize()))

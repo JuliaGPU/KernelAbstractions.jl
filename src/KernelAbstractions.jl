@@ -658,6 +658,21 @@ function __workitems_iterspace end
     end
 end
 
+# Whether all work-items of the current workgroup are part of the ndrange. `@kernel` runs the
+# body of such a workgroup without testing `__validindex` for every work-item. Backends for
+# which the masked body is slow (e.g., because their compiler vectorizes over the work-items of
+# a workgroup, as PoCL does) can override this to return `__fullgroup_check(ctx)`; the default
+# never takes that path, so the unmasked copy of the body is removed when compiling.
+@inline __fullgroup(ctx) = false
+
+@inline function __fullgroup_check(ctx)
+    if __dynamic_checkbounds(ctx)
+        return full_group(ctx, index_launch(ctx))
+    else
+        return true
+    end
+end
+
 include("macros.jl")
 include("spawn.jl")
 include("foreach_index.jl")

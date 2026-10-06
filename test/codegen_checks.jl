@@ -122,6 +122,30 @@ end
         end
     end
 
+    # On PoCL, the body of a kernel with a dynamic ndrange is emitted twice: unmasked for the
+    # workgroups that lie inside the ndrange, and masked for a partial one.
+    @testset "full workgroups" begin
+        @test @filecheck begin
+            @check "define spir_kernel void @{{.*}}gpu_codegen_mul2_inbounds"
+            @check "store float"
+            @check "store float"
+            @check_not "store float"
+            @check "ret void"
+            @device_code_llvm debuginfo = :none codegen_mul2_inbounds(backend, 16)(A, ndrange = 64)
+            KernelAbstractions.synchronize(backend)
+        end
+
+        # with the workgroups known to lie inside the ndrange, only the unmasked body is left
+        @test @filecheck begin
+            @check "define spir_kernel void @{{.*}}gpu_codegen_mul2_inbounds"
+            @check "store float"
+            @check_not "store float"
+            @check "ret void"
+            @device_code_llvm debuginfo = :none codegen_mul2_inbounds(backend, 16, 64)(A)
+            KernelAbstractions.synchronize(backend)
+        end
+    end
+
     # `@localmem` becomes a module-level allocation in the SPIR-V workgroup address space
     # (3), which the kernel reads and writes directly. The two accesses are `@check_dag`
     # because LLVM is free to emit the basic blocks in any order.
@@ -181,13 +205,14 @@ end
         end
     end
 
-    # `@print` lowers to a single variadic printf call, not to one call per argument.
+    # `@print` lowers to a single variadic printf call, not to one call per argument. (With a
+    # static ndrange, so that the body isn't emitted twice, see "full workgroups" below.)
     @testset "print" begin
         @test @filecheck begin
             @check "define spir_kernel void @{{.*}}gpu_codegen_print"
             @check "@printf"
             @check_not "@printf"
-            @device_code_llvm debuginfo = :none codegen_print(backend, 16)(ndrange = 16)
+            @device_code_llvm debuginfo = :none codegen_print(backend, 16, 16)()
             KernelAbstractions.synchronize(backend)
         end
     end
