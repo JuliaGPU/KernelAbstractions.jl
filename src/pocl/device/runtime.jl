@@ -20,24 +20,20 @@ end
     return :(reinterpret(LLVMPtr{$T, AS.CrossWorkgroup}, kernel_state().exception_info + $offset))
 end
 
-# the record is shared by all work-items on the device, and SPIRVIntrinsics' atomics only
-# have work-group scope
+# the record is shared by all work-items on the device, so these need device scope, which
+# UnsafeAtomics' primitives emit as given (SPIRVIntrinsics' atomics are relaxed)
 @inline function atomic_store_device!(ptr::LLVMPtr{Int32, AS.CrossWorkgroup}, val::Int32)
-    semantics = MemorySemantics.CrossWorkgroupMemory | MemorySemantics.Release
-    @builtin_ccall(
-        "__spirv_AtomicStore", Cvoid, (LLVMPtr{Int32, AS.CrossWorkgroup}, UInt32, UInt32, Int32),
-        ptr, UInt32(Scope.Device), UInt32(semantics), val
+    UnsafeAtomics.Internal.llvm_store!(
+        ptr, val, Val(:release), Val(:device), Val(false), Val(sizeof(Int32)), Val(())
     )
     return
 end
 @inline function atomic_cas_device!(ptr::LLVMPtr{Int32, AS.CrossWorkgroup}, cmp::Int32, val::Int32)
-    success = MemorySemantics.CrossWorkgroupMemory | MemorySemantics.AcquireRelease
-    failure = MemorySemantics.CrossWorkgroupMemory | MemorySemantics.Acquire
-    return @builtin_ccall(
-        "__spirv_AtomicCompareExchange", Int32,
-        (LLVMPtr{Int32, AS.CrossWorkgroup}, UInt32, UInt32, UInt32, Int32, Int32),
-        ptr, UInt32(Scope.Device), UInt32(success), UInt32(failure), val, cmp
+    (; old) = UnsafeAtomics.Internal.llvm_cmpxchg!(
+        ptr, cmp, val, Val(:acq_rel), Val(:acquire), Val(:device),
+        Val(false), Val(false), Val(sizeof(Int32)), Val(())
     )
+    return old
 end
 
 # only one work-item reports the exception, or the output of all work-items that throw

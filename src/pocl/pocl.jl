@@ -102,6 +102,7 @@ SPIRVIntrinsics.@reexport_public
 Base.Experimental.@MethodTable(method_table)
 
 import Core: LLVMPtr
+import UnsafeAtomics
 
 # the device code comes first: the compiler's generated functions use its types, and a
 # generator only sees the bindings that existed when it was defined

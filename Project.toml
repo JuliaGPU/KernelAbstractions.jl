@@ -23,6 +23,7 @@ SPIRVIntrinsics = "71d1d633-e7e8-4a92-83a1-de8814b09ba8"
 SPIRV_LLVM_Backend_jll = "4376b9bf-cff8-51b6-bb48-39421dff0d0c"
 SPIRV_Tools_jll = "6ac6d60f-d740-5983-97d7-a4482c0689f4"
 StaticArraysCore = "1e83bf80-4336-4d27-bf5d-d5a4f845583c"
+UnsafeAtomics = "013be700-e6cd-48c3-b4a1-df204f14c38f"
 pocl_standalone_jll = "54f56a70-6062-5590-a942-1226658f6c83"
 
 [weakdeps]
@@ -58,6 +59,7 @@ SPIRV_Tools_jll = "2024.4, 2025.1"
 SparseArrays = "<0.0.1, 1.6"
 StaticArrays = "1.5"
 StaticArraysCore = "1"
+UnsafeAtomics = "0.4"
 julia = "1.10"
 pocl_standalone_jll = "7.2.2"
 
