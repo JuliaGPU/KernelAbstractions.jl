@@ -786,6 +786,10 @@ or memory that is modified independently. For arrays backed by memory that Julia
 allocator is implemented. For arrays that wrap other memory, e.g., with `unsafe_wrap`, this is
 up to the user: make that memory extend to the 4-byte boundaries around the array, e.g., by
 allocating a multiple of 4 bytes at a 4-byte aligned address.
+
+This includes adjacent elements of the same array: while an 8- or 16-bit element is updated
+atomically, the other elements in its aligned 32-bit word must not be modified by plain
+stores concurrently, only atomically.
 """
 const CPU = POCLBackend
 

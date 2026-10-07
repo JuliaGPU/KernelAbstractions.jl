@@ -117,12 +117,18 @@ end
     j = (i - 1) % length(A) + 1
     @inbounds KernelAbstractions.@atomic A[j] += one(eltype(A))
 end
-@kernel function partword_neighbours!(A)
+# atomics on the odd elements only, which must leave the even ones sharing their words intact
+@kernel function partword_odd_add!(A)
     i = @index(Global, Linear)
     j = (i - 1) % length(A) + 1
     if isodd(j)
         @inbounds KernelAbstractions.@atomic A[j] += one(eltype(A))
-    elseif i == j
+    end
+end
+# plain stores to the even elements, once no atomics are in flight
+@kernel function partword_even_store!(A)
+    j = @index(Global, Linear)
+    if iseven(j)
         @inbounds A[j] = eltype(A)(j % 64)
     end
 end
@@ -159,9 +165,14 @@ end
             synchronize(CPU())
             @test all(==(T(k)), A)
 
-            # next to plain stores
+            # next to elements that aren't updated, and that are modified by plain stores
+            # afterwards (not concurrently, which the containing word rules out)
             B = alloc()
-            partword_neighbours!(CPU())(B; ndrange = n * k)
+            B .= [isodd(j) ? zero(T) : typemax(T) for j in 1:n]
+            partword_odd_add!(CPU())(B; ndrange = n * k)
+            synchronize(CPU())
+            @test B == [isodd(j) ? T(k) : typemax(T) for j in 1:n]
+            partword_even_store!(CPU())(B; ndrange = n)
             synchronize(CPU())
             @test B == [isodd(j) ? T(k) : T(j % 64) for j in 1:n]
         end

@@ -76,7 +76,9 @@ end
 ## Memory Operations
 
 # GPUCompiler performs 8- and 16-bit atomics on the aligned 32-bit word containing the value,
-# which must not overlap another allocation or storage that is modified independently. For
+# which must not overlap another allocation or storage that is modified independently. That
+# includes adjacent elements of the same array: while an 8- or 16-bit element is updated
+# atomically, the others in its word must not be modified by plain stores concurrently. For
 # arrays of a bits type backed by Julia-owned storage (from here, but also from `resize!`,
 # `copy`, `similar`, ...), that word stays within the same allocation by how Julia's
 # allocator is implemented, not by anything it documents:
