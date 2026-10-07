@@ -146,10 +146,7 @@ work-groups and the work-group size. A zero number of work-groups means nothing 
     check_launch(numgroups, workgroupsize, ndrange, max_work_group_size)
     items = if workgroupsize != ()
         wgsize = pad3(workgroupsize)
-        max_dims = max_work_group_dims(kernel.backend)
-        all(wgsize .<= max_dims) || throw_work_group_dims_error(wgsize, max_dims)
-        max_items = KernelInterface.max_work_group_size(kernel)
-        prod_exceeds(wgsize, max_items) && throw_work_group_size_error(wgsize, max_items)
+        check_work_group_size(kernel, wgsize)
         wgsize
     elseif ndrange == ()
         (1, 1, 1)
@@ -197,6 +194,23 @@ function launch_groups(numgroups, ndrange, items::Dims{3})
         throw(ArgumentError("Launch of $groups work-groups of $items work-items has more than typemax(Int) work-items in a dimension"))
     end
     return groups
+end
+
+"""
+    check_work_group_size(kernel::Kernel, items::Dims{3})
+
+Check that work-groups of `items` work-items fit the limits of `kernel`, as
+[`launch`](@ref) requires, throwing an `ArgumentError` otherwise.
+
+Not part of the public interface; used by KernelInterface's and KernelAbstractions' launch
+code.
+"""
+@inline function check_work_group_size(kernel::Kernel, items::Dims{3})
+    max_dims = max_work_group_dims(kernel.backend)
+    all(items .<= max_dims) || throw_work_group_dims_error(items, max_dims)
+    max_items = max_work_group_size(kernel)
+    prod_exceeds(items, max_items) && throw_work_group_size_error(items, max_items)
+    return
 end
 
 @noinline function throw_work_group_dims_error(items, max_dims)
