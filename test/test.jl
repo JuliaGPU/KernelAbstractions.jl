@@ -215,11 +215,12 @@ function unittest_testsuite(Backend, backend_str, backend_mod, BackendArrayT; sk
                     @test_skip false
                 end
             elseif backend_str == "CUDA"
-                if Base.libllvm_version >= v"20"
-                    @test occursin("addrspace(1)", IR)
-                else
-                    @test occursin("@llvm.nvvm.ldg", IR)
+                # how the load is expressed in LLVM IR depends on the CUDA.jl and LLVM
+                # versions, so check that it goes through the read-only cache in PTX
+                PTX = sprint() do io
+                    backend_mod.code_ptx(io, kernel.f, (typeof(ctx), AT, AT), kernel = true)
                 end
+                @test occursin("ld.global.nc", PTX)
             elseif backend_str == "ROCM"
                 @test occursin("addrspace(4)", IR)
             else
