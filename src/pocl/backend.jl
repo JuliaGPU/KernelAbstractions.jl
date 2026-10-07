@@ -75,6 +75,25 @@ end
 
 ## Memory Operations
 
+# GPUCompiler performs 8- and 16-bit atomics on the aligned 32-bit word containing the value,
+# which must not overlap another allocation or storage that is modified independently. For
+# arrays of a bits type backed by Julia-owned storage (from here, but also from `resize!`,
+# `copy`, `similar`, ...), that word stays within the same allocation by how Julia's
+# allocator is implemented, not by anything it documents:
+# - Julia 1.11+ (v1.13.1 `src/genericmemory.c`, `jl_alloc_genericmemory_unchecked`): small
+#   `Memory` data starts 16 bytes into an object from a GC pool, whose size classes
+#   (`jl_gc_sizeclasses` in `src/julia_internal.h`) are multiples of 8 bytes, with objects
+#   16-byte aligned (`GC_PAGE_OFFSET` in `src/gc-stock.h`); larger data comes from
+#   `jl_gc_managed_malloc` (`src/gc-stock.c`), which rounds the size up to, and aligns to,
+#   `JL_CACHE_BYTE_ALIGNMENT` (64 or 128 bytes). With MMTk (`src/gc-mmtk.c`), objects are
+#   rounded up to their 16-byte alignment (`jl_mmtk_gc_alloc_default`) and
+#   `jl_gc_managed_malloc` rounds the same way.
+# - Julia 1.10 (v1.10.10 `src/array.c`, `_new_array_`): small arrays store their data at
+#   least 8-byte aligned after the header, in a pool object of the same size classes; larger
+#   ones use `jl_gc_managed_malloc` and `gc_managed_realloc_` (`src/gc.c`), which round and
+#   align as above.
+# Revisit this when Julia's allocator changes. Arrays wrapping foreign memory (e.g., with
+# `unsafe_wrap`) are the user's responsibility, as documented for `CPU`.
 KI.allocate(::POCLBackend, ::Type{T}, dims::Tuple; unified::Bool = false) where {T} = Array{T}(undef, dims)
 
 #  Adapt.jl's `Array` rule converts every `AbstractArray` leaf; `isbits` arrays (ranges, view indices)

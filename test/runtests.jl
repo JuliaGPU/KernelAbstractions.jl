@@ -110,6 +110,71 @@ end
     end
 end
 
+# 8- and 16-bit atomics are performed on the containing 32-bit word, so they contend with
+# the neighbouring values
+@kernel function partword_add!(A)
+    i = @index(Global, Linear)
+    j = (i - 1) % length(A) + 1
+    @inbounds KernelAbstractions.@atomic A[j] += one(eltype(A))
+end
+@kernel function partword_neighbours!(A)
+    i = @index(Global, Linear)
+    j = (i - 1) % length(A) + 1
+    if isodd(j)
+        @inbounds KernelAbstractions.@atomic A[j] += one(eltype(A))
+    elseif i == j
+        @inbounds A[j] = eltype(A)(j % 64)
+    end
+end
+@kernel function partword_local!(out)
+    i = @index(Local, Linear)
+    T = @uniform eltype(out)
+    lmem = @localmem T (5,)
+    if i <= 5
+        @inbounds lmem[i] = zero(T)
+    end
+    @synchronize
+    @inbounds KernelAbstractions.@atomic lmem[(i - 1) % 5 + 1] += one(T)
+    @synchronize
+    if i <= 5
+        @inbounds out[i] = lmem[i]
+    end
+end
+@testset "POCL 8- and 16-bit atomics ($T)" for T in (Int8, UInt16, Float16)
+    k = 64
+    @testset "$n elements" for n in (1, 3, 5, 7, 1023)
+        # the arrays that Julia allocates for us; their data being 4-byte aligned is a
+        # regression check of what the containing words rely on, not proof of it
+        arrays = (
+            "allocate" => () -> KernelAbstractions.zeros(CPU(), T, n),
+            "resize!" => () -> fill!(resize!(zeros(T, 2), n), zero(T)),
+            "copy" => () -> copy(zeros(T, n)),
+            "similar" => () -> fill!(similar(zeros(T, 2), n), zero(T)),
+        )
+        @testset "$name" for (name, alloc) in arrays
+            A = alloc()
+            @test length(A) == n
+            @test UInt(pointer(A)) % 4 == 0
+            partword_add!(CPU())(A; ndrange = n * k)
+            synchronize(CPU())
+            @test all(==(T(k)), A)
+
+            # next to plain stores
+            B = alloc()
+            partword_neighbours!(CPU())(B; ndrange = n * k)
+            synchronize(CPU())
+            @test B == [isodd(j) ? T(k) : T(j % 64) for j in 1:n]
+        end
+    end
+
+    @testset "local memory" begin
+        out = zeros(T, 5)
+        partword_local!(CPU(), 64)(out; ndrange = 64)
+        synchronize(CPU())
+        @test out == T[13, 13, 13, 13, 12]
+    end
+end
+
 # Julia 1.12 checks the bounds of a `StepRange` in 128-bit integers, which the SPIR-V back-end
 # cannot lower; this is reached e.g. by indexing a strided view with `--check-bounds=yes`
 @testset "POCL bounds checks of a StepRange" begin
