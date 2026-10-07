@@ -95,7 +95,9 @@ function launch_tuple(obj::Kernel, args::Tuple; ndrange = nothing, workgroupsize
         # the common case, specialized statically
         launch_kernel(obj, NDLaunch{Int32}(), ndrange, workgroupsize, iterspace, args)
     else
-        launch_kernel(obj, launch, ndrange, workgroupsize, iterspace, args)
+        # the other modes are rare: hide the callee from inference, so that it doesn't
+        # analyze the whole launch chain for each of them when compiling every kernel
+        Base.inferencebarrier(launch_kernel)(obj, launch, ndrange, workgroupsize, iterspace, args)
     end
     return nothing
 end
