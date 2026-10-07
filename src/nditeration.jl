@@ -205,6 +205,16 @@ Base.length(range::NDRange) = length(blocks(range))
     return CartesianIndex(nI)
 end
 
+"""
+    linear_index(iterspace::NDRange, ndrange, groupidx::CartesianIndex, idx::CartesianIndex)
+
+Linear index of work item `idx` of workgroup `groupidx`, as returned by `@index(Global, Linear)`.
+Defaults to the position of `expand(iterspace, groupidx, idx)` within `ndrange`. A custom mapping
+whose linear index is not a function of the expanded index alone, e.g. a list of indices whose
+linear index is the position in the list, can specialize this on its `NDRange` type.
+"""
+@inline linear_index(iterspace::NDRange, ndrange, groupidx::CartesianIndex, idx::CartesianIndex) =
+    linear_index(ndrange, @inbounds expand(iterspace, groupidx, idx))
 
 """
     assume(cond::Bool)
