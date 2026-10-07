@@ -41,8 +41,8 @@ which backends can support with two optional functions:
 
 A new Julia task does not inherit the device of the task that spawned it: backends keep the
 active device in task-local state, which Julia does not copy into a child task, so the task
-Backends with more than one device
-**must** implement the device interface ([`device`](@ref KernelAbstractions.device),
+starts on the backend's default device. Backends with more than one device **must**
+implement the device interface ([`device`](@ref KernelAbstractions.device),
 [`ndevices`](@ref KernelAbstractions.ndevices), [`device!`](@ref KernelAbstractions.device!))
 for `@spawn` to run on the right device.
 

@@ -62,7 +62,8 @@ more than one device implement this with a cross-device
     [`wait_event`](@ref KernelAbstractions.wait_event) yourself.
 
 !!! note
-    If `expr` throws the state of the device and the internal queue is unspecified. 
+    If `expr` throws, the state of the device and of the task's queue is unspecified.
+
 Backend authors: see the [notes for backend implementations](@ref implementations_notes)
 for the protocol behind these guarantees, and for how to support it without a full
 [`synchronize`](@ref).
