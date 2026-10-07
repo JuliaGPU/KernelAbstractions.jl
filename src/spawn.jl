@@ -8,10 +8,10 @@ place of `Threads.@spawn` to launch kernels from a task. It guarantees that
   that argument is given;
 - the work the task queues on `backend` runs after the work the spawning task had queued on
   `backend` before calling `@spawn`;
-- once `wait(task)` or `fetch(task)` returns, all work the task queued on `backend` has
-  completed, so its results may be used from any task. `fetch(task)` returns the value of
-  `expr`. If `expr` throws, the task is not synchronized: its queued work may still be
-  running when the exception surfaces.
+- once `wait(task)` or `fetch(task)` returns successfully, all work the task queued on
+  `backend` has completed, so its results may be used from any task. `fetch(task)`
+  returns the value of `expr`. If `expr` throws, the task is not synchronized: its queued
+  work may still be running when the exception surfaces.
 
 Everything else works as for `Threads.@spawn`: the optional `threadpool` argument
 (`:default` or `:interactive`) is forwarded, `\$x` captures the value of `x` at spawn time,
@@ -32,11 +32,9 @@ fetch(task) == 4 * length(A)
 
 # Choosing the device
 
-Backends keep the active device in task-local state, and Julia does not copy that state
-into a child task. A task started with plain `Threads.@spawn` therefore runs on the
-backend's *default* device, whichever device the spawning task was using. `@spawn` selects
-the device explicitly instead: by default the one active in the spawning task, or the one
-named by `device`, a 1-based index into `1:ndevices(backend)`:
+A task started with plain `Threads.@spawn` runs on the backend's default device, not on
+the device of the task that started it. `@spawn` selects the spawning task's device, or the
+one given by `device`, an index into `1:ndevices(backend)`:
 
 ```julia
 task = KernelAbstractions.@spawn backend device=2 begin
@@ -44,40 +42,30 @@ task = KernelAbstractions.@spawn backend device=2 begin
 end
 ```
 
-The ordering guarantee holds across that switch: the task's work on `device` is still
-ordered after the work the spawning task had queued on *its* device. Backends that support
-more than one device implement this with a cross-device
-[`wait_event`](@ref KernelAbstractions.wait_event).
+The task's work on that device still runs after the spawning task's earlier work on its own
+device.
 
 !!! note
-    `expr` is not ordered against work that the spawning task queues *after* `@spawn`
-    returns. Order conflicting uses of shared data by waiting on the task, or by spawning
-    again.
+    `@spawn` does not order the task's work against work the spawning task queues
+    afterwards. Order conflicting uses of shared data by waiting for the task, or by spawning a new
+    task after that work.
 
 !!! note
-    The ordering is between work queued on `backend`; the host need not wait for the
-    spawning task's work. Before `expr` passes that work's results to something that
-    doesn't queue on `backend`, e.g., an MPI call on a GPU buffer, call
-    `synchronize(backend)` in `expr`, which also waits for the spawning task's work since
-    the task's queue is ordered after it.
-    Some backends synchronize implicitly when such code takes the buffer's pointer, but
-    portable code should not rely on that. The trailing `synchronize` of `@spawn` does not
-    complete asynchronous operations outside the backend, like `MPI.Isend`.
+    Queued work is ordered, but the spawning task's earlier work need not have completed
+    when `expr` starts. Before passing that work's results to a consumer outside that
+    ordering, e.g., an MPI call on a GPU buffer, call `synchronize(backend)` in `expr`,
+    which also waits for that work. Some backends synchronize implicitly when the buffer's
+    pointer is taken, but portable code should not rely on that. `@spawn` does not wait for
+    asynchronous operations outside the backend, like `MPI.Isend`.
 
 !!! note
-    Prefer `device=` over calling [`device!`](@ref KernelAbstractions.device!) inside
-    `expr`. A `device!` in the body carries no ordering of its own, so work queued after it
-    is ordered neither against the spawning task nor against what the body queued before
-    the switch; you would have to bracket it with
-    [`record_event`](@ref KernelAbstractions.record_event) and
-    [`wait_event`](@ref KernelAbstractions.wait_event) yourself.
-
-!!! note
-    If `expr` throws, the state of the device and of the task's queue is unspecified.
+    Prefer `device=` over calling [`device!`](@ref KernelAbstractions.device!) in `expr`.
+    To keep work ordered across a manual switch, call
+    [`record_event`](@ref KernelAbstractions.record_event) before it and
+    [`wait_event`](@ref KernelAbstractions.wait_event) after it, as shown for `wait_event`.
 
 Backend authors: see the [notes for backend implementations](@ref implementations_notes)
-for the protocol behind these guarantees, and for how to support it without a full
-[`synchronize`](@ref).
+for the protocol behind these guarantees.
 """
 macro spawn(args...)
     usage = "@spawn expects `@spawn [threadpool] backend [device=id] expr`"

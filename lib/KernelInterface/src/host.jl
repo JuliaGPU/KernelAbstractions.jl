@@ -36,25 +36,19 @@ Block the calling task until all work it has queued on the active device of `bac
 completed.
 
 !!! note
-    Backend implementations **must** implement this function, and it **must** be
-    cooperative: it may not block inside a driver call, but has to yield to the Julia
-    scheduler while waiting. It **should not** wait for other tasks' work that the calling
-    task's queue was not ordered after. See the
-    [notes for backend implementations](@ref implementations_notes) for why.
+    Backend implementations **must** implement this function cooperatively, yielding to
+    the Julia scheduler while waiting rather than blocking inside a driver call. See the
+    [notes for backend implementations](@ref implementations_notes) for why, and for what
+    it should not wait for.
 """
 function synchronize end
 
 """
     record_event(backend::Backend)
 
-Capture the work the calling task has queued on `backend`'s currently active device so
-far, and return a handle that [`wait_event`](@ref) can use to order later work after it,
-either from another task or from the same task after switching devices. Work queued after
-`record_event` returns is not captured, and recording need not wait for the captured work
-to complete.
-
-The handle is only meaningful for the pair `record_event`/`wait_event`; do not use it for
-anything else.
+Capture the work the calling task has queued on `backend`'s active device so far, and
+return a handle for [`wait_event`](@ref). Work queued later is not captured, and recording
+need not wait for the captured work to complete. The handle is only meant for `wait_event`.
 
 !!! note
     The default implementation calls [`synchronize`](@ref) and returns `nothing`.
@@ -71,31 +65,29 @@ end
 """
     wait_event(backend::Backend, event)
 
-Order the work the calling task subsequently queues on `backend`'s currently active device
-after the work captured by `event`, which was returned by [`record_event`](@ref). This
-orders work on the device; it need not wait for the captured work on the host.
+Order the work the calling task subsequently queues on `backend`'s active device after the
+work captured by `event`, which was returned by [`record_event`](@ref). Returning does not
+mean that the captured work has completed.
 
-The dependency is queue-ordered rather than task-ordered: it applies to the device that is
-active when `wait_event` is called, and a later [`device!`](@ref) leaves the newly selected
-device unordered with respect to `event`. Select the device first and wait afterwards:
+The wait applies to the queue of the device that is active when `wait_event` is called;
+switching devices adds no ordering. To order work across a device switch, select the device
+first and wait afterwards:
 
 ```julia
 event = record_event(backend)   # captures work on the current device
 device!(backend, 2)
-wait_event(backend, event)      # device 2 now waits for that work
+wait_event(backend, event)      # orders this task's work on device 2 after it
 ```
 
 !!! note
     `wait_event(::Backend, ::Nothing)` is a no-op, matching the default `record_event`.
-    A backend that implements [`record_event`](@ref) **must** implement this for the event
-    type it returns, either by enqueuing a dependency on the current task's queue, or by
-    waiting cooperatively as [`synchronize`](@ref) does. A backend that tracks which
-    queue last used an array **should** take this ordering into account when the array moves
-    to the waiting queue. A backend with more than one
-    device **must** also accept an `event` that was recorded on a different device, by
-    enqueuing the cross-device dependency if the driver supports one (CUDA's
-    `cuStreamWaitEvent` does) and by waiting cooperatively otherwise. See the
-    [notes for backend implementations](@ref implementations_notes).
+    A backend that returns another event type **must** implement `wait_event` for it,
+    either by adding a dependency to the current task's queue or by waiting cooperatively
+    as [`synchronize`](@ref) does. A backend with more than one device **must** accept an
+    event recorded on another device, waiting cooperatively if the driver cannot add a
+    cross-device dependency. See the
+    [notes for backend implementations](@ref implementations_notes) for how this ordering
+    should interact with implicit synchronization.
 """
 wait_event(::Backend, ::Nothing) = nothing
 
