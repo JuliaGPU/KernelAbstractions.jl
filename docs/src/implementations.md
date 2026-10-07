@@ -39,6 +39,23 @@ which backends can support with two optional functions:
   `wait(task)` in any other task implies that all work queued by the spawned task has
   completed.
 
+Backends that track which queue last used an array, and wait for that queue, on the host or
+on the device, before using the array on another queue, **should** respect the points up to
+which the current queue is already ordered after the previous one: an event recorded on the
+previous queue that the current queue waited for, or a [`synchronize`](@ref) of the
+previous queue that returned. If the array's last use precedes such a point, using it on
+the current queue should not wait, on the host or on the device, for work queued on the
+previous queue after that point. Waits needed to make memory accessible, e.g., from another
+device, or to keep it alive are not affected, and uses through a pointer taken before such a
+point may still be synchronized conservatively.
+
+For the same reason, `synchronize` **should not** wait for work on other queues that the
+current queue is not ordered after.
+
+A backend that ignores this is still correct, but the spawned task then waits for work the
+parent queued after `@spawn`, and the two tasks' work doesn't overlap. Following it doesn't
+guarantee overlap either; it only rules out these waits.
+
 A new Julia task does not inherit the device of the task that spawned it: backends keep the
 active device in task-local state, which Julia does not copy into a child task, so the task
 starts on the backend's default device. Backends with more than one device **must**

@@ -38,7 +38,8 @@ completed.
 !!! note
     Backend implementations **must** implement this function, and it **must** be
     cooperative: it may not block inside a driver call, but has to yield to the Julia
-    scheduler while waiting. See the
+    scheduler while waiting. It **should not** wait for other tasks' work that the calling
+    task's queue was not ordered after. See the
     [notes for backend implementations](@ref implementations_notes) for why.
 """
 function synchronize end
@@ -48,7 +49,9 @@ function synchronize end
 
 Capture the work the calling task has queued on `backend`'s currently active device so
 far, and return a handle that [`wait_event`](@ref) can use to order later work after it,
-either from another task or from the same task after switching devices.
+either from another task or from the same task after switching devices. Work queued after
+`record_event` returns is not captured, and recording need not wait for the captured work
+to complete.
 
 The handle is only meaningful for the pair `record_event`/`wait_event`; do not use it for
 anything else.
@@ -69,7 +72,8 @@ end
     wait_event(backend::Backend, event)
 
 Order the work the calling task subsequently queues on `backend`'s currently active device
-after the work captured by `event`, which was returned by [`record_event`](@ref).
+after the work captured by `event`, which was returned by [`record_event`](@ref). This
+orders work on the device; it need not wait for the captured work on the host.
 
 The dependency is queue-ordered rather than task-ordered: it applies to the device that is
 active when `wait_event` is called, and a later [`device!`](@ref) leaves the newly selected
@@ -85,7 +89,9 @@ wait_event(backend, event)      # device 2 now waits for that work
     `wait_event(::Backend, ::Nothing)` is a no-op, matching the default `record_event`.
     A backend that implements [`record_event`](@ref) **must** implement this for the event
     type it returns, either by enqueuing a dependency on the current task's queue, or by
-    waiting cooperatively as [`synchronize`](@ref) does. A backend with more than one
+    waiting cooperatively as [`synchronize`](@ref) does. A backend that tracks which
+    queue last used an array **should** take this ordering into account when the array moves
+    to the waiting queue. A backend with more than one
     device **must** also accept an `event` that was recorded on a different device, by
     enqueuing the cross-device dependency if the driver supports one (CUDA's
     `cuStreamWaitEvent` does) and by waiting cooperatively otherwise. See the
