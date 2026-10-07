@@ -65,17 +65,125 @@ end
     @test compute_units("JULIA_KA_CPU_THREADS" => "6", "POCL_MAX_PTHREAD_COUNT" => "5") == 5
 end
 
-@testset "POCL float atomics" begin
-    # pocl's CPU device natively supports float add and min/max atomics in both global
-    # and local memory, so the SPIR-V extensions guarding them must be permitted
+@testset "POCL atomics descriptor" begin
+    # pocl's CPU device supports single- and double-precision addition in global and local
+    # memory, 64-bit integer atomics, and no half-precision atomics
     dev = POCL.device()
-    exts = split(POCL.default_spirv_extensions(dev), ",")
-    @test "+SPV_EXT_shader_atomic_float_add" in exts
-    @test "+SPV_EXT_shader_atomic_float_min_max" in exts
-    @test dev.half_fp_atomic_capabilities == 0
-    # an explicit list overrides the device-derived default
+    atomics = POCL.spirv_atomics(dev)
+    @test atomics == POCL.SPIRVAtomics(;
+        int64 = true, fadd_f32_global = true, fadd_f32_local = true,
+        fadd_f64_global = true, fadd_f64_local = true
+    )
+    @test POCL.compiler_config(dev).target.atomics == atomics
+    # explicitly requested extensions are kept
     config = POCL.compiler_config(dev; extensions = "+SPV_KHR_expect_assume")
     @test config.target.extensions == "+SPV_KHR_expect_assume"
+    @test config.target.atomics == atomics
+    @test POCL.compiler_config(dev; extensions = nothing).target ==
+        POCL.compiler_config(dev).target
+
+    # additions the descriptor doesn't cover become compare-and-swap loops
+    function fadd!(L, G)
+        @inbounds KernelAbstractions.@atomic L[1] += 1.0f0
+        @inbounds KernelAbstractions.@atomic G[1] += 1.0f0
+        return
+    end
+    tt = Tuple{
+        POCL.CLDeviceArray{Float32, 1, POCL.AS.Workgroup},
+        POCL.CLDeviceArray{Float32, 1, POCL.AS.CrossWorkgroup},
+    }
+    function spirv(atomics)
+        config = POCL.compiler_config(dev; kernel = false, atomics)
+        job = POCL.GPUCompiler.CompilerJob(POCL.methodinstance(typeof(fadd!), tt), config)
+        return sprint(io -> POCL.GPUCompiler.code_native(io, job))
+    end
+    for (atomics, native) in (
+            (POCL.spirv_atomics(dev), 2),
+            (POCL.SPIRVAtomics(; fadd_f32_global = true), 1),
+            (POCL.SPIRVAtomics(; fadd_f32_local = true), 1),
+            (POCL.SPIRVAtomics(), 0),
+        )
+        asm = spirv(atomics)
+        @test count("OpAtomicFAddEXT", asm) == native
+        @test count("OpAtomicCompareExchange", asm) == 2 - native
+        @test occursin("SPV_EXT_shader_atomic_float_add", asm) == (native > 0)
+    end
+end
+
+# 8- and 16-bit atomics are performed on the containing 32-bit word, so they contend with
+# the neighbouring values
+@kernel function partword_add!(A)
+    i = @index(Global, Linear)
+    j = (i - 1) % length(A) + 1
+    @inbounds KernelAbstractions.@atomic A[j] += one(eltype(A))
+end
+# atomics on the odd elements only, which must leave the even ones sharing their words intact
+@kernel function partword_odd_add!(A)
+    i = @index(Global, Linear)
+    j = (i - 1) % length(A) + 1
+    if isodd(j)
+        @inbounds KernelAbstractions.@atomic A[j] += one(eltype(A))
+    end
+end
+# plain stores to the even elements, once no atomics are in flight
+@kernel function partword_even_store!(A)
+    j = @index(Global, Linear)
+    if iseven(j)
+        @inbounds A[j] = eltype(A)(j % 64)
+    end
+end
+@kernel function partword_local!(out)
+    i = @index(Local, Linear)
+    T = @uniform eltype(out)
+    lmem = @localmem T (5,)
+    if i <= 5
+        @inbounds lmem[i] = zero(T)
+    end
+    @synchronize
+    @inbounds KernelAbstractions.@atomic lmem[(i - 1) % 5 + 1] += one(T)
+    @synchronize
+    if i <= 5
+        @inbounds out[i] = lmem[i]
+    end
+end
+@testset "POCL 8- and 16-bit atomics ($T)" for T in (Int8, UInt16, Float16)
+    k = 64
+    @testset "$n elements" for n in (1, 3, 5, 7, 1023)
+        # the arrays that Julia allocates for us; their data being 4-byte aligned is a
+        # regression check of what the containing words rely on, not proof of it
+        arrays = (
+            "allocate" => () -> KernelAbstractions.zeros(CPU(), T, n),
+            "resize!" => () -> fill!(resize!(zeros(T, 2), n), zero(T)),
+            "copy" => () -> copy(zeros(T, n)),
+            "similar" => () -> fill!(similar(zeros(T, 2), n), zero(T)),
+        )
+        @testset "$name" for (name, alloc) in arrays
+            A = alloc()
+            @test length(A) == n
+            @test UInt(pointer(A)) % 4 == 0
+            partword_add!(CPU())(A; ndrange = n * k)
+            synchronize(CPU())
+            @test all(==(T(k)), A)
+
+            # next to elements that aren't updated, and that are modified by plain stores
+            # afterwards (not concurrently, which the containing word rules out)
+            B = alloc()
+            B .= [isodd(j) ? zero(T) : typemax(T) for j in 1:n]
+            partword_odd_add!(CPU())(B; ndrange = n * k)
+            synchronize(CPU())
+            @test B == [isodd(j) ? T(k) : typemax(T) for j in 1:n]
+            partword_even_store!(CPU())(B; ndrange = n)
+            synchronize(CPU())
+            @test B == [isodd(j) ? T(k) : T(j % 64) for j in 1:n]
+        end
+    end
+
+    @testset "local memory" begin
+        out = zeros(T, 5)
+        partword_local!(CPU(), 64)(out; ndrange = 64)
+        synchronize(CPU())
+        @test out == T[13, 13, 13, 13, 12]
+    end
 end
 
 # Julia 1.12 checks the bounds of a `StepRange` in 128-bit integers, which the SPIR-V back-end

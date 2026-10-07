@@ -775,6 +775,21 @@ own variables (e.g., `POCL_CPU_MAX_CU_COUNT`) are respected too, and can also ra
 number above the number of hardware threads, but they also affect other users of POCL, like
 OpenCL.jl. The device reports the number as its compute units:
 `KernelAbstractions.POCL.device().max_compute_units`.
+
+# Atomics
+
+8- and 16-bit atomic operations (e.g., on `Int8`, `UInt16` or `Float16` arrays) are performed
+on the aligned 32-bit word that contains the value, which must not overlap another allocation
+or memory that is modified independently. For arrays backed by memory that Julia allocated
+(e.g., by [`allocate`](@ref KernelAbstractions.allocate), `Array`, `zeros`, `resize!`,
+`copy` or `similar`), that word stays within the same allocation, because of how Julia's
+allocator is implemented. For arrays that wrap other memory, e.g., with `unsafe_wrap`, this is
+up to the user: make that memory extend to the 4-byte boundaries around the array, e.g., by
+allocating a multiple of 4 bytes at a 4-byte aligned address.
+
+This includes adjacent elements of the same array: while an 8- or 16-bit element is updated
+atomically, the other elements in its aligned 32-bit word must not be modified by plain
+stores concurrently, only atomically.
 """
 const CPU = POCLBackend
 

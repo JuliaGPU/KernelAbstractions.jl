@@ -135,48 +135,50 @@ end
 ## compiler implementation (configure, compile, and link)
 
 """
-    supports_fp_atomics(caps::UInt64, ops::UInt64)
+    spirv_atomics(dev)
 
-Whether the `cl_ext_float_atomics` capability bitfield `caps` (see
-`dev.single_fp_atomic_capabilities` and friends) natively supports all of `ops`.
-Kernels perform atomics on both global and local memory, so callers should
-require both the `GLOBAL` and `LOCAL` bit of an operation.
+The atomic operations `dev` supports, for which `SPIRVCompilerTarget` selects SPIR-V
+instructions instead of compare-and-swap loops.
+
+Floating-point addition is supported per precision and address space as `dev` reports it
+through `cl_ext_float_atomics`, for half and double precision only if `dev` supports those
+types. 64-bit integer atomics need both `cl_khr_int64_base_atomics` and
+`cl_khr_int64_extended_atomics`.
 """
-supports_fp_atomics(caps::UInt64, ops::UInt64) = caps & ops == ops
-
-const fp_atomic_add = cl.CL_DEVICE_GLOBAL_FP_ATOMIC_ADD_EXT | cl.CL_DEVICE_LOCAL_FP_ATOMIC_ADD_EXT
-const fp_atomic_min_max = cl.CL_DEVICE_GLOBAL_FP_ATOMIC_MIN_MAX_EXT | cl.CL_DEVICE_LOCAL_FP_ATOMIC_MIN_MAX_EXT
-
-"""
-    default_spirv_extensions(dev)
-
-SPIR-V extensions to permit for `dev`, as the `+`-prefixed, comma-separated string
-`SPIRVCompilerTarget` passes on to the backend via `-spirv-ext`.
-
-Listing an extension only *permits* it: nothing is emitted unless a module actually
-needs the instructions it guards, so this costs nothing for kernels that don't.
-"""
-function default_spirv_extensions(dev)
-    exts = String[]
-
-    # Floating-point atomics. Atomix/UnsafeAtomics lower `@atomic A[i] += x` and
-    # `@atomic max(A[i], x)` on floats to LLVM `atomicrmw fadd`/`fmin`/`fmax`, which the
-    # SPIR-V backend only translates when the corresponding extension is permitted:
-    #   LLVM ERROR: The atomic float instruction requires the following SPIR-V
-    #   extension: SPV_EXT_shader_atomic_float_add
-    # Enzyme's reverse mode hits this too, as it accumulates gradients with atomic fadd.
-    # The device reports native support per precision through cl_ext_float_atomics.
-    fp32 = dev.single_fp_atomic_capabilities
-    fp64 = dev.double_fp_atomic_capabilities
-    if supports_fp_atomics(fp32, fp_atomic_add) || supports_fp_atomics(fp64, fp_atomic_add)
-        push!(exts, "+SPV_EXT_shader_atomic_float_add")
-    end
-    if supports_fp_atomics(fp32, fp_atomic_min_max) || supports_fp_atomics(fp64, fp_atomic_min_max)
-        push!(exts, "+SPV_EXT_shader_atomic_float_min_max")
-    end
-
-    return join(exts, ",")
+function spirv_atomics(dev)
+    exts = dev.extensions
+    f16 = "cl_khr_fp16" in exts ? dev.half_fp_atomic_capabilities : zero(UInt64)
+    f32 = dev.single_fp_atomic_capabilities
+    f64 = "cl_khr_fp64" in exts ? dev.double_fp_atomic_capabilities : zero(UInt64)
+    global_add(caps) = caps & cl.CL_DEVICE_GLOBAL_FP_ATOMIC_ADD_EXT != 0
+    local_add(caps) = caps & cl.CL_DEVICE_LOCAL_FP_ATOMIC_ADD_EXT != 0
+    return SPIRVAtomics(;
+        int64 = "cl_khr_int64_base_atomics" in exts && "cl_khr_int64_extended_atomics" in exts,
+        fadd_f16_global = global_add(f16), fadd_f16_local = local_add(f16),
+        fadd_f32_global = global_add(f32), fadd_f32_local = local_add(f32),
+        fadd_f64_global = global_add(f64), fadd_f64_local = local_add(f64),
+    )
 end
+
+"""
+    compiler_config(dev; kwargs...)
+
+The GPUCompiler configuration for compiling kernels for `dev`, cached per device and
+keyword arguments. Besides those of `CompilerConfig` (`kernel`, `name`, `always_inline`,
+`debug_level`) and `sub_group_size`, it takes:
+
+- `atomics`: override the atomic capabilities GPUCompiler may select directly. This
+  replaces the whole device-derived `SPIRVAtomics` (see `spirv_atomics`), and defaults to
+  the device's capabilities. Enabling capabilities the device doesn't support can make
+  compilation fail or crash the driver's compiler, while disabling them relies on integer
+  compare-and-swap for the fallback.
+- `extensions`: SPIR-V extensions to enable, as a `--spirv-ext` specifier (e.g.
+  `"+SPV_KHR_expect_assume"`), in addition to those the atomics need. `nothing`, the
+  default, enables no others.
+
+Other keyword arguments are passed on to `SPIRVCompilerTarget`.
+"""
+function compiler_config end
 
 # cache of compiler configurations, per device (but additionally configurable via kwargs)
 const _toolchain = Ref{Any}()
@@ -197,6 +199,7 @@ end
         dev; kernel = true, name = nothing, always_inline = false,
         debug_level = Base.JLOptions().debug_level,
         sub_group_size::Union{Nothing, Int} = 32,
+        atomics::SPIRVAtomics = spirv_atomics(dev),
         extensions::Union{Nothing, String} = nothing, kwargs...
     )
     supports_fp16 = "cl_khr_fp16" in dev.extensions
@@ -206,12 +209,11 @@ end
         error("$sub_group_size is not a valid sub-group size for this device.")
     end
 
-    if extensions === nothing
-        extensions = default_spirv_extensions(dev)
-    end
-
     # create GPUCompiler objects
-    target = SPIRVCompilerTarget(; supports_fp16, supports_fp64, extensions, validate = true, kwargs...)
+    target = SPIRVCompilerTarget(;
+        supports_fp16, supports_fp64, atomics, extensions = something(extensions, ""),
+        validate = true, kwargs...
+    )
     params = OpenCLCompilerParams(; sub_group_size)
     return CompilerConfig(target, params; kernel, name, always_inline, debug_level)
 end
