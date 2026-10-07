@@ -50,8 +50,19 @@ more than one device implement this with a cross-device
 [`wait_event`](@ref KernelAbstractions.wait_event).
 
 !!! note
-    `expr` should not rely on data that the spawning task queues *after* `@spawn` returns.
-    Order later work by waiting on the task, or by spawning again.
+    `expr` is not ordered against work that the spawning task queues *after* `@spawn`
+    returns. Order conflicting uses of shared data by waiting on the task, or by spawning
+    again.
+
+!!! note
+    The ordering is between work queued on `backend`; the host need not wait for the
+    spawning task's work. Before `expr` passes that work's results to something that
+    doesn't queue on `backend`, e.g., an MPI call on a GPU buffer, call
+    `synchronize(backend)` in `expr`, which also waits for the spawning task's work since
+    the task's queue is ordered after it.
+    Some backends synchronize implicitly when such code takes the buffer's pointer, but
+    portable code should not rely on that. The trailing `synchronize` of `@spawn` does not
+    complete asynchronous operations outside the backend, like `MPI.Isend`.
 
 !!! note
     Prefer `device=` over calling [`device!`](@ref KernelAbstractions.device!) inside
