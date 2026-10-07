@@ -65,17 +65,49 @@ end
     @test compute_units("JULIA_KA_CPU_THREADS" => "6", "POCL_MAX_PTHREAD_COUNT" => "5") == 5
 end
 
-@testset "POCL float atomics" begin
-    # pocl's CPU device natively supports float add and min/max atomics in both global
-    # and local memory, so the SPIR-V extensions guarding them must be permitted
+@testset "POCL atomics descriptor" begin
+    # pocl's CPU device supports single- and double-precision addition in global and local
+    # memory, 64-bit integer atomics, and no half-precision atomics
     dev = POCL.device()
-    exts = split(POCL.default_spirv_extensions(dev), ",")
-    @test "+SPV_EXT_shader_atomic_float_add" in exts
-    @test "+SPV_EXT_shader_atomic_float_min_max" in exts
-    @test dev.half_fp_atomic_capabilities == 0
-    # an explicit list overrides the device-derived default
+    atomics = POCL.spirv_atomics(dev)
+    @test atomics == POCL.SPIRVAtomics(;
+        int64 = true, fadd_f32_global = true, fadd_f32_local = true,
+        fadd_f64_global = true, fadd_f64_local = true
+    )
+    @test POCL.compiler_config(dev).target.atomics == atomics
+    # explicitly requested extensions are kept
     config = POCL.compiler_config(dev; extensions = "+SPV_KHR_expect_assume")
     @test config.target.extensions == "+SPV_KHR_expect_assume"
+    @test config.target.atomics == atomics
+    @test POCL.compiler_config(dev; extensions = nothing).target ==
+        POCL.compiler_config(dev).target
+
+    # additions the descriptor doesn't cover become compare-and-swap loops
+    function fadd!(L, G)
+        @inbounds KernelAbstractions.@atomic L[1] += 1.0f0
+        @inbounds KernelAbstractions.@atomic G[1] += 1.0f0
+        return
+    end
+    tt = Tuple{
+        POCL.CLDeviceArray{Float32, 1, POCL.AS.Workgroup},
+        POCL.CLDeviceArray{Float32, 1, POCL.AS.CrossWorkgroup},
+    }
+    function spirv(atomics)
+        config = POCL.compiler_config(dev; kernel = false, atomics)
+        job = POCL.GPUCompiler.CompilerJob(POCL.methodinstance(typeof(fadd!), tt), config)
+        return sprint(io -> POCL.GPUCompiler.code_native(io, job))
+    end
+    for (atomics, native) in (
+            (POCL.spirv_atomics(dev), 2),
+            (POCL.SPIRVAtomics(; fadd_f32_global = true), 1),
+            (POCL.SPIRVAtomics(; fadd_f32_local = true), 1),
+            (POCL.SPIRVAtomics(), 0),
+        )
+        asm = spirv(atomics)
+        @test count("OpAtomicFAddEXT", asm) == native
+        @test count("OpAtomicCompareExchange", asm) == 2 - native
+        @test occursin("SPV_EXT_shader_atomic_float_add", asm) == (native > 0)
+    end
 end
 
 # Julia 1.12 checks the bounds of a `StepRange` in 128-bit integers, which the SPIR-V back-end

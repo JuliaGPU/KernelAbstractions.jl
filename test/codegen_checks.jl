@@ -167,12 +167,12 @@ end
         end
     end
 
-    # `@atomic` lowers to a native atomicrmw on global memory rather than to a lock or a
-    # compare-and-swap loop.
+    # `@atomic` lowers to a native floating-point addition on global memory, which PoCL
+    # supports, rather than to a lock or a compare-and-swap loop.
     @testset "atomics" begin
-        @test @filecheck implicit_check_not = "cmpxchg" begin
+        @test @filecheck implicit_check_not = "{{cmpxchg|AtomicCompareExchange}}" begin
             @check "define spir_kernel void @{{.*}}gpu_codegen_atomic_sum"
-            @check "atomicrmw fadd"
+            @check "call float @{{.*}}__spirv_AtomicFAddEXT"
             @device_code_llvm debuginfo = :none codegen_atomic_sum(backend, 16)(A, out, ndrange = 64)
             KernelAbstractions.synchronize(backend)
         end
