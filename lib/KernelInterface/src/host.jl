@@ -37,9 +37,10 @@ completed.
 
 !!! note
     Backend implementations **must** implement this function cooperatively, yielding to
-    the Julia scheduler while waiting rather than blocking inside a driver call. See the
-    [notes for backend implementations](@ref implementations_notes) for why, and for what
-    it should not wait for.
+    the Julia scheduler while waiting rather than blocking inside a driver call. It
+    **must not** wait for work on other queues that the current queue is not ordered
+    after, e.g., by [`wait_event`](@ref). See the
+    [notes for backend implementations](@ref implementations_notes) for why.
 """
 function synchronize end
 

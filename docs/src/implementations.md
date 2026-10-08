@@ -43,13 +43,10 @@ and waited for by the current queue, or through a [`synchronize`](@ref) of the p
 queue that completed that use. In particular, they should not wait, on the host or on the
 device, for work queued on the previous queue after that event or synchronization. Waits
 needed to make memory accessible or to keep it alive still apply, and uses through a pointer
-taken before that event or synchronization may be synchronized conservatively. Likewise,
-`synchronize` **should not** wait for work on other queues that the current queue is not
-ordered after.
-
-Otherwise, a spawned task's first use of an array shared with its parent waits for work the
-parent queued after `@spawn`, reducing overlap. Neither recommendation guarantees that the
-work of different tasks runs concurrently.
+taken before that event or synchronization may be synchronized conservatively. This lets a
+spawned task use arrays it shares with its parent while the parent keeps queuing work, which
+is also why [`synchronize`](@ref) **must not** wait for work on other queues that the
+current queue is not ordered after.
 
 
 ## Moving data with `adapt`
