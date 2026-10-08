@@ -95,7 +95,9 @@ function launch_tuple(obj::Kernel, args::Tuple; ndrange = nothing, workgroupsize
         # the common case, specialized statically
         launch_kernel(obj, NDLaunch{Int32}(), ndrange, workgroupsize, iterspace, args)
     else
-        launch_kernel(obj, launch, ndrange, workgroupsize, iterspace, args)
+        # the other modes are rare: hide the callee from inference, so that it doesn't
+        # analyze the whole launch chain for each of them when compiling every kernel
+        Base.inferencebarrier(launch_kernel)(obj, launch, ndrange, workgroupsize, iterspace, args)
     end
     return nothing
 end
@@ -115,14 +117,16 @@ function launch_kernel(obj::Kernel, launch, ndrange, _workgroupsize, iterspace, 
         ctx = mkcontext(obj, ndrange, iterspace, launch)
     end
 
-    # launching through the `KI.Kernel` validates the sizes against the kernel's limits
+    # the geometry is valid by construction, except for the kernel's limits
     groups = size(blocks(iterspace))
     items = size(workitems(iterspace))
     if launch isa NDLaunch
-        call_kernel(kernel, ctx, args, groups, items)
+        groups, items = KI.pad3(groups), KI.pad3(items)
     else
-        call_kernel(kernel, ctx, args, prod(groups), prod(items))
+        groups, items = (prod(groups), 1, 1), (prod(items), 1, 1)
     end
+    KI.check_work_group_size(kernel, items)
+    KI.launch(kernel, groups, items, prepend(ctx, args))
     return nothing
 end
 
@@ -141,8 +145,8 @@ end
     return :(Tuple{Core.Typeof(KI.argconvert(backend, ctx)), $(types...)})
 end
 
-# `kernel(ctx, args...; numgroups, workgroupsize)`
-@inline @generated function call_kernel(kernel::KI.Kernel, ctx, args::Tuple, numgroups, workgroupsize)
+# `(ctx, args...)`
+@inline @generated function prepend(ctx, args::Tuple)
     argexprs = (:(args[$i]) for i in 1:fieldcount(args))
-    return :(kernel(ctx, $(argexprs...); numgroups, workgroupsize))
+    return :((ctx, $(argexprs...)))
 end

@@ -143,19 +143,9 @@ Validate the launch keywords of a [`Kernel`](@ref) call and turn them into the n
 work-groups and the work-group size. A zero number of work-groups means nothing is launched.
 """
 @inline function launch_geometry(kernel::Kernel, numgroups, workgroupsize, ndrange, max_work_group_size)
-    check_dims("numgroups", numgroups)
-    check_dims("workgroupsize", workgroupsize)
-    check_dims("ndrange", ndrange)
-    if ndrange != () && numgroups != ()
-        throw(ArgumentError("Only one of `numgroups` and `ndrange` can be used"))
-    end
-    max_work_group_size > 0 ||
-        throw(ArgumentError("`max_work_group_size` must be positive, got $max_work_group_size"))
-
+    check_launch(numgroups, workgroupsize, ndrange, max_work_group_size)
     items = if workgroupsize != ()
         wgsize = pad3(workgroupsize)
-        any(iszero, wgsize) &&
-            throw(ArgumentError("`workgroupsize` must be positive, got $(repr(workgroupsize))"))
         check_work_group_size(kernel, wgsize)
         wgsize
     elseif ndrange == ()
@@ -170,7 +160,27 @@ work-groups and the work-group size. A zero number of work-groups means nothing 
         )
         threads_to_workgroupsize(config.workgroupsize, wanted, max_work_group_dims(kernel.backend))
     end
+    return launch_groups(numgroups, ndrange, items), items
+end
 
+# The parts of `launch_geometry` that don't need the kernel. They are kept out of it, which
+# is compiled for every kernel.
+
+function check_launch(numgroups, workgroupsize, ndrange, max_work_group_size)
+    check_dims("numgroups", numgroups)
+    check_dims("workgroupsize", workgroupsize)
+    check_dims("ndrange", ndrange)
+    if ndrange != () && numgroups != ()
+        throw(ArgumentError("Only one of `numgroups` and `ndrange` can be used"))
+    end
+    max_work_group_size > 0 ||
+        throw(ArgumentError("`max_work_group_size` must be positive, got $max_work_group_size"))
+    any(iszero, workgroupsize) &&
+        throw(ArgumentError("`workgroupsize` must be positive, got $(repr(workgroupsize))"))
+    return
+end
+
+function launch_groups(numgroups, ndrange, items::Dims{3})
     groups = if ndrange != ()
         cld.(pad3(ndrange), items)
     elseif numgroups != ()
@@ -183,17 +193,32 @@ work-groups and the work-group size. A zero number of work-groups means nothing 
     if !any(iszero, groups) && any(map((g, i) -> g > typemax(Int) ÷ i, groups, items))
         throw(ArgumentError("Launch of $groups work-groups of $items work-items has more than typemax(Int) work-items in a dimension"))
     end
-    return groups, items
+    return groups
 end
 
-function check_work_group_size(kernel::Kernel, items::Dims{3})
+"""
+    check_work_group_size(kernel::Kernel, items::Dims{3})
+
+Check that work-groups of `items` work-items fit the limits of `kernel`, as
+[`launch`](@ref) requires, throwing an `ArgumentError` otherwise.
+
+Not part of the public interface; used by KernelInterface's and KernelAbstractions' launch
+code.
+"""
+@inline function check_work_group_size(kernel::Kernel, items::Dims{3})
     max_dims = max_work_group_dims(kernel.backend)
-    all(items .<= max_dims) ||
-        throw(ArgumentError("Work-group size $items exceeds the maximum of $max_dims per dimension"))
+    all(items .<= max_dims) || throw_work_group_dims_error(items, max_dims)
     max_items = max_work_group_size(kernel)
-    prod_exceeds(items, max_items) &&
-        throw(ArgumentError("Work-group size $items has more than $max_items work-items, the maximum for this kernel"))
+    prod_exceeds(items, max_items) && throw_work_group_size_error(items, max_items)
     return
+end
+
+@noinline function throw_work_group_dims_error(items, max_dims)
+    throw(ArgumentError("Work-group size $items exceeds the maximum of $max_dims per dimension"))
+end
+
+@noinline function throw_work_group_size_error(items, max_items)
+    throw(ArgumentError("Work-group size $items has more than $max_items work-items, the maximum for this kernel"))
 end
 
 """
