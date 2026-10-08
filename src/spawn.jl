@@ -32,9 +32,9 @@ fetch(task) == 4 * length(A)
 
 # Choosing the device
 
-A task started with plain `Threads.@spawn` runs on the backend's default device, not on
-the device of the task that started it. `@spawn` selects the spawning task's device, or the
-one given by `device`, an index into `1:ndevices(backend)`:
+Which device a task started with plain `Threads.@spawn` uses depends on the backend, and
+need not be the spawning task's. `@spawn` selects the spawning task's device, or the one
+given by `device`, an index into `1:ndevices(backend)`:
 
 ```julia
 task = KernelAbstractions.@spawn backend device=2 begin

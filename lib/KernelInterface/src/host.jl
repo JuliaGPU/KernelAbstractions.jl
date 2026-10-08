@@ -47,9 +47,9 @@ function synchronize end
 """
     record_event(backend::Backend)
 
-Capture the work the calling task has queued on `backend`'s active device so far, and
-return a handle for [`wait_event`](@ref). Work queued later is not captured, and recording
-need not wait for the captured work to complete. The handle is only meant for `wait_event`.
+Capture the work the calling task has queued on `backend`'s active device before this
+call, and return a handle for [`wait_event`](@ref). Recording need not wait for that work to
+complete. The handle is only meant for `wait_event`.
 
 !!! note
     The default implementation calls [`synchronize`](@ref) and returns `nothing`.
