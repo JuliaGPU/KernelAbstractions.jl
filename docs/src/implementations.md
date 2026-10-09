@@ -16,49 +16,37 @@ thread instead of letting independent tasks run concurrently.
 
 ## Task-local queues and `KernelAbstractions.@spawn`
 
-Backends should give each Julia task its own queue/stream, so that kernels
-launched from different tasks can execute concurrently. This implies that work queued
-from two tasks is not ordered with respect to each other.
+Backends **should** give each Julia task its own queue, so that work from different tasks
+can execute concurrently. Separate queues do not by themselves order work.
 
-[`KernelAbstractions.@spawn`](@ref) hides this from users by following a fixed protocol,
-which backends can support with two optional functions:
+[`KernelAbstractions.@spawn`](@ref) orders it with this protocol:
 
-- Before the new task is created, the spawning task calls
-  [`record_event`](@ref KernelAbstractions.record_event) on the backend. The default
-  implementation is a full [`synchronize`](@ref) returning `nothing`, which is always
-  correct. A backend with task-local queues **may** instead record an event on the
-  current task's queue and return it, so that the spawning task does not have to wait.
-- The new task selects its device with [`device!`](@ref KernelAbstractions.device!) — the
-  spawning task's, or the one the user asked for with `@spawn backend device=id` — and then
-  calls [`wait_event`](@ref KernelAbstractions.wait_event) with the recorded handle. The
-  order matters: `wait_event` makes the queue of the *currently active* device wait, so the
-  device has to be selected first. A backend that overrides `record_event` **must**
-  implement `wait_event` for its event type, typically by making the current task's queue
-  wait on the event.
-- After the user's code returns, the new task calls [`synchronize`](@ref), so that
-  `wait(task)` in any other task implies that all work queued by the spawned task has
-  completed.
+1. The spawning task calls [`record_event`](@ref KernelAbstractions.record_event).
+2. The new task selects its device with [`device!`](@ref KernelAbstractions.device!), then
+   calls [`wait_event`](@ref KernelAbstractions.wait_event) before running the user's code.
+3. If that code returns normally, the new task calls [`synchronize`](@ref), so that a
+   successful `wait(task)` implies its queued work has completed.
 
-A new Julia task does not inherit the device of the task that spawned it: backends keep the
-active device in task-local state, which Julia does not copy into a child task, so the task
-Backends with more than one device
-**must** implement the device interface ([`device`](@ref KernelAbstractions.device),
-[`ndevices`](@ref KernelAbstractions.ndevices), [`device!`](@ref KernelAbstractions.device!))
-for `@spawn` to run on the right device.
+The default `record_event` synchronizes and returns `nothing`, for which `wait_event` does
+nothing. Backends can return an event instead, so that the spawning task doesn't wait; see
+the docstrings of both functions for what that requires. Backends with more than one device
+**must** implement [`device`](@ref KernelAbstractions.device),
+[`ndevices`](@ref KernelAbstractions.ndevices) and
+[`device!`](@ref KernelAbstractions.device!), and `wait_event` **must** accept an event
+recorded on another device, since `@spawn backend device=id` records on the spawning task's
+device.
 
-`@spawn backend device=id` records the event on the spawning task's device but waits on
-`id`, so a multi-device backend **must** accept an event recorded on a device other than the
-one active in `wait_event`. A backend whose driver cannot **must** fall back
-to waiting cooperatively, as [`synchronize`](@ref) does.
-
-Because `device!` selects the queue that `wait_event` acts on, the same two functions are
-what lets users order work across a device switch they make themselves:
-
-```julia
-event = KernelAbstractions.record_event(backend)
-KernelAbstractions.device!(backend, 2)
-KernelAbstractions.wait_event(backend, event)
-```
+Backends that track which queue last used an array, and wait for that queue before using the
+array on another one, **should** skip that wait when the current queue is already ordered
+after the array's last use: through an event recorded on the previous queue after that use
+and waited for by the current queue, or through a [`synchronize`](@ref) of the previous
+queue that completed that use. In particular, they should not wait, on the host or on the
+device, for work queued on the previous queue after that event or synchronization. Waits
+needed to make memory accessible or to keep it alive still apply, and uses through a pointer
+taken before that event or synchronization may be synchronized conservatively. This lets a
+spawned task use arrays it shares with its parent while the parent keeps queuing work, which
+is also why [`synchronize`](@ref) **must not** wait for work on other queues that the
+current queue is not ordered after.
 
 
 ## Moving data with `adapt`
