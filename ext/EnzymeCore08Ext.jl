@@ -1,13 +1,32 @@
+# Forward mode of the kernel body, with the runtime activity and strong zero settings of `config`.
+# `set_strong_zero(mode, config)` is broken in EnzymeCore <= 0.8.22, so dispatch on `Val` instead.
+@static if isdefined(EnzymeRules, :strong_zero)
+    _fwd_mode(config) = _set_strong_zero(
+        EnzymeCore.set_runtime_activity(Forward, config),
+        Val(EnzymeRules.strong_zero(config)),
+    )
+    _set_strong_zero(mode, ::Val{true}) = EnzymeCore.set_strong_zero(mode)
+    _set_strong_zero(mode, ::Val{false}) = mode
+else
+    _fwd_mode(config) = EnzymeCore.set_runtime_activity(Forward, config)
+end
+
 # https://github.com/EnzymeAD/Enzyme.jl/issues/1516
 # On the CPU `autodiff_deferred` can deadlock.
 # Hence a specialized CPU version
 function cpu_fwd(ctx, config, f, args...)
-    EnzymeCore.autodiff(EnzymeCore.set_runtime_activity(Forward, config), Const(f), Const{Nothing}, Const(ctx), args...)
+    EnzymeCore.autodiff(_fwd_mode(config), Const(f), Const{Nothing}, Const(ctx), args...)
     return nothing
 end
 
+_unwrap_const_type(arg) = arg
+_unwrap_const_type(arg::Const{<:Type}) = arg.val
+_rewrap_const_type(arg) = arg
+_rewrap_const_type(::Type{T}) where {T} = Const{Type{T}}(T)
+
 function gpu_fwd(ctx, config, f, args...)
-    EnzymeCore.autodiff_deferred(EnzymeCore.set_runtime_activity(Forward, config), Const(f), Const{Nothing}, Const(ctx), args...)
+    args = map(_rewrap_const_type, args)
+    EnzymeCore.autodiff_deferred(_fwd_mode(config), Const(f), Const{Nothing}, Const(ctx), args...)
     return nothing
 end
 
@@ -38,6 +57,9 @@ function EnzymeRules.forward(
     f = kernel.f
     fwd_kernel = similar(kernel, gpu_fwd)
 
+    # `Const{Type{T}}` is not a bitstype, so it cannot be passed to GPU kernels.
+    # Pass the type itself, and re-wrap it as `Const` in the kernel (`gpu_fwd`).
+    args = map(_unwrap_const_type, args)
     return fwd_kernel(config, f, args...; ndrange, workgroupsize)
 end
 
