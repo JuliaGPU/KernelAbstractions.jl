@@ -89,6 +89,7 @@ This allows for the following configurations:
 2. `inbounds={false, true}`: Enables a forced `@inbounds` macro around the function definition in the case the user is using too many `@inbounds` already in their kernel. Note that this can lead to incorrect results, crashes, etc and is fundamentally unsafe. Be careful!
 3. `unsafe_indices={false, true}`: Disables the implicit validation of indices, users must avoid `@index(Global)`.
 4. `generated={false, true}`: Turns the kernel into a [generated function](https://docs.julialang.org/en/v1/manual/metaprogramming/#Generated-functions), see *Generated* below.
+5. `tile=N`: Divides the workgroups into tiles of `N` work-items, see [`@tile`](@ref).
 
 - [`@context`](@ref)
 
@@ -117,11 +118,12 @@ generators (`x -> ...`, `do` blocks, `[f(i) for i in ...]`); use the Cartesian m
 """
 macro kernel(ex...)
     if length(ex) == 1
-        return __kernel(ex[1], __source__, __module__, false, false, false)
+        return __kernel(ex[1], __source__, __module__, false, false, false, nothing)
     else
         unsafe_indices = false
         force_inbounds = false
         generated = false
+        tile = nothing
         for i in 1:(length(ex) - 1)
             if ex[i] isa Expr && ex[i].head == :(=) &&
                     ex[i].args[1] == :cpu && ex[i].args[2] isa Bool
@@ -135,6 +137,10 @@ macro kernel(ex...)
             elseif ex[i] isa Expr && ex[i].head == :(=) &&
                     ex[i].args[1] == :generated && ex[i].args[2] isa Bool
                 generated = ex[i].args[2]
+            elseif ex[i] isa Expr && ex[i].head == :(=) && ex[i].args[1] == :tile
+                tile = ex[i].args[2]
+                tile isa Integer && !(tile > 0 && ispow2(tile)) &&
+                    error("`tile` has to be a power of two, got $tile")
             else
                 error(
                     "Configuration should be of form:\n" *
@@ -142,11 +148,12 @@ macro kernel(ex...)
                         "* `inbounds=true`\n" *
                         "* `unsafe_indices=true`\n" *
                         "* `generated=true`\n" *
+                        "* `tile=N`\n" *
                         "got `", ex[i], "`",
                 )
             end
         end
-        return __kernel(ex[end], __source__, __module__, force_inbounds, unsafe_indices, generated)
+        return __kernel(ex[end], __source__, __module__, force_inbounds, unsafe_indices, generated, tile)
     end
 end
 
@@ -402,6 +409,8 @@ A cartesian index is a general N-dimensional index that is derived from the iter
   - `Global`: Used to access global memory.
   - `Group`: The index of the `workgroup`.
   - `Local`: The within `workgroup` index.
+  - `Tile`: The global linear index of the work-item's tile, in kernels with tiles (see
+    [`@tile`](@ref)). It takes no index kind.
 
 # Index kind
 
@@ -423,8 +432,12 @@ If the index kind is not provided it defaults to `Linear`, this is subject to ch
 ```
 """
 macro index(locale, args...)
+    if locale === :Tile
+        isempty(args) || error("@index(Tile) takes no further arguments")
+        return :($__index_Tile($(esc(:__ctx__)), $(esc(:__tile_width__))))
+    end
     if !(locale === :Global || locale === :Local || locale === :Group)
-        error("@index requires as first argument either :Global, :Local or :Group")
+        error("@index requires as first argument either :Global, :Local, :Group or :Tile")
     end
 
     if length(args) >= 1
@@ -645,6 +658,12 @@ last (possibly partial) workgroup. Primarily used by backend implementations and
 end
 
 function construct(backend::B, ::S, ::NDRange, xpu_name::XPUName) where {B <: Backend, S <: _Size, NDRange <: _Size, XPUName}
+    N = tile_width(xpu_name)
+    if N !== nothing && S <: StaticSize && backend isa KI.Backend
+        # the ndrange is checked at launch, with the final workgroup size
+        workgroupsize = get(S)
+        check_tiles(backend, N, (N,), (workgroupsize..., ntuple(_ -> 1, 3 - length(workgroupsize))...))
+    end
     return Kernel{B, S, NDRange, XPUName}(backend, xpu_name)
 end
 
@@ -673,6 +692,7 @@ end
 
 include("macros.jl")
 include("groupreduction.jl")
+include("tiles.jl")
 include("spawn.jl")
 include("foreach_index.jl")
 
