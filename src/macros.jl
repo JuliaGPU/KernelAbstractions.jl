@@ -177,6 +177,12 @@ function transform_gpu!(def, constargs, force_inbounds, unsafe_indices)
     # `Any[]`, since `split` hands back `LineNumberNode`s alongside `Expr`s
     new_stmts = Any[]
     body = MacroTools.flatten(def[:body])
+    # A kernel without `@synchronize` is a single region, which can run without the mask in
+    # workgroups that lie entirely inside the ndrange (see `__fullgroup`).
+    full_group = !unsafe_indices && !find_sync(body)
+    if full_group
+        push!(new_stmts, :(__full_group__ = $__fullgroup(__ctx__)))
+    end
     if !unsafe_indices
         push!(new_stmts, :(__active_lane__ = $__validindex(__ctx__)))
     end
@@ -184,7 +190,7 @@ function transform_gpu!(def, constargs, force_inbounds, unsafe_indices)
         push!(new_stmts, Expr(:inbounds, true))
     end
     if !unsafe_indices
-        append!(new_stmts, split(body.args))
+        append!(new_stmts, split(body.args, full_group))
     else
         push!(new_stmts, body)
     end
@@ -253,7 +259,7 @@ function find_sync(stmt)
     return result[]
 end
 
-function split(stmts)
+function split(stmts, full_group = false)
     # 1. Split the code into blocks separated by `@synchronize`
 
     current = Any[]
@@ -347,18 +353,34 @@ function split(stmts)
     # everything since the last `@synchronize`, including hoisted statements
     if !isempty(current) || !isempty(allocations)
         loop = WorkgroupLoop(current, allocations, false, nothing)
-        push!(new_stmts, emit(loop))
+        push!(new_stmts, emit(loop, full_group))
     end
     return new_stmts
 end
 
-function emit(loop)
+function emit(loop, full_group = false)
     # Note: built without `quote`, since that would splice `LineNumberNode`s
     # pointing at this file into the middle of the user's kernel body.
     stmts = Any[]
 
     append!(stmts, loop.allocations)
-    push!(stmts, Expr(:if, :__active_lane__, Expr(:block, loop.stmts...)))
+    if full_group
+        # The body is emitted twice: without the mask for full workgroups (the branch is the
+        # same for all their work-items), and masked for the others. Each copy is a scope of
+        # its own, so that a variable captured by a closure isn't assigned in two places,
+        # which would box it.
+        push!(
+            stmts, Expr(
+                :if, :__full_group__, Expr(:let, Expr(:block), Expr(:block, loop.stmts...)),
+                Expr(
+                    :elseif, :__active_lane__,
+                    Expr(:let, Expr(:block), Expr(:block, deepcopy(loop.stmts)...))
+                )
+            )
+        )
+    else
+        push!(stmts, Expr(:if, :__active_lane__, Expr(:block, loop.stmts...)))
+    end
     if loop.terminated_in_sync
         loop.sync_line === nothing || push!(stmts, loop.sync_line)
         push!(stmts, :($__synchronize()))

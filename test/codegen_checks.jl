@@ -43,6 +43,25 @@ end
     end
 end
 
+# `@synchronize` at the top level, with indices carried across the barrier
+@kernel function codegen_neighbour(A, B)
+    N = @uniform prod(@groupsize())
+    I = @index(Global, Linear)
+    i = @index(Local, Linear)
+    tile = @localmem Float32 (N,)
+    @inbounds tile[i] = A[I]
+    @synchronize
+    @inbounds B[I] = tile[i] + tile[ifelse(i == N, 1, i + 1)]
+end
+
+# a local captured by a closure, which is assigned once per copy of the body
+@kernel function codegen_closure(A)
+    I = @index(Global, Linear)
+    s = 2.0f0
+    f = x -> s * x
+    @inbounds A[I] = f(A[I])
+end
+
 @kernel function codegen_atomic_sum(A, out)
     I = @index(Global, Linear)
     @inbounds @atomic out[1] += A[I]
@@ -148,6 +167,53 @@ end
         end
     end
 
+    # On PoCL, the body of a kernel with a dynamic ndrange and no `@synchronize` is emitted
+    # twice: unmasked for the workgroups that lie inside the ndrange, and masked for a partial
+    # one.
+    @testset "full workgroups" begin
+        @test @filecheck begin
+            @check "define spir_kernel void @{{.*}}gpu_codegen_mul2_inbounds"
+            @check "store float"
+            @check "store float"
+            @check_not "store float"
+            @check "ret void"
+            @device_code_llvm debuginfo = :none codegen_mul2_inbounds(backend, 16)(A, ndrange = 64)
+            KernelAbstractions.synchronize(backend)
+        end
+
+        # with the workgroups known to lie inside the ndrange, only the unmasked body is left
+        @test @filecheck begin
+            @check "define spir_kernel void @{{.*}}gpu_codegen_mul2_inbounds"
+            @check "store float"
+            @check_not "store float"
+            @check "ret void"
+            @device_code_llvm debuginfo = :none codegen_mul2_inbounds(backend, 16, 64)(A)
+            KernelAbstractions.synchronize(backend)
+        end
+
+        # a kernel with `@synchronize` keeps a single, masked body: duplicating its regions
+        # would leave variables carried across the barrier possibly undefined
+        B = KernelAbstractions.zeros(backend, Float32, 64)
+        @test @filecheck implicit_check_not = "gpu_report_exception" begin
+            @check "define spir_kernel void @{{.*}}gpu_codegen_neighbour"
+            @check "store float {{.*}}addrspace(1)"
+            @check_not "store float {{.*}}addrspace(1)"
+            @device_code_llvm debuginfo = :none codegen_neighbour(backend, 16)(A, B, ndrange = 64)
+            KernelAbstractions.synchronize(backend)
+        end
+
+        # each copy of the body is a scope of its own, so a local captured by a closure isn't
+        # boxed (which would leave calls into the runtime)
+        @test @filecheck implicit_check_not = "jl_" begin
+            @check "define spir_kernel void @{{.*}}gpu_codegen_closure"
+            @check "store float"
+            @check "store float"
+            @check "ret void"
+            @device_code_llvm debuginfo = :none codegen_closure(backend, 16)(A, ndrange = 64)
+            KernelAbstractions.synchronize(backend)
+        end
+    end
+
     # `@localmem` becomes a module-level allocation in the SPIR-V workgroup address space
     # (3), which the kernel reads and writes directly. The two accesses are `@check_dag`
     # because LLVM is free to emit the basic blocks in any order.
@@ -230,12 +296,15 @@ end
     # The bounds check of a partial workgroup compares every dimension and branches once.
     # Branching per dimension (as `all` does on Julia 1.10–1.12) keeps PoCL from
     # hoisting the index computation out of its loop over the work-items, which made
-    # kernels with a linear launch several times slower.
+    # kernels with a linear launch several times slower. (These kernels have no
+    # `@synchronize`, so there are two branches: whether the workgroup is full, and the
+    # bounds check of a partial one, see "full workgroups".)
     @testset "bounds check branches once" begin
         B = KernelAbstractions.zeros(backend, Float32, 5, 6, 7, 3)
         kernel = codegen_scale_cartesian(backend, 16)
         @test @filecheck begin
             @check "define spir_kernel void @{{.*}}gpu_codegen_scale_cartesian"
+            @check "br i1"
             @check "br i1"
             @check_not "br i1"
             @check "ret void"
@@ -247,6 +316,7 @@ end
         @test @filecheck begin
             @check "define spir_kernel void @{{.*}}gpu_codegen_scale_cartesian"
             @check "br i1"
+            @check "br i1"
             @check_not "br i1"
             @check "ret void"
             @device_code_llvm debuginfo = :none kernel(C, ndrange = size(C))
@@ -254,13 +324,14 @@ end
         end
     end
 
-    # `@print` lowers to a single variadic printf call, not to one call per argument.
+    # `@print` lowers to a single variadic printf call, not to one call per argument. (With a
+    # static ndrange, so that the body isn't emitted twice, see "full workgroups" above.)
     @testset "print" begin
         @test @filecheck begin
             @check "define spir_kernel void @{{.*}}gpu_codegen_print"
             @check "@printf"
             @check_not "@printf"
-            @device_code_llvm debuginfo = :none codegen_print(backend, 16)(ndrange = 16)
+            @device_code_llvm debuginfo = :none codegen_print(backend, 16, 16)()
             KernelAbstractions.synchronize(backend)
         end
     end
