@@ -17,6 +17,7 @@ using FileCheck
 using KernelAbstractions
 using KernelAbstractions: @atomic
 using StaticArrays
+import KernelAbstractions.KernelInterface as KI
 using Test
 
 import KernelAbstractions.POCL: @device_code_llvm
@@ -81,6 +82,14 @@ end
 @kernel function codegen_scale_cartesian(A)
     I = @index(Global, Cartesian)
     @inbounds A[I] = 2 * A[I]
+end
+
+# a 64-bit primitive type that no backend shuffles natively
+primitive type CodegenBits64 64 end
+
+@kernel function codegen_shfl_bits64(A)
+    I = @index(Global, Linear)
+    @inbounds A[I] = reinterpret(UInt64, KI.shfl(reinterpret(CodegenBits64, A[I]), 1))
 end
 
 # `@inbounds` is only honoured under `--check-bounds=auto`; several checks below assert
@@ -250,6 +259,21 @@ end
             @check_not "br i1"
             @check "ret void"
             @device_code_llvm debuginfo = :none kernel(C, ndrange = size(C))
+            KernelAbstractions.synchronize(backend)
+        end
+    end
+
+    # A 64-bit primitive type that the backend doesn't shuffle natively uses its native 64-bit
+    # shuffle (`__spirv_GroupNonUniformShuffle` mangled for an `i64` value is `...jmj`, for an
+    # `i32` value `...jjj`), rather than being split into two 32-bit words.
+    @testset "shuffles of other primitive types" begin
+        A = KernelAbstractions.zeros(backend, UInt64, 32)
+        @test @filecheck implicit_check_not = "GroupNonUniformShufflejjj" begin
+            @check "define spir_kernel void @{{.*}}gpu_codegen_shfl_bits64"
+            @check "GroupNonUniformShufflejmj"
+            @check_not "GroupNonUniformShuffle"
+            @check "ret void"
+            @device_code_llvm debuginfo = :none codegen_shfl_bits64(backend, 32)(A, ndrange = 32)
             KernelAbstractions.synchronize(backend)
         end
     end

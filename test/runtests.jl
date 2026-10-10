@@ -237,6 +237,18 @@ if "cl_khr_fp16" in POCL.device().extensions
     end
 end
 
+# the sub-group width kernels are compiled for is the one `KI.sub_group_size` reports
+# (PoCL folds `get_max_sub_group_size` to that constant itself, see pocl/pocl#2375)
+function max_sub_group_size_kernel(out)
+    out[1] = KernelAbstractions.KernelInterface.get_max_sub_group_size()
+    return
+end
+@testset "POCL sub-group width" begin
+    out = zeros(Int, 1)
+    @opencl max_sub_group_size_kernel(out)
+    @test out[1] == POCL.device_limits().sub_group_size
+end
+
 # Julia doesn't turn a splat of more than 32 elements into a direct call, so a launch with
 # many arguments allocates unless every layer passes them on as a tuple
 @testset "POCL launch with many arguments" begin

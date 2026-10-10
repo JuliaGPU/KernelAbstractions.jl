@@ -127,19 +127,22 @@ end
 
 # Sub-group support is optional, see `supports_subgroups`. A work-group is divided into
 # sub-groups of at most `sub_group_size(backend)` work-items. Which work-items form a
-# sub-group, how many sub-groups there are and which are partial is unspecified, except
-# that `(get_sub_group_id(), get_sub_group_local_id())` is unique within a work-group and
-# doesn't change during the kernel's execution, and that a 1-D work-group of at most
-# `sub_group_size(backend)` work-items is a single sub-group. Backends that can't ensure
-# that don't report sub-group support. See the manual.
+# sub-group, how many sub-groups there are and which are partial is unspecified (unless
+# `supports_linear_subgroups`), except that `(get_sub_group_id(), get_sub_group_local_id())`
+# is unique within a work-group and doesn't change during the kernel's execution (see the
+# manual).
+#
+# In a partial sub-group, the lanes `get_sub_group_size()+1:get_max_sub_group_size()` have no
+# work-item: shuffles from them give unspecified values, and the votes only take the
+# work-items of the sub-group into account.
 
 """
     get_sub_group_size([::Type{T}=Int])::T
 
 The number of work-items in the sub-group, at most the sub-group width
 ([`get_max_sub_group_size`](@ref)). Which sub-groups have fewer work-items than the width
-is unspecified: when the work-group size isn't a multiple of the width, there can be more
-than one, e.g. one per row of a multi-dimensional work-group.
+is unspecified (unless [`supports_linear_subgroups`](@ref)): there can be more than one,
+e.g. one per row of a multi-dimensional work-group.
 
 See [`get_local_id`](@ref) for the supported types `T`.
 
@@ -155,12 +158,21 @@ See [`get_local_id`](@ref) for the supported types `T`.
 """
     get_max_sub_group_size([::Type{T}=Int])::T
 
-The sub-group width, [`sub_group_size(backend)`](@ref sub_group_size) on the host.
+The sub-group width (the warp or wavefront size), [`sub_group_size(backend)`](@ref
+sub_group_size) on the host.
+
+Backends should make it a constant of the generated code, so that code depending on it, e.g.
+a loop over the lanes or a shuffle butterfly, is specialized for it; on some, it is only
+folded late in compilation, or not at all. It is never known during type inference: to pick
+types or `Val` parameters from the width, e.g. the integer type of a mask with a bit per
+lane, pass [`sub_group_size(backend)`](@ref sub_group_size) from the host.
 
 See [`get_local_id`](@ref) for the supported types `T`.
 
 !!! note
-    Backend implementations that support sub-groups **must** implement:
+    Backend implementations that support sub-groups **must** implement this, and **should**
+    return the width the kernel is compiled for as a constant rather than query the device
+    at run time, so that code depending on it is specialized for the width:
     ```
     @device_override get_max_sub_group_size(::Type{T})::T where {T}
     ```
@@ -173,8 +185,8 @@ See [`get_local_id`](@ref) for the supported types `T`.
 
 The number of sub-groups in the work-group. It is at least
 `cld(prod(get_local_size()), get_max_sub_group_size())`, but can be larger, since more than
-one sub-group can be partial. Size storage for a value per sub-group for up to one
-sub-group per work-item.
+one sub-group can be partial (unless [`supports_linear_subgroups`](@ref)). Size storage for a
+value per sub-group for up to one sub-group per work-item.
 
 See [`get_local_id`](@ref) for the supported types `T`.
 
@@ -191,7 +203,8 @@ See [`get_local_id`](@ref) for the supported types `T`.
     get_sub_group_id([::Type{T}=Int])::T
 
 The 1-based index of the sub-group within the work-group, between 1 and
-[`get_num_sub_groups`](@ref). How it relates to [`get_local_id`](@ref) is unspecified.
+[`get_num_sub_groups`](@ref). How it relates to [`get_local_id`](@ref) is unspecified,
+unless [`supports_linear_subgroups`](@ref).
 
 See [`get_local_id`](@ref) for the supported types `T`.
 
@@ -209,7 +222,8 @@ See [`get_local_id`](@ref) for the supported types `T`.
 
 The 1-based index of the work-item within its sub-group (its lane), between 1 and
 [`get_sub_group_size`](@ref). It doesn't depend on which work-items of the sub-group are
-active, e.g. in a divergent branch.
+active, e.g. in a divergent branch. How it relates to [`get_local_id`](@ref) is unspecified,
+unless [`supports_linear_subgroups`](@ref).
 
 See [`get_local_id`](@ref) for the supported types `T`.
 
@@ -254,26 +268,301 @@ localmemory(::Type{T}, ::Val) where {T} =
 
 ## communication
 
+# The shuffles, votes, collectives and `sub_group_barrier` have to be executed by all
+# work-items of a sub-group together, in control flow that is uniform over the work-group
+# unless `supports_independent_subgroups`. The id and size queries above can be used anywhere.
+
+"""
+    shfl(val::T, lane::Integer)::T
+
+Return `val` of the work-item with [`get_sub_group_local_id`](@ref) equal to `lane` in the
+sub-group. When there is no such work-item, the result is an unspecified value (of type `T`).
+
+All work-items of the sub-group have to execute `shfl` together (not in a divergent branch),
+but they may read from different lanes. Unless [`supports_independent_subgroups`](@ref), all
+sub-groups of the work-group have to execute it.
+
+`shfl` exchanges values, not memory: it is not a memory fence.
+
+Types for which [`supports_shuffle`](@ref) returns `true` are supported. Besides the types a
+backend supports natively, that includes other primitive types of 1, 2, 4, 8 or 16 bytes
+(e.g. `Bool`, `Char` or `Int64`) if the backend supports `UInt32`, and `isbits` structs and
+tuples of supported types, which are shuffled field by field. Primitive types of up to 4
+bytes are shuffled as a `UInt32`, and larger ones as `UInt64` words, each of which is shuffled
+natively if the backend supports `UInt64`, and as two `UInt32` words otherwise.
+
+!!! note
+    Backend implementations **must** implement this for the primitive types they support
+    natively, which have to include `UInt32`, and only for those, so that other types reach
+    the fallbacks:
+    ```
+    @device_override shfl(val::T, lane::Integer) where {T <: Union{...}}
+    ```
+"""
+@inline shfl(val, lane::Integer) = shfl_fallback(x -> shfl(x, lane), val)
+
 """
     shfl_down(val::T, offset::Integer)::T
 
 Return `val` of the work-item `offset` lanes further in the sub-group, i.e. with
-[`get_sub_group_local_id`](@ref) equal to `get_sub_group_local_id() + offset`. When there is
-no such work-item, the result is an unspecified value (of type `T`).
+[`get_sub_group_local_id`](@ref) equal to `get_sub_group_local_id() + offset`, for an `offset`
+of at least 0. When that lane is past the sub-group width, i.e.
+`get_sub_group_local_id() + offset > get_max_sub_group_size()`, the result is `val` of the
+work-item itself, as on CUDA, HIP and Metal. When the lane is within the width but has no
+work-item, in a partial sub-group, the result is an unspecified value (of type `T`).
 
 All work-items of the sub-group have to execute `shfl_down` together (not in a divergent
-branch), with the same `offset`.
+branch), with the same `offset`; see [`shfl`](@ref).
 
-`shfl_down` exchanges values, not memory: it is not a memory fence.
+`shfl_down` exchanges values, not memory: it is not a memory fence. See [`shfl`](@ref) for
+the supported types.
 
 !!! note
-    Backend implementations **must** implement this for every `T` for which
-    [`supports_shuffle`](@ref) returns `true`:
+    Backend implementations **must** implement this like [`shfl`](@ref):
     ```
-    @device_override shfl_down(val::T, offset::Integer) where T
+    @device_override shfl_down(val::T, offset::Integer) where {T <: Union{...}}
     ```
 """
-function shfl_down end
+@inline shfl_down(val, offset::Integer) = shfl_fallback(x -> shfl_down(x, offset), val)
+
+"""
+    shfl_up(val::T, offset::Integer)::T
+
+Return `val` of the work-item `offset` lanes earlier in the sub-group, i.e. with
+[`get_sub_group_local_id`](@ref) equal to `get_sub_group_local_id() - offset`, for an `offset`
+of at least 0. When there is no such lane, i.e. `get_sub_group_local_id() <= offset`, the
+result is `val` of the work-item itself, as on CUDA, HIP and Metal.
+
+All work-items of the sub-group have to execute `shfl_up` together (not in a divergent
+branch), with the same `offset`; see [`shfl`](@ref).
+
+`shfl_up` exchanges values, not memory: it is not a memory fence. See [`shfl`](@ref) for
+the supported types.
+
+!!! note
+    Backend implementations **must** implement this like [`shfl`](@ref):
+    ```
+    @device_override shfl_up(val::T, offset::Integer) where {T <: Union{...}}
+    ```
+"""
+@inline shfl_up(val, offset::Integer) = shfl_fallback(x -> shfl_up(x, offset), val)
+
+"""
+    shfl_xor(val::T, mask::Integer)::T
+
+Return `val` of the work-item whose 0-based lane id is the 0-based lane id of this work-item
+xor `mask`, i.e. with [`get_sub_group_local_id`](@ref) equal to
+`((get_sub_group_local_id() - 1) ⊻ mask) + 1`. `mask` has to be between 0 and
+`get_max_sub_group_size() - 1`. When that lane has no work-item, in a partial sub-group, the
+result is an unspecified value (of type `T`).
+
+All work-items of the sub-group have to execute `shfl_xor` together (not in a divergent
+branch), with the same `mask`; see [`shfl`](@ref). A butterfly over the masks `width ÷ 2, …, 2, 1` (for the
+sub-group width [`get_max_sub_group_size`](@ref)) reduces a full sub-group such that every
+work-item gets the result.
+
+`shfl_xor` exchanges values, not memory: it is not a memory fence. See [`shfl`](@ref) for
+the supported types.
+
+!!! note
+    Backend implementations **must** implement this like [`shfl`](@ref):
+    ```
+    @device_override shfl_xor(val::T, mask::Integer) where {T <: Union{...}}
+    ```
+"""
+@inline shfl_xor(val, mask::Integer) = shfl_fallback(x -> shfl_xor(x, mask), val)
+
+# Shuffle a value of a type that the backend doesn't support natively, with `f` shuffling a
+# value of a type it does support. The fallbacks are separate functions for primitive and for
+# other types, so that the fallback of a struct with a field the backend doesn't support
+# natively, e.g. an `Int64` on Metal, doesn't call itself, which inference gives up on (on
+# Julia 1.10).
+@inline function shfl_fallback(f, val::T) where {T}
+    return isprimitivetype(T) ? shfl_words(f, val) : shfl_fields(f, val)
+end
+
+shfl_unsupported(T) = throw(
+    ArgumentError(
+        "Shuffling values of type $T is not supported by this backend, see `supports_shuffle`"
+    )
+)
+
+# Whether a primitive type that a backend doesn't support natively can be shuffled as unsigned
+# words
+shuffle_as_words(T) = T !== UInt32 && sizeof(T) in (1, 2, 4, 8, 16)
+
+# The unsigned integer type of the size of a primitive type `T` (of 1, 2, 4, 8 or 16 bytes)
+const word_types = (UInt8, UInt16, UInt32, UInt64, UInt128)
+word_type(T) = word_types[trailing_zeros(sizeof(T)) + 1]
+
+# Shuffle a primitive value as unsigned words: values of up to 4 bytes are zero-extended to a
+# `UInt32`. Other 8-byte values are shuffled as a `UInt64`, which the backend may support
+# natively, and a `UInt64` it doesn't is split into two `UInt32` words. 16-byte values are
+# split into two `UInt64` words.
+@inline @generated function shfl_words(f, val::T) where {T}
+    shuffle_as_words(T) || return :(shfl_unsupported($T))
+    U = word_type(T)
+    if sizeof(T) <= 4
+        return :(reinterpret($T, f(reinterpret($U, val) % UInt32) % $U))
+    elseif sizeof(T) == 8 && T !== UInt64
+        return :(reinterpret($T, f(reinterpret(UInt64, val))))
+    end
+    W = sizeof(T) == 8 ? UInt32 : UInt64
+    nbits = 8 * sizeof(W)
+    words = (:((f((bits >> $(nbits * (i - 1))) % $W) % $U) << $(nbits * (i - 1))) for i in 1:2)
+    return quote
+        bits = reinterpret($U, val)
+        return reinterpret($T, |($(words...)))
+    end
+end
+
+# A `UInt64` that the backend doesn't shuffle natively is split into two `UInt32` words by a
+# method of its own, so that another 8-byte type, shuffled as a `UInt64`, doesn't reach the
+# fallback through itself, which inference gives up on (on Julia 1.10). Backends that shuffle
+# `UInt64` natively override these.
+@inline shfl(val::UInt64, lane::Integer) = shfl_words(x -> shfl(x, lane), val)
+@inline shfl_down(val::UInt64, offset::Integer) = shfl_words(x -> shfl_down(x, offset), val)
+@inline shfl_up(val::UInt64, offset::Integer) = shfl_words(x -> shfl_up(x, offset), val)
+@inline shfl_xor(val::UInt64, mask::Integer) = shfl_words(x -> shfl_xor(x, mask), val)
+
+# The expression that shuffles `ex::S` field by field, calling `f` on the primitive fields
+function shfl_fields_expr(S, ex)
+    isprimitivetype(S) && return :(f($ex))
+    fields = (shfl_fields_expr(fieldtype(S, i), :(getfield($ex, $i))) for i in 1:fieldcount(S))
+    return Expr(:new, S, fields...)
+end
+
+# Shuffle a value that the backend doesn't support directly field by field. Nested fields are
+# unrolled here, rather than shuffled with a recursive call, which inference gives up on
+# (on Julia 1.10), so that `f` is only called on the primitive types.
+@inline @generated function shfl_fields(f, val::T) where {T}
+    isbitstype(T) || return :(shfl_unsupported($T))
+    return shfl_fields_expr(T, :val)
+end
+
+# The shuffles within segments of `width` lanes, implemented with `shfl` from a lane.
+
+"""
+    shfl(val::T, lane::Integer, width::Integer)::T
+    shfl_down(val::T, offset::Integer, width::Integer)::T
+    shfl_up(val::T, offset::Integer, width::Integer)::T
+    shfl_xor(val::T, mask::Integer, width::Integer)::T
+
+Shuffles within segments of `width` consecutive lanes of the sub-group, with CUDA's semantics
+for a `width`:
+
+- `shfl` reads from lane `lane` of the caller's segment, with `lane` taken modulo `width`
+  (lane `width + 1` is the segment's first lane);
+- `shfl_down` and `shfl_up` read from the lane `offset` lanes further or earlier, and return
+  `val` of the work-item itself where that lane is outside of the caller's segment;
+- `shfl_xor` reads from the lane whose 0-based position in the segment is the caller's xor
+  `mask`, which has to be between 0 and `width - 1`.
+
+Reading from a lane of the segment that has no work-item (in a partial sub-group) gives an
+unspecified value. `width` has to be a power of two of at most the sub-group width
+[`get_max_sub_group_size`](@ref), and the same for all work-items of the sub-group.
+
+The `width` only changes which lanes are read from: as for the shuffles without a `width`, all
+work-items of the sub-group have to execute them together, not just those of a segment.
+
+!!! note
+    Backends **may** implement these, e.g. if they have native shuffles with a width. The
+    fallbacks use [`shfl`](@ref) from a lane.
+"""
+@inline function shfl(val, lane::Integer, width::Integer)
+    l0 = get_sub_group_local_id(Int32) - Int32(1)
+    w = width % Int32
+    base = l0 & ~(w - Int32(1))
+    # `lane - 1` modulo the power of two `width`, before narrowing `lane`
+    return shfl(val, base + ((lane - 1) & (width - 1)) % Int32 + Int32(1))
+end
+
+# The offsets are compared with the width before they are narrowed to `Int32`, so that large
+# offsets read from outside of the segment.
+@inline function shfl_down(val, offset::Integer, width::Integer)
+    l0 = get_sub_group_local_id(Int32) - Int32(1)
+    w = width % Int32
+    pos = l0 & (w - Int32(1))
+    inside = offset < width - pos
+    src = ifelse(inside, l0 + offset % Int32, l0)
+    return shfl(val, src + Int32(1))
+end
+
+@inline function shfl_up(val, offset::Integer, width::Integer)
+    l0 = get_sub_group_local_id(Int32) - Int32(1)
+    w = width % Int32
+    pos = l0 & (w - Int32(1))
+    inside = offset <= pos
+    src = ifelse(inside, l0 - offset % Int32, l0)
+    return shfl(val, src + Int32(1))
+end
+
+@inline function shfl_xor(val, mask::Integer, width::Integer)
+    l0 = get_sub_group_local_id(Int32) - Int32(1)
+    return shfl(val, (l0 ⊻ (mask % Int32)) + Int32(1))
+end
+
+"""
+    sub_group_any(pred::Bool)::Bool
+
+Whether `pred` is `true` for any work-item of the sub-group. All work-items of the sub-group
+get the same result.
+
+All work-items of the sub-group have to execute `sub_group_any` together (not in a divergent
+branch); see [`shfl`](@ref).
+
+It exchanges values, not memory: it is not a memory fence, see [`sub_group_barrier`](@ref).
+
+!!! note
+    Backend implementations that support sub-groups **must** implement:
+    ```
+    @device_override sub_group_any(pred::Bool)::Bool
+    ```
+"""
+function sub_group_any end
+
+"""
+    sub_group_all(pred::Bool)::Bool
+
+Whether `pred` is `true` for all work-items of the sub-group. All work-items of the
+sub-group get the same result.
+
+All work-items of the sub-group have to execute `sub_group_all` together (not in a divergent
+branch); see [`shfl`](@ref).
+
+It exchanges values, not memory: it is not a memory fence, see [`sub_group_barrier`](@ref).
+
+!!! note
+    Backend implementations that support sub-groups **must** implement:
+    ```
+    @device_override sub_group_all(pred::Bool)::Bool
+    ```
+"""
+function sub_group_all end
+
+"""
+    sub_group_ballot(pred::Bool)::UInt64
+
+A mask of the work-items of the sub-group for which `pred` is `true`: bit `i - 1` (counting
+from the least significant bit) is set if and only if the sub-group has a work-item with
+[`get_sub_group_local_id`](@ref) equal to `i` and its `pred` is `true`. All other bits, e.g.
+those of lanes without a work-item in a partial sub-group, are zero. All work-items of the
+sub-group get the same result. Use e.g. `count_ones` to count the work-items, or
+`trailing_zeros` to find the first one.
+
+All work-items of the sub-group have to execute `sub_group_ballot` together (not in a
+divergent branch); see [`shfl`](@ref). Only sub-groups of at most 64 work-items are supported.
+
+It exchanges values, not memory: it is not a memory fence, see [`sub_group_barrier`](@ref).
+
+!!! note
+    Backend implementations that support sub-groups with a width of at most 64 **must**
+    implement:
+    ```
+    @device_override sub_group_ballot(pred::Bool)::UInt64
+    ```
+"""
+function sub_group_ballot end
 
 
 ## synchronization
@@ -306,7 +595,8 @@ Like [`barrier`](@ref), for the work-items of a sub-group: wait until all work-i
 sub-group have reached the barrier, and make their writes to global and local memory
 before it visible to the sub-group.
 
-All work-items of a sub-group have to reach the same `sub_group_barrier()`.
+All work-items of a sub-group have to reach the same `sub_group_barrier()`; see
+[`shfl`](@ref).
 
 !!! note
     Backend implementations that support sub-groups **must** implement:

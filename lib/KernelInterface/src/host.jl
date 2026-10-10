@@ -260,13 +260,17 @@ supports_float64(::Backend) = false
 """
     supports_subgroups(::Backend)::Bool
 
-Whether kernels on the active device support sub-groups: the sub-group queries
-([`get_sub_group_size`](@ref) etc.), [`sub_group_barrier`](@ref), and a fixed sub-group
-width [`sub_group_size`](@ref). See the manual for what KernelInterface guarantees about
-how work-groups are divided into sub-groups; a backend that can't ensure that reports
-`false`.
+Whether kernels on the active device support sub-groups with a fixed width
+[`sub_group_size`](@ref): the sub-group queries ([`get_sub_group_size`](@ref) etc.),
+[`sub_group_barrier`](@ref), and the votes [`sub_group_any`](@ref), [`sub_group_all`](@ref)
+and, for widths of at most 64, [`sub_group_ballot`](@ref). Which types the shuffles support
+is queried separately with [`supports_shuffle`](@ref).
 
-Which types [`shfl_down`](@ref) supports is queried separately with [`supports_shuffle`](@ref).
+Which work-items form a sub-group is unspecified, unless
+[`supports_linear_subgroups`](@ref) returns `true`, and the communication functions have to
+be executed in control flow that is uniform over the work-group, unless
+[`supports_independent_subgroups`](@ref) returns `true`. See the manual for what
+KernelInterface guarantees about sub-groups.
 
 !!! note
     Backend implementations **must** implement this function if they support sub-groups.
@@ -275,15 +279,79 @@ Which types [`shfl_down`](@ref) supports is queried separately with [`supports_s
 supports_subgroups(::Backend) = false
 
 """
-    supports_shuffle(::Backend, ::Type{T})::Bool
+    supports_linear_subgroups(::Backend)::Bool
 
-Whether kernels on the active device support [`shfl_down`](@ref) for values of type `T`.
+Whether sub-groups are formed from consecutive work-items on the active device, for every
+kernel and launch: if the work-group is 1-D, or its x extent is a multiple of the sub-group
+width `W` ([`sub_group_size`](@ref)), the work-item with the linear local index `lin` (x
+fastest, see [`get_local_id`](@ref)) is in sub-group `fld(lin - 1, W) + 1`, at lane
+`mod(lin - 1, W) + 1`, the sub-group ids are `1:cld(n, W)` for a work-group of `n`
+work-items, and only the last sub-group can be partial. In particular, a 1-D work-group of at
+most `W` work-items is a single sub-group. Implies [`supports_subgroups`](@ref).
+
+Code needs this when it relates local ids to lanes: e.g. stencils that shuffle values between
+neighbouring work-items, transposes through shuffles, or work-group scans built from
+sub-group scans. Code that doesn't can index storage by the sub-group slot
+`(get_sub_group_id() - 1) * W + get_sub_group_local_id()`, which is unique within the
+work-group, but not dense: it can exceed the work-group size, so storage has to have room for
+`get_num_sub_groups() * W` values.
+
+`false` means that the layout isn't guaranteed, not that it is different: OpenCL, Vulkan and
+other APIs leave it to the implementation.
 
 !!! note
-    Backend implementations **must** implement this function for the types they support.
+    Backend implementations **should** implement this function if they guarantee the layout.
     The fallback returns `false`.
 """
-supports_shuffle(::Backend, ::Type) = false
+supports_linear_subgroups(::Backend) = false
+
+"""
+    supports_independent_subgroups(::Backend)::Bool
+
+Whether the sub-group communication functions (shuffles, votes, collectives and
+[`sub_group_barrier`](@ref)) can be executed in control flow that is uniform over the
+sub-group, but not over the work-group: e.g. a loop whose trip count differs between
+sub-groups, or after an early `return` of whole sub-groups. Otherwise, all sub-groups of a
+work-group have to execute the same communication functions, in the same order.
+
+This covers physical sub-groups, not the segments of the shuffles with a `width`, and doesn't
+promise forward progress: a sub-group spin-waiting for another one can still hang. Implies
+[`supports_subgroups`](@ref).
+
+!!! note
+    Backend implementations **should** implement this function if sub-groups are
+    independent. The fallback returns `false`.
+"""
+supports_independent_subgroups(::Backend) = false
+
+"""
+    supports_shuffle(::Backend, ::Type{T})::Bool
+
+Whether kernels on the active device support the shuffles [`shfl`](@ref),
+[`shfl_down`](@ref), [`shfl_up`](@ref) and [`shfl_xor`](@ref) for values of type `T`.
+
+Other primitive types of 1, 2, 4, 8 or 16 bytes are supported if `UInt32` is, and `isbits`
+structs and tuples if all of their fields are (and, for those without fields, if `UInt32`
+is).
+
+This reports whether values of type `T` can be moved between work-items, not whether the
+device can compute with them: e.g. `Float64` values can be shuffled (as words) on a device
+without [`supports_float64`](@ref), as long as they are only stored and loaded, e.g. through
+an array of `UInt64`.
+
+!!! note
+    Backend implementations **must** implement this function for the primitive types they
+    support natively, which have to include `UInt32`, with a signature that only matches
+    those, e.g. `supports_shuffle(::NewBackend, ::Type{<:Union{UInt32, Float32}})`. The
+    fallback handles other types.
+"""
+function supports_shuffle(backend::Backend, ::Type{T}) where {T}
+    isprimitivetype(T) && return shuffle_as_words(T) && supports_shuffle(backend, UInt32)
+    (isbitstype(T) && !isprimitivetype(T)) || return false
+    # not `true` for a type without fields on a backend without shuffles
+    fieldcount(T) == 0 && return supports_shuffle(backend, UInt32)
+    return all(i -> supports_shuffle(backend, fieldtype(T, i)), 1:fieldcount(T))
+end
 
 """
     allocate(::Backend, Type, dims...; unified=false)::AbstractArray
