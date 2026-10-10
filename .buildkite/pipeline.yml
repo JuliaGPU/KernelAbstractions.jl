@@ -182,9 +182,7 @@ steps:
       julia -e 'println("--- :julia: Developing OpenCL")
                 using Pkg
                 Pkg.add(url="https://github.com/JuliaGPU/OpenCL.jl", rev="ka-0.10")
-                # not the ka-0.10 copy of SPIRVIntrinsics: KernelAbstractions needs the
-                # sub-group votes and collectives of SPIRVIntrinsics 1.3
-                Pkg.add(name="SPIRVIntrinsics", version="1.3")' || exit 3
+                Pkg.develop(; name="SPIRVIntrinsics")' || exit 3
 
       julia -e 'println("+++ :julia: Running tests")
                 using Pkg
