@@ -33,6 +33,7 @@ include("host.jl")
             :get_sub_group_id, :get_sub_group_local_id,
             :localmemory, :shfl, :shfl_down, :shfl_up, :shfl_xor,
             :sub_group_any, :sub_group_all, :sub_group_ballot,
+            :sub_group_reduce, :sub_group_scan, :sub_group_exclusive_scan,
             :barrier, :sub_group_barrier, :_print,
             # compilation and launch
             :Kernel, :kernel_function, :argconvert, :launch, Symbol("@launch"),

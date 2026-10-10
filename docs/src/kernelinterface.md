@@ -77,7 +77,7 @@ What a backend implements, at a glance. The docstrings below have the details.
 | **Capabilities** | | [`supports_float64`](@ref), [`supports_atomics`](@ref), [`supports_unified`](@ref), [`supports_subgroups`](@ref), [`supports_linear_subgroups`](@ref), [`supports_independent_subgroups`](@ref) (all `false`), [`supports_shuffle`](@ref) (`false` unless derived from the natively supported types, see its docstring) |
 | **Compilation** | [`argconvert`](@ref), [`kernel_function`](@ref), [`launch`](@ref) | |
 | **Device** | [`get_local_id`](@ref), [`get_group_id`](@ref), [`get_local_size`](@ref), [`get_num_groups`](@ref), [`localmemory`](@ref), [`barrier`](@ref) | [`get_global_id`](@ref), [`get_global_size`](@ref) (derived from the primitive queries), [`_print`](@ref KernelInterface._print) (host `print`) |
-| **Sub-groups** | if `supports_subgroups`: [`sub_group_size`](@ref), the sub-group queries (with a constant [`get_max_sub_group_size`](@ref)), [`sub_group_barrier`](@ref), [`sub_group_any`](@ref), [`sub_group_all`](@ref), and [`sub_group_ballot`](@ref) for widths of at most 64; if `supports_shuffle(backend, T)`: [`shfl`](@ref), [`shfl_down`](@ref), [`shfl_up`](@ref), [`shfl_xor`](@ref) for the primitive `T` supported natively, including `UInt32` | shuffles with a `width` (built on [`shfl`](@ref)); shuffles of other primitive types (as `UInt32` or `UInt64` words) and of structs (field by field) |
+| **Sub-groups** | if `supports_subgroups`: [`sub_group_size`](@ref), the sub-group queries (with a constant [`get_max_sub_group_size`](@ref)), [`sub_group_barrier`](@ref), [`sub_group_any`](@ref), [`sub_group_all`](@ref), and [`sub_group_ballot`](@ref) for widths of at most 64; if `supports_shuffle(backend, T)`: [`shfl`](@ref), [`shfl_down`](@ref), [`shfl_up`](@ref), [`shfl_xor`](@ref) for the primitive `T` supported natively, including `UInt32` | shuffles with a `width`, [`sub_group_reduce`](@ref), [`sub_group_scan`](@ref), [`sub_group_exclusive_scan`](@ref) (built on the shuffles); shuffles of other primitive types (as `UInt32` or `UInt64` words) and of structs (field by field) |
 
 Everything else, such as [`zeros`](@ref KernelInterface.zeros), [`ones`](@ref KernelInterface.ones),
 the launch-keyword handling of [`Kernel`](@ref) and [`@launch`](@ref KernelInterface.@launch),
@@ -168,7 +168,8 @@ one sub-group per work-item, and code combining those values has to use
 
 A sub-group is partial when it has fewer work-items than the width: the lanes
 `get_sub_group_size()+1:W` have no work-item. Shuffles from those lanes give unspecified
-values, and the votes only take the work-items of the sub-group into account.
+values, and the votes, [`sub_group_reduce`](@ref) and the scans only take the work-items of
+the sub-group into account.
 
 Backends that guarantee more say so with two queries:
 
@@ -181,8 +182,8 @@ Backends that guarantee more say so with two queries:
   ids to lanes needs this, e.g. stencils exchanging neighbouring values with shuffles. Code
   that doesn't, like a work-group reduction combining a value per sub-group, can index by the
   sub-group slot `(get_sub_group_id() - 1) * W + get_sub_group_local_id()` instead.
-- [`supports_independent_subgroups`](@ref): the communication functions (shuffles, votes
-  and [`sub_group_barrier`](@ref)) can be executed in control flow that is uniform
+- [`supports_independent_subgroups`](@ref): the communication functions (shuffles, votes,
+  collectives and [`sub_group_barrier`](@ref)) can be executed in control flow that is uniform
   over each sub-group, but differs between the sub-groups of a work-group, e.g. a loop whose
   trip count depends on the sub-group, or after an early `return` of whole sub-groups.
   Otherwise, all sub-groups of a work-group have to execute the same communication
@@ -245,6 +246,9 @@ shfl(::Any, ::Integer, ::Integer)
 sub_group_any
 sub_group_all
 sub_group_ballot
+sub_group_reduce
+sub_group_scan
+sub_group_exclusive_scan
 ```
 
 ### Printing

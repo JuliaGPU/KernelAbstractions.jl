@@ -299,6 +299,33 @@ end
     return UInt64(mask[1].value) | (UInt64(mask[2].value) << 32)
 end
 
+# Native reductions and scans of `cl_khr_subgroups`, for `+` on 32- and 64-bit integers and
+# floats, and `min`/`max` on integers (OpenCL's `min` and `max` treat NaN and the sign of zero
+# differently from Julia's). They need the fix of PoCL 7.2's peeling of the first work-item
+# (pocl/pocl#2239), which `pocl_standalone_jll` includes since 7.2.1+1.
+const CollectiveIntTypes = Union{Int32, UInt32, Int64, UInt64}
+const CollectiveTypes = Union{CollectiveIntTypes, Float16, Float32, Float64}
+
+@device_override KI.sub_group_reduce(::typeof(+), val::CollectiveTypes) =
+    SPIRVIntrinsics.sub_group_reduce_add(val)
+@device_override KI.sub_group_reduce(::typeof(min), val::CollectiveIntTypes) =
+    SPIRVIntrinsics.sub_group_reduce_min(val)
+@device_override KI.sub_group_reduce(::typeof(max), val::CollectiveIntTypes) =
+    SPIRVIntrinsics.sub_group_reduce_max(val)
+
+@device_override KI.sub_group_scan(::typeof(+), val::CollectiveTypes) =
+    SPIRVIntrinsics.sub_group_scan_inclusive_add(val)
+@device_override KI.sub_group_scan(::typeof(min), val::CollectiveIntTypes) =
+    SPIRVIntrinsics.sub_group_scan_inclusive_min(val)
+@device_override KI.sub_group_scan(::typeof(max), val::CollectiveIntTypes) =
+    SPIRVIntrinsics.sub_group_scan_inclusive_max(val)
+
+# the exclusive scans of `cl_khr_subgroups` start from the identity, not from `init`
+@device_override function KI.sub_group_exclusive_scan(::typeof(+), val::T, init::T) where {T <: CollectiveTypes}
+    prefix = SPIRVIntrinsics.sub_group_scan_exclusive_add(val)
+    return ifelse(get_sub_group_local_id() == 1, init, init + prefix)
+end
+
 @device_override @inline function KI._print(args...)
     POCL._print(args...)
 end

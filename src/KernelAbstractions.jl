@@ -747,7 +747,8 @@ CPU backend that compiles kernels to OpenCL via [POCL](https://portablecl.org/) 
 them on the host. This is the concrete type behind the [`CPU`](@ref) alias.
 
 !!! warning "Sub-group operations"
-    PoCL implements sub-group operations (shuffles and votes) with barriers across the whole work-group, so it doesn't support independent
+    PoCL implements sub-group operations (shuffles, votes, and the collectives built on
+    them) with barriers across the whole work-group, so it doesn't support independent
     sub-groups (`KernelInterface.supports_independent_subgroups` is `false`): all sub-groups
     of a work-group have to execute the same sub-group operations, in the same order, e.g.
     not in a loop whose trip count depends on the sub-group, or in a branch that only some

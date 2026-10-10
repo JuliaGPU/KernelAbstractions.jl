@@ -376,6 +376,60 @@ function all_shuffles(sg_size)
     return shuffles
 end
 
+# The collectives, as callables
+struct Reduce{O}
+    op::O
+end
+(r::Reduce)(x) = KI.sub_group_reduce(r.op, x)
+
+struct Scan{O}
+    op::O
+end
+(s::Scan)(x) = KI.sub_group_scan(s.op, x)
+
+struct ExclusiveScan{O, T}
+    op::O
+    init::T
+end
+(s::ExclusiveScan)(x) = KI.sub_group_exclusive_scan(s.op, x, s.init)
+
+# an associative but not commutative operator: the composition of affine maps
+compose_affine(f, g) = (g[1] * f[1], g[1] * f[2] + g[2])
+# the (value, index) of the smallest value, the first one of equal values
+argmin_op(x, y) = ifelse(y[1] < x[1], y, x)
+
+# The expected result of a collective for lane `l` of the sub-group with the values `vals`
+collective_result(r::Reduce, vals, l) = foldl(r.op, vals)
+collective_result(s::Scan, vals, l) = foldl(s.op, vals[1:l])
+collective_result(s::ExclusiveScan, vals, l) = l == 1 ? s.init : s.op(s.init, foldl(s.op, vals[1:(l - 1)]))
+
+# Floating-point `+` and `*` may be reassociated, so they are compared with a tolerance
+# (other than for the `init` of an exclusive scan, which lane 1 gets unchanged).
+collective_op(f) = f.op
+reassociable(f, ::Type{T}) where {T} = T <: AbstractFloat && collective_op(f) in (+, *)
+
+function collective_testsuite(backend, AT, f, a)
+    res = sub_group_apply(backend, AT, f, a)
+    res === nothing && return
+    out, groups = res
+    T = eltype(a)
+    ok = true
+    for g in groups
+        vals = a[g]
+        for (l, i) in enumerate(g)
+            expected = collective_result(f, vals, l)
+            if reassociable(f, T) && !(f isa ExclusiveScan && l == 1)
+                ok &= isapprox(out[i], expected; nans = true, rtol = sqrt(eps(T)))
+            else
+                # `isequal`, as the results may be NaN or a signed zero
+                ok &= isequal(out[i], expected)
+            end
+        end
+    end
+    @test ok
+    return
+end
+
 function vote_testsuite(backend, AT, sg_size, pred)
     for (vote, T) in ((KI.sub_group_any, Bool), (KI.sub_group_all, Bool), (KI.sub_group_ballot, UInt64))
         vote === KI.sub_group_ballot && sg_size > 64 && continue
@@ -391,6 +445,36 @@ function vote_testsuite(backend, AT, sg_size, pred)
             ok &= all(i -> out[i] == expected, g)
         end
         @test ok
+    end
+    return
+end
+
+# the values come from a divergent branch, like for the padding work-items of a `@kernel`
+function reduce_divergent_kernel(ids, red, scan, a, m)
+    i = KI.get_local_id().x
+    record_sub_group!(ids, i)
+    val = i <= m ? (@inbounds a[i]) : zero(eltype(a))
+    r = KI.sub_group_reduce(+, val)
+    s = KI.sub_group_scan(+, val)
+    @inbounds red[i] = r
+    @inbounds scan[i] = s
+    return
+end
+
+function reduce_divergent_testsuite(backend, AT, sg_size, ::Type{T}) where {T}
+    n = sg_size
+    m = max(n - 5, 1)
+    a = T.(rand(1:20, n))
+    ids = AT(zeros(Int, 3, n))
+    red = AT(zeros(T, n))
+    scan = AT(zeros(T, n))
+    KI.@launch backend workgroupsize = n reduce_divergent_kernel(ids, red, scan, AT(a), m)
+    KI.synchronize(backend)
+    red, scan = Array(red), Array(scan)
+    vals = [i <= m ? a[i] : zero(T) for i in 1:n]
+    for g in observed_sub_groups(Array(ids))
+        @test all(i -> red[i] == sum(vals[g]), g)
+        @test all(l -> scan[g[l]] == sum(vals[g[1:l]]), eachindex(g))
     end
     return
 end
@@ -590,6 +674,67 @@ function subgroup_communication_testsuite(backend::KI.Backend, AT, sg_size)
         @test KI.supports_shuffle(backend, ShuffleStruct) ==
             all(S -> KI.supports_shuffle(backend, S), (Float32, Int64, Int32))
         @test !KI.supports_shuffle(backend, Ref{Int})
+    end
+
+    @testset "sub_group_reduce and scans" begin
+        @testset "$n work-items" for n in sizes
+            ops = Any[
+                (+, Int32.(rand(1:100, n))),
+                # wrap-around
+                (+, Int32[typemax(Int32) - rand(Int32(0):Int32(10)) for _ in 1:n]),
+                (*, Int32.(rand(-3:3, n))),
+                # operators and types that backends may implement natively
+                (+, UInt64.(rand(1:100, n))), (+, Int64.(rand(-100:100, n))),
+                (+, UInt32.(rand(1:100, n))),
+                (min, Int64.(rand(-100:100, n))), (min, Int32.(rand(-100:100, n))),
+                (max, UInt32.(rand(1:100, n))), (max, Int64.(rand(-100:100, n))),
+                (|, UInt32.(rand(UInt32, n))), (&, UInt32.(rand(UInt32, n))),
+                (xor, UInt64.(rand(UInt64, n))),
+                # not commutative
+                (compose_affine, [(Int32(rand((-1, 1, 2))), Int32(rand(-5:5))) for _ in 1:n]),
+                (argmin_op, [(Float32(rand(1:20)), Int32(i)) for i in 1:n]),
+            ]
+            float_types = Any[Float32]
+            KI.supports_shuffle(backend, Float16) && push!(float_types, Float16)
+            fp64 && KI.supports_shuffle(backend, Float64) && push!(float_types, Float64)
+            for T in float_types
+                # exactly representable sums for `Float16`, rounding for the others
+                push!(ops, (+, T === Float16 ? T.(rand(1:8, n)) ./ 4 : T.(rand(n))))
+                T === Float16 || push!(ops, (*, T.(rand(0.9:0.01:1.1, n))))
+                # NaN and infinities propagate through `+` whatever the order
+                push!(ops, (+, T[i == 2 ? -T(Inf) : i == 3 ? T(Inf) : rand(1:100) for i in 1:n]))
+                push!(ops, (+, T[i == 2 ? T(NaN) : rand(1:100) for i in 1:n]))
+                # Julia's `max` and `min` propagate NaN, unlike OpenCL's
+                push!(ops, (max, T[i == 2 ? T(NaN) : rand(1:100) for i in 1:n]))
+                push!(ops, (min, T[i == n ? T(NaN) : rand(1:100) for i in 1:n]))
+                # ... and tell the sign of zero apart
+                push!(ops, (min, T[isodd(i) ? -zero(T) : zero(T) for i in 1:n]))
+                push!(ops, (max, T[isodd(i) ? zero(T) : -zero(T) for i in 1:n]))
+            end
+            for (op, a) in ops
+                KI.supports_shuffle(backend, eltype(a)) || continue
+                collective_testsuite(backend, AT, Reduce(op), a)
+                collective_testsuite(backend, AT, Scan(op), a)
+            end
+
+            # exclusive scans with an `init` that isn't the identity
+            collective_testsuite(backend, AT, ExclusiveScan(+, Int32(7)), Int32.(rand(1:100, n)))
+            collective_testsuite(backend, AT, ExclusiveScan(+, UInt64(7)), UInt64.(rand(1:100, n)))
+            collective_testsuite(backend, AT, ExclusiveScan(max, Int32(50)), Int32.(rand(1:100, n)))
+            collective_testsuite(backend, AT, ExclusiveScan(+, 7.0f0), Float32.(rand(1:100, n)))
+            collective_testsuite(
+                backend, AT, ExclusiveScan(compose_affine, (Int32(2), Int32(3))),
+                [(Int32(rand((-1, 1, 2))), Int32(rand(-5:5))) for _ in 1:n]
+            )
+            # lane 1 gets `init` itself, not `init + 0.0`
+            collective_testsuite(backend, AT, ExclusiveScan(+, -0.0f0), Float32.(rand(1:100, n)))
+            collective_testsuite(backend, AT, ExclusiveScan(+, -0.0f0), fill(-0.0f0, n))
+        end
+    end
+
+    @testset "sub_group_reduce and sub_group_scan of divergent values" begin
+        reduce_divergent_testsuite(backend, AT, sg_size, Int32)
+        reduce_divergent_testsuite(backend, AT, sg_size, Float32)
     end
 
     if KI.supports_independent_subgroups(backend)

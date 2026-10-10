@@ -133,8 +133,8 @@ end
 # manual).
 #
 # In a partial sub-group, the lanes `get_sub_group_size()+1:get_max_sub_group_size()` have no
-# work-item: shuffles from them give unspecified values, and the votes only take the
-# work-items of the sub-group into account.
+# work-item: shuffles from them give unspecified values, and the votes, `sub_group_reduce` and
+# the scans only take the work-items of the sub-group into account.
 
 """
     get_sub_group_size([::Type{T}=Int])::T
@@ -563,6 +563,134 @@ It exchanges values, not memory: it is not a memory fence, see [`sub_group_barri
     ```
 """
 function sub_group_ballot end
+
+"""
+    sub_group_reduce(op, val::T)::T
+
+Reduce `val` over the work-items of the sub-group with the binary operator `op`, in the order
+of the lanes: `op(…op(op(v₁, v₂), v₃)…, vₙ)` for the values `vᵢ` of lanes `1:n`, with
+`n = get_sub_group_size()`, up to associativity. `op` has to be associative, but needn't be
+commutative. All work-items of the sub-group get the result.
+
+All work-items of the sub-group have to execute `sub_group_reduce` together (not in a
+divergent branch), with the same `op`; see [`shfl`](@ref). Values of the types that the
+shuffles support are supported, see [`supports_shuffle`](@ref), and others for which the
+backend has a native reduction.
+
+It exchanges values, not memory: it is not a memory fence, see [`sub_group_barrier`](@ref).
+
+!!! note
+    Backends **may** implement this for operators and types with a native reduction (e.g.
+    `+` on `Float32`), dispatching on `typeof(op)`. The result has to be the one documented
+    above, with Julia's semantics of `op` (e.g. NaN propagation and the sign of zero for `min`
+    and `max`, wrap-around for integers), with one exception: for `+` and `*` on floating-point
+    values, it may differ as if the values were combined in another order and grouping. The
+    fallback combines ranges of doubling length with a butterfly of [`shfl_xor`](@ref), and
+    in a partial sub-group broadcasts the result of the first lane with [`shfl`](@ref).
+"""
+@inline function sub_group_reduce(op, val)
+    width = get_max_sub_group_size(Int32)
+    sgsize = get_sub_group_size(Int32)
+    lane0 = get_sub_group_local_id(Int32) - Int32(1)
+    if ispow2(width)
+        # A butterfly with `shfl_xor`, which unrolls for the constant width. Each step combines
+        # the block of a work-item with the neighboring block, the lower one first, so that
+        # only associativity is needed. In a full sub-group, every work-item ends up with the
+        # reduction; in a partial one, blocks without work-items are skipped, which keeps the
+        # result of the first lane correct, and it is broadcast. All sub-groups run the same
+        # shuffles, since some backends (PoCL) need that across the sub-groups of a work-group.
+        mask = Int32(1)
+        while mask < width
+            other = shfl_xor(val, mask)
+            if (lane0 ⊻ mask) < sgsize
+                if lane0 & mask == Int32(0)
+                    val = op(val, other)
+                else
+                    val = op(other, val)
+                end
+            end
+            mask <<= 1
+        end
+        first = shfl(val, 1)
+        return ifelse(sgsize == width, val, first)
+    else
+        # combine ranges of doubling length with `shfl_down`, skipping the lanes without a
+        # work-item, and broadcast the result of the first lane
+        lane = lane0 + Int32(1)
+        offset = Int32(1)
+        while offset < width
+            other = shfl_down(val, offset)
+            if lane + offset <= sgsize
+                val = op(val, other)
+            end
+            offset <<= 1
+        end
+        return shfl(val, 1)
+    end
+end
+
+"""
+    sub_group_scan(op, val::T)::T
+
+The inclusive scan of `val` over the work-items of the sub-group with the associative binary
+operator `op`, in the order of the lanes: the work-item in lane `i` gets the reduction of the
+values of lanes `1` to `i`, as with [`sub_group_reduce`](@ref).
+
+All work-items of the sub-group have to execute `sub_group_scan` together (not in a divergent
+branch), with the same `op`; see [`shfl`](@ref). Values of the types that the shuffles
+support are supported, see [`supports_shuffle`](@ref), and others for which the backend has a
+native scan.
+
+It exchanges values, not memory: it is not a memory fence, see [`sub_group_barrier`](@ref).
+
+!!! note
+    Backends **may** implement this for operators and types with a native scan (e.g. `+` on
+    `Float32`), dispatching on `typeof(op)`, with the results documented above, as for
+    [`sub_group_reduce`](@ref): for floating-point `+` and `*`, the values of each lane's
+    prefix may be combined in another order and grouping. The fallback is a Hillis-Steele scan
+    with [`shfl_up`](@ref).
+"""
+@inline function sub_group_scan(op, val)
+    lane = get_sub_group_local_id(Int32)
+    # loop to the constant width, so that the loop unrolls: the lanes `shfl_up` reads from
+    # always have a work-item, also in a partial sub-group
+    width = get_max_sub_group_size(Int32)
+    offset = Int32(1)
+    while offset < width
+        other = shfl_up(val, offset)
+        if lane > offset
+            val = op(other, val)
+        end
+        offset <<= 1
+    end
+    return val
+end
+
+"""
+    sub_group_exclusive_scan(op, val::T, init::T)::T
+
+The exclusive scan of `val` over the work-items of the sub-group with the associative binary
+operator `op`, in the order of the lanes, starting from `init`: the work-item in lane 1 gets
+`init` itself, and the one in lane `i > 1` gets `op(init, r)` for the reduction `r` of the
+values of lanes `1` to `i - 1`, as with [`sub_group_scan`](@ref). `init` has to be the same
+for all work-items of the sub-group, and of the type of `val`; it needn't be an identity of
+`op`.
+
+All work-items of the sub-group have to execute `sub_group_exclusive_scan` together (not in a
+divergent branch), with the same `op`; see [`shfl`](@ref). Values of the types that the
+shuffles support are supported, see [`supports_shuffle`](@ref), and others for which the
+backend has a native scan.
+
+It exchanges values, not memory: it is not a memory fence, see [`sub_group_barrier`](@ref).
+
+!!! note
+    Backends **may** implement this like [`sub_group_scan`](@ref). The fallback shifts the
+    result of [`sub_group_scan`](@ref) up by a lane with [`shfl_up`](@ref).
+"""
+@inline function sub_group_exclusive_scan(op, val, init)
+    prefix = shfl_up(sub_group_scan(op, val), 1)
+    return get_sub_group_local_id(Int32) == Int32(1) ? init : op(init, prefix)
+end
 
 
 ## synchronization

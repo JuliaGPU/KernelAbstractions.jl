@@ -249,6 +249,35 @@ end
     @test out[1] == POCL.device_limits().sub_group_size
 end
 
+# the native sub-group collectives are used where they have Julia's semantics
+function sub_group_reduce_kernel(out, x)
+    i = KernelAbstractions.KernelInterface.get_global_id().x
+    out[i] = KernelAbstractions.KernelInterface.sub_group_reduce(+, x[i])
+    return
+end
+function sub_group_exclusive_scan_kernel(out, x)
+    i = KernelAbstractions.KernelInterface.get_global_id().x
+    out[i] = KernelAbstractions.KernelInterface.sub_group_exclusive_scan(+, x[i], eltype(x)(7))
+    return
+end
+@testset "POCL native sub-group collectives" begin
+    W = POCL.device_limits().sub_group_size
+    for T in (Int32, Float32)
+        x, out = ones(T, W), zeros(T, W)
+        ir = sprint() do io
+            @device_code_llvm io = io debuginfo = :none @opencl local_size = W global_size = W sub_group_reduce_kernel(out, x)
+        end
+        @test all(==(W), out)
+        @test occursin("sub_group_reduce_add", ir)
+
+        ir = sprint() do io
+            @device_code_llvm io = io debuginfo = :none @opencl local_size = W global_size = W sub_group_exclusive_scan_kernel(out, x)
+        end
+        @test out == 7 .+ (0:(W - 1))
+        @test occursin("sub_group_scan_exclusive_add", ir)
+    end
+end
+
 # Julia doesn't turn a splat of more than 32 elements into a direct call, so a launch with
 # many arguments allocates unless every layer passes them on as a tuple
 @testset "POCL launch with many arguments" begin
