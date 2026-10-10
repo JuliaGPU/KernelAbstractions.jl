@@ -70,6 +70,16 @@ function __kernel(expr, __source__::LineNumberNode, __module__::Module, force_in
     end
     gpu_function = combinedef(def_gpu)
 
+    # Properties of the kernel are methods of its function, rather than of a function of
+    # KernelAbstractions, so that a kernel can also be defined in a local scope. Like the
+    # constructors, they are defined with the first method of the kernel, since a method can't
+    # be overwritten during precompilation.
+    queries = Any[]
+    if find_collective(def[:body])
+        # see `uses_collectives`
+        push!(queries, :($gpu_name(::$CollectivesQuery) = true))
+    end
+
     # create constructor functions
     _name = Symbol(:_, name)
     constructors = quote
@@ -81,6 +91,7 @@ function __kernel(expr, __source__::LineNumberNode, __module__::Module, force_in
             $name(dev, size) = $_name(dev, $StaticSize(size), $DynamicSize())
             $name(dev, size, range) = $_name(dev, $StaticSize(size), $StaticSize(range))
             $name(dev, size::$_Size, range::$_Size) = $_name(dev, size, range)
+            $(queries...)
         end
     end
     constructors = relocate_lines(constructors, __source__)
@@ -173,7 +184,8 @@ function transform_gpu!(def, constargs, force_inbounds, unsafe_indices)
             push!(let_constargs, :($arg = $constify($arg)))
         end
     end
-    pushfirst!(def[:args], :__ctx__)
+    # typed, so that the queries of `@kernel` (e.g. `uses_collectives`) never match the kernel
+    pushfirst!(def[:args], :(__ctx__::$CompilerMetadata))
     # `Any[]`, since `split` hands back `LineNumberNode`s alongside `Expr`s
     new_stmts = Any[]
     body = MacroTools.flatten(def[:body])
@@ -242,6 +254,15 @@ end
 function is_scope_construct(expr::Expr)
     return expr.head === :block # ||
     # expr.head === :let
+end
+
+function find_collective(stmt)
+    result = Ref(false)
+    postwalk(stmt) do expr
+        result[] |= is_collective(expr)
+        expr
+    end
+    return result[]
 end
 
 # Whether `stmt` contains a `@synchronize`, or a collective like `@groupreduce` that all

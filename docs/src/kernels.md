@@ -219,7 +219,8 @@ survive across `@synchronize`, an `MArray` can be used instead.
 Like [`@synchronize`](@ref), they are collectives: all work-items of the workgroup have to
 reach them, not in a branch or loop that only some of them take, and they have to be used as
 statements of their own, e.g. `res = @groupreduce(+, val, zero(T))`. Work-items that pad a
-partial workgroup take part as well, contributing the neutral element.
+partial workgroup take part as well, contributing the neutral element. On backends with
+sub-groups, `@groupreduce` uses them where it can.
 
 A kernel is either a `@kernel` or a kernel written against
 [KernelInterface](@ref kernelinterface), never a mix: don't call KernelInterface's device
