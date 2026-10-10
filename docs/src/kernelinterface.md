@@ -206,7 +206,9 @@ used anywhere.
     kernel languages built on it. A kernel is either a KernelInterface kernel or a
     KernelAbstractions `@kernel`, never a mix: `@kernel` adds padding work-items to partial
     work-groups, which skip the kernel's body, so KernelInterface's sub-group functions called
-    in a `@kernel` aren't reached by all work-items. Host code may use the queries of both.
+    in a `@kernel` aren't reached by all work-items. A `@kernel` uses KernelAbstractions'
+    collectives instead, e.g. [`@groupreduce`](@ref KernelAbstractions.@groupreduce). Host
+    code may use the queries of both.
 
 ```@docs
 get_sub_group_size
