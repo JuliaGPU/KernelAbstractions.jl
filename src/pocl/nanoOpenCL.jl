@@ -1628,9 +1628,14 @@ const blocking_waits = Ref(false)
 
 function Base.wait(evt::Event)
     # wait without blocking the thread, so that other tasks can run in the meantime. after
-    # polling briefly, PoCL notifies us when the command completes: waking a worker thread
-    # to wait for it, or polling for longer, would compete with the command for the CPU
-    # cores it executes on.
+    # polling for a while, PoCL notifies us when the command completes: waking a worker
+    # thread to wait for it, or polling for longer, would compete with the command for the
+    # CPU cores it executes on.
+    #
+    # being notified costs ~7 µs more than polling: PoCL calls back a few µs after the
+    # command completes, and then has to wake up this task. polling for up to 50 µs avoids
+    # that for small kernels, which take 2-50 µs from the flush to completing, and only
+    # occupies one CPU thread for a small fraction of a longer command.
     #
     # this cannot be interrupted, as kernels may be using memory that callers would release:
     # an interrupt is only thrown once the kernel has completed (or waiting failed, in which
@@ -1644,7 +1649,7 @@ function Base.wait(evt::Event)
 
             cooperative_wait(
                 blocking_wait, evt; subscribe = subscribe_completion, isdone = iscomplete,
-                spin = 10.0e-6
+                spin = 50.0e-6
             )
         catch
             blocking_wait(evt)
