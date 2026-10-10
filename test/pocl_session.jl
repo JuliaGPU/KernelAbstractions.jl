@@ -16,6 +16,12 @@ end
     @inbounds A[I] = rand(Float32)
 end
 
+@kernel function group_index!(G, L)
+    I = @index(Global, Linear)
+    @inbounds G[I] = @index(Group, Linear)
+    @inbounds L[I] = @index(Local, Linear)
+end
+
 empty_kernel() = return
 
 function pointer_value(out, p)
@@ -60,6 +66,19 @@ end
             end
         end
         @test all(A -> all(x -> 0 <= x < 1, A), arrays)
+    end
+
+    # the default workgroup size spreads a launch over the threads
+    @testset "default workgroup size" begin
+        threads = POCL.device().max_compute_units
+        @test threads > 1
+        N = 4096
+        G = zeros(Int, N)
+        L = zeros(Int, N)
+        group_index!(CPU())(G, L; ndrange = N)
+        @test maximum(G) >= threads
+        # every work-item ran once
+        @test (G .- 1) .* maximum(L) .+ L == 1:N
     end
 
     @testset "null pointer arguments" begin

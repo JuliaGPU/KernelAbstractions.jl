@@ -17,7 +17,10 @@ struct Session
     device::cl.Device
     context::cl.Context
     # querying the device allocates, so cache the limits that every launch needs
-    limits::@NamedTuple{max_work_group_size::Int, max_work_group_dims::NTuple{3, Int}, sub_group_size::Int}
+    limits::@NamedTuple{
+        max_work_group_size::Int, max_work_group_dims::NTuple{3, Int}, sub_group_size::Int,
+        compute_units::Int,
+    }
 end
 
 function Session()
@@ -42,6 +45,8 @@ function Session()
         max_work_group_dims = ntuple(d -> d <= length(sizes) ? sizes[d] : 1, 3),
         # 0 if the device has no sub-groups
         sub_group_size = isempty(common) ? 0 : first(common),
+        # the threads PoCL runs work-groups on
+        compute_units = Int(device.max_compute_units),
     )
 
     return Session(platform, device, context, limits)
