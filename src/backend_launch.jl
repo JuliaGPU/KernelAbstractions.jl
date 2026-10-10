@@ -8,15 +8,27 @@
 ###
 
 """
-    mkcontext(kernel::Kernel, ndrange, iterspace, [launch])
+    mkcontext(kernel::Kernel, ndrange, iterspace, [launch]; subgroups = nothing)
 
 The hidden context argument for launching `kernel` over `ndrange`, partitioned as
-`iterspace`, with the launch configuration `launch` (see [`select_launch`](@ref)).
+`iterspace`, with the launch configuration `launch` (see [`select_launch`](@ref)) and the
+backend's sub-group capabilities `subgroups` (see [`kernel_subgroups`](@ref)).
 """
 mkcontext(kernel::Kernel, _ndrange, iterspace) =
     CompilerMetadata{ndrange(kernel), DynamicCheck}(_ndrange, iterspace)
-mkcontext(kernel::Kernel, _ndrange, iterspace, launch) =
-    CompilerMetadata{ndrange(kernel), DynamicCheck}(_ndrange, iterspace; launch)
+mkcontext(kernel::Kernel, _ndrange, iterspace, launch; subgroups = nothing) =
+    CompilerMetadata{ndrange(kernel), DynamicCheck}(_ndrange, iterspace; launch, subgroups)
+
+"""
+    kernel_subgroups(kernel::Kernel)
+
+The sub-group capabilities of the backend of `kernel` that its work-group collectives can
+use, a [`SubgroupCapabilities`](@ref), or `nothing` if the backend has none, or if the kernel
+doesn't use collectives (which doesn't depend on the backend, so that launching other
+kernels doesn't query it).
+"""
+kernel_subgroups(kernel::Kernel) =
+    uses_collectives(kernel.f) ? subgroup_capabilities(backend(kernel)) : nothing
 mkcontext(kernel::Kernel, I, _ndrange, iterspace, ::Dynamic) where {Dynamic} =
     CompilerMetadata{ndrange(kernel), Dynamic}(I, _ndrange, iterspace)
 
@@ -103,10 +115,18 @@ function launch_tuple(obj::Kernel, args::Tuple; ndrange = nothing, workgroupsize
 end
 
 function launch_kernel(obj::Kernel, launch, ndrange, _workgroupsize, iterspace, args::Tuple)
+    # a constant `nothing` for kernels without collectives; for kernels with, the call below
+    # is a function barrier that makes the rest of the launch type stable
+    subgroups = kernel_subgroups(obj)
+    launch_kernel(obj, launch, subgroups, ndrange, _workgroupsize, iterspace, args)
+    return nothing
+end
+
+function launch_kernel(obj::Kernel, launch, subgroups, ndrange, _workgroupsize, iterspace, args::Tuple)
     b = backend(obj)
 
     # this might not be the final context, since we may tune the workgroupsize
-    ctx = mkcontext(obj, ndrange, iterspace, launch)
+    ctx = mkcontext(obj, ndrange, iterspace, launch; subgroups)
     kernel = compile(obj, ctx, args)
 
     # tune the workgroup size, keeping the context type (and thus the kernel) the same
@@ -114,7 +134,7 @@ function launch_kernel(obj::Kernel, launch, ndrange, _workgroupsize, iterspace, 
         range = something(ndrange, static_ndrange(obj))
         threads = KI.launch_configuration(kernel; nitems = saturated_prod(extents(range))).workgroupsize
         iterspace, _ = partition(obj, ndrange, launch_workgroupsize(b, launch, threads, range))
-        ctx = mkcontext(obj, ndrange, iterspace, launch)
+        ctx = mkcontext(obj, ndrange, iterspace, launch; subgroups)
     end
 
     # the geometry is valid by construction, except for the kernel's limits

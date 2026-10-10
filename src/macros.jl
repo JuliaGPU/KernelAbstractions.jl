@@ -83,6 +83,10 @@ function __kernel(expr, __source__::LineNumberNode, __module__::Module, force_in
             $name(dev, size::$_Size, range::$_Size) = $_name(dev, size, range)
         end
     end
+    if find_collective(def[:body])
+        # see `uses_collectives`
+        push!(constructors.args, :($(GlobalRef(@__MODULE__, :uses_collectives))(::typeof($gpu_name)) = true))
+    end
     constructors = relocate_lines(constructors, __source__)
 
     return Expr(:block, esc(gpu_function), esc(constructors))
@@ -242,6 +246,15 @@ end
 function is_scope_construct(expr::Expr)
     return expr.head === :block # ||
     # expr.head === :let
+end
+
+function find_collective(stmt)
+    result = Ref(false)
+    postwalk(stmt) do expr
+        result[] |= is_collective(expr)
+        expr
+    end
+    return result[]
 end
 
 # Whether `stmt` contains a `@synchronize`, or a collective like `@groupreduce` that all

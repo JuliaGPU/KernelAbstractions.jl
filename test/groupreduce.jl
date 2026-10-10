@@ -110,6 +110,28 @@ function groupwise_scan(op, x, groupsize, neutral, inclusive)
     return out
 end
 
+# A 32-bit float type that no backend shuffles, so that `@groupreduce` uses local memory
+# only, also on backends with sub-groups. Its `+` adds the bits as integers.
+primitive type TreeFloat <: AbstractFloat 32 end
+TreeFloat(x::Integer) = reinterpret(TreeFloat, Int32(x))
+Base.:+(a::TreeFloat, b::TreeFloat) = reinterpret(TreeFloat, reinterpret(Int32, a) + reinterpret(Int32, b))
+Base.zero(::Type{TreeFloat}) = TreeFloat(0)
+Base.typemin(::Type{TreeFloat}) = TreeFloat(typemin(Int32))
+Base.:(==)(a::TreeFloat, b::TreeFloat) = reinterpret(Int32, a) == reinterpret(Int32, b)
+
+# Run `f`, and return whether it failed to compile with GPUCompiler.jl#1004 (Metal: a phi of
+# a by-reference argument and a device pointer, as in `x[i]` or the `neutral` argument),
+# which the local-memory path runs into.
+function gpucompiler_1004(f)
+    try
+        f()
+        return false
+    catch err
+        occursin("Invalid phi record", sprint(showerror, err)) || rethrow()
+        return true
+    end
+end
+
 # `neutral` is evaluated once per work-item, also by the padding work-items
 counted_neutral() = 0
 count_symbol(ex::Expr, sym) = sum(arg -> count_symbol(arg, sym), ex.args; init = 0)
@@ -117,16 +139,41 @@ count_symbol(ex, sym) = Int(ex === sym)
 
 function groupreduce_testsuite(backend, AT)
     b = backend()
-    types = (Int32, Int64, Float32)
+    caps = KernelAbstractions.subgroup_capabilities(b)
+
+    @testset "sub-group capabilities" begin
+        sub_groups = KI.supports_subgroups(b) && KI.supports_shuffle(b, UInt32)
+        @test (caps !== nothing) == sub_groups
+        shuffleable(T) = KernelAbstractions.__shuffleable(caps, T)
+        @test shuffleable(Int32) == sub_groups
+        @test shuffleable(Tuple{Int64, Bool}) == sub_groups
+        @test shuffleable(Float32) == (sub_groups && KI.supports_shuffle(b, Float32))
+        @test shuffleable(Tuple{Float32, Int32}) == (sub_groups && KI.supports_shuffle(b, Float32))
+        @test !shuffleable(TreeFloat)
+        @test !shuffleable(Ref{Int})
+        # kernels without collectives don't query the capabilities
+        @test KernelAbstractions.kernel_subgroups(groupreduce_static!(b, 64)) == caps
+        @test KernelAbstractions.kernel_subgroups(groupscan!(b, 64)) == caps
+        @test KernelAbstractions.uses_collectives(groupreduce_static!(b, 64).f)
+    end
+
+    types = (Int32, Int64, Float32, TreeFloat)
     @testset "$T, $(nameof(typeof(op)))" for T in types, (op, neutral) in ((+, zero(T)), (max, typemin(T)))
+        T === TreeFloat && op === max && continue
         for (groupsize, n) in ((64, 64), (64, 256), (32, 100), (256, 1000), (7, 23), (1, 3))
             x = T.(rand(1:100, n))
             out = AT(fill(zero(T), n))
-            groupreduce_static!(b, groupsize)(out, AT(x), op, neutral; ndrange = n)
+            if gpucompiler_1004(() -> groupreduce_static!(b, groupsize)(out, AT(x), op, neutral; ndrange = n))
+                @test_broken false
+                continue
+            end
             @test Array(out) == groupwise(op, x, groupsize)
 
             fill!(out, zero(T))
-            groupreduce_bound!(b)(out, AT(x), op, neutral, Val(256); ndrange = n, workgroupsize = groupsize)
+            if gpucompiler_1004(() -> groupreduce_bound!(b)(out, AT(x), op, neutral, Val(256); ndrange = n, workgroupsize = groupsize))
+                @test_broken false
+                continue
+            end
             @test Array(out) == groupwise(op, x, groupsize)
         end
     end

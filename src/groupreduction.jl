@@ -30,6 +30,10 @@ The reduction stores values in local memory, so its size has to be known at comp
 either the kernel has a static workgroup size, or the keyword `groupsize` gives an upper
 bound of the workgroup size (a constant, e.g. a literal or a type parameter of the kernel).
 
+On backends with sub-groups, KernelAbstractions reduces the values of every sub-group with
+[`KernelInterface.sub_group_reduce`](@ref) first, if the backend can shuffle values of the
+type of `neutral`.
+
 ```julia
 @kernel function sum_kernel!(out, @Const(x))
     i = @index(Global)
@@ -198,7 +202,11 @@ end
     n = prod(groupsize(ctx))
     n <= N || throw(ArgumentError("@groupreduce: the workgroup size exceeds the given upper bound"))
     storage = KI.localmemory(T, Val(N))
-    res = __groupreduce_tree(op, convert(T, val), storage, __index_Local_Linear(ctx), n)
+    if __shuffleable(__subgroups(ctx), T)
+        res = __groupreduce_subgroups(op, convert(T, val), neutral, storage)
+    else
+        res = __groupreduce_tree(op, convert(T, val), storage, __index_Local_Linear(ctx), n)
+    end
     # all work-items have to read the result before the storage can be reused
     KI.barrier()
     return res
@@ -216,6 +224,39 @@ end
         KI.barrier()
         s >>= 1
     end
+    return @inbounds storage[1]
+end
+
+# Reduce every sub-group with `KI.sub_group_reduce`, which backends can implement natively,
+# then reduce the results of the sub-groups. This only uses the sub-group ids, not how the
+# work-items form sub-groups, and all sub-groups execute the same sub-group operations, so it
+# needs neither linear nor independent sub-groups. There are at most as many sub-groups as
+# work-items, so `storage` has room for a value per sub-group.
+@inline function __groupreduce_subgroups(op, val, neutral, storage)
+    sg = KI.get_sub_group_id()
+    lane = KI.get_sub_group_local_id()
+    val = KI.sub_group_reduce(op, val)
+    if lane == 1
+        @inbounds storage[sg] = val
+    end
+    KI.barrier()
+
+    # every sub-group reduces the results of all sub-groups, which avoids running sub-group
+    # operations in a branch that only some sub-groups take
+    width = KI.get_sub_group_size()
+    acc = neutral
+    i = lane
+    while i <= KI.get_num_sub_groups()
+        acc = op(acc, @inbounds storage[i])
+        i += width
+    end
+    acc = KI.sub_group_reduce(op, acc)
+    KI.barrier()
+    # the sub-groups can combine the values in different orders, so broadcast one result
+    if sg == 1 && lane == 1
+        @inbounds storage[1] = acc
+    end
+    KI.barrier()
     return @inbounds storage[1]
 end
 
@@ -253,3 +294,48 @@ end
     return res
 end
 
+
+## sub-group capabilities
+
+"""
+    SubgroupCapabilities{F16, F32, F64}()
+
+The sub-group capabilities of a backend that the work-group collectives use, passed to the
+kernel in its [`CompilerMetadata`](@ref): the backend supports sub-groups and shuffles of
+`UInt32` values (and thus of other integer-like values, as words), and of `Float16`,
+`Float32` and `Float64` values if `F16`, `F32` and `F64`. Kernels on backends without these
+capabilities get `nothing` instead.
+"""
+struct SubgroupCapabilities{F16, F32, F64} end
+
+function subgroup_capabilities(backend::KI.Backend)
+    (KI.supports_subgroups(backend) && KI.supports_shuffle(backend, UInt32)) || return nothing
+    return SubgroupCapabilities{
+        KI.supports_shuffle(backend, Float16),
+        KI.supports_shuffle(backend, Float32),
+        KI.supports_shuffle(backend, Float64),
+    }()
+end
+
+# Whether values of type `T` can be shuffled. Floating-point types need the backend's support:
+# a backend that shuffles a float type natively may do so without regard for the device, e.g.
+# `Float64` on a device without it. Other primitive types are shuffled as words, and structs
+# field by field.
+__shuffleable(::Nothing, ::Type) = false
+@generated function __shuffleable(::SubgroupCapabilities{F16, F32, F64}, ::Type{T}) where {F16, F32, F64, T}
+    function shuffleable(S)
+        if isprimitivetype(S)
+            S === Float16 && return F16
+            S === Float32 && return F32
+            S === Float64 && return F64
+            return !(S <: AbstractFloat) && sizeof(S) in (1, 2, 4, 8, 16)
+        end
+        return isbitstype(S) && all(i -> shuffleable(fieldtype(S, i)), 1:fieldcount(S))
+    end
+    return shuffleable(T)
+end
+
+# Whether a kernel's body contains a work-group collective, which needs the backend's
+# sub-group capabilities: the `@kernel` macro adds a method that returns `true` for the
+# kernel's function, so that other kernels don't query them at every launch.
+uses_collectives(f) = false
