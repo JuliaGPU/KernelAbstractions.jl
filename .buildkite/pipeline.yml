@@ -26,7 +26,7 @@ steps:
                 Pkg.develop([PackageSpec(; name="KernelAbstractions", path=pwd()),
                 PackageSpec(; name="KernelInterface", path=joinpath(pwd(), "lib", "KernelInterface"))])' || exit 3
       echo "--- :julia: Developing CUDA"
-      julia .buildkite/develop_backend.jl https://github.com/JuliaGPU/CUDA.jl ka-0.10 \
+      julia .buildkite/develop_backend.jl https://github.com/JuliaGPU/CUDA.jl vc/ki-subgroup-ops \
             CUDACore CUDATools lib/cusolver lib/curand lib/cublas lib/cufft lib/cusparse lib/cupti lib/nvml lib/custatevec lib/cudnn lib/cutensor lib/cutensornet || exit 3
 
       julia -e 'println("+++ :julia: Running tests")
@@ -64,7 +64,7 @@ steps:
                 Pkg.develop([PackageSpec(; name="KernelAbstractions", path=pwd()),
                 PackageSpec(; name="KernelInterface", path=joinpath(pwd(), "lib", "KernelInterface"))])' || exit 3
       echo "--- :julia: Developing Metal"
-      julia .buildkite/develop_backend.jl https://github.com/JuliaGPU/Metal.jl ka-0.10 || exit 3
+      julia .buildkite/develop_backend.jl https://github.com/JuliaGPU/Metal.jl vc/ki-subgroup-ops || exit 3
       julia -e 'println("+++ :julia: Running tests")
                 using Pkg
                 check = joinpath(pwd(), ".buildkite", "check_sources.jl")
@@ -102,7 +102,7 @@ steps:
       julia -e 'println("--- :julia: Developing oneAPI")
                 using Pkg
                 Pkg.add(url="https://github.com/JuliaGPU/AcceleratedKernels.jl", rev="main")' || exit 3
-      julia .buildkite/develop_backend.jl https://github.com/JuliaGPU/oneAPI.jl ka-0.10 || exit 3
+      julia .buildkite/develop_backend.jl https://github.com/JuliaGPU/oneAPI.jl tb/ki-subgroup-ops || exit 3
 
       julia -e 'println("+++ :julia: Running tests")
                 using Pkg
@@ -142,7 +142,7 @@ steps:
       julia -e 'println("--- :julia: Developing AMDGPU")
                 using Pkg
                 Pkg.add(url="https://github.com/JuliaGPU/AcceleratedKernels.jl", rev="main")' || exit 3
-      julia .buildkite/develop_backend.jl https://github.com/JuliaGPU/AMDGPU.jl ka-0.10 || exit 3
+      julia .buildkite/develop_backend.jl https://github.com/JuliaGPU/AMDGPU.jl vc/ki-subgroup-ops || exit 3
 
       julia -e 'println("+++ :julia: Running tests")
                 using Pkg
@@ -180,7 +180,7 @@ steps:
                 Pkg.develop([PackageSpec(; name="KernelAbstractions", path=pwd()),
                 PackageSpec(; name="KernelInterface", path=joinpath(pwd(), "lib", "KernelInterface"))])' || exit 3
       echo "--- :julia: Developing OpenCL"
-      julia .buildkite/develop_backend.jl https://github.com/JuliaGPU/OpenCL.jl ka-0.10 lib/intrinsics || exit 3
+      julia .buildkite/develop_backend.jl https://github.com/JuliaGPU/OpenCL.jl tb/ki-subgroup-ops lib/intrinsics || exit 3
 
       julia -e 'println("+++ :julia: Running tests")
                 using Pkg
