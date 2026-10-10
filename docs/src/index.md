@@ -172,6 +172,9 @@ end
   written against KernelInterface and for kernel languages built on it; capability queries
   say how a backend forms its sub-groups, whether they may diverge, and which types it can
   shuffle. See [Sub-groups](@ref ki_subgroups).
+- [`@groupreduce`](@ref) and [`@groupscan`](@ref) reduce and scan a value over the
+  workgroup, on every backend. `@groupreduce` uses sub-groups internally where the backend
+  can shuffle the values. See [Reductions and scans](@ref group_collectives).
 
 ## Semantic differences
 
