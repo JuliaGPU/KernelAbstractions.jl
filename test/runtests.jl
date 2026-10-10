@@ -492,6 +492,23 @@ end
     @test_throws ArgumentError fill_index!(CPU())(zeros(Int, 1); ndrange = (2^22, 2^22, 2^22, 1), workgroupsize = 1)
 end
 
+@testset "POCL workgroup size" begin
+    workgroupsize = POCL.POCLKernels.cpu_workgroupsize
+    for threads in (1, 4, 7, 64), max_items in (1, 7, 64, 4096), nitems in (nothing, 0, 1, 1000, 4096, 2^20, typemax(Int))
+        items = workgroupsize(nitems, threads, max_items)
+        @test 1 <= items <= max_items
+        # a power of two, unless limited by `max_items`
+        @test ispow2(items) || items == max_items
+    end
+    # a launch with several workgroups' worth of work-items gets several per thread
+    @test cld(4096, workgroupsize(4096, 4, 4096)) >= 4
+    @test cld(2^20, workgroupsize(2^20, 64, 4096)) >= 64
+    # but launches that are too small for that don't get tiny workgroups
+    @test workgroupsize(64, 64, 4096) >= 32
+    # more threads don't mean larger workgroups
+    @test issorted([workgroupsize(4096, threads, 4096) for threads in 1:64]; rev = true)
+end
+
 # the shared testsuite only covers the launch configuration POCL selects
 @testset "POCL launch configurations" begin
     KA = KernelAbstractions
