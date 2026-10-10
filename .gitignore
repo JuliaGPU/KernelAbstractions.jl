@@ -2,3 +2,4 @@ docs/build/
 
 .vscode
 Manifest*.toml
+/.backend/
