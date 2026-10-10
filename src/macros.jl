@@ -83,6 +83,10 @@ function __kernel(expr, __source__::LineNumberNode, __module__::Module, force_in
             $name(dev, size::$_Size, range::$_Size) = $_name(dev, size, range)
         end
     end
+    if find_collective(def[:body])
+        # see `uses_collectives`
+        push!(constructors.args, :($(GlobalRef(@__MODULE__, :uses_collectives))(::typeof($gpu_name)) = true))
+    end
     constructors = relocate_lines(constructors, __source__)
 
     return Expr(:block, esc(gpu_function), esc(constructors))
@@ -244,10 +248,21 @@ function is_scope_construct(expr::Expr)
     # expr.head === :let
 end
 
+function find_collective(stmt)
+    result = Ref(false)
+    postwalk(stmt) do expr
+        result[] |= is_collective(expr)
+        expr
+    end
+    return result[]
+end
+
+# Whether `stmt` contains a `@synchronize`, or a collective like `@groupreduce` that all
+# work-items of the workgroup have to reach as well.
 function find_sync(stmt)
     result = Ref(false)
     postwalk(stmt) do expr
-        result[] |= is_sync(expr)
+        result[] |= is_sync(expr) || is_collective(expr)
         expr
     end
     return result[]
@@ -279,6 +294,17 @@ function split(stmts)
             continue
         end
 
+        if is_collective_stmt(stmt)
+            # executed by all work-items, the padding ones contribute the neutral element
+            loop = WorkgroupLoop(current, allocations, false, nothing)
+            push!(new_stmts, emit(loop))
+            allocations = Any[]
+            current = Any[]
+            take_line!(new_stmts)
+            push!(new_stmts, mask_collective(stmt))
+            continue
+        end
+
         has_sync = find_sync(stmt)
         if has_sync
             loop = WorkgroupLoop(current, allocations, is_sync(stmt), line)
@@ -298,6 +324,7 @@ function split(stmts)
             recurse(x) = x
             function recurse(expr::Expr)
                 expr = unblock_lines(expr)
+                is_collective(expr) && collective_error(expr)
                 if expr.head in (:if, :elseif) && find_sync(expr)
                     return split_branches(expr, recurse)
                 elseif is_scope_construct(expr) && any(find_sync, expr.args)

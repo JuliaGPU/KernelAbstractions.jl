@@ -213,6 +213,22 @@ statements, and [`@uniform`](@ref) evaluates an expression outside the work-item
 can be reused across `@synchronize` statements. For scratch storage that does not need to
 survive across `@synchronize`, an `MArray` can be used instead.
 
+## Reductions and scans
+
+[`@groupreduce`](@ref) and [`@groupscan`](@ref) reduce and scan values over the workgroup.
+Like [`@synchronize`](@ref), they are collectives: all work-items of the workgroup have to
+reach them, not in a branch or loop that only some of them take, and they have to be used as
+statements of their own, e.g. `res = @groupreduce(+, val, zero(T))`. Work-items that pad a
+partial workgroup take part as well, contributing the neutral element. On backends with
+sub-groups, `@groupreduce` uses them where it can.
+
+A kernel is either a `@kernel` or a kernel written against
+[KernelInterface](@ref kernelinterface), never a mix: don't call KernelInterface's device
+functions, such as its sub-group shuffles and votes, in a `@kernel`. They have to be executed
+by all work-items of a sub-group, but in a `@kernel` with the default bounds checking, every
+statement other than the collectives above only runs on the work-items that are part of the
+`ndrange`. Host code can use KernelInterface's queries, e.g. to pick a kernel.
+
 ## Launching kernels
 
 Construct a kernel by calling the kernel function on a backend and optional static sizes, then
