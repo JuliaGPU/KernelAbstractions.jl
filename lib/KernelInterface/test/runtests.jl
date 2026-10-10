@@ -23,13 +23,18 @@ end
     @test !occursin("[sources]", toml)
 end
 
+struct ShuffleBackend <: KI.Backend end
+KI.supports_shuffle(::ShuffleBackend, ::Type{Int32}) = true
+struct WordShuffleBackend <: KI.Backend end
+struct PlainBackend <: KI.Backend end
+KI.supports_shuffle(::WordShuffleBackend, ::Type{UInt32}) = true
+
 # NOTE: this runs before the mock backend below defines methods on `argconvert`
 # and `kernel_function`.
 @testset "interface stubs" begin
     # These have no fallback on purpose: a backend that forgets to `@device_override`
     # them should get a MethodError rather than silently wrong behaviour.
     stubs = [
-        KI.shfl_down,
         KI.max_work_group_size, KI.max_work_group_dims, KI.max_num_groups,
         KI.sub_group_size, KI.argconvert, KI.kernel_function, KI.launch,
         # Host-side stubs: required backend methods with no sensible fallback.
@@ -38,6 +43,34 @@ end
     for stub in stubs
         @test isempty(methods(stub))
     end
+
+    # The votes have no fallbacks: backends that support sub-groups implement them.
+    for vote in [KI.sub_group_any, KI.sub_group_all, KI.sub_group_ballot]
+        @test isempty(methods(vote))
+    end
+
+    # The shuffles only have the fallback that shuffles structs field by field, which
+    # doesn't handle the primitive types a backend has to implement.
+    for shfl in [KI.shfl, KI.shfl_down, KI.shfl_up, KI.shfl_xor]
+        @test_throws ArgumentError shfl(1.0f0, 1)
+        @test_throws ArgumentError shfl((1.0f0, 2), 1)
+        @test_throws ArgumentError shfl(Ref(1), 1)
+    end
+    # primitive types are shuffled as `UInt32` words, if the backend supports `UInt32`
+    @test KI.supports_shuffle(WordShuffleBackend(), Bool)
+    @test KI.supports_shuffle(WordShuffleBackend(), Float64)
+    @test KI.supports_shuffle(WordShuffleBackend(), Tuple{Char, Int128})
+    @test !KI.supports_shuffle(WordShuffleBackend(), Ref{Int})
+    @test !KI.supports_shuffle(ShuffleBackend(), Float32)
+    @test !KI.supports_shuffle(ShuffleBackend(), Tuple{Float32, Int})
+    @test KI.supports_shuffle(ShuffleBackend(), Int32)
+    @test KI.supports_shuffle(ShuffleBackend(), Tuple{Int32, NTuple{2, Int32}})
+    @test !KI.supports_shuffle(ShuffleBackend(), Tuple{Int32, Float32})
+
+    # the sub-group capabilities default to unsupported
+    @test !KI.supports_subgroups(PlainBackend())
+    @test !KI.supports_linear_subgroups(PlainBackend())
+    @test !KI.supports_independent_subgroups(PlainBackend())
 
     # The primitive queries take an element type; only the zero-argument form has a
     # (forwarding) method, and it must reach the typed stub rather than recurse.
