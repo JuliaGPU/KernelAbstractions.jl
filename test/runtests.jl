@@ -278,6 +278,22 @@ end
     end
 end
 
+# `@groupreduce` reduces sub-groups with PoCL's native collectives
+@kernel function groupreduce_codegen!(out, @Const(x))
+    i = @index(Global, Linear)
+    res = @groupreduce(+, x[i], zero(eltype(out)))
+    out[i] = res
+end
+@testset "POCL @groupreduce with sub-groups" begin
+    x = ones(Int32, 100)
+    out = zeros(Int32, 100)
+    ir = sprint() do io
+        @device_code_llvm io = io debuginfo = :none groupreduce_codegen!(POCLBackend(), 64)(out, x; ndrange = 100)
+    end
+    @test out == [fill(64, 64); fill(36, 36)]
+    @test occursin("sub_group_reduce_add", ir)
+end
+
 # Julia doesn't turn a splat of more than 32 elements into a direct call, so a launch with
 # many arguments allocates unless every layer passes them on as a tuple
 @testset "POCL launch with many arguments" begin
