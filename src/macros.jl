@@ -25,7 +25,7 @@ function unblock_lines(ex)
 end
 
 # XXX: Proper errors
-function __kernel(expr, __source__::LineNumberNode, __module__::Module, force_inbounds = false, unsafe_indices = false, generated = false)
+function __kernel(expr, __source__::LineNumberNode, __module__::Module, force_inbounds = false, unsafe_indices = false, generated = false, tile = nothing)
     def = splitdef(expr)
     name = def[:name]
     args = def[:args]
@@ -45,7 +45,9 @@ function __kernel(expr, __source__::LineNumberNode, __module__::Module, force_in
 
     def_gpu = deepcopy(def)
     def_gpu[:name] = gpu_name = Symbol(:gpu_, name)
-    transform_gpu!(def_gpu, constargs, force_inbounds, unsafe_indices)
+    tile === nothing && find_tile(def[:body]) &&
+        error("`@tile()` and `@index(Tile)` need a kernel with tiles: `@kernel tile=N function ...`")
+    transform_gpu!(def_gpu, constargs, force_inbounds, unsafe_indices, tile)
     if generated
         # Turn the kernel into a generated function: the transformed body is
         # quoted so that it is returned as an expression. Passing the quote
@@ -82,6 +84,10 @@ function __kernel(expr, __source__::LineNumberNode, __module__::Module, force_in
             $name(dev, size, range) = $_name(dev, $StaticSize(size), $StaticSize(range))
             $name(dev, size::$_Size, range::$_Size) = $_name(dev, size, range)
         end
+    end
+    if tile !== nothing
+        # see `tile_width`
+        push!(constructors.args, :($(GlobalRef(@__MODULE__, :tile_width))(::typeof($gpu_name)) = $tile))
     end
     if find_collective(def[:body])
         # see `uses_collectives`
@@ -170,7 +176,7 @@ end
 
 # The easy case, transform the function for GPU execution
 # - mark constant arguments by applying `constify`.
-function transform_gpu!(def, constargs, force_inbounds, unsafe_indices)
+function transform_gpu!(def, constargs, force_inbounds, unsafe_indices, tile = nothing)
     let_constargs = Expr[]
     for (i, arg) in enumerate(def[:args])
         if constargs[i]
@@ -183,6 +189,10 @@ function transform_gpu!(def, constargs, force_inbounds, unsafe_indices)
     body = MacroTools.flatten(def[:body])
     if !unsafe_indices
         push!(new_stmts, :(__active_lane__ = $__validindex(__ctx__)))
+    end
+    if tile !== nothing
+        # what `@tile()` and `@index(Tile)` refer to
+        push!(new_stmts, :(__tile_width__ = Val($tile)))
     end
     if force_inbounds
         push!(new_stmts, Expr(:inbounds, true))
@@ -246,6 +256,17 @@ end
 function is_scope_construct(expr::Expr)
     return expr.head === :block # ||
     # expr.head === :let
+end
+
+# Whether `stmt` uses the tile of the work-item, `@tile()` or `@index(Tile)`
+function find_tile(stmt)
+    result = Ref(false)
+    postwalk(stmt) do expr
+        result[] |= is_macrocall(expr, Symbol("@tile")) ||
+            (is_macrocall(expr, Symbol("@index")) && any(==(:Tile), expr.args))
+        expr
+    end
+    return result[]
 end
 
 function find_collective(stmt)

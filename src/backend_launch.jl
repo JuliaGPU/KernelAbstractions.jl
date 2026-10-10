@@ -96,9 +96,15 @@ Core.kwcall(kwargs::NamedTuple, obj::Kernel{<:KI.Backend}, args::Vararg{Any, N})
     launch_tuple(obj, args; kwargs...)
 
 function launch_tuple(obj::Kernel, args::Tuple; ndrange = nothing, workgroupsize = nothing)
+    N = tile_width(obj.f)
+    if N !== nothing
+        workgroupsize = tile_workgroupsize(obj, N, workgroupsize)
+    end
     ndrange, workgroupsize, iterspace, dynamic = launch_config(obj, ndrange, workgroupsize)
     # nothing to launch (or compile) for an empty ndrange
     any(iszero, size(blocks(iterspace))) && return nothing
+    # reject an invalid launch of a kernel with tiles before compiling it
+    N === nothing || check_tiles_launch(obj, N, ndrange, workgroupsize, iterspace)
 
     # launch on an N-d grid, computing indices in 32 bits, if possible. this doesn't depend
     # on the tuned workgroup size, so the context (and thus the kernel) doesn't either.
@@ -133,6 +139,8 @@ function launch_kernel(obj::Kernel, launch, subgroups, ndrange, _workgroupsize, 
     if workgroupsize(obj) <: DynamicSize && _workgroupsize === nothing
         range = something(ndrange, static_ndrange(obj))
         threads = KI.launch_configuration(kernel; nitems = saturated_prod(extents(range))).workgroupsize
+        N = tile_width(obj.f)
+        N === nothing || (threads = tile_threads(N, threads))
         iterspace, _ = partition(obj, ndrange, launch_workgroupsize(b, launch, threads, range))
         ctx = mkcontext(obj, ndrange, iterspace, launch; subgroups)
     end
@@ -145,6 +153,8 @@ function launch_kernel(obj::Kernel, launch, subgroups, ndrange, _workgroupsize, 
     else
         groups, items = (prod(groups), 1, 1), (prod(items), 1, 1)
     end
+    N = tile_width(obj.f)
+    N === nothing || check_tiles(b, N, extents(something(ndrange, static_ndrange(obj))), items)
     KI.check_work_group_size(kernel, items)
     KI.launch(kernel, groups, items, prepend(ctx, args))
     return nothing
