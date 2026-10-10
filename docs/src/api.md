@@ -35,7 +35,10 @@ tile_any
 tile_all
 tile_ballot
 tile_reduce
+tile_scan
+tile_exclusive_scan
 tile_barrier
+tile_width
 tiles_per_workgroup
 ```
 

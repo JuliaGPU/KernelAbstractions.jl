@@ -15,9 +15,9 @@ The hidden context argument for launching `kernel` over `ndrange`, partitioned a
 backend's sub-group capabilities `subgroups` (see [`kernel_subgroups`](@ref)).
 """
 mkcontext(kernel::Kernel, _ndrange, iterspace) =
-    CompilerMetadata{ndrange(kernel), DynamicCheck}(_ndrange, iterspace)
+    CompilerMetadata{ndrange(kernel), DynamicCheck}(_ndrange, iterspace; tile = tile_val(kernel))
 mkcontext(kernel::Kernel, _ndrange, iterspace, launch; subgroups = nothing) =
-    CompilerMetadata{ndrange(kernel), DynamicCheck}(_ndrange, iterspace; launch, subgroups)
+    CompilerMetadata{ndrange(kernel), DynamicCheck}(_ndrange, iterspace; launch, subgroups, tile = tile_val(kernel))
 
 """
     kernel_subgroups(kernel::Kernel)
@@ -96,7 +96,7 @@ Core.kwcall(kwargs::NamedTuple, obj::Kernel{<:KI.Backend}, args::Vararg{Any, N})
     launch_tuple(obj, args; kwargs...)
 
 function launch_tuple(obj::Kernel, args::Tuple; ndrange = nothing, workgroupsize = nothing)
-    N = tile_width(obj.f)
+    N = tile_width(obj)
     if N !== nothing
         workgroupsize = tile_workgroupsize(obj, N, workgroupsize)
     end
@@ -139,7 +139,7 @@ function launch_kernel(obj::Kernel, launch, subgroups, ndrange, _workgroupsize, 
     if workgroupsize(obj) <: DynamicSize && _workgroupsize === nothing
         range = something(ndrange, static_ndrange(obj))
         threads = KI.launch_configuration(kernel; nitems = saturated_prod(extents(range))).workgroupsize
-        N = tile_width(obj.f)
+        N = tile_width(obj)
         N === nothing || (threads = tile_threads(N, threads))
         iterspace, _ = partition(obj, ndrange, launch_workgroupsize(b, launch, threads, range))
         ctx = mkcontext(obj, ndrange, iterspace, launch; subgroups)
@@ -153,7 +153,7 @@ function launch_kernel(obj::Kernel, launch, subgroups, ndrange, _workgroupsize, 
     else
         groups, items = (prod(groups), 1, 1), (prod(items), 1, 1)
     end
-    N = tile_width(obj.f)
+    N = tile_width(obj)
     N === nothing || check_tiles(b, N, extents(something(ndrange, static_ndrange(obj))), items)
     KI.check_work_group_size(kernel, items)
     KI.launch(kernel, groups, items, prepend(ctx, args))

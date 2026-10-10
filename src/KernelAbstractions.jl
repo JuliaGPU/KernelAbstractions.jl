@@ -89,7 +89,8 @@ This allows for the following configurations:
 2. `inbounds={false, true}`: Enables a forced `@inbounds` macro around the function definition in the case the user is using too many `@inbounds` already in their kernel. Note that this can lead to incorrect results, crashes, etc and is fundamentally unsafe. Be careful!
 3. `unsafe_indices={false, true}`: Disables the implicit validation of indices, users must avoid `@index(Global)`.
 4. `generated={false, true}`: Turns the kernel into a [generated function](https://docs.julialang.org/en/v1/manual/metaprogramming/#Generated-functions), see *Generated* below.
-5. `tile=N`: Divides the workgroups into tiles of `N` work-items, see [`@tile`](@ref).
+5. `tile` or `tile=N`: Divides the workgroups into tiles, of a width chosen when the kernel is
+   constructed or of `N` work-items, see [`@tile`](@ref).
 
 - [`@context`](@ref)
 
@@ -137,9 +138,11 @@ macro kernel(ex...)
             elseif ex[i] isa Expr && ex[i].head == :(=) &&
                     ex[i].args[1] == :generated && ex[i].args[2] isa Bool
                 generated = ex[i].args[2]
+            elseif ex[i] === :tile
+                tile = :configurable
             elseif ex[i] isa Expr && ex[i].head == :(=) && ex[i].args[1] == :tile
                 tile = ex[i].args[2]
-                tile isa Integer && !(tile > 0 && ispow2(tile)) &&
+                tile isa Integer && tile > 0 && ispow2(tile) ||
                     error("`tile` has to be a power of two, got $tile")
             else
                 error(
@@ -148,7 +151,7 @@ macro kernel(ex...)
                         "* `inbounds=true`\n" *
                         "* `unsafe_indices=true`\n" *
                         "* `generated=true`\n" *
-                        "* `tile=N`\n" *
+                        "* `tile` or `tile=N`\n" *
                         "got `", ex[i], "`",
                 )
             end
@@ -434,7 +437,7 @@ If the index kind is not provided it defaults to `Linear`, this is subject to ch
 macro index(locale, args...)
     if locale === :Tile
         isempty(args) || error("@index(Tile) takes no further arguments")
-        return :($__index_Tile($(esc(:__ctx__)), $(esc(:__tile_width__))))
+        return :($__index_Tile($(esc(:__ctx__)), $__tile_width($(esc(:__ctx__)))))
     end
     if !(locale === :Global || locale === :Local || locale === :Group)
         error("@index requires as first argument either :Global, :Local, :Group or :Tile")
@@ -528,9 +531,10 @@ import .NDIteration: get
 ###
 
 """
-    Kernel{Backend, WorkgroupSize, NDRange, Func}
+    Kernel{Backend, WorkgroupSize, NDRange, Func, TileWidth}
 
-Host-side handle for a kernel specialized on a backend, workgroup size, and `ndrange`.
+Host-side handle for a kernel specialized on a backend, workgroup size, `ndrange`, and for a
+kernel with tiles, the tile width (an `Int`, or `nothing`, see [`tile_width`](@ref)).
 
 Kernels are created by calling a [`@kernel`](@ref) function on a backend, for example
 `my_kernel(CUDABackend(), 256)`. The returned object is callable:
@@ -547,13 +551,17 @@ and [`backend`](@ref KernelAbstractions.backend) to inspect a kernel's static co
 Kernels are launched on any backend that implements [KernelInterface](@ref kernelinterface);
 see the [notes for backend implementations](@ref implementations_notes).
 """
-struct Kernel{Backend, WorkgroupSize <: _Size, NDRange <: _Size, Fun}
+struct Kernel{Backend, WorkgroupSize <: _Size, NDRange <: _Size, Fun, TileWidth}
     backend::Backend
     f::Fun
 end
 
-function Base.similar(kernel::Kernel{D, WS, ND}, f::F) where {D, WS, ND, F}
-    return Kernel{D, WS, ND, F}(kernel.backend, f)
+# a kernel without tiles
+Kernel{B, WS, ND, F}(backend, f) where {B, WS, ND, F} = Kernel{B, WS, ND, F, nothing}(backend, f)
+
+function Base.similar(kernel::Kernel{D, WS, ND, <:Any, T}, f::F) where {D, WS, ND, F, T}
+    check_tile_policy(tile_policy(f), T)
+    return Kernel{D, WS, ND, F, T}(kernel.backend, f)
 end
 
 """
@@ -657,14 +665,23 @@ last (possibly partial) workgroup. Primarily used by backend implementations and
     return iterspace, dynamic
 end
 
-function construct(backend::B, ::S, ::NDRange, xpu_name::XPUName) where {B <: Backend, S <: _Size, NDRange <: _Size, XPUName}
-    N = tile_width(xpu_name)
-    if N !== nothing && S <: StaticSize && backend isa KI.Backend
-        # the ndrange is checked at launch, with the final workgroup size
-        workgroupsize = get(S)
-        check_tiles(backend, N, (N,), (workgroupsize..., ntuple(_ -> 1, 3 - length(workgroupsize))...))
+# The constructors of a `@kernel` function `f`: `f(backend)`, `f(backend, workgroupsize)` and
+# `f(backend, workgroupsize, ndrange)`
+construct_kernel(backend, f; tile = nothing) = construct(backend, DynamicSize(), DynamicSize(), f; tile)
+construct_kernel(backend, f, size; tile = nothing) = construct(backend, StaticSize(size), DynamicSize(), f; tile)
+construct_kernel(backend, f, size, range; tile = nothing) =
+    construct(backend, StaticSize(size), StaticSize(range), f; tile)
+construct_kernel(backend, f, size::_Size, range::_Size; tile = nothing) = construct(backend, size, range, f; tile)
+
+function construct(backend::B, ::S, ::NDRange, xpu_name::XPUName; tile = nothing) where {B <: Backend, S <: _Size, NDRange <: _Size, XPUName}
+    N = resolve_tile_width(backend, coalesce(tile_policy(xpu_name), nothing), tile)
+    if N !== nothing
+        # the ndrange is checked again at launch, with the final workgroup size
+        ndrange = NDRange <: StaticSize ? extents(get(NDRange)) : (N,)
+        workgroupsize = S <: StaticSize ? KI.pad3(extents(get(S))) : (N, 1, 1)
+        check_tiles(backend, N, ndrange, workgroupsize)
     end
-    return Kernel{B, S, NDRange, XPUName}(backend, xpu_name)
+    return Kernel{B, S, NDRange, XPUName, N}(backend, xpu_name)
 end
 
 ###
