@@ -74,10 +74,10 @@ What a backend implements, at a glance. The docstrings below have the details.
 | **Execution** | [`synchronize`](@ref) (cooperative) | [`record_event`](@ref)/[`wait_event`](@ref) (synchronize), [`priority!`](@ref) (no-op) |
 | **Devices** | with more than one device: [`ndevices`](@ref), [`device`](@ref), [`device!`](@ref), `device(backend, A)` | all four (a single device) |
 | **Queries** | [`max_work_group_size`](@ref) (for the backend and for a kernel), [`max_work_group_dims`](@ref), [`max_num_groups`](@ref) | [`launch_configuration`](@ref) (the limit), [`multiprocessor_count`](@ref) (0), [`functional`](@ref) (`missing`), [`versioninfo`](@ref) |
-| **Capabilities** | | [`supports_float64`](@ref), [`supports_atomics`](@ref), [`supports_unified`](@ref), [`supports_subgroups`](@ref), [`supports_shuffle`](@ref) (all `false`) |
+| **Capabilities** | | [`supports_float64`](@ref), [`supports_atomics`](@ref), [`supports_unified`](@ref), [`supports_subgroups`](@ref), [`supports_linear_subgroups`](@ref), [`supports_independent_subgroups`](@ref) (all `false`), [`supports_shuffle`](@ref) (`false` unless derived from the natively supported types, see its docstring) |
 | **Compilation** | [`argconvert`](@ref), [`kernel_function`](@ref), [`launch`](@ref) | |
 | **Device** | [`get_local_id`](@ref), [`get_group_id`](@ref), [`get_local_size`](@ref), [`get_num_groups`](@ref), [`localmemory`](@ref), [`barrier`](@ref) | [`get_global_id`](@ref), [`get_global_size`](@ref) (derived from the primitive queries), [`_print`](@ref KernelInterface._print) (host `print`) |
-| **Sub-groups** | if `supports_subgroups`: [`sub_group_size`](@ref), the sub-group queries, [`sub_group_barrier`](@ref); if `supports_shuffle(backend, T)`: [`shfl_down`](@ref) for `T` | |
+| **Sub-groups** | if `supports_subgroups`: [`sub_group_size`](@ref), the sub-group queries (with a constant [`get_max_sub_group_size`](@ref)), [`sub_group_barrier`](@ref), [`sub_group_any`](@ref), [`sub_group_all`](@ref), and [`sub_group_ballot`](@ref) for widths of at most 64; if `supports_shuffle(backend, T)`: [`shfl`](@ref), [`shfl_down`](@ref), [`shfl_up`](@ref), [`shfl_xor`](@ref) for the primitive `T` supported natively, including `UInt32` | shuffles with a `width` (built on [`shfl`](@ref)); shuffles of other primitive types (as `UInt32` or `UInt64` words) and of structs (field by field) |
 
 Everything else, such as [`zeros`](@ref KernelInterface.zeros), [`ones`](@ref KernelInterface.ones),
 the launch-keyword handling of [`Kernel`](@ref) and [`@launch`](@ref KernelInterface.@launch),
@@ -149,24 +149,63 @@ get_global_size
 ### Sub-groups
 
 Sub-groups are optional ([`supports_subgroups`](@ref)). A work-group is divided into
-sub-groups of at most [`sub_group_size(backend)`](@ref sub_group_size) work-items. Which
-work-items form a sub-group, how many sub-groups there are, and which of them are partial
-is unspecified, and differs between devices and work-group shapes. For example, CUDA forms
-warps from consecutive linear work-item indices, while Intel's CPU OpenCL runtime forms
-sub-groups per row of a multi-dimensional work-group, so that a 33×2 work-group consists of
-four sub-groups of 32 and 1 work-items. What KernelInterface guarantees, and backends that
-report sub-group support have to ensure:
+sub-groups of at most `W = `[`sub_group_size(backend)`](@ref sub_group_size) work-items, the
+sub-group width. What KernelInterface guarantees, and backends that report sub-group support
+have to ensure:
 
 - every work-item has a unique `(get_sub_group_id(), get_sub_group_local_id())` pair in its
   work-group, which doesn't change during the kernel;
 - the sub-group ids are `1:get_num_sub_groups()`, and the lanes of a sub-group are
-  `1:get_sub_group_size()`;
-- a 1-D work-group of at most `sub_group_size(backend)` work-items is a single sub-group.
+  `1:get_sub_group_size()`.
 
-In particular, [`get_num_sub_groups`](@ref) can be larger than
-`cld(prod(get_local_size()), get_max_sub_group_size())`. Storage for a value per sub-group
-has to be sized for up to one sub-group per work-item, and code combining those values has
-to use `get_num_sub_groups()` rather than compute the count.
+Which work-items form a sub-group is **not specified**: it differs between APIs, devices and
+work-group shapes. For example, Intel's CPU OpenCL runtime forms sub-groups per row of a
+multi-dimensional work-group, so that a 33×2 work-group consists of four sub-groups of 32, 1,
+32 and 1 work-items. In particular, [`get_num_sub_groups`](@ref) can be larger than
+`cld(prod(get_local_size()), W)`. Storage for a value per sub-group has to be sized for up to
+one sub-group per work-item, and code combining those values has to use
+`get_num_sub_groups()` rather than compute the count.
+
+A sub-group is partial when it has fewer work-items than the width: the lanes
+`get_sub_group_size()+1:W` have no work-item. Shuffles from those lanes give unspecified
+values, and the votes only take the work-items of the sub-group into account.
+
+Backends that guarantee more say so with two queries:
+
+- [`supports_linear_subgroups`](@ref): if the work-group is 1-D, or its x extent is a
+  multiple of `W`, sub-groups are formed from consecutive work-items, x fastest: the
+  work-item with the linear local index
+  `lin = x + (y - 1) * size.x + (z - 1) * size.x * size.y` (for `(; x, y, z) =
+  get_local_id()` and `size = get_local_size()`) is in sub-group `fld(lin - 1, W) + 1`, lane
+  `mod(lin - 1, W) + 1`, and only the last sub-group can be partial. Code that relates local
+  ids to lanes needs this, e.g. stencils exchanging neighbouring values with shuffles. Code
+  that doesn't, like a work-group reduction combining a value per sub-group, can index by the
+  sub-group slot `(get_sub_group_id() - 1) * W + get_sub_group_local_id()` instead.
+- [`supports_independent_subgroups`](@ref): the communication functions (shuffles, votes
+  and [`sub_group_barrier`](@ref)) can be executed in control flow that is uniform
+  over each sub-group, but differs between the sub-groups of a work-group, e.g. a loop whose
+  trip count depends on the sub-group, or after an early `return` of whole sub-groups.
+  Otherwise, all sub-groups of a work-group have to execute the same communication
+  functions in the same order.
+
+| Backend | `supports_linear_subgroups` | `supports_independent_subgroups` |
+|---|---|---|
+| CUDA, AMDGPU | `true` | `true` |
+| Metal | `true` (not specified by Metal, but tested) | `true` |
+| oneAPI | once the layout is tested on Intel's GPU compiler | `true` |
+| OpenCL.jl | on runtimes known to form them linearly | `true`, except on PoCL |
+| KernelAbstractions' POCL backend | `true` | `false`: sub-group operations are work-group barriers |
+
+In all cases, all work-items of a sub-group have to execute a communication function
+together, not in a branch that only some of its lanes take. The id and size queries can be
+used anywhere.
+
+!!! note "Kernel languages"
+    The sub-group functions are meant for kernels written against KernelInterface, and for
+    kernel languages built on it. A kernel is either a KernelInterface kernel or a
+    KernelAbstractions `@kernel`, never a mix: `@kernel` adds padding work-items to partial
+    work-groups, which skip the kernel's body, so KernelInterface's sub-group functions called
+    in a `@kernel` aren't reached by all work-items. Host code may use the queries of both.
 
 ```@docs
 get_sub_group_size
@@ -191,8 +230,21 @@ localmemory
 
 ### Communication
 
+The shuffles, votes and collectives below exchange values between the work-items of a
+sub-group, not memory: they don't order or make visible the work-items' accesses to local
+or global memory. To communicate through memory within a sub-group, e.g. a work-item reading
+what another one wrote to local memory, use [`sub_group_barrier`](@ref) between the write
+and the read.
+
 ```@docs
+shfl
 shfl_down
+shfl_up
+shfl_xor
+shfl(::Any, ::Integer, ::Integer)
+sub_group_any
+sub_group_all
+sub_group_ballot
 ```
 
 ### Printing
@@ -247,6 +299,8 @@ supports_float64
 
 ```@docs
 supports_subgroups
+supports_linear_subgroups
+supports_independent_subgroups
 supports_shuffle
 ```
 
