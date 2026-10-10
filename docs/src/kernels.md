@@ -222,6 +222,29 @@ statements of their own, e.g. `res = @groupreduce(+, val, zero(T))`. Work-items 
 partial workgroup take part as well, contributing the neutral element. On backends with
 sub-groups, `@groupreduce` uses them where it can.
 
+## Tiles
+
+A kernel declared with `@kernel tile=N` divides its workgroups into tiles of `N` consecutive
+work-items (by `@index(Local, Linear)`), whose work-items can exchange values with
+operations such as [`tile_shfl`](@ref) and [`tile_reduce`](@ref), without going through local
+memory. The tiles map onto the backend's sub-groups, so a backend has to support them, see
+[`tiles_per_workgroup`](@ref). Unlike the work-group collectives, the tile operations only need
+the tile's work-items to execute them together: different tiles can take different branches,
+loop a different number of times, or `return` early. See [`@tile`](@ref) for the details, and
+for the restrictions on the launch.
+
+```julia
+@kernel tile=32 function tile_maxima!(out, @Const(x))
+    t = @tile()
+    m = tile_reduce(t, max, x[@index(Global, Linear)])
+    if t.lane == 1
+        out[@index(Tile)] = m
+    end
+end
+```
+
+## Kernel languages
+
 A kernel is either a `@kernel` or a kernel written against
 [KernelInterface](@ref kernelinterface), never a mix: don't call KernelInterface's device
 functions, such as its sub-group shuffles and votes, in a `@kernel`. They have to be executed
