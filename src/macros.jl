@@ -46,8 +46,8 @@ function __kernel(expr, __source__::LineNumberNode, __module__::Module, force_in
     def_gpu = deepcopy(def)
     def_gpu[:name] = gpu_name = Symbol(:gpu_, name)
     tile === nothing && find_tile(def[:body]) &&
-        error("`@tile()` and `@index(Tile)` need a kernel with tiles: `@kernel tile=N function ...`")
-    transform_gpu!(def_gpu, constargs, force_inbounds, unsafe_indices, tile)
+        error("`@tile()` and `@index(Tile)` need a kernel with tiles: `@kernel tile function ...` or `@kernel tile=N function ...`")
+    transform_gpu!(def_gpu, constargs, force_inbounds, unsafe_indices)
     if generated
         # Turn the kernel into a generated function: the transformed body is
         # quoted so that it is returned as an expression. Passing the quote
@@ -77,32 +77,30 @@ function __kernel(expr, __source__::LineNumberNode, __module__::Module, force_in
     # constructors, they are defined with the first method of the kernel, since a method can't
     # be overwritten during precompilation.
     queries = Any[]
-    if tile !== nothing
-        # see `tile_width`
-        push!(queries, :($gpu_name(::$TileWidthQuery) = $tile))
-    end
+    # see `tile_policy`; only for kernels with tiles, since adding a method to a function in a
+    # branch makes a local function a `Core.Box`
+    policy = tile === :configurable ? QuoteNode(:configurable) : tile
+    tile === nothing || push!(queries, :($gpu_name(::$TilePolicyQuery) = $policy))
     if find_collective(def[:body])
         # see `uses_collectives`
         push!(queries, :($gpu_name(::$CollectivesQuery) = true))
     end
 
-    # create constructor functions
-    _name = Symbol(:_, name)
+    # create constructor functions (a single method with keywords: in a local scope, several
+    # would capture each other in a `Core.Box`)
     constructors = quote
         if $(name isa Symbol ? :(!@isdefined($name)) : true)
-            function $_name(dev::Dev, sz::S, range::NDRange) where {Dev, S <: $_Size, NDRange <: $_Size}
-                return $construct(dev, sz, range, $gpu_name)
-            end
-            Core.@__doc__ $name(dev) = $_name(dev, $DynamicSize(), $DynamicSize())
-            $name(dev, size) = $_name(dev, $StaticSize(size), $DynamicSize())
-            $name(dev, size, range) = $_name(dev, $StaticSize(size), $StaticSize(range))
-            $name(dev, size::$_Size, range::$_Size) = $_name(dev, size, range)
+            Core.@__doc__ $name(dev, sizes...; tile = nothing) = $construct_kernel(dev, $gpu_name, sizes...; tile)
             $(queries...)
         end
     end
     constructors = relocate_lines(constructors, __source__)
 
-    return Expr(:block, esc(gpu_function), esc(constructors))
+    # all methods of a kernel function have to be declared with the same tiles as the first
+    defined = name isa Symbol ? :(@isdefined($name)) : false
+    declare_policy = :($declare_tile_policy($gpu_name, $policy, $defined))
+
+    return Expr(:block, esc(gpu_function), esc(declare_policy), esc(constructors))
 end
 
 """
@@ -183,7 +181,7 @@ end
 
 # The easy case, transform the function for GPU execution
 # - mark constant arguments by applying `constify`.
-function transform_gpu!(def, constargs, force_inbounds, unsafe_indices, tile = nothing)
+function transform_gpu!(def, constargs, force_inbounds, unsafe_indices)
     let_constargs = Expr[]
     for (i, arg) in enumerate(def[:args])
         if constargs[i]
@@ -197,10 +195,6 @@ function transform_gpu!(def, constargs, force_inbounds, unsafe_indices, tile = n
     body = MacroTools.flatten(def[:body])
     if !unsafe_indices
         push!(new_stmts, :(__active_lane__ = $__validindex(__ctx__)))
-    end
-    if tile !== nothing
-        # what `@tile()` and `@index(Tile)` refer to
-        push!(new_stmts, :(__tile_width__ = Val($tile)))
     end
     if force_inbounds
         push!(new_stmts, Expr(:inbounds, true))
