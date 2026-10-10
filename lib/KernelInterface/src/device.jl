@@ -269,10 +269,6 @@ localmemory(::Type{T}, ::Val) where {T} =
 
 ## communication
 
-# Shuffles exchange values between the work-items of a sub-group. Backends implement them for
-# the primitive types for which `supports_shuffle` returns `true`. The fallbacks below shuffle
-# other primitive types as unsigned words, and other `isbits` types field by field.
-
 """
     shfl(val::T, lane::Integer)::T
 

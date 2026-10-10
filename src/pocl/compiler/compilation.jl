@@ -65,19 +65,6 @@ function GPUCompiler.finish_module!(
     if sg_size !== nothing
         entry.metadata["intel_reqd_sub_group_size"] = MDNode([ConstantInt(Int32(sg_size))])
 
-        # the sub-group width is fixed, so make `get_max_sub_group_size` a constant, as
-        # KernelInterface requires (this runs before optimization)
-        gvs = LLVM.globals(mod)
-        if haskey(gvs, "__spirv_BuiltInSubgroupMaxSize")
-            gv = gvs["__spirv_BuiltInSubgroupMaxSize"]
-            for use in collect(LLVM.uses(gv))
-                load = LLVM.user(use)
-                load isa LLVM.LoadInst || continue
-                LLVM.replace_uses!(load, ConstantInt(LLVM.value_type(load), sg_size))
-                LLVM.erase!(load)
-            end
-            isempty(LLVM.uses(gv)) && LLVM.erase!(gv)
-        end
     end
 
     # if this kernel uses our RNG, we should prime the shared state.
