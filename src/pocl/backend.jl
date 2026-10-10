@@ -190,8 +190,34 @@ KI.max_work_group_dims(::POCLBackend)::NTuple{3, Int} = device_limits().max_work
 # the grid is only limited by the size of `size_t`
 KI.max_num_groups(::POCLBackend)::NTuple{3, Int} = (typemax(Int), typemax(Int), typemax(Int))
 KI.sub_group_size(::POCLBackend)::Int = device_limits().sub_group_size
-function KI.multiprocessor_count(::POCLBackend)::Int
-    return Int(device().max_compute_units)
+KI.multiprocessor_count(::POCLBackend)::Int = device_limits().compute_units
+
+# PoCL runs each work-group on one of its threads, looping over (and vectorizing across) the
+# work-items. the largest work-group would run a launch of up to that many work-items on a
+# single thread, so recommend several work-groups per thread instead, to balance the load,
+# but not so few work-items per work-group that the loop no longer vectorizes well.
+function KI.launch_configuration(
+        kernel::KI.Kernel{<:POCLBackend}; nitems::Union{Integer, Nothing} = nothing,
+        max_work_group_size::Integer = typemax(Int)
+    )
+    max_items = min(KI.max_work_group_size(kernel), max_work_group_size)
+    items = cpu_workgroupsize(nitems, device_limits().compute_units, max_items)
+    return (; workgroupsize = Int(items))
+end
+
+# Measured on a Ryzen 9 5950X with 1 to 8 threads: kernels with much work per work-item run
+# best with many work-groups per thread, and cheap, memory-bound ones with at least 128 to
+# 256 work-items per work-group. Launches too small for that many work-groups still spread
+# over the threads, which costs a few microseconds for cheap kernels, but saves much more
+# for expensive ones.
+const GROUPS_PER_THREAD = 16
+const MIN_WORKGROUP_SIZE = 128
+
+# a power of two, so that it divides the extents of `ndrange`s that are powers of two
+function cpu_workgroupsize(nitems, threads, max_items)
+    nitems === nothing && return max_items
+    items = nextpow(2, max(cld(nitems, GROUPS_PER_THREAD * threads), MIN_WORKGROUP_SIZE))
+    return min(items, max_items)
 end
 
 KI.supports_subgroups(::POCLBackend) = device_limits().sub_group_size > 0
