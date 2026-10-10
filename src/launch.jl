@@ -269,7 +269,10 @@ end
 @inline validindex(ctx, launch::Launch, iterspace, ndrange) =
 if builtin(iterspace) && ndrange isa CartesianIndices
     T = index_type(launch)
-    all(map(<=, blocked_position(ctx, launch), narrow(T, size(ndrange))))
+    # `&` rather than `all`, which Julia 1.10–1.12 lower to a branch per dimension. PoCL
+    # doesn't hoist the index computation of a linear launch out of its loop over the
+    # work-items when it is spread over several branches.
+    reduce(&, map(<=, blocked_position(ctx, launch), narrow(T, size(ndrange))); init = true)
 else
     global_cartesian(ctx, launch, iterspace, ndrange) in ndrange
 end

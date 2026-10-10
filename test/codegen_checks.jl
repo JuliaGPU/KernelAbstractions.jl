@@ -78,6 +78,11 @@ end
     @inbounds A[I] = I
 end
 
+@kernel function codegen_scale_cartesian(A)
+    I = @index(Global, Cartesian)
+    @inbounds A[I] = 2 * A[I]
+end
+
 # `@inbounds` is only honoured under `--check-bounds=auto`; several checks below assert
 # that it removes code, so refuse to run under anything else rather than fail obscurely.
 if Base.JLOptions().check_bounds != 0
@@ -218,6 +223,33 @@ end
             @check "define spir_kernel void @{{.*}}gpu_codegen_private_escape"
             @check "alloca"
             @device_code_llvm debuginfo = :none codegen_private_escape(backend, 16)(A, ndrange = 64)
+            KernelAbstractions.synchronize(backend)
+        end
+    end
+
+    # The bounds check of a partial workgroup compares every dimension and branches once.
+    # Branching per dimension (as `all` does on Julia 1.10–1.12) keeps PoCL from
+    # hoisting the index computation out of its loop over the work-items, which made
+    # kernels with a linear launch several times slower.
+    @testset "bounds check branches once" begin
+        B = KernelAbstractions.zeros(backend, Float32, 5, 6, 7, 3)
+        kernel = codegen_scale_cartesian(backend, 16)
+        @test @filecheck begin
+            @check "define spir_kernel void @{{.*}}gpu_codegen_scale_cartesian"
+            @check "br i1"
+            @check_not "br i1"
+            @check "ret void"
+            @device_code_llvm debuginfo = :none kernel(B, ndrange = size(B))
+            KernelAbstractions.synchronize(backend)
+        end
+
+        C = KernelAbstractions.zeros(backend, Float32, 5, 6, 7)
+        @test @filecheck begin
+            @check "define spir_kernel void @{{.*}}gpu_codegen_scale_cartesian"
+            @check "br i1"
+            @check_not "br i1"
+            @check "ret void"
+            @device_code_llvm debuginfo = :none kernel(C, ndrange = size(C))
             KernelAbstractions.synchronize(backend)
         end
     end
