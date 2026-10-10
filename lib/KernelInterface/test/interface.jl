@@ -706,16 +706,28 @@ function subgroup_communication_testsuite(backend::KI.Backend, AT, sg_size)
         KI.supports_shuffle(backend, Float32) && reduce_divergent_testsuite(backend, AT, sg_size, Float32)
     end
 
-    for n in unique((sg_size, max(sg_size - 3, 1)))
-        @testset "sub_group_reduce and sub_group_scan, $n work-items" begin
+    @testset "sub_group_reduce and sub_group_scan" begin
+        @testset "$n work-items" for n in unique((sg_size, max(sg_size - 3, 1)))
             reduce_scan_testsuite(backend, AT, +, Int32.(rand(1:100, n)))
             # operators and types that backends may implement natively
+            reduce_scan_testsuite(backend, AT, +, UInt64.(rand(1:100, n)))
             reduce_scan_testsuite(backend, AT, min, Int64.(rand(-100:100, n)))
+            reduce_scan_testsuite(backend, AT, min, Int32.(rand(-100:100, n)))
             reduce_scan_testsuite(backend, AT, max, UInt32.(rand(1:100, n)))
+            reduce_scan_testsuite(backend, AT, max, Int64.(rand(-100:100, n)))
             KI.supports_shuffle(backend, Float32) &&
                 reduce_scan_testsuite(backend, AT, +, Float32.(rand(1:100, n)))
+            # NaN and infinities propagate through `+` whatever the order
+            KI.supports_shuffle(backend, Float32) &&
+                reduce_scan_testsuite(backend, AT, +, Float32[i == 2 ? -Inf32 : i == 3 ? Inf32 : rand(1:100) for i in 1:n])
+            KI.supports_shuffle(backend, Float64) &&
+                reduce_scan_testsuite(backend, AT, +, Float64[i == 2 ? NaN : rand(1:100) for i in 1:n])
+            # Julia's `max` propagates NaN, unlike OpenCL's
             KI.supports_shuffle(backend, Float32) &&
                 reduce_scan_testsuite(backend, AT, max, Float32[i == 2 ? NaN32 : rand(1:100) for i in 1:n])
+            # ... and `min` tells the sign of zero apart
+            KI.supports_shuffle(backend, Float32) &&
+                reduce_scan_testsuite(backend, AT, min, Float32[i == 2 ? -0.0f0 : 0.0f0 for i in 1:n])
             reduce_scan_testsuite(
                 backend, AT, compose_affine,
                 [(Int32(rand((-1, 1, 2))), Int32(rand(-5:5))) for _ in 1:n]

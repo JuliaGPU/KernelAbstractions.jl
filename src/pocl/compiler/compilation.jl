@@ -64,7 +64,6 @@ function GPUCompiler.finish_module!(
     sg_size = job.config.params.sub_group_size
     if sg_size !== nothing
         entry.metadata["intel_reqd_sub_group_size"] = MDNode([ConstantInt(Int32(sg_size))])
-
     end
 
     # if this kernel uses our RNG, we should prime the shared state.

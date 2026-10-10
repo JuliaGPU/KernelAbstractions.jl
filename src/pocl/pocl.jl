@@ -34,8 +34,9 @@ function Session()
     context = cl.Context(device)
 
     sizes = device.max_work_item_size
-    # POCL can technically support any sub-group size; prefer the common GPU ones
-    sg_sizes = device.sub_group_sizes
+    # POCL can technically support any sub-group size; prefer the common GPU ones, and only
+    # widths of up to 64, so that `KI.sub_group_ballot` (a `UInt64` mask) covers every lane
+    sg_sizes = filter(<=(64), device.sub_group_sizes)
     common = filter(in(sg_sizes), [32, 64, 16, sg_sizes...])
     limits = (;
         max_work_group_size = Int(device.max_work_group_size),

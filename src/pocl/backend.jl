@@ -263,23 +263,23 @@ end
 end
 
 @device_override KI.shfl(val::T, lane::Integer) where {T <: ShuffleTypes} =
-    sub_group_shuffle(val, lane)
+    SPIRVIntrinsics.sub_group_shuffle(val, lane)
 
 # past the sub-group width, `shfl_down` and `shfl_up` return the work-item's own value, which
 # `sub_group_shuffle` (like SPIR-V's `OpGroupNonUniformShuffleDown`) leaves undefined
 @device_override function KI.shfl_down(val::T, offset::Integer) where {T <: ShuffleTypes}
     lane = get_sub_group_local_id()
     src = lane + offset
-    return sub_group_shuffle(val, ifelse(src <= get_max_sub_group_size(), src, lane))
+    return SPIRVIntrinsics.sub_group_shuffle(val, ifelse(src <= get_max_sub_group_size(), src, lane))
 end
 
 @device_override function KI.shfl_up(val::T, offset::Integer) where {T <: ShuffleTypes}
     lane = get_sub_group_local_id()
-    return sub_group_shuffle(val, ifelse(lane > offset, lane - offset, lane))
+    return SPIRVIntrinsics.sub_group_shuffle(val, ifelse(lane > offset, lane - offset, lane))
 end
 
 @device_override KI.shfl_xor(val::T, mask::Integer) where {T <: ShuffleTypes} =
-    sub_group_shuffle_xor(val, mask)
+    SPIRVIntrinsics.sub_group_shuffle_xor(val, mask)
 
 @device_override KI.sub_group_any(pred::Bool) = SPIRVIntrinsics.sub_group_any(pred)
 

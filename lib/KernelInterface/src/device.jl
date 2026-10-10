@@ -173,9 +173,9 @@ from the host.
 See [`get_local_id`](@ref) for the supported types `T`.
 
 !!! note
-    Backend implementations that support sub-groups **must** implement this, returning the
-    width the kernel is compiled for as a constant (not by querying the device at run
-    time):
+    Backend implementations that support sub-groups **must** implement this, and **should**
+    return the width the kernel is compiled for as a constant rather than query the device
+    at run time, so that code depending on it is specialized for the width:
     ```
     @device_override get_max_sub_group_size(::Type{T})::T where {T}
     ```
@@ -387,8 +387,9 @@ shfl_unsupported(T) = throw(
 # words
 shuffle_as_words(T) = T !== UInt32 && sizeof(T) in (1, 2, 4, 8, 16)
 
-# The unsigned integer type of the size of a primitive type `T`
-const word_types = Dict(1 => UInt8, 2 => UInt16, 4 => UInt32, 8 => UInt64, 16 => UInt128)
+# The unsigned integer type of the size of a primitive type `T` (of 1, 2, 4, 8 or 16 bytes)
+const word_types = (UInt8, UInt16, UInt32, UInt64, UInt128)
+word_type(T) = word_types[trailing_zeros(sizeof(T)) + 1]
 
 # Shuffle a primitive value as unsigned words: values of up to 4 bytes are zero-extended to a
 # `UInt32`. Other 8-byte values are shuffled as a `UInt64`, which the backend may support
@@ -396,7 +397,7 @@ const word_types = Dict(1 => UInt8, 2 => UInt16, 4 => UInt32, 8 => UInt64, 16 =>
 # split into two `UInt64` words.
 @inline @generated function shfl_words(f, val::T) where {T}
     shuffle_as_words(T) || return :(shfl_unsupported($T))
-    U = word_types[sizeof(T)]
+    U = word_type(T)
     if sizeof(T) <= 4
         return :(reinterpret($T, f(reinterpret($U, val) % UInt32) % $U))
     elseif sizeof(T) == 8 && T !== UInt64
@@ -610,17 +611,13 @@ It exchanges values, not memory: it is not a memory fence, see [`sub_group_barri
     Backends **may** implement these. The fallbacks use [`sub_group_ballot`](@ref) and
     [`sub_group_match_any`](@ref) of the whole sub-group.
 """
-@inline sub_group_ballot(pred::Bool, width::Integer) =
-    segment_bits(sub_group_ballot(pred), segment_base(width), width)
-
 @inline sub_group_any(pred::Bool, width::Integer) = sub_group_ballot(pred, width) != zero(UInt64)
 
-@inline function sub_group_all(pred::Bool, width::Integer)
-    # compare with the work-items of the segment, which may be partial
-    base = segment_base(width)
-    return segment_bits(sub_group_ballot(pred), base, width) ==
-        segment_bits(sub_group_ballot(true), base, width)
-end
+# the ballot only has bits for the work-items of the segment, which may be partial
+@inline sub_group_all(pred::Bool, width::Integer) = sub_group_ballot(!pred, width) == zero(UInt64)
+
+@inline sub_group_ballot(pred::Bool, width::Integer) =
+    segment_bits(sub_group_ballot(pred), segment_base(width), width)
 
 @inline sub_group_match_any(val, width::Integer) =
     segment_bits(sub_group_match_any(val), segment_base(width), width)

@@ -237,20 +237,16 @@ if "cl_khr_fp16" in POCL.device().extensions
     end
 end
 
-# KernelInterface requires the sub-group width to be a constant of the generated code
+# the sub-group width kernels are compiled for is the one `KI.sub_group_size` reports
+# (PoCL folds `get_max_sub_group_size` to that constant itself, see pocl/pocl#2375)
 function max_sub_group_size_kernel(out)
     out[1] = KernelAbstractions.KernelInterface.get_max_sub_group_size()
     return
 end
-@testset "POCL constant sub-group width" begin
+@testset "POCL sub-group width" begin
     out = zeros(Int, 1)
-    ir = sprint() do io
-        @device_code_llvm io = io debuginfo = :none @opencl max_sub_group_size_kernel(out)
-    end
-    width = POCL.device_limits().sub_group_size
-    @test out[1] == width
-    @test !occursin("BuiltInSubgroupMaxSize", ir)
-    @test occursin("store i64 $width", ir)
+    @opencl max_sub_group_size_kernel(out)
+    @test out[1] == POCL.device_limits().sub_group_size
 end
 
 # the native sub-group collectives are used where they have Julia's semantics
