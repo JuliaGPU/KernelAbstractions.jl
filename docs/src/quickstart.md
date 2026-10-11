@@ -10,6 +10,14 @@ called a grid in NVIDIA CUDA and designates the total number of work items. If
 using a workgroup of size 1 (non-parallel execution), the ndrange is the
 number of items to iterate over in a loop.
 
+Like other GPU programming models, KernelAbstractions assumes that the work is roughly balanced
+across the work-items. A launch without a workgroup size gets one chosen under that
+assumption: on the CPU, each workgroup runs on one thread and is vectorized across its
+work-items, so the default splits a launch into about one workgroup per thread, as long as
+the workgroups stay large enough to vectorize. If the cost of a work-item varies a lot, e.g.,
+with a triangular loop bound, pass a smaller workgroup size, so that threads that finish
+early can pick up more workgroups.
+
 ## Writing your first kernel
 
 Kernel functions are marked with the [`@kernel`](@ref). Inside the `@kernel` macro

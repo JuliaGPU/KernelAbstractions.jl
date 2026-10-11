@@ -190,8 +190,46 @@ KI.max_work_group_dims(::POCLBackend)::NTuple{3, Int} = device_limits().max_work
 # the grid is only limited by the size of `size_t`
 KI.max_num_groups(::POCLBackend)::NTuple{3, Int} = (typemax(Int), typemax(Int), typemax(Int))
 KI.sub_group_size(::POCLBackend)::Int = device_limits().sub_group_size
-function KI.multiprocessor_count(::POCLBackend)::Int
-    return Int(device().max_compute_units)
+KI.multiprocessor_count(::POCLBackend)::Int = device_limits().compute_units
+
+# PoCL runs each work-group on one of its threads, looping over (and vectorizing across) the
+# work-items. the largest work-group would run a launch of up to that many work-items on a
+# single thread, so split it into about as many work-groups as there are threads, as long as
+# the work-groups stay large enough to vectorize. this assumes that the work is balanced
+# across the work-items.
+function KI.launch_configuration(
+        kernel::KI.Kernel{<:POCLBackend}; nitems::Union{Integer, Nothing} = nothing,
+        max_work_group_size::Integer = typemax(Int)
+    )
+    wginfo = cl.work_group_info(kernel.kern.kernel.fun, device())
+    max_items = min(wginfo.size, max_work_group_size)
+    items = cpu_workgroupsize(
+        nitems, device_limits().compute_units, max_items, wginfo.prefered_size_multiple
+    )
+    return (; workgroupsize = Int(items))
+end
+
+# PoCL's own choice when a launch doesn't give a local size (`pocl_default_local_size_optimizer`
+# in `lib/CL/devices/pocl_local_size.c`), in one dimension: start from the largest work-group,
+# and split it while there are at most half as many work-groups as threads, but not below
+# 4 times the preferred work-group size multiple. two differences: PoCL only uses local sizes
+# that divide the global size; KernelAbstractions supports partial work-groups, so this uses
+# powers of two instead, which divide the extents of `ndrange`s that are powers of two. and
+# PoCL doesn't split at all if splitting over all threads would go below the minimum, which
+# leaves e.g. 1000 work-items on 64 threads in one work-group; this splits down to the
+# minimum instead.
+function cpu_workgroupsize(nitems, threads, max_items, multiple)
+    nitems === nothing && return max_items
+    nitems = max(nitems, 1)
+    min_items = min(4 * max(multiple, 1), max_items)
+    items = min(nextpow(2, min(nitems, max_items)), max_items)
+    groups = cld(nitems, items)
+    while (splits = min(threads ÷ groups, items ÷ min_items)) > 1
+        # PoCL splits by the largest factor of at most `splits` that divides the work-group
+        items ÷= prevpow(2, splits)
+        groups = cld(nitems, items)
+    end
+    return items
 end
 
 KI.supports_subgroups(::POCLBackend) = device_limits().sub_group_size > 0
