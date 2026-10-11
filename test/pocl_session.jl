@@ -76,8 +76,9 @@ end
         G = zeros(Int, N)
         L = zeros(Int, N)
         group_index!(CPU())(G, L; ndrange = N)
-        # PoCL's heuristic stops splitting with more than half as many workgroups as threads
-        @test 2 * maximum(G) > threads
+        # splitting stops with more than half as many workgroups as threads, or at the
+        # minimum workgroup size of 32
+        @test 2 * maximum(G) > min(threads, N ÷ 32)
         # every work-item ran once
         @test (G .- 1) .* maximum(L) .+ L == 1:N
     end

@@ -566,24 +566,26 @@ end
         @test 1 <= items <= max_items
         # a power of two, unless limited by `max_items`
         ispow2(max_items) && @test ispow2(items)
-        # PoCL stops splitting with more than half as many workgroups as threads, or when
-        # splitting over the remaining threads would make workgroups smaller than 4 times
-        # the preferred multiple
+        # splitting stops with more than half as many workgroups as threads, or at the
+        # minimum of 4 times the preferred multiple
         if nitems !== nothing
-            splits = threads ÷ cld(max(nitems, 1), items)
-            @test splits <= 1 || items < splits * min(32, max_items)
+            @test 2 * cld(max(nitems, 1), items) > threads || items < 2 * min(32, max_items)
         end
     end
     # PoCL's choice for the same launches (`pocl_default_local_size_optimizer`)
     for (nitems, threads, items) in (
             (1024, 1, 1024), (1024, 4, 256), (1024, 8, 128), (4096, 4, 1024), (4096, 8, 512),
-            (16384, 4, 4096), (16384, 8, 2048), (65536, 8, 4096), (64, 64, 64), (4096, 64, 64),
+            (16384, 4, 4096), (16384, 8, 2048), (65536, 8, 4096), (4096, 64, 64),
         )
         @test workgroupsize(nitems, threads, 4096, 8) == items
     end
     # the floor follows the preferred multiple
     @test workgroupsize(1024, 32, 4096, 8) == 32
-    @test workgroupsize(1024, 32, 4096, 16) >= 64
+    @test workgroupsize(1024, 32, 4096, 16) == 64
+    # unlike PoCL, launches too small to split over all threads split down to the floor
+    @test workgroupsize(1000, 64, 4096, 8) == 32
+    @test workgroupsize(4096, 192, 4096, 8) == 32
+    @test workgroupsize(64, 64, 4096, 8) == 32
     # more threads don't mean larger workgroups
     @test issorted([workgroupsize(4096, threads, 4096, 8) for threads in 1:64]; rev = true)
 end

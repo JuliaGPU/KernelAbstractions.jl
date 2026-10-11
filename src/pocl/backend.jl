@@ -212,16 +212,19 @@ end
 # PoCL's own choice when a launch doesn't give a local size (`pocl_default_local_size_optimizer`
 # in `lib/CL/devices/pocl_local_size.c`), in one dimension: start from the largest work-group,
 # and split it while there are at most half as many work-groups as threads, but not below
-# 4 times the preferred work-group size multiple. PoCL only uses local sizes that divide the
-# global size; KernelAbstractions supports partial work-groups, so this uses powers of two
-# instead, which divide the extents of `ndrange`s that are powers of two.
+# 4 times the preferred work-group size multiple. two differences: PoCL only uses local sizes
+# that divide the global size; KernelAbstractions supports partial work-groups, so this uses
+# powers of two instead, which divide the extents of `ndrange`s that are powers of two. and
+# PoCL doesn't split at all if splitting over all threads would go below the minimum, which
+# leaves e.g. 1000 work-items on 64 threads in one work-group; this splits down to the
+# minimum instead.
 function cpu_workgroupsize(nitems, threads, max_items, multiple)
     nitems === nothing && return max_items
     nitems = max(nitems, 1)
     min_items = min(4 * max(multiple, 1), max_items)
     items = min(nextpow(2, min(nitems, max_items)), max_items)
     groups = cld(nitems, items)
-    while (splits = threads ÷ groups) > 1 && items >= splits * min_items
+    while (splits = min(threads ÷ groups, items ÷ min_items)) > 1
         # PoCL splits by the largest factor of at most `splits` that divides the work-group
         items ÷= prevpow(2, splits)
         groups = cld(nitems, items)
