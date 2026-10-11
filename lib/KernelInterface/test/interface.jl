@@ -641,6 +641,8 @@ function subgroup_communication_testsuite(backend::KI.Backend, AT, sg_size)
             Float32 => i -> Float32(i) / 3, Bool => isodd, Char => i -> Char(0x0001F600 + i),
             Bits64 => i -> Bits64((UInt64(i) << 40) - i), Bits16 => i -> Bits16(0xa000 + i),
             ShuffleStruct => i -> ShuffleStruct(i, -i, (i, 2i, 3i)),
+            # fields of less than 4 bytes share words
+            Tuple{Bool, Int8, Float16, UInt16} => i -> (isodd(i), Int8(-i), Float16(i), UInt16(1000i % 65536)),
             FallbackStruct => i -> FallbackStruct(isodd(i), Char(64 + i), Bits64(-i), (i, -i, 2i, typemin(Int64) + i)),
         ]
         fp64 && push!(values, Float64 => i -> 1 / i)
@@ -671,8 +673,7 @@ function subgroup_communication_testsuite(backend::KI.Backend, AT, sg_size)
         @test KI.supports_shuffle(backend, Bits64)
         @test KI.supports_shuffle(backend, Bits16)
         @test KI.supports_shuffle(backend, FallbackStruct)
-        @test KI.supports_shuffle(backend, ShuffleStruct) ==
-            all(S -> KI.supports_shuffle(backend, S), (Float32, Int64, Int32))
+        @test KI.supports_shuffle(backend, ShuffleStruct)
         @test !KI.supports_shuffle(backend, Ref{Int})
     end
 
