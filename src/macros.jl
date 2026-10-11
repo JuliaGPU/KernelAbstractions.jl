@@ -236,7 +236,9 @@ function split(
             push!(private_allocations, :($lhs = $rhs))
             continue
         elseif @capture(stmt, lhs_ = rhs_ | (vs__, lhs_ = rhs_))
-            if @capture(rhs, @index(args__))
+            # Only hoist index definitions, `A[i] = @index(...)` or
+            # `x.f = @index(...)` must stay in place (#855).
+            if @capture(rhs, @index(args__)) && !(lhs isa Expr && lhs.head in (:ref, :.))
                 push!(indices, stmt)
                 continue
             elseif @capture(rhs, @localmem(args__) | @uniform(args__))
@@ -302,6 +304,9 @@ function emit_cpu(loop)
                 if A in loop.private
                     return :($A[$__index_Local_Linear(__ctx__, $(idx))][$(i...)])
                 end
+            elseif @capture(expr, @index(args__))
+                # splice index into nested `@index` uses (#218, #855)
+                return Expr(:macrocall, expr.args..., idx)
             elseif expr isa Symbol
                 if expr in loop.private
                     return :($expr[$__index_Local_Linear(__ctx__, $(idx))])
