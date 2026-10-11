@@ -30,6 +30,9 @@
 #   in the `i` and `j` directions go through `O(N²)` local memory per element, while the
 #   contributions in the `k` direction and the result are accumulated in `@private`
 #   arrays. Two `@synchronize` per slab.
+# - "weak/slab double-buffered E=<E>" (3D): the same with two local-memory buffers that
+#   alternate between slabs, which needs only one `@synchronize` per slab, as in the
+#   slab kernel prototyped for Trixi.jl's 3D `P4estMesh` (trixi-framework/Trixi.jl#3339).
 # - "fluxdiff/element" and "fluxdiff/node E=<E>": the flux differencing form, with a symmetric
 #   two-point flux of the averaged state of two nodes on a line instead of the
 #   derivative of the flux. Per element, each two-point flux is computed once and added
@@ -204,15 +207,19 @@ end
 # accumulates in `@private` memory over the slabs `k`: the flux in the `k` direction of
 # node `(i, j, k)` only contributes to its own column, the fluxes in the `i` and `j`
 # directions are shared through local memory, one slab at a time. The loops over `k` and
-# `l` are unrolled so that the private arrays can be kept in registers.
+# `l` are unrolled so that the private arrays can be kept in registers. With `NB = 1`
+# local buffer, a slab waits until all work-items are done reading the previous one, i.e.,
+# two `@synchronize` per slab. With `NB = 2`, consecutive slabs use different buffers and
+# the `@synchronize` of slab `k + 1` ensures that slab `k` has been read before slab `k + 2`
+# overwrites its buffer, so one `@synchronize` per slab suffices.
 @kernel inbounds = true function dgsem_weak_slab_3d!(
-        du, @Const(u), @Const(D), @Const(Ja), ::Val{N}, ::Val{E}
-    ) where {N, E}
+        du, @Const(u), @Const(D), @Const(Ja), ::Val{N}, ::Val{E}, ::Val{NB}
+    ) where {N, E, NB}
     @uniform NV = 5
     i, j, e = @index(Global, NTuple)
     _, _, le = @index(Local, NTuple)
-    F1 = @localmem eltype(du) (NV, N, N, E)
-    F2 = @localmem eltype(du) (NV, N, N, E)
+    F1 = @localmem eltype(du) (NV, N, N, E, NB)
+    F2 = @localmem eltype(du) (NV, N, N, E, NB)
     acc = @private eltype(du) (NV, N)
     @unroll for k in 1:N
         @unroll for v in 1:NV
@@ -220,15 +227,18 @@ end
         end
     end
     @unroll for k in 1:N
+        b = mod1(k, NB)
         U = dgsem_node(u, Val(NV), i, j, k, e)
         G1 = dgsem_flux(U, dgsem_metric(Ja, Val(3), 1, i, j, k, e))
         G2 = dgsem_flux(U, dgsem_metric(Ja, Val(3), 2, i, j, k, e))
         G3 = dgsem_flux(U, dgsem_metric(Ja, Val(3), 3, i, j, k, e))
-        # all work-items are done reading the previous slab
-        @synchronize
+        if NB == 1
+            # all work-items are done reading the previous slab
+            @synchronize
+        end
         @unroll for v in 1:NV
-            F1[v, i, j, le] = G1[v]
-            F2[v, i, j, le] = G2[v]
+            F1[v, i, j, le, b] = G1[v]
+            F2[v, i, j, le, b] = G2[v]
         end
         @unroll for l in 1:N
             Dlk = D[l, k]
@@ -240,8 +250,8 @@ end
         @unroll for l in 1:N
             Dil, Djl = D[i, l], D[j, l]
             @unroll for v in 1:NV
-                acc[v, k] = muladd(Dil, F1[v, l, j, le], acc[v, k])
-                acc[v, k] = muladd(Djl, F2[v, i, l, le], acc[v, k])
+                acc[v, k] = muladd(Dil, F1[v, l, j, le, b], acc[v, k])
+                acc[v, k] = muladd(Djl, F2[v, i, l, le, b], acc[v, k])
             end
         end
     end
@@ -364,9 +374,10 @@ function dgsem_variants(backend, ::Val{DIM}, N, nelem) where {DIM}
     end
     push!(variants, "weak/node recompute E=$Ew" => per_node(dgsem_weak_node_recompute!, weak, Ew))
     if DIM == 3
-        for E in unique((1, max(1, 128 ÷ N^2)))
+        for E in unique((1, max(1, 128 ÷ N^2))), NB in (1, 2)
             k = dgsem_weak_slab_3d!(backend, (N, N, E))
-            push!(variants, "weak/slab E=$E" => (du, data) -> k(du, data.u, data.D, data.Ja, Val(N), Val(E); ndrange = (N, N, nelem)))
+            name = NB == 1 ? "weak/slab E=$E" : "weak/slab double-buffered E=$E"
+            push!(variants, name => (du, data) -> k(du, data.u, data.D, data.Ja, Val(N), Val(E), Val(NB); ndrange = (N, N, nelem)))
         end
     end
     push!(variants, "fluxdiff/element" => per_element(dgsem_fluxdiff_element!, fluxdiff))
