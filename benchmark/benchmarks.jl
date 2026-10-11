@@ -112,6 +112,40 @@ let steps = Val(16), variants = ("@Const" => relax_kernel!, "unmarked" => relax_
     end
 end
 
+# Elementwise work on a (W, nelem) array in workgroups of (W, E) work-items, so that the
+# first dimension of a workgroup has only W work-items. On the CPU, PoCL's innermost loop
+# over the work-items then has W iterations, which LLVM vectorizes only if the index
+# computation needs no runtime checks (#868). `unsafe_indices` drops the per-work-item
+# bounds check.
+@kernel inbounds = true function narrow_masked_kernel!(y, @Const(x))
+    i, e = @index(Global, NTuple)
+    y[i, e] = x[i, e] / (1 + x[i, e] * x[i, e])
+end
+
+@kernel inbounds = true unsafe_indices = true function narrow_unmasked_kernel!(y, @Const(x))
+    i, e = @index(Global, NTuple)
+    y[i, e] = x[i, e] / (1 + x[i, e] * x[i, e])
+end
+
+SUITE["narrow workgroup"] = BenchmarkGroup()
+
+let variants = ("masked" => narrow_masked_kernel!, "unmasked" => narrow_unmasked_kernel!), N = 2^20
+    for (name, kernel_fun) in variants
+        variant = BenchmarkGroup()
+        for W in (4, 16)
+            E = 256 ÷ W
+            x = rand!(KernelAbstractions.zeros(BACKEND, Float64, W, N ÷ W))
+            y = similar(x)
+            kernel = kernel_fun(BACKEND, (W, E))
+            variant["W=$W"] = @benchmarkable begin
+                $kernel($y, $x, ndrange = $(size(x)))
+                KernelAbstractions.synchronize($BACKEND)
+            end
+        end
+        SUITE["narrow workgroup"][name] = variant
+    end
+end
+
 # Launch overhead: a problem of a single workgroup, so that the time is dominated by the
 # host-side work of a launch. The kernel is constructed in the setup and the backend
 # synchronized in the teardown, so only the launch itself is measured.
