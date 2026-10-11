@@ -146,6 +146,30 @@ end
         @inbounds out[i] = lmem[i]
     end
 end
+
+@testset "POCL fast-math contraction" begin
+    # `muladd` is `fmul contract` + `fadd contract`, which only SPV_KHR_float_controls2 can
+    # carry into SPIR-V (#865); it is enabled when the device accepts it
+    dev = POCL.device()
+    enabled = "SPV_KHR_float_controls2" in dev.spirv_extensions
+    @test occursin("SPV_KHR_float_controls2", POCL.compiler_config(dev).target.extensions) == enabled
+
+    function contract!(c, a, b)
+        i = POCL.get_global_id()
+        @inbounds c[i] = muladd(a[i], b[i], c[i])
+        return
+    end
+    T = POCL.CLDeviceArray{Float32, 1, POCL.AS.CrossWorkgroup}
+    function spirv(; kwargs...)
+        config = POCL.compiler_config(dev; kernel = true, kwargs...)
+        job = POCL.GPUCompiler.CompilerJob(POCL.methodinstance(typeof(contract!), Tuple{T, T, T}), config)
+        return sprint(io -> POCL.GPUCompiler.code_native(io, job))
+    end
+    @test occursin("FPFastMathMode AllowContract", spirv()) == enabled
+    # explicitly requested extensions replace the default ones
+    @test !occursin("AllowContract", spirv(; extensions = ""))
+end
+
 @testset "POCL 8- and 16-bit atomics ($T)" for T in (Int8, UInt16, Float16)
     k = 64
     @testset "$n elements" for n in (1, 3, 5, 7, 1023)

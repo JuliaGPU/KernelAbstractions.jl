@@ -416,6 +416,8 @@ const CL_KERNEL_EXEC_INFO_SVM_FINE_GRAIN_SYSTEM = 0x11b7
 
 const CL_DEVICE_SUB_GROUP_SIZES_INTEL = 0x4108
 
+const CL_DEVICE_SPIRV_EXTENSIONS_KHR = 0x12ba
+
 struct CLError <: Exception
     code::Cint
 end
@@ -1003,6 +1005,17 @@ end
         caps = Ref{UInt64}(0)
         clGetDeviceInfo(d, prop, sizeof(UInt64), caps, C_NULL)
         return caps[]
+    end
+
+    # cl_khr_spirv_queries: the SPIR-V extensions the device accepts (empty when the device
+    # does not expose the extension)
+    if s == :spirv_extensions
+        "cl_khr_spirv_queries" in d.extensions || return String[]
+        size = Ref{Csize_t}()
+        clGetDeviceInfo(d, CL_DEVICE_SPIRV_EXTENSIONS_KHR, 0, C_NULL, size)
+        result = Vector{Cstring}(undef, size[] ÷ sizeof(Cstring))
+        clGetDeviceInfo(d, CL_DEVICE_SPIRV_EXTENSIONS_KHR, size[], result, C_NULL)
+        return String[unsafe_string(ext) for ext in result]
     end
 
     if s == :platform
