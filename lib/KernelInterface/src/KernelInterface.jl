@@ -46,7 +46,7 @@ include("host.jl")
             :functional, :versioninfo,
             :supports_unified, :supports_atomics, :supports_float64,
             :supports_subgroups, :supports_shuffle, :supports_linear_subgroups,
-            :supports_independent_subgroups,
+            :supports_independent_subgroups, :supports_partitionable_subgroups,
         )
     )
 end

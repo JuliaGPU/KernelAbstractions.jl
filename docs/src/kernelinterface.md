@@ -74,10 +74,10 @@ What a backend implements, at a glance. The docstrings below have the details.
 | **Execution** | [`synchronize`](@ref) (cooperative) | [`record_event`](@ref)/[`wait_event`](@ref) (synchronize), [`priority!`](@ref) (no-op) |
 | **Devices** | with more than one device: [`ndevices`](@ref), [`device`](@ref), [`device!`](@ref), `device(backend, A)` | all four (a single device) |
 | **Queries** | [`max_work_group_size`](@ref) (for the backend and for a kernel), [`max_work_group_dims`](@ref), [`max_num_groups`](@ref) | [`launch_configuration`](@ref) (the limit), [`multiprocessor_count`](@ref) (0), [`functional`](@ref) (`missing`), [`versioninfo`](@ref) |
-| **Capabilities** | | [`supports_float64`](@ref), [`supports_atomics`](@ref), [`supports_unified`](@ref), [`supports_subgroups`](@ref), [`supports_linear_subgroups`](@ref), [`supports_independent_subgroups`](@ref) (all `false`), [`supports_shuffle`](@ref) (`false` unless derived from the natively supported types, see its docstring) |
+| **Capabilities** | | [`supports_float64`](@ref), [`supports_atomics`](@ref), [`supports_unified`](@ref), [`supports_subgroups`](@ref), [`supports_linear_subgroups`](@ref), [`supports_independent_subgroups`](@ref), [`supports_partitionable_subgroups`](@ref) (all `false`), [`supports_shuffle`](@ref) (`false` unless derived from the natively supported types, see its docstring) |
 | **Compilation** | [`argconvert`](@ref), [`kernel_function`](@ref), [`launch`](@ref) | |
 | **Device** | [`get_local_id`](@ref), [`get_group_id`](@ref), [`get_local_size`](@ref), [`get_num_groups`](@ref), [`localmemory`](@ref), [`barrier`](@ref) | [`get_global_id`](@ref), [`get_global_size`](@ref) (derived from the primitive queries), [`_print`](@ref KernelInterface._print) (host `print`) |
-| **Sub-groups** | if `supports_subgroups`: [`sub_group_size`](@ref), the sub-group queries (with a constant [`get_max_sub_group_size`](@ref)), [`sub_group_barrier`](@ref), [`sub_group_any`](@ref), [`sub_group_all`](@ref), and [`sub_group_ballot`](@ref) for widths of at most 64; if `supports_shuffle(backend, T)`: [`shfl`](@ref), [`shfl_down`](@ref), [`shfl_up`](@ref), [`shfl_xor`](@ref) for the primitive `T` supported natively, including `UInt32` | shuffles with a `width`, [`sub_group_reduce`](@ref), [`sub_group_scan`](@ref), [`sub_group_exclusive_scan`](@ref) (built on the shuffles); shuffles of other primitive types (as `UInt32` or `UInt64` words) and of structs (packed into `UInt32` words) |
+| **Sub-groups** | if `supports_subgroups`: [`sub_group_size`](@ref), the sub-group queries, [`sub_group_barrier`](@ref), [`sub_group_any`](@ref), [`sub_group_all`](@ref), and [`sub_group_ballot`](@ref) for widths of at most 64; if `supports_shuffle(backend, T)`: [`shfl`](@ref), [`shfl_down`](@ref), [`shfl_up`](@ref), [`shfl_xor`](@ref) for the primitive `T` supported natively, including `UInt32` | [`sub_group_reduce`](@ref), [`sub_group_scan`](@ref), [`sub_group_exclusive_scan`](@ref) (built on the shuffles); the functions with a `width` (built on those without, or on the ballot); shuffles of other primitive types (as `UInt32` or `UInt64` words) and of structs (packed into `UInt32` words) |
 
 Everything else, such as [`zeros`](@ref KernelInterface.zeros), [`ones`](@ref KernelInterface.ones),
 the launch-keyword handling of [`Kernel`](@ref) and [`@launch`](@ref KernelInterface.@launch),
@@ -146,7 +146,7 @@ get_global_id
 get_global_size
 ```
 
-### Sub-groups
+### [Sub-groups](@id ki_subgroups)
 
 Sub-groups are optional ([`supports_subgroups`](@ref)). A work-group is divided into
 sub-groups of at most `W = `[`sub_group_size(backend)`](@ref sub_group_size) work-items, the
@@ -171,7 +171,7 @@ A sub-group is partial when it has fewer work-items than the width: the lanes
 values, and the votes, [`sub_group_reduce`](@ref) and the scans only take the work-items of
 the sub-group into account.
 
-Backends that guarantee more say so with two queries:
+Backends that guarantee more say so with these queries:
 
 - [`supports_linear_subgroups`](@ref): if the work-group is 1-D, or its x extent is a
   multiple of `W`, sub-groups are formed from consecutive work-items, x fastest: the
@@ -180,25 +180,32 @@ Backends that guarantee more say so with two queries:
   get_local_id()` and `size = get_local_size()`) is in sub-group `fld(lin - 1, W) + 1`, lane
   `mod(lin - 1, W) + 1`, and only the last sub-group can be partial. Code that relates local
   ids to lanes needs this, e.g. stencils exchanging neighbouring values with shuffles. Code
-  that doesn't, like a work-group reduction combining a value per sub-group, can index by the
-  sub-group slot `(get_sub_group_id() - 1) * W + get_sub_group_local_id()` instead.
+  that doesn't, like a work-group reduction that stores a result per sub-group, can index
+  those results by `get_sub_group_id()` and combine them using `get_num_sub_groups()`.
 - [`supports_independent_subgroups`](@ref): the communication functions (shuffles, votes,
   collectives and [`sub_group_barrier`](@ref)) can be executed in control flow that is uniform
   over each sub-group, but differs between the sub-groups of a work-group, e.g. a loop whose
   trip count depends on the sub-group, or after an early `return` of whole sub-groups.
   Otherwise, all sub-groups of a work-group have to execute the same communication
   functions in the same order.
+- [`supports_partitionable_subgroups`](@ref): a sub-group can be partitioned into segments that
+  diverge independently. The communication functions with a `width` work on segments of
+  `width` consecutive lanes; all work-items of a segment have to execute them together, but
+  different segments of a sub-group may take different branches or loop a different number of
+  times. Implies `supports_independent_subgroups`.
 
-| Backend | `supports_linear_subgroups` | `supports_independent_subgroups` |
-|---|---|---|
-| CUDA, AMDGPU | `true` | `true` |
-| Metal | `true` (not specified by Metal, but tested) | `true` |
-| oneAPI | once the layout is tested on Intel's GPU compiler | `true` |
-| OpenCL.jl | on runtimes known to form them linearly | `true`, except on PoCL |
-| KernelAbstractions' POCL backend | `true` | `false`: sub-group operations are work-group barriers |
+| Backend | `supports_linear_subgroups` | `supports_independent_subgroups` | `supports_partitionable_subgroups` |
+|---|---|---|---|
+| CUDA, AMDGPU | `true` | `true` | `true` |
+| Metal | `true` (not specified by Metal, but tested) | `true` | `true`: Apple GPUs execute a SIMD-group in lock-step, so the barrier for a segment is a SIMD-group-scope fence (not specified by Metal, but validated on M1 and M3) |
+| oneAPI | `true` | `true` | `true`: Intel GPUs execute a sub-group as the SIMD lanes of one hardware thread, so the barrier for a segment is a sub-group-scope fence |
+| OpenCL.jl | on PoCL and Intel's runtimes, which form them linearly | `true`, except on PoCL and Intel's CPU runtime | on Intel's GPU runtime only, as with oneAPI |
+| KernelAbstractions' POCL backend | `true` | `false`: sub-group operations are work-group barriers | `false` |
 
-In all cases, all work-items of a sub-group have to execute a communication function
-together, not in a branch that only some of its lanes take. The id and size queries can be
+Unless sub-groups are partitionable, the functions with a `width` need the whole sub-group, like
+the others: all its work-items have to execute them together, not in a branch that only some
+of its lanes take. Without independent sub-groups, all sub-groups of the work-group have to
+execute the same communication functions in the same order. The id and size queries can be
 used anywhere.
 
 !!! note "Kernel languages"
@@ -221,6 +228,7 @@ get_sub_group_local_id
 ```@docs
 barrier
 sub_group_barrier
+sub_group_barrier(::Integer)
 ```
 
 ### Memory
@@ -231,11 +239,10 @@ localmemory
 
 ### Communication
 
-The shuffles, votes and collectives below exchange values between the work-items of a
-sub-group, not memory: they don't order or make visible the work-items' accesses to local
-or global memory. To communicate through memory within a sub-group, e.g. a work-item reading
-what another one wrote to local memory, use [`sub_group_barrier`](@ref) between the write
-and the read.
+The shuffles, votes and collectives below don't synchronize accesses to local or global
+memory. When a work-item reads memory that another one of its sub-group wrote, put a
+[`sub_group_barrier`](@ref) between the write and the read, or
+[`sub_group_barrier(width)`](@ref sub_group_barrier(::Integer)) within a segment.
 
 ```@docs
 shfl
@@ -246,9 +253,11 @@ shfl(::Any, ::Integer, ::Integer)
 sub_group_any
 sub_group_all
 sub_group_ballot
+sub_group_ballot(::Bool, ::Integer)
 sub_group_reduce
 sub_group_scan
 sub_group_exclusive_scan
+sub_group_reduce(::Any, ::Any, ::Integer)
 ```
 
 ### Printing
@@ -305,6 +314,7 @@ supports_float64
 supports_subgroups
 supports_linear_subgroups
 supports_independent_subgroups
+supports_partitionable_subgroups
 supports_shuffle
 ```
 
@@ -359,6 +369,22 @@ optional methods where it can do better than the fallback. In particular:
    ```
 4. Compute the typed index queries with `% T`, not `T(x)`: a checked conversion leaves
    an error branch in every kernel.
+5. Sub-groups are optional. To support them, report [`supports_subgroups`](@ref) and
+   [`sub_group_size`](@ref), and implement the device functions the
+   [contract](@ref Contract) requires. If the backend has shuffles, implement them only for the
+   primitive types the hardware shuffles natively, including `UInt32`, and report those with
+   [`supports_shuffle`](@ref); KernelInterface shuffles other types as words. It also
+   provides the reductions, scans and functions with a `width`; override those where a
+   native implementation helps, keeping their documented results.
+
+   Report linear, independent and partitionable sub-groups only when the backend guarantees
+   them. Partitionable sub-groups need every function with a `width`,
+   including [`sub_group_barrier(width)`](@ref sub_group_barrier(::Integer)), to work when
+   only that segment executes it. Without a barrier for part of a sub-group, as in OpenCL
+   and Metal, that can rest on a hardware execution model, such as sub-groups that run in
+   lock-step, combined with a fence. Base these guarantees on the API or the hardware, not
+   on the testsuite passing: it checks the layout and divergent control flow, but can't
+   prove them.
 
 The PoCL backend in `src/pocl/backend.jl` is a complete worked example.
 
