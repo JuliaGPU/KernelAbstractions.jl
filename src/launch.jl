@@ -42,6 +42,18 @@ const Launch = Union{LinearLaunch, NDLaunch}
 index_type(::LinearLaunch{T}) where {T} = T
 index_type(::NDLaunch{T}) where {T} = T
 
+"""
+    preferred_index_type(backend)::Type{<:Union{Int32, Int}}
+
+The integer type in which `@index` computes on `backend` when the iteration space fits it
+(see [`select_launch`](@ref)). Backends **may** implement this for their backend type; the
+default is `Int32`, which is cheaper than `Int` on GPUs. A backend whose work-item ids are
+`Int`s and for which `Int` arithmetic is as cheap, e.g. a CPU backend, should return `Int`:
+narrowing the ids to `Int32` and widening the indices again hides from LLVM that they can't
+wrap, which e.g. keeps it from vectorizing PoCL's loops over the work-items (#868).
+"""
+preferred_index_type(backend) = Int32
+
 
 ## host side
 
@@ -52,7 +64,8 @@ Choose how to launch `kernel` with the (possibly preliminary) iteration space `i
 and the given `workgroupsize` (`nothing` if it will be tuned), as returned by
 `launch_config`: an [`NDLaunch`](@ref) if the iteration space fits the grid of
 `backend(kernel)`, i.e. its number of dimensions and per-dimension limits, and a
-[`LinearLaunch`](@ref) otherwise, both computing indices in `Int32` if possible.
+[`LinearLaunch`](@ref) otherwise, both computing indices in
+[`preferred_index_type(backend(kernel))`](@ref preferred_index_type) if possible.
 
 If the workgroup size will be tuned, the choice holds for any workgroup size the backend
 tunes afterwards, so the context and thus the compiled kernel are the same before and
@@ -72,15 +85,16 @@ function select_launch(kernel::Kernel, workgroupsize, iterspace)
     tuned = KernelAbstractions.workgroupsize(kernel) <: DynamicSize && workgroupsize === nothing
     return select_launch(
         map(mul_extent, groups, items), tuned ? nothing : items,
-        KI.max_work_group_size(b), KI.max_work_group_dims(b), KI.max_num_groups(b)
+        KI.max_work_group_size(b), KI.max_work_group_dims(b), KI.max_num_groups(b),
+        preferred_index_type(b)
     )
 end
 
 # `groupsize === nothing` means that the workgroup size will be tuned
 function select_launch(
         extent::Dims{N}, groupsize, max_items::Int,
-        max_dims::Dims, max_groups::Dims
-    ) where {N}
+        max_dims::Dims, max_groups::Dims, ::Type{T} = Int32
+    ) where {N, T}
     nd = N <= length(max_dims)
     if groupsize === nothing
         if nd
@@ -96,8 +110,8 @@ function select_launch(
         end
         padded = map(mul_extent, blocks, items)
     end
-    if fits(Int32, padded)
-        return nd ? NDLaunch{Int32}() : LinearLaunch{Int32}()
+    if fits(T, padded)
+        return nd ? NDLaunch{T}() : LinearLaunch{T}()
     elseif fits(Int, padded)
         return nd ? NDLaunch{Int}() : LinearLaunch{Int}()
     else
@@ -178,10 +192,25 @@ launch_workgroupsize(backend, ::Union{LinearLaunch, Nothing}, threads, ndrange) 
     return (i - q * dims[1] + one(i), ind2sub(Base.tail(dims), q)...)
 end
 
+# Arithmetic on positions in the padded iteration space, which `select_launch` sizes to fit
+# the index type, so it can't wrap. Telling LLVM so with `nuw`/`nsw` lets it widen the
+# result to `Int` without a runtime check, which e.g. keeps PoCL's work-item loops
+# vectorizable (#868).
+for (T, t) in ((Int32, "i32"), (Int64, "i64")), op in (:add, :sub, :mul)
+    f = Symbol(op, :_nowrap)
+    @eval @inline $f(a::$T, b::$T) = Base.llvmcall(
+        $"""
+        %r = $op nuw nsw $t %0, %1
+        ret $t %r
+        """, $T, Tuple{$T, $T}, a, b
+    )
+end
+
 # 1-based subscripts into `dims` to a 1-based linear index of type `T`, column-major
 @inline linearize(::Type{T}, ::Tuple{}, ::Tuple{}) where {T} = one(T)
-@inline linearize(::Type{T}, dims::Tuple, I::Tuple) where {T} =
-    I[1] + dims[1] * (linearize(T, Base.tail(dims), Base.tail(I)) - one(T))
+@inline linearize(::Type{T}, dims::Tuple, I::Tuple) where {T} = add_nowrap(
+    I[1], mul_nowrap(dims[1], sub_nowrap(linearize(T, Base.tail(dims), Base.tail(I)), one(T)))
+)
 
 @inline hardware_position(id, ::Val{N}) where {N} = ntuple(d -> (id.x, id.y, id.z)[d], Val(N))
 
@@ -222,7 +251,7 @@ end
     T = index_type(launch)
     groupsize = narrow(T, size(workitems(__iterspace(ctx))))
     return map(
-        (g, w, l) -> (g - one(g)) * w + l,
+        (g, w, l) -> add_nowrap(mul_nowrap(sub_nowrap(g, one(g)), w), l),
         group_position(ctx, launch), groupsize, local_position(ctx, launch)
     )
 end

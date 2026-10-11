@@ -135,6 +135,9 @@ end
 KI.functional(::POCLBackend) = true
 KA.pagelock!(::POCLBackend, x) = nothing
 
+# PoCL's work-item ids are 64-bit, and so are the loops over them that it vectorizes (#868)
+KA.preferred_index_type(::POCLBackend) = Int
+
 KI.get_backend(::Array) = POCLBackend()
 
 ## Implementation note:

@@ -252,6 +252,14 @@ function select_launch_testsuite()
         # including when empty
         @test select((2^40, 2^40, 0)) === LinearLaunch{Int32}()
         @test select((2^20, 2^12, 0), (1024,)) === NDLaunch{Int32}()
+
+        # a backend can prefer `Int`
+        selectint(extent, groupsize = nothing) =
+            KernelAbstractions.select_launch(extent, groupsize, max_items, max_dims, max_groups, Int)
+        @test selectint((1000,)) === NDLaunch{Int}()
+        @test selectint((2, 3, 4, 5)) === LinearLaunch{Int}()
+        @test selectint((1025, 1024, 1024)) === NDLaunch{Int}()
+        @test_throws ArgumentError selectint((2^40, 2^40))
     end
 
     # The index type is chosen before the workgroup size is tuned, so the padding that the
