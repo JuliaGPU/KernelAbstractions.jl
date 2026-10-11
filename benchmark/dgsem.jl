@@ -22,11 +22,6 @@
 #   work-item stores its fluxes in `@localmem`, and after a `@synchronize` sums along its
 #   lines and writes its `du` once. With `E = 1` the workgroups have only `N^DIM`
 #   work-items; the larger `E` has 128 per workgroup, as in Trixi's GPU kernels.
-# - "weak/node localmem v-last E=<E>": the same with the variable index last in local
-#   memory, `F[i, j, (k,) e, d, v]` instead of `F[v, i, j, (k,) e, d]`, so that neighbouring
-#   work-items access neighbouring words. With the variable index first and an even number
-#   of variables (`NV = 4` in 2D), they access the same shared-memory banks on NVIDIA GPUs
-#   (trixi-framework/Trixi.jl#3337).
 # - "weak/node recompute E=<E>": one work-item per node, but without local memory or
 #   `@synchronize`: each work-item recomputes the fluxes of the nodes on its lines (`DIM *
 #   N` instead of `DIM` fluxes). The control for the cost of `@synchronize`.
@@ -43,11 +38,20 @@
 #   derivative of the flux. Per element, each two-point flux is computed once and added
 #   to both nodes (read-modify-write in global memory); per node, each work-item computes
 #   all the two-point fluxes of its node, i.e., each one twice, and writes `du` once.
-# - "fluxdiff/node halfsweep E=<E>" and "... v-last E=<E>": one work-item per node, but
-#   each two-point flux is computed once, by the first node of the pair, and shared with
-#   the second through `@localmem` (`O(N^(DIM + 1))` per element) and a `@synchronize`,
-#   as Trixi's `HalfSweep` kernels, with the variable index first or last in local memory
-#   (see "weak/node localmem v-last").
+# - "fluxdiff/node halfsweep E=<E>": one work-item per node, but each two-point flux is
+#   computed once, by the first node of the pair, and shared with the second through
+#   `@localmem` (`O(N^(DIM + 1))` per element) and a `@synchronize`, as Trixi's `HalfSweep`
+#   kernels.
+#
+# Local-memory layout: the kernels with local memory store the variables of a node either
+# first, `F[v, i, j, (k,) e, ...]`, or last, `F[i, j, (k,) e, ..., v]`. With the variable
+# index last, neighbouring work-items access neighbouring words, while with it first and an
+# even number of variables (`NV = 4` in 2D) they access the same shared-memory banks on
+# NVIDIA GPUs (trixi-framework/Trixi.jl#3337). On the CPU the variables of a node in
+# consecutive words are faster. So, like the `VIJFH` and `VIJHF` data layouts of
+# ClimaCore.jl and a prototype for Trixi.jl, each backend gets a default layout
+# (`dgsem_default_layout`): the variable index first on the CPU and last otherwise. The variants without a layout in
+# their name use the default, and those named "v-first" or "v-last" the other layout.
 #
 # These are compute-heavy kernels with small, `@synchronize`d workgroups and `@private`
 # arrays, so they are sensitive to how a back-end handles local memory, barriers and
@@ -104,11 +108,25 @@ end
 # The node `l` of the line through `node` in direction `d`
 @inline dgsem_line(node, d, l) = Base.setindex(node, l, d)
 
-# The index of variable `v` at `I` in local memory, with the variable index first or last
-@inline dgsem_local_index(::Val{VLAST}, v, I...) where {VLAST} = VLAST ? (I..., v) : (v, I...)
+# The layout of the variables in local memory: `F[v, I...]` or `F[I..., v]`
+abstract type DGSEMLayout end
+struct DGSEMVariableFirst <: DGSEMLayout end
+struct DGSEMVariableLast <: DGSEMLayout end
+
+# The layout that a backend prefers (see "Local-memory layout" above)
+dgsem_default_layout(backend) = backend isa CPU ? DGSEMVariableFirst() : DGSEMVariableLast()
+
+# The suffix of the name of a variant with `layout` on `backend`: none for the default
+dgsem_layout_name(backend, layout) =
+    layout == dgsem_default_layout(backend) ? "" :
+    layout isa DGSEMVariableLast ? " v-last" : " v-first"
+
+# The index of variable `v` at `I` in local memory
+@inline dgsem_local_index(::DGSEMVariableFirst, v, I...) = (v, I...)
+@inline dgsem_local_index(::DGSEMVariableLast, v, I...) = (I..., v)
 
 # The state of a node in local memory, as a tuple
-@inline dgsem_local_node(A, layout::Val, ::Val{NV}, I::Vararg{Integer}) where {NV} =
+@inline dgsem_local_node(A, layout::DGSEMLayout, ::Val{NV}, I::Vararg{Integer}) where {NV} =
     ntuple(v -> @inbounds(A[dgsem_local_index(layout, v, I...)...]), Val(NV))
 
 @kernel inbounds = true function dgsem_weak_element!(
@@ -169,28 +187,27 @@ end
     end
 end
 
-# Workgroups of `(N, ..., N, E)` work-items, i.e., `E` elements. `VLAST` puts the variable
-# index last in local memory.
+# Workgroups of `(N, ..., N, E)` work-items, i.e., `E` elements
 @kernel inbounds = true function dgsem_weak_node_localmem!(
-        du, @Const(u), @Const(D), @Const(Ja), ::Val{N}, ::Val{DIM}, ::Val{E}, ::Val{VLAST}
-    ) where {N, DIM, E, VLAST}
+        du, @Const(u), @Const(D), @Const(Ja), ::Val{N}, ::Val{DIM}, ::Val{E}, layout::DGSEMLayout
+    ) where {N, DIM, E}
     @uniform NV = DIM + 2
     I = @index(Global, NTuple)
     node, e = Base.front(I), last(I)
     le = last(@index(Local, NTuple))
-    F = @localmem eltype(du) dgsem_local_index(Val(VLAST), NV, ntuple(_ -> N, Val(DIM))..., E, DIM)
+    F = @localmem eltype(du) dgsem_local_index(layout, NV, ntuple(_ -> N, Val(DIM))..., E, DIM)
     U = dgsem_node(u, Val(NV), node..., e)
     @unroll for d in 1:DIM
         G = dgsem_flux(U, dgsem_metric(Ja, Val(DIM), d, node..., e))
         @unroll for v in 1:NV
-            F[dgsem_local_index(Val(VLAST), v, node..., le, d)...] = G[v]
+            F[dgsem_local_index(layout, v, node..., le, d)...] = G[v]
         end
     end
     @synchronize
     acc = dgsem_zero(eltype(du), Val(NV))
     for l in 1:N
         @unroll for d in 1:DIM
-            G = dgsem_local_node(F, Val(VLAST), Val(NV), dgsem_line(node, d, l)..., le, d)
+            G = dgsem_local_node(F, layout, Val(NV), dgsem_line(node, d, l)..., le, d)
             acc = muladd.(D[node[d], l], G, acc)
         end
     end
@@ -231,13 +248,13 @@ end
 # the `@synchronize` of slab `k + 1` ensures that slab `k` has been read before slab `k + 2`
 # overwrites its buffer, so one `@synchronize` per slab suffices.
 @kernel inbounds = true function dgsem_weak_slab_3d!(
-        du, @Const(u), @Const(D), @Const(Ja), ::Val{N}, ::Val{E}, ::Val{NB}
+        du, @Const(u), @Const(D), @Const(Ja), ::Val{N}, ::Val{E}, ::Val{NB}, layout::DGSEMLayout
     ) where {N, E, NB}
     @uniform NV = 5
     i, j, e = @index(Global, NTuple)
     _, _, le = @index(Local, NTuple)
-    F1 = @localmem eltype(du) (NV, N, N, E, NB)
-    F2 = @localmem eltype(du) (NV, N, N, E, NB)
+    F1 = @localmem eltype(du) dgsem_local_index(layout, NV, N, N, E, NB)
+    F2 = @localmem eltype(du) dgsem_local_index(layout, NV, N, N, E, NB)
     acc = @private eltype(du) (NV, N)
     @unroll for k in 1:N
         @unroll for v in 1:NV
@@ -255,8 +272,8 @@ end
             @synchronize
         end
         @unroll for v in 1:NV
-            F1[v, i, j, le, b] = G1[v]
-            F2[v, i, j, le, b] = G2[v]
+            F1[dgsem_local_index(layout, v, i, j, le, b)...] = G1[v]
+            F2[dgsem_local_index(layout, v, i, j, le, b)...] = G2[v]
         end
         @unroll for l in 1:N
             Dlk = D[l, k]
@@ -268,8 +285,8 @@ end
         @unroll for l in 1:N
             Dil, Djl = D[i, l], D[j, l]
             @unroll for v in 1:NV
-                acc[v, k] = muladd(Dil, F1[v, l, j, le, b], acc[v, k])
-                acc[v, k] = muladd(Djl, F2[v, i, l, le, b], acc[v, k])
+                acc[v, k] = muladd(Dil, F1[dgsem_local_index(layout, v, l, j, le, b)...], acc[v, k])
+                acc[v, k] = muladd(Djl, F2[dgsem_local_index(layout, v, i, l, le, b)...], acc[v, k])
             end
         end
     end
@@ -341,16 +358,15 @@ end
 # Each work-item computes the two-point fluxes with the nodes after it on its lines and
 # stores them in local memory, at `F[v, node..., e, l, d]` for the node `l` in direction
 # `d`. After a `@synchronize`, it reads the fluxes with the nodes before it from theirs.
-# Workgroups of `(N, ..., N, E)` work-items. `VLAST` puts the variable index last in
-# local memory.
+# Workgroups of `(N, ..., N, E)` work-items.
 @kernel inbounds = true function dgsem_fluxdiff_halfsweep!(
-        du, @Const(u), @Const(Ds), @Const(Ja), ::Val{N}, ::Val{DIM}, ::Val{E}, ::Val{VLAST}
-    ) where {N, DIM, E, VLAST}
+        du, @Const(u), @Const(Ds), @Const(Ja), ::Val{N}, ::Val{DIM}, ::Val{E}, layout::DGSEMLayout
+    ) where {N, DIM, E}
     @uniform NV = DIM + 2
     I = @index(Global, NTuple)
     node, e = Base.front(I), last(I)
     le = last(@index(Local, NTuple))
-    F = @localmem eltype(du) dgsem_local_index(Val(VLAST), NV, ntuple(_ -> N, Val(DIM))..., E, N, DIM)
+    F = @localmem eltype(du) dgsem_local_index(layout, NV, ntuple(_ -> N, Val(DIM))..., E, N, DIM)
     U = dgsem_node(u, Val(NV), node..., e)
     @unroll for d in 1:DIM
         n = dgsem_metric(Ja, Val(DIM), d, node..., e)
@@ -361,7 +377,7 @@ end
                 dgsem_average(n, dgsem_metric(Ja, Val(DIM), d, other..., e))
             )
             @unroll for v in 1:NV
-                F[dgsem_local_index(Val(VLAST), v, node..., le, l, d)...] = f[v]
+                F[dgsem_local_index(layout, v, node..., le, l, d)...] = f[v]
             end
         end
     end
@@ -370,10 +386,10 @@ end
     @unroll for d in 1:DIM
         for l in 1:N
             if l < node[d]
-                f = dgsem_local_node(F, Val(VLAST), Val(NV), dgsem_line(node, d, l)..., le, node[d], d)
+                f = dgsem_local_node(F, layout, Val(NV), dgsem_line(node, d, l)..., le, node[d], d)
                 acc = muladd.(Ds[node[d], l], f, acc)
             elseif l > node[d]
-                f = dgsem_local_node(F, Val(VLAST), Val(NV), node..., le, l, d)
+                f = dgsem_local_node(F, layout, Val(NV), node..., le, l, d)
                 acc = muladd.(Ds[node[d], l], f, acc)
             end
         end
@@ -432,25 +448,26 @@ function dgsem_variants(backend, ::Val{DIM}, N, nelem) where {DIM}
         "weak/element" => per_element(dgsem_weak_element!, weak),
         "weak/element private" => per_element(dgsem_weak_element_private!, weak),
     ]
-    for E in unique((1, Ew)), vlast in (false, true)
-        name = vlast ? "weak/node localmem v-last E=$E" : "weak/node localmem E=$E"
-        push!(variants, name => per_node(dgsem_weak_node_localmem!, weak, E, Val(E), Val(vlast)))
+    layouts = (DGSEMVariableFirst(), DGSEMVariableLast())
+    for E in unique((1, Ew)), layout in layouts
+        name = "weak/node localmem$(dgsem_layout_name(backend, layout)) E=$E"
+        push!(variants, name => per_node(dgsem_weak_node_localmem!, weak, E, Val(E), layout))
     end
     push!(variants, "weak/node recompute E=$Ew" => per_node(dgsem_weak_node_recompute!, weak, Ew))
     if DIM == 3
-        for E in unique((1, max(1, 128 ÷ N^2))), NB in (1, 2)
+        for E in unique((1, max(1, 128 ÷ N^2))), NB in (1, 2), layout in layouts
             k = dgsem_weak_slab_3d!(backend, (N, N, E))
-            name = NB == 1 ? "weak/slab E=$E" : "weak/slab double-buffered E=$E"
-            push!(variants, name => (du, data) -> k(du, data.u, data.D, data.Ja, Val(N), Val(E), Val(NB); ndrange = (N, N, nelem)))
+            name = "weak/slab$(NB == 2 ? " double-buffered" : "")$(dgsem_layout_name(backend, layout)) E=$E"
+            push!(variants, name => (du, data) -> k(du, data.u, data.D, data.Ja, Val(N), Val(E), Val(NB), layout; ndrange = (N, N, nelem)))
         end
     end
     push!(variants, "fluxdiff/element" => per_element(dgsem_fluxdiff_element!, fluxdiff))
     push!(variants, "fluxdiff/node E=$Ew" => per_node(dgsem_fluxdiff_node!, fluxdiff, Ew))
     # In 3D, `E = 2` would need more than 48 KiB of local memory in Float64
     Eh = DIM == 2 ? Ew : 1
-    for vlast in (false, true)
-        name = vlast ? "fluxdiff/node halfsweep v-last E=$Eh" : "fluxdiff/node halfsweep E=$Eh"
-        push!(variants, name => per_node(dgsem_fluxdiff_halfsweep!, fluxdiff, Eh, Val(Eh), Val(vlast)))
+    for layout in layouts
+        name = "fluxdiff/node halfsweep$(dgsem_layout_name(backend, layout)) E=$Eh"
+        push!(variants, name => per_node(dgsem_fluxdiff_halfsweep!, fluxdiff, Eh, Val(Eh), layout))
     end
     return variants
 end
