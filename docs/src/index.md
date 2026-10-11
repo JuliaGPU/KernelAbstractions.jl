@@ -141,11 +141,9 @@ end
 - KernelAbstractions is built on [KernelInterface](@ref kernelinterface), which defines
   `Backend` and the host-side functions (`allocate`, `synchronize`, …) that
   KernelAbstractions re-exports. User code is unaffected, but backends have to implement
-  KernelInterface, so KernelAbstractions 0.10 needs a release of the backend package that
-  supports it; see the [notes for backend implementations](@ref implementations_notes).
+  KernelInterface; see the [notes for backend implementations](@ref implementations_notes).
 - The Enzyme extension has been removed temporarily, and is planned to return in a later
-  0.10 release. Code that differentiates kernels with Enzyme has to stay on
-  KernelAbstractions 0.9 until then.
+  0.10 release.
 - [`KernelAbstractions.@spawn`](@ref) launches kernels from a task like `Threads.@spawn`
   does, and additionally orders them after the work the spawning task has queued, and can
   select the device the task uses; see the [Quickstart](@ref).
