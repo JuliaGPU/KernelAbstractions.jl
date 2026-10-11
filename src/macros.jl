@@ -36,6 +36,7 @@ function __kernel(expr, __source__::LineNumberNode, __module__::Module, force_in
             if arg.args[1] === Symbol("@Const")
                 # arg.args[2] is a LineInfo node
                 args[i] = arg.args[3] # strip @Const
+                isexpr(args[i], :...) && error("`@Const` cannot be applied to varargs")
                 constargs[i] = true
                 continue
             end
@@ -45,6 +46,9 @@ function __kernel(expr, __source__::LineNumberNode, __module__::Module, force_in
 
     def_gpu = deepcopy(def)
     def_gpu[:name] = gpu_name = Symbol(:gpu_, name)
+    # a kernel returns `nothing` anyway, but a `ConstArgs` query returns its mask
+    delete!(def_gpu, :rtype)
+    forwarders = default_forwarders!(def_gpu, gpu_name, constargs)
     transform_gpu!(def_gpu, constargs, force_inbounds, unsafe_indices)
     if generated
         # Turn the kernel into a generated function: the transformed body is
@@ -85,7 +89,7 @@ function __kernel(expr, __source__::LineNumberNode, __module__::Module, force_in
     end
     constructors = relocate_lines(constructors, __source__)
 
-    return Expr(:block, esc(gpu_function), esc(constructors))
+    return Expr(:block, esc(gpu_function), esc(forwarders), esc(constructors))
 end
 
 """
@@ -164,18 +168,68 @@ function generated_error_body(err)
     return :(return $(GeneratedKernelError(msg)))
 end
 
-# The easy case, transform the function for GPU execution
-# - mark constant arguments by applying `constify`.
-function transform_gpu!(def, constargs, force_inbounds, unsafe_indices)
-    let_constargs = Expr[]
-    for (i, arg) in enumerate(def[:args])
-        if constargs[i]
-            push!(let_constargs, :($arg = $constify($arg)))
-        end
+# the answer of a kernel method to a `ConstArgs` query
+constargs_mask(constargs) = any(constargs) ? :(Val($(Tuple(constargs)))) : :nothing
+
+whereparam_name(p) = isexpr(p, :<:) || isexpr(p, :>:) ? p.args[1] : isexpr(p, :comparison) ? p.args[3] : p
+
+function uses(ex, name)
+    found = false
+    postwalk(x -> (found |= x === name; x), ex)
+    return found
+end
+
+# The methods for the arities that default arguments allow, which Julia would otherwise
+# generate itself. Like those, each supplies the next default, so that a default can refer to
+# the ones before it, but these first answer `ConstArgs` queries, so that a query doesn't
+# evaluate the defaults on the host. Strips the defaults from `def`.
+function default_forwarders!(def, gpu_name, constargs)
+    args = def[:args]
+    first_default = findfirst(arg -> isexpr(arg, :kw), args)
+    first_default === nothing && return Expr(:block)
+    nfixed = count(arg -> !isexpr(arg, :...), args)
+    # the forwarders pass on their arguments, so they need names
+    named = map(args) do arg
+        arg = isexpr(arg, :kw) ? arg.args[1] : arg
+        return isexpr(arg, :(::)) && length(arg.args) == 1 ? :($(gensym())::$(arg.args[1])) : arg
     end
+    argname(arg) = isexpr(arg, :(::)) ? arg.args[1] : arg
+    whereparams = collect(Base.get(def, :whereparams, ()))
+    forwarders = map((first_default - 1):(nfixed - 1)) do n
+        kept = named[1:n]
+        # Julia warns about static parameters that a method doesn't use
+        used = filter(p -> any(arg -> uses(arg, whereparam_name(p)), kept), whereparams)
+        while true
+            bounds = filter(p -> !(p in used) && any(q -> uses(q, whereparam_name(p)), used), whereparams)
+            isempty(bounds) && break
+            append!(used, bounds)
+        end
+        default = args[n + 1].args[2]
+        fdef = Dict{Symbol, Any}(
+            :name => gpu_name,
+            :args => Any[:__ctx__, kept...],
+            :kwargs => Any[],
+            :whereparams => filter(in(used), whereparams),
+            :body => quote
+                __ctx__ isa $ConstArgs && return $(constargs_mask(constargs[1:n]))
+                # as in the methods Julia generates: referring to the function by name
+                # would capture it when it's a closure
+                return var"#self#"(__ctx__, $(map(argname, kept)...), $default)
+            end,
+        )
+        return combinedef(fdef)
+    end
+    def[:args] = map(arg -> isexpr(arg, :kw) ? arg.args[1] : arg, args)
+    return Expr(:block, forwarders...)
+end
+
+# The easy case, transform the function for GPU execution
+# - answer which arguments are marked `@Const` (see `ConstArgs`)
+function transform_gpu!(def, constargs, force_inbounds, unsafe_indices)
     pushfirst!(def[:args], :__ctx__)
     # `Any[]`, since `split` hands back `LineNumberNode`s alongside `Expr`s
     new_stmts = Any[]
+    push!(new_stmts, :(__ctx__ isa $ConstArgs && return $(constargs_mask(constargs))))
     body = MacroTools.flatten(def[:body])
     if !unsafe_indices
         push!(new_stmts, :(__active_lane__ = $__validindex(__ctx__)))
@@ -192,11 +246,7 @@ function transform_gpu!(def, constargs, force_inbounds, unsafe_indices)
         push!(new_stmts, Expr(:inbounds, :pop))
     end
     push!(new_stmts, :(return nothing))
-    def[:body] = Expr(
-        :let,
-        Expr(:block, let_constargs...),
-        Expr(:block, new_stmts...),
-    )
+    def[:body] = Expr(:block, new_stmts...)
     return
 end
 

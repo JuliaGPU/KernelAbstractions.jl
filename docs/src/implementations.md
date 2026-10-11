@@ -84,7 +84,11 @@ it should return its method tables from `GPUCompiler.method_tables` rather than 
 - [`KernelAbstractions.compiler_options`](@ref): compiler options for a kernel, e.g. a
   register hint derived from its static workgroup size.
 - `Adapt.adapt_storage(::KernelAbstractions.ConstAdaptor, x)` for the backend's device
-  arrays, which implements [`@Const`](@ref).
+  arrays, which implements [`@Const`](@ref). KernelAbstractions marks `@Const` arguments
+  when launching a kernel, and they are constified by the backend's argument conversion,
+  on the host. That conversion, by [`KI.argconvert`](@ref KernelInterface.argconvert) as
+  well as within [`KI.launch`](@ref KernelInterface.launch), **must** therefore use Adapt.jl
+  to recurse into the arguments.
 
 [`@index`](@ref) computes its indices from how a kernel was launched: on a grid with the
 shape of the iteration space ([`NDLaunch`](@ref KernelAbstractions.NDLaunch), for up to as

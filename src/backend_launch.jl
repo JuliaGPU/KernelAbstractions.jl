@@ -107,7 +107,8 @@ function launch_kernel(obj::Kernel, launch, ndrange, _workgroupsize, iterspace, 
 
     # this might not be the final context, since we may tune the workgroupsize
     ctx = mkcontext(obj, ndrange, iterspace, launch)
-    kernel = compile(obj, ctx, args)
+    args, tt = prepare_arguments(b, obj.f, ctx, args)
+    kernel = KI.kernel_function(b, obj.f, tt; compiler_options(obj)...)
 
     # tune the workgroup size, keeping the context type (and thus the kernel) the same
     if workgroupsize(obj) <: DynamicSize && _workgroupsize === nothing
@@ -130,19 +131,45 @@ function launch_kernel(obj::Kernel, launch, ndrange, _workgroupsize, iterspace, 
     return nothing
 end
 
-@inline function compile(obj::Kernel, ctx, args::Tuple)
-    b = backend(obj)
-    tt = argument_types(b, ctx, args)
-    return KI.kernel_function(b, obj.f, tt; compiler_options(obj)...)
-end
-
 # The helpers below avoid splatting the arguments, and `map`, which isn't type stable for 32
 # or more elements.
 
-# `Tuple{map(x -> Core.Typeof(KI.argconvert(backend, x)), (ctx, args...))...}`
-@inline @generated function argument_types(backend, ctx, args::Tuple)
-    types = (:(Core.Typeof(KI.argconvert(backend, args[$i]))) for i in 1:fieldcount(args))
-    return :(Tuple{Core.Typeof(KI.argconvert(backend, ctx)), $(types...)})
+# Wrap the arguments the kernel marks `@Const` in a `ConstArg`, and return them together
+# with the types of the converted arguments, which the kernel is compiled for. Converting a
+# `ConstArg` constifies the converted argument, so each argument only needs to be converted
+# once, to find the kernel method's `@Const` mask and to compute its type.
+@inline @generated function prepare_arguments(backend, f, ctx, args::Tuple)
+    n = fieldcount(args)
+    converted = [Symbol(:arg, i) for i in 1:n]
+    conversions = (:($(converted[i]) = KI.argconvert(backend, args[$i])) for i in 1:n)
+    return quote
+        converted_ctx = KI.argconvert(backend, ctx)
+        $(conversions...)
+        mask = f(ConstArgs(), $(converted...))
+        return mark_constargs(mask, args),
+            argument_types(mask, converted_ctx, ($(converted...),))
+    end
+end
+
+# a kernel with varargs can have more arguments than its mask
+is_constarg(mask, i) = i <= length(mask) && mask[i]
+
+# no argument is marked, or the generator of a generated kernel failed, which compiling it
+# reports
+mark_constargs(_, args::Tuple) = args
+@inline @generated function mark_constargs(::Val{mask}, args::Tuple) where {mask}
+    marked = (is_constarg(mask, i) ? :(ConstArg(args[$i])) : :(args[$i]) for i in 1:fieldcount(args))
+    return :(($(marked...),))
+end
+
+# `Tuple{map(Core.Typeof, (ctx, args...))...}`, with the `@Const` arguments constified
+@inline @generated function argument_types(mask, ctx, args::Tuple)
+    marked = mask <: Val ? mask.parameters[1] : ()
+    types = (
+        is_constarg(marked, i) ? :(Core.Typeof(constify(args[$i]))) : :(Core.Typeof(args[$i]))
+            for i in 1:fieldcount(args)
+    )
+    return :(Tuple{Core.Typeof(ctx), $(types...)})
 end
 
 # `(ctx, args...)`
