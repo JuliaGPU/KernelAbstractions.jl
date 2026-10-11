@@ -180,3 +180,6 @@ let partition = BenchmarkGroup(), ndrange = Ref((1024,)), workgroupsize = Ref((1
     )
     SUITE["partition"] = partition
 end
+
+# Volume integral kernels of a discontinuous Galerkin spectral element method
+include("dgsem.jl")
