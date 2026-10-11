@@ -1,15 +1,5 @@
 # Forward mode of the kernel body, with the runtime activity and strong zero settings of `config`.
-# `set_strong_zero(mode, config)` is broken in EnzymeCore <= 0.8.22, so dispatch on `Val` instead.
-@static if isdefined(EnzymeRules, :strong_zero)
-    _fwd_mode(config) = _set_strong_zero(
-        EnzymeCore.set_runtime_activity(Forward, config),
-        Val(EnzymeRules.strong_zero(config)),
-    )
-    _set_strong_zero(mode, ::Val{true}) = EnzymeCore.set_strong_zero(mode)
-    _set_strong_zero(mode, ::Val{false}) = mode
-else
-    _fwd_mode(config) = EnzymeCore.set_runtime_activity(Forward, config)
-end
+_fwd_mode(config) = EnzymeCore.set_strong_zero(EnzymeCore.set_runtime_activity(Forward, config), config)
 
 # https://github.com/EnzymeAD/Enzyme.jl/issues/1516
 # On the CPU `autodiff_deferred` can deadlock.
