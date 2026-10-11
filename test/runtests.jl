@@ -214,6 +214,73 @@ end
     @test A == ref
 end
 
+@testset "POCL reinterpret" begin
+    @kernel function reinterpret_copy!(out, a)
+        I = @index(Global, Linear)
+        @inbounds out[I] = reinterpret(eltype(out), a)[I]
+    end
+    a = Float32[1, 2, 3, 4]
+    @testset "$T" for T in (UInt32, UInt16)
+        out = zeros(T, length(reinterpret(T, a)))
+        reinterpret_copy!(CPU())(out, a; ndrange = length(out))
+        synchronize(CPU())
+        @test out == reinterpret(T, a)
+    end
+
+    # like on the host, arrays of non-bitstypes can't be reinterpreted
+    out = zeros(UInt8, 1)
+    @test_throws POCL.KernelException redirect_stdout(devnull) do
+        reinterpret_copy!(CPU())(out, Union{Int8, UInt8}[Int8(-1)]; ndrange = 1)
+        synchronize(CPU())
+    end
+end
+
+# `@Const` arguments are constified by the launch, using the mask of the kernel method
+# that is called
+@kernel function const_seen!(out, @Const(B::AbstractVector))
+    I = @index(Global, Linear)
+    @inbounds out[I] = B isa POCL.Const
+end
+@kernel function const_seen!(out, B::Number)
+    I = @index(Global, Linear)
+    @inbounds out[I] = B isa POCL.Const
+end
+@kernel function const_seen_vararg!(out, @Const(B), Cs...)
+    I = @index(Global, Linear)
+    @inbounds out[I] = (B isa POCL.Const) && !any(C -> C isa POCL.Const, Cs)
+end
+# the defaults are evaluated on the device, not when looking up which arguments are
+# `@Const`, and can refer to the ones before them
+@kernel function const_seen_default!(
+        out, @Const(B), C = B isa POCL.Const || error("evaluated on the host"), D = C
+    )
+    I = @index(Global, Linear)
+    @inbounds out[I] = C && D
+end
+@kernel generated = true function const_seen_generated!(out, @Const(B))
+    I = @index(Global, Linear)
+    @inbounds out[I] = $(B <: POCL.Const)
+end
+@testset "POCL @Const arguments" begin
+    B = ones(Float32, 4)
+    @testset "$name" for (name, kernel, args, expected) in (
+            ("marked method", const_seen!, (B,), true),
+            ("unmarked method", const_seen!, (1.0f0,), false),
+            ("varargs", const_seen_vararg!, (B, B, B), true),
+            ("default arguments", const_seen_default!, (B,), true),
+            ("default argument given", const_seen_default!, (B, true), true),
+            ("generated", const_seen_generated!, (B,), true),
+        )
+        out = zeros(Bool, 4)
+        kernel(CPU())(out, args...; ndrange = length(out))
+        synchronize(CPU())
+        @test all(==(expected), out)
+    end
+    @test_throws "`@Const` cannot be applied to varargs" macroexpand(
+        @__MODULE__, :(@kernel function const_varargs!(out, @Const(Bs...)) end)
+    )
+end
+
 # `randn`/`randexp` for Float16 route through Random's table-free fallback, whose polar
 # transform overflows in Float16 and whose `log1p` isn't available for Float16 on the
 # device. The device overlays compute in Float32 and convert, so results stay finite.

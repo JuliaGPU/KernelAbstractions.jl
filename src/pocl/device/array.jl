@@ -269,15 +269,20 @@ Base.show(io::IO, mime::MIME"text/plain", a::CLDeviceArray) = show(io, a)
     end
 end
 
+# the checks of GPUArrays' `reinterpret`; the thrown value is dropped on the device, so
+# these don't need the exception types it uses to report the details
 function Base.reinterpret(::Type{T}, a::CLDeviceArray{S, N, A}) where {T, S, N, A}
-    err = _reinterpret_exception(T, a)
-    err === nothing || throw(err)
+    isbitstype(T) && isbitstype(S) ||
+        throw(ArgumentError("cannot reinterpret an array when not all types are bitstypes"))
 
     if sizeof(T) == sizeof(S) # fast case
         return CLDeviceArray{T, N, A}(size(a), reinterpret(LLVMPtr{T, A}, a.ptr), a.maxsize)
     end
 
+    N == 0 && throw(ArgumentError("cannot reinterpret a zero-dimensional array to a type of a different size"))
     isize = size(a)
+    rem(isize[1] * sizeof(S), sizeof(T)) == 0 ||
+        throw(ArgumentError("cannot reinterpret an array whose first dimension is not divisible by the new element size"))
     size1 = div(isize[1] * sizeof(S), sizeof(T))
     osize = tuple(size1, Base.tail(isize)...)
     return CLDeviceArray{T, N, A}(osize, reinterpret(LLVMPtr{T, A}, a.ptr), a.maxsize)

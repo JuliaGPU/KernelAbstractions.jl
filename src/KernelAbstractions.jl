@@ -155,6 +155,11 @@ end
 by `A` is both not written to as part of the kernel and that it does not alias
 any other memory in the kernel.
 
+The kernel receives such an argument with the backend's read-only array type, so a type
+annotation on it has to accept that type, e.g., `@Const(A::AbstractArray{T})`. Which
+arguments are read-only is determined by the kernel method the arguments select before
+that, so kernel methods should not dispatch on the read-only type.
+
 !!! danger
     Violating those constraints will lead to arbitrary behaviour.
 
@@ -493,16 +498,21 @@ Adapt.adapt_storage(::Backend, x)
 
 constify(arg) = adapt(ConstAdaptor(), arg)
 
-# `constify` runs inside the kernel, where wrappers must be rebuilt without re-validating
-# them: Adapt.jl's rules for these wrappers go through constructors whose error paths build
-# strings, which does not compile for GPUs. Adapting only replaces the parent array, so the
-# existing fields remain valid.
-Adapt.adapt_structure(to::ConstAdaptor, A::Base.ReshapedArray) =
-    Base.ReshapedArray(adapt(to, parent(A)), size(A), A.mi)
-@eval function Adapt.adapt_structure(to::ConstAdaptor, A::PermutedDimsArray{T, N, perm, iperm}) where {T, N, perm, iperm}
-    P = adapt(to, parent(A))
-    return $(Expr(:new, :(PermutedDimsArray{eltype(P), N, perm, iperm, typeof(P)}), :P))
+# A `@Const` argument is wrapped in a `ConstArg` when launching the kernel, so that the
+# backend's argument conversion constifies it right after converting it. That keeps Adapt.jl's
+# rules, which rebuild wrappers through validating constructors, out of device code, and
+# leaves converting (and tracking) the argument itself to the backend.
+struct ConstArg{T}
+    x::T
 end
+Adapt.adapt_structure(to, arg::ConstArg) = constify(adapt(to, arg.x))
+
+# Calling a kernel function with `ConstArgs()` instead of its context, on the host, returns
+# which of its arguments are marked `@Const`: `Val(mask)`, with a `Bool` per argument, or
+# `nothing` if none are. `@kernel` checks for it at the top of every kernel method, so that
+# the answer comes from the method the converted arguments dispatch to. For the actual
+# context, the check is folded away.
+struct ConstArgs end
 
 include("nditeration.jl")
 using .NDIteration

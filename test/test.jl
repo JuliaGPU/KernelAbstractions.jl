@@ -276,9 +276,11 @@ function unittest_testsuite(Backend, backend_str, backend_mod, BackendArrayT; sk
             iterspace = NDRange{1, StaticSize{(128,)}, StaticSize{(8,)}}()
             ctx = KernelAbstractions.mkcontext(kernel, nothing, iterspace)
             AT = BackendArrayT{Float32, 2, 1} # AS 1
+            # the launch constifies `@Const` arguments before passing them to the kernel
+            CT = Base.promote_op(KernelAbstractions.constify, AT)
             IR = sprint() do io
                 backend_mod.code_llvm(
-                    io, kernel.f, (typeof(ctx), AT, AT),
+                    io, kernel.f, (typeof(ctx), AT, CT),
                     kernel = true, optimize = true,
                     # the annotation we look for on POCL is metadata, which is only
                     # printed in raw mode
@@ -291,7 +293,7 @@ function unittest_testsuite(Backend, backend_str, backend_mod, BackendArrayT; sk
                 # how the load is expressed in LLVM IR depends on the CUDA.jl and LLVM
                 # versions, so check that it goes through the read-only cache in PTX
                 PTX = sprint() do io
-                    backend_mod.code_ptx(io, kernel.f, (typeof(ctx), AT, AT), kernel = true)
+                    backend_mod.code_ptx(io, kernel.f, (typeof(ctx), AT, CT), kernel = true)
                 end
                 @test occursin("ld.global.nc", PTX)
             elseif backend_str == "ROCM"
@@ -315,15 +317,23 @@ function unittest_testsuite(Backend, backend_str, backend_mod, BackendArrayT; sk
         synchronize(Backend())
         @test all(Array(A) .== 1.0f0)
 
-        # wrapped arrays are rebuilt around the constified array inside the kernel
+        # wrapped arrays are rebuilt around the constified array, and objects whose
+        # constructors validate their arguments can be passed too
         host = Float32.(reshape(1:25, 5, 5))
         dev = adapt(Backend(), host)
-        for (B, ref) in (
-                (vec(view(dev, 1:4, 1:4)), vec(view(host, 1:4, 1:4))),
-                (reshape(view(dev, 1:4, 1:4), 2, 8), reshape(view(host, 1:4, 1:4), 2, 8)),
-                (reshape(view(dev, :, 2:3), 2, 5), reshape(view(host, :, 2:3), 2, 5)),
-                (PermutedDimsArray(dev, (2, 1)), PermutedDimsArray(host, (2, 1))),
-            )
+        args = Any[
+            (vec(view(dev, 1:4, 1:4)), vec(view(host, 1:4, 1:4))),
+            (reshape(view(dev, 1:4, 1:4), 2, 8), reshape(view(host, 1:4, 1:4), 2, 8)),
+            (reshape(view(dev, :, 2:3), 2, 5), reshape(view(host, :, 2:3), 2, 5)),
+            (PermutedDimsArray(dev, (2, 1)), PermutedDimsArray(host, (2, 1))),
+            (StepRangeLen(0.0f0, 0.5f0, 16), collect(StepRangeLen(0.0f0, 0.5f0, 16))),
+        ]
+        if KernelAbstractions.supports_float64(Backend())
+            # indexing these computes in Float64
+            push!(args, (LinRange(0.0f0, 7.5f0, 16), collect(LinRange(0.0f0, 7.5f0, 16))))
+            push!(args, (range(0.0f0, step = 0.1f0, length = 16), collect(range(0.0f0, step = 0.1f0, length = 16))))
+        end
+        for (B, ref) in args
             A = KernelAbstractions.zeros(Backend(), Float32, size(B))
             if ndims(B) == 1
                 constarg(Backend(), 8)(A, B, ndrange = size(A))
