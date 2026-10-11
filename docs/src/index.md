@@ -181,6 +181,13 @@ end
   `GPUCompiler.SHARED_METHOD_TABLE`, which backends that override
   `GPUCompiler.method_table_view` have to include, e.g., by implementing
   `GPUCompiler.method_tables` instead.
+- [`@Const`](@ref) arguments are constified on the host when the kernel is launched, instead
+  of at the start of the kernel. Arguments whose Adapt.jl rules don't compile for GPUs, e.g.
+  a `StepRangeLen` or `LinRange`, can now be passed as `@Const`. The kernel sees the same
+  types as before. `@Const` on a varargs argument, which didn't work before, is now an error
+  when the kernel is defined. Backends have to convert kernel arguments with Adapt.jl,
+  both in `KI.argconvert` and in `KI.launch`, since that conversion now constifies them; see
+  the [notes for backend implementations](@ref implementations_notes).
 - Launching a kernel on the `CPU` backend costs more than in 0.9: the kernel is handed to
   PoCL's threads and the launching task waits for them, which takes several microseconds
   per launch even for an empty kernel. Code that launches many small kernels pays this every
