@@ -287,9 +287,10 @@ sub-groups of the work-group have to execute it.
 Types for which [`supports_shuffle`](@ref) returns `true` are supported. Besides the types a
 backend supports natively, that includes other primitive types of 1, 2, 4, 8 or 16 bytes
 (e.g. `Bool`, `Char` or `Int64`) if the backend supports `UInt32`, and `isbits` structs and
-tuples of supported types, which are shuffled field by field. Primitive types of up to 4
-bytes are shuffled as a `UInt32`, and larger ones as `UInt64` words, each of which is shuffled
-natively if the backend supports `UInt64`, and as two `UInt32` words otherwise.
+tuples of such types. Primitive types of up to 4 bytes are shuffled as a `UInt32`, and larger
+ones as `UInt64` words, each of which is shuffled natively if the backend supports `UInt64`,
+and as two `UInt32` words otherwise. Structs and tuples are packed into `UInt32` words, with
+fields of less than 4 bytes sharing words, and shuffled word by word.
 
 !!! note
     Backend implementations **must** implement this for the primitive types they support
@@ -299,7 +300,7 @@ natively if the backend supports `UInt64`, and as two `UInt32` words otherwise.
     @device_override shfl(val::T, lane::Integer) where {T <: Union{...}}
     ```
 """
-@inline shfl(val, lane::Integer) = shfl_fallback(x -> shfl(x, lane), val)
+@inline shfl(val, lane::Integer) = shfl_fallback(ShuffleOp(shfl, (lane,)), val)
 
 """
     shfl_down(val::T, offset::Integer)::T
@@ -323,7 +324,7 @@ the supported types.
     @device_override shfl_down(val::T, offset::Integer) where {T <: Union{...}}
     ```
 """
-@inline shfl_down(val, offset::Integer) = shfl_fallback(x -> shfl_down(x, offset), val)
+@inline shfl_down(val, offset::Integer) = shfl_fallback(ShuffleOp(shfl_down, (offset,)), val)
 
 """
     shfl_up(val::T, offset::Integer)::T
@@ -345,7 +346,7 @@ the supported types.
     @device_override shfl_up(val::T, offset::Integer) where {T <: Union{...}}
     ```
 """
-@inline shfl_up(val, offset::Integer) = shfl_fallback(x -> shfl_up(x, offset), val)
+@inline shfl_up(val, offset::Integer) = shfl_fallback(ShuffleOp(shfl_up, (offset,)), val)
 
 """
     shfl_xor(val::T, mask::Integer)::T
@@ -370,15 +371,24 @@ the supported types.
     @device_override shfl_xor(val::T, mask::Integer) where {T <: Union{...}}
     ```
 """
-@inline shfl_xor(val, mask::Integer) = shfl_fallback(x -> shfl_xor(x, mask), val)
+@inline shfl_xor(val, mask::Integer) = shfl_fallback(ShuffleOp(shfl_xor, (mask,)), val)
 
-# Shuffle a value of a type that the backend doesn't support natively, with `f` shuffling a
+# A shuffle of values of the types that the backend supports natively: `op(x)` is
+# `op.f(x, op.args...)`. A struct rather than a closure, so that a backend can dispatch on it in
+# `shfl_word_tuple`.
+struct ShuffleOp{F, A <: Tuple}
+    f::F
+    args::A
+end
+@inline (op::ShuffleOp)(x) = op.f(x, op.args...)
+
+# Shuffle a value of a type that the backend doesn't support natively, with `op` shuffling a
 # value of a type it does support. The fallbacks are separate functions for primitive and for
 # other types, so that the fallback of a struct with a field the backend doesn't support
 # natively, e.g. an `Int64` on Metal, doesn't call itself, which inference gives up on (on
 # Julia 1.10).
-@inline function shfl_fallback(f, val::T) where {T}
-    return isprimitivetype(T) ? shfl_words(f, val) : shfl_fields(f, val)
+@inline function shfl_fallback(op, val::T) where {T}
+    return isprimitivetype(T) ? shfl_words(op, val) : shfl_packed(op, val)
 end
 
 shfl_unsupported(T) = throw(
@@ -395,52 +405,130 @@ shuffle_as_words(T) = T !== UInt32 && sizeof(T) in (1, 2, 4, 8, 16)
 const word_types = (UInt8, UInt16, UInt32, UInt64, UInt128)
 word_type(T) = word_types[trailing_zeros(sizeof(T)) + 1]
 
+# The generated functions mark their bodies for inlining: `@inline` on a generated function
+# doesn't apply to a body that the generator returns with an explicit `return`.
+inline_body(ex) = Expr(:block, Expr(:meta, :inline), ex)
+
 # Shuffle a primitive value as unsigned words: values of up to 4 bytes are zero-extended to a
 # `UInt32`. Other 8-byte values are shuffled as a `UInt64`, which the backend may support
 # natively, and a `UInt64` it doesn't is split into two `UInt32` words. 16-byte values are
 # split into two `UInt64` words.
-@inline @generated function shfl_words(f, val::T) where {T}
+@inline @generated function shfl_words(op, val::T) where {T}
     shuffle_as_words(T) || return :(shfl_unsupported($T))
     U = word_type(T)
     if sizeof(T) <= 4
-        return :(reinterpret($T, f(reinterpret($U, val) % UInt32) % $U))
+        return inline_body(:(reinterpret($T, op(reinterpret($U, val) % UInt32) % $U)))
     elseif sizeof(T) == 8 && T !== UInt64
-        return :(reinterpret($T, f(reinterpret(UInt64, val))))
+        return inline_body(:(reinterpret($T, op(reinterpret(UInt64, val)))))
     end
     W = sizeof(T) == 8 ? UInt32 : UInt64
     nbits = 8 * sizeof(W)
-    words = (:((f((bits >> $(nbits * (i - 1))) % $W) % $U) << $(nbits * (i - 1))) for i in 1:2)
-    return quote
-        bits = reinterpret($U, val)
-        return reinterpret($T, |($(words...)))
-    end
+    words = (:((op((bits >> $(nbits * (i - 1))) % $W) % $U) << $(nbits * (i - 1))) for i in 1:2)
+    return inline_body(
+        quote
+            bits = reinterpret($U, val)
+            reinterpret($T, |($(words...)))
+        end
+    )
 end
 
 # A `UInt64` that the backend doesn't shuffle natively is split into two `UInt32` words by a
 # method of its own, so that another 8-byte type, shuffled as a `UInt64`, doesn't reach the
 # fallback through itself, which inference gives up on (on Julia 1.10). Backends that shuffle
 # `UInt64` natively override these.
-@inline shfl(val::UInt64, lane::Integer) = shfl_words(x -> shfl(x, lane), val)
-@inline shfl_down(val::UInt64, offset::Integer) = shfl_words(x -> shfl_down(x, offset), val)
-@inline shfl_up(val::UInt64, offset::Integer) = shfl_words(x -> shfl_up(x, offset), val)
-@inline shfl_xor(val::UInt64, mask::Integer) = shfl_words(x -> shfl_xor(x, mask), val)
+@inline shfl(val::UInt64, lane::Integer) = shfl_words(ShuffleOp(shfl, (lane,)), val)
+@inline shfl_down(val::UInt64, offset::Integer) = shfl_words(ShuffleOp(shfl_down, (offset,)), val)
+@inline shfl_up(val::UInt64, offset::Integer) = shfl_words(ShuffleOp(shfl_up, (offset,)), val)
+@inline shfl_xor(val::UInt64, mask::Integer) = shfl_words(ShuffleOp(shfl_xor, (mask,)), val)
 
-# The expression that shuffles `ex::S` field by field, calling `f` on the primitive fields
-function shfl_fields_expr(S, ex)
-    isprimitivetype(S) && return :(f($ex))
-    fields = (shfl_fields_expr(fieldtype(S, i), :(getfield($ex, $i))) for i in 1:fieldcount(S))
-    return Expr(:new, S, fields...)
+# The primitive fields of a value `ex::S`, nested ones included, in order, as
+# `(type, expression)` pairs
+function primitive_fields!(fields, S, ex)
+    if isprimitivetype(S)
+        push!(fields, (S, ex))
+    else
+        for i in 1:fieldcount(S)
+            primitive_fields!(fields, fieldtype(S, i), :(getfield($ex, $i)))
+        end
+    end
+    return fields
 end
 
-# Shuffle a value that the backend doesn't support directly field by field. Nested fields are
-# unrolled here, rather than shuffled with a recursive call, which inference gives up on
-# (on Julia 1.10), so that `f` is only called on the primitive types.
-@inline @generated function shfl_fields(f, val::T) where {T}
+# The bit offset of each of the primitive types `types` when packed into `UInt32` words, and
+# the number of words: types of less than 4 bytes are aligned to their size, so that they don't
+# straddle words, and larger ones to a word.
+function packed_layout(types)
+    offsets = Int[]
+    bit = 0
+    for T in types
+        align = min(8 * sizeof(T), 32)
+        bit = cld(bit, align) * align
+        push!(offsets, bit)
+        bit += 8 * sizeof(T)
+    end
+    return offsets, cld(bit, 32)
+end
+
+# The expression that builds a value of type `S` from the expressions `leaves` of its primitive
+# fields, in the order of `primitive_fields!`, starting at `leaves[i]`; and the next index
+function rebuild_expr(S, leaves, i)
+    isprimitivetype(S) && return leaves[i], i + 1
+    fields = Any[]
+    for j in 1:fieldcount(S)
+        ex, i = rebuild_expr(fieldtype(S, j), leaves, i)
+        push!(fields, ex)
+    end
+    return Expr(:new, S, fields...), i
+end
+
+# Shuffle a struct or tuple: its primitive fields are packed into `UInt32` words, which are
+# shuffled with `shfl_word_tuple`. Nested fields are unrolled here, rather than shuffled with a
+# recursive call, which inference gives up on (on Julia 1.10).
+@inline @generated function shfl_packed(op, val::T) where {T}
     isbitstype(T) || return :(shfl_unsupported($T))
-    return shfl_fields_expr(T, :val)
+    fields = primitive_fields!(Any[], T, :val)
+    all(((S, _),) -> sizeof(S) in (1, 2, 4, 8, 16), fields) || return :(shfl_unsupported($T))
+    offsets, nwords = packed_layout(first.(fields))
+    bits = [Symbol(:bits, i) for i in eachindex(fields)]
+    body = Any[]
+    terms = [Any[] for _ in 1:nwords]
+    for (i, (S, ex)) in enumerate(fields)
+        U = word_type(S)
+        push!(body, :($(bits[i]) = reinterpret($U, $ex)))
+        word, shift = fld(offsets[i], 32) + 1, offsets[i] % 32
+        if sizeof(S) <= 4
+            push!(terms[word], :(($(bits[i]) % UInt32) << $shift))
+        else
+            for j in 0:(sizeof(S) ÷ 4 - 1)
+                push!(terms[word + j], :(($(bits[i]) >> $(32j)) % UInt32))
+            end
+        end
+    end
+    words = [isempty(t) ? :(UInt32(0)) : :(|($(t...))) for t in terms]
+    push!(body, :(words = shfl_word_tuple(op, ($(words...),))))
+    leaves = Any[]
+    for (i, (S, _)) in enumerate(fields)
+        U = word_type(S)
+        word, shift = fld(offsets[i], 32) + 1, offsets[i] % 32
+        if sizeof(S) <= 4
+            push!(leaves, :(reinterpret($S, (words[$word] >> $shift) % $U)))
+        else
+            parts = (:($U(words[$(word + j)]) << $(32j)) for j in 0:(sizeof(S) ÷ 4 - 1))
+            push!(leaves, :(reinterpret($S, |($(parts...)))))
+        end
+    end
+    push!(body, first(rebuild_expr(T, leaves, 1)))
+    return inline_body(Expr(:block, body...))
 end
 
-# The shuffles within segments of `width` lanes, implemented with `shfl` from a lane.
+# Shuffle the words a struct or tuple is packed into, with `op` shuffling a `UInt32`, one at a
+# time. Not public: a backend may exchange all words at once instead, e.g. with a vector shuffle.
+#
+# PoCL limitation: every shuffle on PoCL is a work-group barrier, so one exchange of all words
+# would make these shuffles several times faster there. PoCL has vector shuffles
+# (`intel_sub_group_shuffle` on `uint2` to `uint16`), but its CPU device doesn't accept them
+# from SPIR-V (`cl_intel_spirv_subgroups`), so no backend implements this yet.
+@inline shfl_word_tuple(op, words::NTuple{N, UInt32}) where {N} = map(op, words)
 
 """
     shfl(val::T, lane::Integer, width::Integer)::T
@@ -693,6 +781,7 @@ It exchanges values, not memory: it is not a memory fence, see [`sub_group_barri
 end
 
 
+
 ## synchronization
 
 """
@@ -735,6 +824,7 @@ All work-items of a sub-group have to reach the same `sub_group_barrier()`; see
 function sub_group_barrier()
     error("Sub-group barrier used outside kernel or not captured")
 end
+
 
 
 ## printing

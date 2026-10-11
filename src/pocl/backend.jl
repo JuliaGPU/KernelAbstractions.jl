@@ -200,10 +200,12 @@ KI.supports_subgroups(::POCLBackend) = device_limits().sub_group_size > 0
 KI.supports_linear_subgroups(backend::POCLBackend) = KI.supports_subgroups(backend)
 KI.supports_independent_subgroups(::POCLBackend) = false
 
-# The types `sub_group_shuffle` supports; other types are shuffled as words or field by
-# field. `Float16` and `Float64` are reported as unsupported on devices without `cl_khr_fp16`
-# or `cl_khr_fp64`, rather than shuffled as words: the overrides below are selected by type,
-# not by device.
+# PoCL limitation: every shuffle is a work-group barrier, also for each word of a struct; see
+# `KI.shfl_word_tuple`, which could exchange them at once with `cl_intel_spirv_subgroups`.
+
+# The types `sub_group_shuffle` supports; other types are shuffled as words. `Float16` and
+# `Float64` are reported as unsupported on devices without `cl_khr_fp16` or `cl_khr_fp64`,
+# rather than shuffled as words: the overrides below are selected by type, not by device.
 const ShuffleTypes = Union{SPIRVIntrinsics.gentypes...}
 
 function KI.supports_shuffle(backend::POCLBackend, ::Type{T}) where {T <: ShuffleTypes}
