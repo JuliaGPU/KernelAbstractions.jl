@@ -49,8 +49,8 @@ KI.supports_shuffle(::WordShuffleBackend, ::Type{UInt32}) = true
         @test isempty(methods(vote))
     end
 
-    # The shuffles only have the fallback that shuffles structs field by field, which
-    # doesn't handle the primitive types a backend has to implement.
+    # The shuffles only have the fallbacks that shuffle other types as `UInt32` words, which
+    # don't handle the primitive types a backend has to implement.
     for shfl in [KI.shfl, KI.shfl_down, KI.shfl_up, KI.shfl_xor]
         @test_throws ArgumentError shfl(1.0f0, 1)
         @test_throws ArgumentError shfl((1.0f0, 2), 1)
@@ -62,10 +62,22 @@ KI.supports_shuffle(::WordShuffleBackend, ::Type{UInt32}) = true
     @test KI.supports_shuffle(WordShuffleBackend(), Tuple{Char, Int128})
     @test !KI.supports_shuffle(WordShuffleBackend(), Ref{Int})
     @test !KI.supports_shuffle(ShuffleBackend(), Float32)
-    @test !KI.supports_shuffle(ShuffleBackend(), Tuple{Float32, Int})
     @test KI.supports_shuffle(ShuffleBackend(), Int32)
-    @test KI.supports_shuffle(ShuffleBackend(), Tuple{Int32, NTuple{2, Int32}})
-    @test !KI.supports_shuffle(ShuffleBackend(), Tuple{Int32, Float32})
+    # structs and tuples are packed into `UInt32` words, whatever their fields
+    @test KI.supports_shuffle(WordShuffleBackend(), Tuple{Float32, Int})
+    @test KI.supports_shuffle(WordShuffleBackend(), Tuple{Int32, NTuple{2, Float16}})
+    @test !KI.supports_shuffle(ShuffleBackend(), Tuple{Int32, NTuple{2, Int32}})
+
+    # fields of less than 4 bytes share words, and every word is shuffled once
+    for (val, nwords) in (
+            (Float16(1), Float16(2)) => 1, (true, Int8(3), 2.0f0) => 2,
+            (1.0, 0x01, Int128(-5)) => 7, () => 0,
+        )
+        count = Ref(0)
+        @test KI.shfl_packed(w -> (count[] += 1; ~w), KI.shfl_packed(w -> ~w, val)) === val
+        KI.shfl_packed(w -> (count[] += 1; w), val)
+        @test count[] == 2 * nwords
+    end
 
     # the sub-group capabilities default to unsupported
     @test !KI.supports_subgroups(PlainBackend())
