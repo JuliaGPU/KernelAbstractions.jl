@@ -214,6 +214,27 @@ end
     @test A == ref
 end
 
+@testset "POCL reinterpret" begin
+    @kernel function reinterpret_copy!(out, a)
+        I = @index(Global, Linear)
+        @inbounds out[I] = reinterpret(eltype(out), a)[I]
+    end
+    a = Float32[1, 2, 3, 4]
+    @testset "$T" for T in (UInt32, UInt16)
+        out = zeros(T, length(reinterpret(T, a)))
+        reinterpret_copy!(CPU())(out, a; ndrange = length(out))
+        synchronize(CPU())
+        @test out == reinterpret(T, a)
+    end
+
+    # like on the host, arrays of non-bitstypes can't be reinterpreted
+    out = zeros(UInt8, 1)
+    @test_throws POCL.KernelException redirect_stdout(devnull) do
+        reinterpret_copy!(CPU())(out, Union{Int8, UInt8}[Int8(-1)]; ndrange = 1)
+        synchronize(CPU())
+    end
+end
+
 # `randn`/`randexp` for Float16 route through Random's table-free fallback, whose polar
 # transform overflows in Float16 and whose `log1p` isn't available for Float16 on the
 # device. The device overlays compute in Float32 and convert, so results stay finite.
