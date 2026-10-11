@@ -75,11 +75,13 @@ end
         fadd_f64_global = true, fadd_f64_local = true
     )
     @test POCL.compiler_config(dev).target.atomics == atomics
-    # explicitly requested extensions are kept, in addition to the default ones
-    @test POCL.compiler_config(dev).target.extensions == "+SPV_KHR_no_integer_wrap_decoration"
+    # explicitly requested extensions are kept, in addition to the default ones and the one
+    # for vector shuffles
+    @test POCL.compiler_config(dev).target.extensions ==
+        "+SPV_KHR_no_integer_wrap_decoration,+SPV_INTEL_subgroups"
     config = POCL.compiler_config(dev; extensions = "+SPV_KHR_expect_assume")
     @test config.target.extensions ==
-        "+SPV_KHR_no_integer_wrap_decoration,+SPV_KHR_expect_assume"
+        "+SPV_KHR_no_integer_wrap_decoration,+SPV_INTEL_subgroups,+SPV_KHR_expect_assume"
     @test config.target.atomics == atomics
     @test POCL.compiler_config(dev; extensions = nothing).target ==
         POCL.compiler_config(dev).target
@@ -344,6 +346,27 @@ end
         end
         @test out == 7 .+ (0:(W - 1))
         @test occursin("sub_group_scan_exclusive_add", ir)
+    end
+end
+
+# structs are packed into words, which are exchanged with as few vector shuffles as possible
+function packed_shuffle_kernel(out, x)
+    KI = KernelAbstractions.KernelInterface
+    i = KI.get_global_id().x
+    out[i] = KI.shfl(x[i], KI.get_sub_group_local_id() % KI.get_sub_group_size() + 1)
+    return
+end
+@testset "POCL vector shuffles of packed structs" begin
+    W = POCL.device_limits().sub_group_size
+    for n in (1, 2, 5, 16, 17, 18, 33)
+        x = [ntuple(k -> UInt32(1000i + k), n) for i in 1:2W]
+        out = similar(x)
+        ir = sprint() do io
+            @device_code_llvm io = io debuginfo = :none @opencl local_size = 2W global_size = 2W packed_shuffle_kernel(out, x)
+        end
+        @test out == [x[fld(i - 1, W) * W + mod1(i - fld(i - 1, W) * W + 1, W)] for i in 1:2W]
+        # vectors of up to 16 words, and a single word as a scalar
+        @test count(r"call [^\n]*SubgroupShuffleINTEL", ir) == fld(n, 16) + (n % 16 >= 2)
     end
 end
 

@@ -527,12 +527,8 @@ end
 end
 
 # Shuffle the words a struct or tuple is packed into, with `op` shuffling a `UInt32`, one at a
-# time. Not public: a backend may exchange all words at once instead, e.g. with a vector shuffle.
-#
-# PoCL limitation: every shuffle on PoCL is a work-group barrier, so one exchange of all words
-# would make these shuffles several times faster there. PoCL has vector shuffles
-# (`intel_sub_group_shuffle` on `uint2` to `uint16`), but its CPU device doesn't accept them
-# from SPIR-V (`cl_intel_spirv_subgroups`), so no backend implements this yet.
+# time. Not public: a backend may exchange several words at once instead, e.g. with vector
+# shuffles from the lane `shuffle_source(op)`, as KernelAbstractions' POCL backend does.
 @inline shfl_word_tuple(op, words::NTuple{N, UInt32}) where {N} = map(op, words)
 
 """
@@ -586,37 +582,63 @@ as for the shuffles without a `width`.
     shfl_words(ShuffleOp(shfl_xor, (mask, width)), val)
 
 # A `UInt32` within a segment is read with `shfl` from the computed lane
-@inline function shfl(val::UInt32, lane::Integer, width::Integer)
+@inline shfl(val::UInt32, lane::Integer, width::Integer) = shfl(val, shuffle_source(shfl, lane, width))
+@inline shfl_down(val::UInt32, offset::Integer, width::Integer) =
+    shfl(val, shuffle_source(shfl_down, offset, width))
+@inline shfl_up(val::UInt32, offset::Integer, width::Integer) =
+    shfl(val, shuffle_source(shfl_up, offset, width))
+@inline shfl_xor(val::UInt32, mask::Integer, width::Integer) =
+    shfl(val, shuffle_source(shfl_xor, mask, width))
+
+# The lane of the sub-group (1-based, as an `Int32`) that the shuffle `op` reads from, e.g. for
+# a backend's `shfl_word_tuple` that exchanges the words with `shfl` from a lane. Without a
+# `width`, the shuffles read like those with the sub-group width.
+@inline shuffle_source(op::ShuffleOp) = shuffle_source(op.f, op.args...)
+
+@inline function shuffle_source(::typeof(shfl), lane::Integer)
+    return lane % Int32
+end
+@inline function shuffle_source(::typeof(shfl_down), offset::Integer)
+    l = get_sub_group_local_id(Int32)
+    # compared before adding, so that large offsets don't overflow
+    return ifelse(offset <= get_max_sub_group_size(Int32) - l, l + offset % Int32, l)
+end
+@inline function shuffle_source(::typeof(shfl_up), offset::Integer)
+    l = get_sub_group_local_id(Int32)
+    return ifelse(l > offset, l - offset % Int32, l)
+end
+@inline function shuffle_source(::typeof(shfl_xor), mask::Integer)
+    return ((get_sub_group_local_id(Int32) - Int32(1)) ⊻ (mask % Int32)) + Int32(1)
+end
+
+@inline function shuffle_source(::typeof(shfl), lane::Integer, width::Integer)
     l0 = get_sub_group_local_id(Int32) - Int32(1)
     w = width % Int32
     base = l0 & ~(w - Int32(1))
     # `lane - 1` modulo the power of two `width`, before narrowing `lane`
-    return shfl(val, base + ((lane - 1) & (width - 1)) % Int32 + Int32(1))
+    return base + ((lane - 1) & (width - 1)) % Int32 + Int32(1)
 end
 
 # The offsets are compared with the width before they are narrowed to `Int32`, so that large
 # offsets read from outside of the segment.
-@inline function shfl_down(val::UInt32, offset::Integer, width::Integer)
+@inline function shuffle_source(::typeof(shfl_down), offset::Integer, width::Integer)
     l0 = get_sub_group_local_id(Int32) - Int32(1)
     w = width % Int32
     pos = l0 & (w - Int32(1))
     inside = offset < width - pos
-    src = ifelse(inside, l0 + offset % Int32, l0)
-    return shfl(val, src + Int32(1))
+    return ifelse(inside, l0 + offset % Int32, l0) + Int32(1)
 end
 
-@inline function shfl_up(val::UInt32, offset::Integer, width::Integer)
+@inline function shuffle_source(::typeof(shfl_up), offset::Integer, width::Integer)
     l0 = get_sub_group_local_id(Int32) - Int32(1)
     w = width % Int32
     pos = l0 & (w - Int32(1))
     inside = offset <= pos
-    src = ifelse(inside, l0 - offset % Int32, l0)
-    return shfl(val, src + Int32(1))
+    return ifelse(inside, l0 - offset % Int32, l0) + Int32(1)
 end
 
-@inline function shfl_xor(val::UInt32, mask::Integer, width::Integer)
-    l0 = get_sub_group_local_id(Int32) - Int32(1)
-    return shfl(val, (l0 ⊻ (mask % Int32)) + Int32(1))
+@inline function shuffle_source(::typeof(shfl_xor), mask::Integer, width::Integer)
+    return ((get_sub_group_local_id(Int32) - Int32(1)) ⊻ (mask % Int32)) + Int32(1)
 end
 
 """
