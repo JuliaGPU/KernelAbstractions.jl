@@ -174,7 +174,8 @@ keyword arguments. Besides those of `CompilerConfig` (`kernel`, `name`, `always_
   compare-and-swap for the fallback.
 - `extensions`: SPIR-V extensions to enable, as a `--spirv-ext` specifier (e.g.
   `"+SPV_KHR_expect_assume"`), in addition to those the atomics need. `nothing`, the
-  default, enables no others.
+  default, enables those of `OPTIONAL_SPIRV_EXTENSIONS` that the device accepts
+  (`SPV_KHR_float_controls2`, which carries the `contract` fast-math flag).
 
 Other keyword arguments are passed on to `SPIRVCompilerTarget`.
 """
@@ -195,6 +196,13 @@ function compiler_config(dev::cl.Device; kwargs...)
         config
     end
 end
+
+# SPIR-V extensions that let the back-ends express more of the IR, enabled when the device
+# accepts them:
+# - SPV_KHR_float_controls2 carries per-instruction fast-math flags, such as `contract` (e.g.
+#   from `muladd`), which base SPIR-V can't express, so PoCL never fuses those into FMAs.
+const OPTIONAL_SPIRV_EXTENSIONS = ["SPV_KHR_float_controls2"]
+
 @noinline function _compiler_config(
         dev; kernel = true, name = nothing, always_inline = false,
         debug_level = Base.JLOptions().debug_level,
@@ -209,9 +217,13 @@ end
         error("$sub_group_size is not a valid sub-group size for this device.")
     end
 
+    if extensions === nothing
+        extensions = join(("+$ext" for ext in OPTIONAL_SPIRV_EXTENSIONS if ext in dev.spirv_extensions), ",")
+    end
+
     # create GPUCompiler objects
     target = SPIRVCompilerTarget(;
-        supports_fp16, supports_fp64, atomics, extensions = something(extensions, ""),
+        supports_fp16, supports_fp64, atomics, extensions,
         validate = true, kwargs...
     )
     params = OpenCLCompilerParams(; sub_group_size)
