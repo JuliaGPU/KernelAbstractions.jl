@@ -111,10 +111,28 @@ end
 @kernel function tile_noargs!()
 end
 
+# the nodes of an element per tile, over an N-D ndrange
+@kernel tile function tile_elements!(out, index, @Const(x))
+    t = @tile()
+    I = @index(Global, NTuple)
+    out[I...] = tile_reduce(t, +, x[I...])
+    index[I...] = @index(Tile)
+end
+
 struct TileForward{F}
     f::F
 end
 (w::TileForward)(args...) = w.f(args...)
+
+# Whether every tile of `N` consecutive work-items of every workgroup is entirely inside or
+# outside of the ndrange, by enumerating them
+function whole_tiles_reference(N, ndrange, workgroupsize)
+    for b in CartesianIndices(cld.(ndrange, workgroupsize))
+        inside = [all((Tuple(b) .- 1) .* workgroupsize .+ Tuple(I) .<= ndrange) for I in CartesianIndices(workgroupsize)]
+        all(t -> allequal(inside[t:(t + N - 1)]), 1:N:length(inside)) || return false
+    end
+    return true
+end
 
 # the reference results, by tile of `N` consecutive elements
 tile_groups(n, N) = [((i - 1) ÷ N * N + 1):((i - 1) ÷ N * N + N) for i in 1:n]
@@ -122,7 +140,7 @@ tile_groups(n, N) = [((i - 1) ÷ N * N + 1):((i - 1) ÷ N * N + N) for i in 1:n]
 function tile_testsuite_width(backend, AT, N, tiles)
     W = KI.sub_group_size(backend)
     # several workgroups, and a partial one with a padding tile where possible
-    groupsize = tiles == 1 ? N : 2N
+    groupsize = tiles >= 2 ? 2N : N
     ntiles = 5
     n = ntiles * N
     x = Int32.(rand(1:100, n))
@@ -217,7 +235,7 @@ function tile_testsuite_width(backend, AT, N, tiles)
         # a single tile per workgroup also works where several are possible
         tile_divergent!(backend; tile = N)(out, AT(x); ndrange = n, workgroupsize = N)
         @test Array(out) == divergent
-        if tiles > 1
+        if tiles >= 2
             # several tiles per workgroup, which diverge, with a padding tile in the last one
             out = AT(fill(Int32(-1), n))
             tile_divergent!(backend; tile = N)(out, AT(x); ndrange = n, workgroupsize = 2N)
@@ -237,16 +255,36 @@ function tile_testsuite_width(backend, AT, N, tiles)
         @test_throws "isn't a multiple of $N" k(out, AT(x); ndrange = n - 1)
         @test_throws "isn't a multiple of $N" k(out, AT(x); ndrange = n, workgroupsize = N ÷ 2)
         @test_throws "isn't a multiple of $N" tile_barrier!(backend, N + N ÷ 2; tile = N)
-        @test_throws "isn't 1-D" k(out, AT(x); ndrange = (N, 2))
-        @test_throws "isn't 1-D" tile_divergent!(backend, N, (N, 2); tile = N)
+        @test_throws "isn't a multiple of $N" k(out, AT(x); ndrange = (N - 1, 3))
         @test_throws "isn't a multiple of $N" tile_divergent!(backend, N, n - 1; tile = N)
         # before compiling the kernel
         u = tile_uncompilable!(backend; tile = N)
         @test_throws "isn't a multiple of $N" u(out; ndrange = n - 1)
         @test_throws "isn't a multiple of $N" u(out; ndrange = n, workgroupsize = N ÷ 2)
-        @test_throws "isn't 1-D" u(out; ndrange = (N, 2))
+        @test_throws "isn't a multiple of $N" u(out; ndrange = (N - 1, 3))
         tiles == 1 && @test_throws "single tile per workgroup" u(out; ndrange = n, workgroupsize = 2N)
         @test_throws "isn't a multiple of $N" u(out; ndrange = n, workgroupsize = 0)
+        if N >= 4
+            # tiles that would straddle the end of the first dimension
+            @test_throws "partial tiles" u(out; ndrange = (3, N), workgroupsize = (2, N ÷ 2))
+        end
+    end
+
+    @testset "N-D ndrange" begin
+        # elements of 2 × N/2 nodes, a tile each, in workgroups of one or several elements
+        dims = (2, N ÷ 2)
+        nelem = 5
+        x = Int32.(rand(1:100, dims..., nelem))
+        sums = [sum(x[:, :, e]) for _ in 1:dims[1], _ in 1:dims[2], e in 1:nelem]
+        elements = [e for _ in 1:dims[1], _ in 1:dims[2], e in 1:nelem]
+        k = tile_elements!(backend; tile = N)
+        for workgroupsize in (nothing, (dims..., 1), tiles >= 2 ? (dims..., 2) : nothing)
+            out, index = AT(zeros(Int32, size(x))), AT(zeros(Int, size(x)))
+            k(out, index, AT(x); ndrange = size(x), workgroupsize)
+            @test Array(out) == sums
+            # tiles are numbered workgroup by workgroup, so one per element
+            @test Array(index) == elements
+        end
     end
     return
 end
@@ -293,8 +331,59 @@ function tile_testsuite(backend, AT)
     end
     W = KI.sub_group_size(b)
     @test tiles_per_workgroup(b, 2W) == 0
-    @test tiles_per_workgroup(b, W) ==
-        (KI.supports_independent_subgroups(b) ? typemax(Int) : 1)
+    for N in (W, W ÷ 2)
+        N >= 1 || continue
+        segments = N == W || KI.supports_independent_segments(b)
+        @test tiles_per_workgroup(b, N) ==
+            (KI.supports_independent_subgroups(b) ? (segments ? typemax(Int) : 1) : (segments ? W ÷ N : 1))
+    end
+
+    @testset "whole tiles" begin
+        whole_tiles = KernelAbstractions.whole_tiles
+        @test whole_tiles(16, (4, 4, 5), (4, 4, 2))
+        @test !whole_tiles(32, (4, 4, 5), (4, 4, 2))
+        @test whole_tiles(32, (4, 4, 6), (4, 4, 2))
+        @test !whole_tiles(16, (6, 4), (4, 4))
+        @test !whole_tiles(4, (6, 4), (4, 4))
+        @test whole_tiles(2, (6, 4), (4, 4))
+        @test whole_tiles(16, (64, 60), (16, 16))
+        @test whole_tiles(32, (64, 60), (16, 16))
+        @test !whole_tiles(32, (60, 64), (16, 16))
+        @test !whole_tiles(64, (64, 62), (16, 16))
+        @test whole_tiles(8, (8,), (16,))
+        @test !whole_tiles(8, (12,), (16,))
+        # tiles that don't follow the dimensions of the workgroup
+        @test whole_tiles(16, (16, 1), (24, 2))
+        ok = true
+        @test whole_tiles(32, (0, 1), (1, 32))
+        for N in (2, 4, 8), w1 in 1:6, w2 in 1:4, r1 in 0:7, r2 in 1:5
+            (w1 * w2) % N == 0 || continue
+            ok &= whole_tiles(N, (r1, r2), (w1, w2)) == whole_tiles_reference(N, (r1, r2), (w1, w2))
+        end
+        for N in (2, 4), w in Iterators.product(1:3, 1:3, 1:2), r in Iterators.product(1:4, 1:3, 1:3)
+            prod(w) % N == 0 || continue
+            ok &= whole_tiles(N, r, w) == whole_tiles_reference(N, r, w)
+        end
+        @test ok
+    end
+
+    @testset "automatic workgroup sizes" begin
+        size = KernelAbstractions.tile_launch_workgroupsize
+        launch = KernelAbstractions.LinearLaunch{Int32}()
+        # a recommendation of less than a tile still gets one
+        @test size(b, launch, W, max(W ÷ 4, 1), (2W,)) == (W,)
+        # shapes that the leading dimensions don't divide into whole tiles
+        for range in ((3, W), (3, 64W), (5, 3, 2W), (6, W ÷ 2))
+            items = size(b, launch, W, 4W, range)
+            @test prod(items) % W == 0 && whole_tiles_reference(W, range, items)
+        end
+        @test_throws "no workgroup size" size(b, launch, W, 4W, (3, W + 1))
+        # the padded iteration space fits the index type, without overflowing
+        shape = KernelAbstractions.tile_shape
+        @test shape(32, 1024, (32_000_016, 66), Int32) === nothing
+        @test shape(32, 32, (32_000_016, 66), Int32) == (16, 2)
+        @test shape(32, 1024, (32 * (typemax(Int) ÷ 96 - 100), 3), Int) == (1024, 1)
+    end
 
     @testset "construction" begin
         # the default width is the sub-group width
@@ -329,9 +418,9 @@ function tile_testsuite(backend, AT)
         @test KernelAbstractions.__tile_width(KernelAbstractions.mkcontext(tile_plain!(b), (W,), iterspace)) === nothing
     end
 
-    # the sub-group width, and a narrower width with one tile per workgroup, with the same
-    # kernels
-    for N in unique((W, W ÷ 2))
+    # the sub-group width, and narrower widths, several of which share a sub-group where the
+    # backend supports that, with the same kernels
+    for N in unique((W, W ÷ 2, W ÷ 4))
         N >= 2 || continue
         tiles = tiles_per_workgroup(b, N)
         @testset "tile = $N" begin

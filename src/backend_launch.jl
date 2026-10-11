@@ -97,9 +97,6 @@ Core.kwcall(kwargs::NamedTuple, obj::Kernel{<:KI.Backend}, args::Vararg{Any, N})
 
 function launch_tuple(obj::Kernel, args::Tuple; ndrange = nothing, workgroupsize = nothing)
     N = tile_width(obj)
-    if N !== nothing
-        workgroupsize = tile_workgroupsize(obj, N, workgroupsize)
-    end
     ndrange, workgroupsize, iterspace, dynamic = launch_config(obj, ndrange, workgroupsize)
     # nothing to launch (or compile) for an empty ndrange
     any(iszero, size(blocks(iterspace))) && return nothing
@@ -140,21 +137,22 @@ function launch_kernel(obj::Kernel, launch, subgroups, ndrange, _workgroupsize, 
         range = something(ndrange, static_ndrange(obj))
         threads = KI.launch_configuration(kernel; nitems = saturated_prod(extents(range))).workgroupsize
         N = tile_width(obj)
-        N === nothing || (threads = tile_threads(N, threads))
-        iterspace, _ = partition(obj, ndrange, launch_workgroupsize(b, launch, threads, range))
+        items = N === nothing ? launch_workgroupsize(b, launch, threads, range) :
+            tile_launch_workgroupsize(b, launch, N, threads, range)
+        iterspace, _ = partition(obj, ndrange, items)
         ctx = mkcontext(obj, ndrange, iterspace, launch; subgroups)
     end
 
     # the geometry is valid by construction, except for the kernel's limits
     groups = size(blocks(iterspace))
     items = size(workitems(iterspace))
+    N = tile_width(obj)
+    N === nothing || check_tiles(b, N, extents(something(ndrange, static_ndrange(obj))), items)
     if launch isa NDLaunch
         groups, items = KI.pad3(groups), KI.pad3(items)
     else
         groups, items = (prod(groups), 1, 1), (prod(items), 1, 1)
     end
-    N = tile_width(obj)
-    N === nothing || check_tiles(b, N, extents(something(ndrange, static_ndrange(obj))), items)
     KI.check_work_group_size(kernel, items)
     KI.launch(kernel, groups, items, prepend(ctx, args))
     return nothing

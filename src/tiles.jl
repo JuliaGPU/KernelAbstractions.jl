@@ -45,7 +45,8 @@ kernel(out, x; ndrange = N * ntiles)
 The tiles divide the workgroup by its linear local index: the work-item with
 `@index(Local, Linear) == lid` is in tile `fld(lid - 1, N) + 1`, at lane `mod(lid - 1, N) + 1`.
 [`@index(Tile)`](@ref @index) is the global linear index of the tile,
-`(@index(Group, Linear) - 1) * (@groupsize()[1] ÷ N) + t.index`.
+`(@index(Group, Linear) - 1) * (prod(@groupsize()) ÷ N) + t.index`: the tiles are numbered
+workgroup by workgroup.
 
 The work-items of a tile communicate with the tile operations, which take the tile as their
 first argument, so that helper functions can use them: [`tile_shfl`](@ref),
@@ -61,10 +62,11 @@ workgroup.
 
 Tiles are built on the backend's sub-groups, so the width `N` is limited by them: it is a
 power of two of at most the sub-group width `W` ([`KernelInterface.sub_group_size`](@ref)),
-and the backend has to form sub-groups from consecutive work-items. A workgroup can have
-several tiles only if `N == W` and the backend's sub-groups are independent; otherwise a
-workgroup is a single tile. [`tiles_per_workgroup(backend, N)`](@ref tiles_per_workgroup)
-tells which.
+and the backend has to form sub-groups from consecutive work-items. How many tiles a workgroup
+can have depends on the backend, see [`tiles_per_workgroup(backend, N)`](@ref
+tiles_per_workgroup): tiles narrower than `W` share a sub-group, which needs a backend whose
+sub-groups can be split into independent parts. Where it can't, e.g. on Metal and on the CPU,
+a workgroup of such tiles is a single tile. Either way, the tiles behave the same.
 
 - `@kernel tile=N` fixes the width, for algorithms that need it. Constructing the kernel on
   a backend that doesn't support it is an error.
@@ -82,11 +84,24 @@ them (e.g. 32 on NVIDIA GPUs, 32 or 64 on AMD GPUs, 8 to 32 on Intel GPUs).
 
 Kernels with tiles have restrictions on their launch:
 
-- the `ndrange` is 1-D, and a multiple of `N`, so that work-items that pad a partial
-  workgroup form whole tiles, which don't execute the kernel;
-- the workgroup size is a multiple of `N`, and equal to `N` on backends that only support one
-  tile per workgroup. Without an explicit workgroup size, KernelAbstractions picks one that
-  satisfies this; an explicit one that doesn't is an error.
+- the workgroup has a multiple of `N` work-items, and at most as many tiles as the backend
+  supports ([`tiles_per_workgroup`](@ref));
+- every tile is either entirely within the `ndrange`, or entirely outside of it, so that the
+  work-items that pad a partial workgroup form whole tiles, which don't execute the kernel.
+  For a 1-D `ndrange`, that means a multiple of `N`. For an N-D `ndrange`, e.g. one dimension
+  per index of an element, it holds if the workgroup covers the leading dimensions of the
+  `ndrange` and the number of work-items is a multiple of `N`: e.g. an `ndrange` of
+  `(4, 4, nelements)` in workgroups of `(4, 4, k)`, with tiles of 16 work-items or, for an
+  even `k` and `nelements`, 32.
+
+Without an explicit workgroup size, KernelAbstractions picks one that satisfies this; an
+explicit one that doesn't is an error. Kernels with tiles and an N-D `ndrange` are launched on
+a 1-D grid, so that the tiles follow the backend's sub-groups.
+
+To give each element fewer nodes than a tile has lanes, e.g. 9 nodes of a 3×3 element in a
+tile of 16, map the lanes to nodes yourself, and keep the lanes without a node in the tile
+operations: clamp their loads, skip their stores, but let them shuffle, vote and reduce (with
+a neutral value) like the others.
 """
 macro tile()
     return :($__tile($(esc(:__ctx__)), $__tile_width($(esc(:__ctx__)))))
@@ -112,12 +127,13 @@ end
 
 @inline function __index_Tile(ctx, ::Val{N}) where {N}
     lid0 = __index_Local_Linear(ctx) - 1
-    return (__index_Group_Linear(ctx) - 1) * (groupsize(ctx)[1] ÷ N) + lid0 ÷ N + 1
+    return (__index_Group_Linear(ctx) - 1) * (prod(groupsize(ctx)) ÷ N) + lid0 ÷ N + 1
 end
 
-# A tile is a sub-group, or the work-group that is a single (possibly partial) sub-group of `N`
-# work-items, so the tile operations are KernelInterface's sub-group operations; the shuffles
-# use a `width` of `N`, so that they don't read past the tile.
+# A tile is a segment of `N` lanes of a sub-group, so the tile operations are KernelInterface's
+# sub-group operations with a `width` of `N`: where several tiles share a sub-group, which
+# `tiles_per_workgroup` only allows with `KI.supports_independent_segments`, those only need
+# the tile to execute them together.
 
 """
     tile_shfl(t::Tile{N}, val, lane)
@@ -156,23 +172,23 @@ has to be between 0 and `N - 1`. See [`KernelInterface.shfl`](@ref) for the supp
 
 Whether `pred` is `true` for any work-item of the tile `t`.
 """
-@inline tile_any(::Tile, pred::Bool) = KI.sub_group_any(pred)
+@inline tile_any(::Tile{N}, pred::Bool) where {N} = KI.sub_group_any(pred, N)
 
 """
     tile_all(t::Tile, pred::Bool)::Bool
 
 Whether `pred` is `true` for all work-items of the tile `t`.
 """
-@inline tile_all(::Tile, pred::Bool) = KI.sub_group_all(pred)
+@inline tile_all(::Tile{N}, pred::Bool) where {N} = KI.sub_group_all(pred, N)
 
 """
     tile_ballot(t::Tile, pred::Bool)::UInt64
 
 A mask of the work-items of the tile `t` for which `pred` is `true`: bit `i - 1` for the
 work-item at lane `i`. Needs a sub-group width of at most 64
-([`KernelInterface.sub_group_size`](@ref)).
+([`KernelInterface.sub_group_size`](@ref)), also for narrower tiles.
 """
-@inline tile_ballot(::Tile, pred::Bool) = KI.sub_group_ballot(pred)
+@inline tile_ballot(::Tile{N}, pred::Bool) where {N} = KI.sub_group_ballot(pred, N)
 
 """
     tile_reduce(t::Tile, op, val)
@@ -181,7 +197,7 @@ Reduce `val` over the work-items of the tile `t` with the associative operator `
 order of the lanes, and return the result on every work-item of the tile. See
 [`KernelInterface.sub_group_reduce`](@ref).
 """
-@inline tile_reduce(::Tile, op, val) = KI.sub_group_reduce(op, val)
+@inline tile_reduce(::Tile{N}, op, val) where {N} = KI.sub_group_reduce(op, val, N)
 
 """
     tile_scan(t::Tile, op, val)
@@ -189,7 +205,7 @@ order of the lanes, and return the result on every work-item of the tile. See
 The inclusive scan of `val` over the work-items of the tile `t` with the associative
 operator `op`, in the order of the lanes. See [`KernelInterface.sub_group_scan`](@ref).
 """
-@inline tile_scan(::Tile, op, val) = KI.sub_group_scan(op, val)
+@inline tile_scan(::Tile{N}, op, val) where {N} = KI.sub_group_scan(op, val, N)
 
 """
     tile_exclusive_scan(t::Tile, op, val, init)
@@ -198,15 +214,16 @@ The exclusive scan of `val` over the work-items of the tile `t` with the associa
 operator `op`, in the order of the lanes, starting from `init`: lane 1 gets `init`. See
 [`KernelInterface.sub_group_exclusive_scan`](@ref).
 """
-@inline tile_exclusive_scan(::Tile, op, val, init) = KI.sub_group_exclusive_scan(op, val, init)
+@inline tile_exclusive_scan(::Tile{N}, op, val, init) where {N} = KI.sub_group_exclusive_scan(op, val, init, N)
 
 """
     tile_barrier(t::Tile)
 
 Wait until all work-items of the tile `t` reached the barrier, and make their writes to
-global and local memory before it visible to the tile.
+global and local memory before it visible to the tile. It doesn't order memory between
+tiles.
 """
-@inline tile_barrier(::Tile) = KI.sub_group_barrier()
+@inline tile_barrier(::Tile{N}) where {N} = KI.sub_group_barrier(N)
 
 
 ## host side
@@ -214,22 +231,30 @@ global and local memory before it visible to the tile.
 """
     tiles_per_workgroup(backend, N)::Int
 
-How many tiles of `N` work-items a workgroup of a kernel with tiles (see [`@tile`](@ref)) can
-have on `backend`: `0` if the backend doesn't support such tiles, `1` if a workgroup has to
-be a single tile, or `typemax(Int)` if it can have several (up to the kernel's workgroup size
-limit, which the launch checks).
+The most tiles of `N` work-items a workgroup of a kernel with tiles (see [`@tile`](@ref)) can
+have on `backend`: `0` if the backend doesn't support such tiles, and `typemax(Int)` if it
+supports any number (up to the kernel's workgroup size limit, which the launch checks).
 
 Tiles need sub-groups that are formed from consecutive work-items
 ([`KernelInterface.supports_linear_subgroups`](@ref)), and `N` a power of two of at most the
-sub-group width `W`. Several tiles per workgroup need tiles that are sub-groups (`N == W`)
-which can communicate independently
-([`KernelInterface.supports_independent_subgroups`](@ref)).
+sub-group width `W`. Then a workgroup can have:
+
+- a tile per sub-group, of any number of sub-groups, if the sub-groups of a workgroup are
+  independent ([`KernelInterface.supports_independent_subgroups`](@ref)), or else a single
+  sub-group;
+- several tiles per sub-group (`N < W`) if its segments of `N` lanes are independent
+  ([`KernelInterface.supports_independent_segments`](@ref)), or else a single tile.
 """
 function tiles_per_workgroup(backend::KI.Backend, N::Integer)
     (N > 0 && ispow2(N) && KI.supports_linear_subgroups(backend)) || return 0
     W = KI.sub_group_size(backend)
     N <= W || return 0
-    return N == W && KI.supports_independent_subgroups(backend) ? typemax(Int) : 1
+    segments = N == W || KI.supports_independent_segments(backend)
+    if KI.supports_independent_subgroups(backend)
+        return segments ? typemax(Int) : 1
+    else
+        return segments ? W ÷ N : 1
+    end
 end
 
 # How a kernel function was declared: `:configurable` for `@kernel tile`, the width `N` for
@@ -299,43 +324,136 @@ tile_error_backend() = throw(ArgumentError("the backend doesn't support tiles, a
 
 tile_error(N, msg) = throw(ArgumentError("Tiles of $N work-items: $msg"))
 
-# The workgroup size to launch a kernel with tiles of `N` work-items with, without an
-# explicit one: `N` if a workgroup has to be a single tile, or `nothing` to tune it.
-function tile_workgroupsize(kernel::Kernel, N, workgroupsize)
-    workgroupsize === nothing && KernelAbstractions.workgroupsize(kernel) <: DynamicSize || return workgroupsize
-    tiles = tiles_per_workgroup(backend(kernel), N)
-    tiles == 0 && tile_error(N, "the backend doesn't support them, see `tiles_per_workgroup`")
-    return tiles == 1 ? N : nothing
+# The workgroup size for a launch of a kernel with tiles of `N` work-items over `range` with
+# `launch` (see `select_launch`), for about `threads` work-items: the largest multiple of `N`
+# work-items, up to `threads` (but at least `N`, leaving it to the launch to check the kernel's
+# limit) and what the backend supports, that divides `range` into whole tiles.
+function tile_launch_workgroupsize(backend, launch, N, threads, range)
+    dims = extents(range)
+    tiles = tiles_per_workgroup(backend, N)
+    t = max(threads, N)
+    tiles == typemax(Int) || (t = min(t, tiles * N))
+    for t in (t ÷ N * N):-N:N
+        items = length(dims) == 1 ? launch_workgroupsize(backend, launch, t, range) :
+            tile_shape(N, t, dims, index_type(launch))
+        items !== nothing && prod(items) % N == 0 && whole_tiles(N, dims, items) && return items
+    end
+    return tile_error(N, "no workgroup size divides the ndrange $dims into whole tiles, pass one")
 end
 
-# A tuned workgroup size for a kernel with tiles of `N` work-items: a multiple of `N`
-tile_threads(N, threads) = max(N, threads ÷ N * N)
+# The shape of a workgroup of `t` work-items, no larger than `dims` along any dimension, that
+# divides `dims` into whole tiles of `N` work-items with the least padding, or `nothing`. The
+# padded iteration space has to fit `T`, the index type `select_launch` chose for a workgroup
+# from `launch_workgroupsize`, which pads differently.
+function tile_shape(N, t, dims::Dims, ::Type{T}) where {T}
+    best, best_padded = nothing, typemax(Int)
+    for items in workgroup_shapes(t, dims)
+        padded = map((d, i) -> Int128(cld(d, i)) * i, dims, items)
+        all(<=(typemax(Int)), padded) && fits(T, Int.(padded)) || continue
+        n = prod(Int.(padded))
+        if n < best_padded && whole_tiles(N, dims, items)
+            best, best_padded = items, n
+        end
+    end
+    return best
+end
+
+# The shapes of `t` work-items that are no larger than `dims` along any dimension, larger
+# extents of the first dimensions first
+function workgroup_shapes(t, dims::Dims)
+    length(dims) == 1 && return t <= dims[1] ? [(t,)] : Dims{1}[]
+    shapes = Dims{length(dims)}[]
+    for a in min(t, dims[1]):-1:1
+        t % a == 0 || continue
+        for rest in workgroup_shapes(t ÷ a, Base.tail(dims))
+            push!(shapes, (a, rest...))
+        end
+    end
+    return shapes
+end
 
 # Check the launch of `kernel` with tiles of `N` work-items with the `ndrange`, `workgroupsize`
-# and `iterspace` from `launch_config`: the workgroup size is the partitioned one, or a
-# multiple of `N` if it will be tuned.
+# and `iterspace` from `launch_config`, before compiling it: the partitioned workgroup size, or
+# that there is one that will be tuned.
 function check_tiles_launch(kernel::Kernel, N, ndrange, workgroupsize, iterspace)
+    b = backend(kernel)
     range = something(ndrange, static_ndrange(kernel))
-    tuned = workgroupsize === nothing && KernelAbstractions.workgroupsize(kernel) <: DynamicSize
-    items = tuned ? (N,) : size(workitems(iterspace))
-    return check_tiles(backend(kernel), N, extents(range), KI.pad3(items))
+    if workgroupsize === nothing && KernelAbstractions.workgroupsize(kernel) <: DynamicSize
+        check_tile_width(b, N)
+        check_tile_items(N, extents(range))
+        launch = select_launch(kernel, workgroupsize, iterspace)
+        tile_launch_workgroupsize(b, launch, N, KI.max_work_group_size(b), range)
+        return
+    end
+    return check_tiles(b, N, extents(range), size(workitems(iterspace)))
 end
 
-# Check the launch of a kernel with tiles of `N` work-items over `ndrange`, in workgroups of
-# `workgroupsize`
-function check_tiles(backend, N, ndrange::Dims, workgroupsize::Dims)
+function check_tile_width(backend, N)
     (N > 0 && ispow2(N)) || tile_error(N, "the width has to be a power of two")
     backend isa KI.Backend && KI.supports_linear_subgroups(backend) || tile_error_backend()
     W = KI.sub_group_size(backend)
     N <= W || tile_error(N, "the width is larger than the sub-group width $W of the backend")
-    tiles = tiles_per_workgroup(backend, N)
-    length(ndrange) == 1 || tile_error(N, "the ndrange $ndrange isn't 1-D")
-    ndrange[1] % N == 0 || tile_error(N, "the ndrange $(ndrange[1]) isn't a multiple of $N")
-    all(==(1), Base.tail(workgroupsize)) ||
-        tile_error(N, "the workgroup size $workgroupsize isn't 1-D")
-    items = workgroupsize[1]
-    items % N == 0 || tile_error(N, "the workgroup size $items isn't a multiple of $N")
-    tiles == 1 && items != N &&
-        tile_error(N, "the backend only supports a single tile per workgroup, not a workgroup size of $items")
     return
+end
+
+check_tile_items(N, ndrange::Dims) = saturated_prod(ndrange) % N == 0 ||
+    tile_error(N, "the ndrange $(length(ndrange) == 1 ? only(ndrange) : ndrange) has $(saturated_prod(ndrange)) work-items, which isn't a multiple of $N")
+
+# Check the launch of a kernel with tiles of `N` work-items over `ndrange`, in workgroups of
+# `workgroupsize` (logical sizes, before a launch on a 1-D grid flattens them)
+function check_tiles(backend, N, ndrange::Dims, workgroupsize::Dims)
+    check_tile_width(backend, N)
+    check_tile_items(N, ndrange)
+    check_tile_workgroup(backend, N, workgroupsize)
+    whole_tiles(N, ndrange, workgroupsize) ||
+        tile_error(N, "workgroups of $workgroupsize divide the ndrange $ndrange into partial tiles")
+    return
+end
+
+function check_tile_workgroup(backend, N, workgroupsize::Dims)
+    items = prod(workgroupsize)
+    items % N == 0 ||
+        tile_error(N, "the workgroup size $(length(workgroupsize) == 1 ? items : workgroupsize) isn't a multiple of $N")
+    tiles = tiles_per_workgroup(backend, N)
+    if items ÷ N > tiles
+        tiles == 1 && tile_error(N, "the backend only supports a single tile per workgroup, not a workgroup size of $items")
+        tile_error(N, "the backend supports at most $tiles tiles per workgroup, not a workgroup size of $items")
+    end
+    return
+end
+
+# Whether workgroups of size `workgroupsize` (a multiple of `N` work-items) divide `ndrange`
+# into tiles of `N` consecutive work-items that are each entirely inside or outside of it. The
+# part of a workgroup inside the `ndrange` is a box: the whole workgroup, or in the last
+# workgroup along a dimension, what's left of the `ndrange`. So it suffices to check one
+# workgroup per combination of the dimensions it's the last one along.
+function whole_tiles(N, ndrange::Dims, workgroupsize::Dims)
+    n = max(length(ndrange), length(workgroupsize))
+    range = ntuple(d -> Base.get(ndrange, d, 1), n)
+    items = ntuple(d -> Base.get(workgroupsize, d, 1), n)
+    # an empty `ndrange` has no workgroups
+    any(iszero, range) && return true
+    insides = map(range, items) do r, i
+        last = r - (cld(r, i) - 1) * i
+        return r > i && last != i ? (i, last) : (last,)
+    end
+    # a 1-D box, a prefix of the workgroup, is whole tiles if its length is a multiple of `N`
+    n == 1 && return all(inside -> inside % N == 0, only(insides))
+    return all(inside -> whole_tiles_box(N, items, inside), Iterators.product(insides...))
+end
+
+# Whether every tile of `N` consecutive work-items of a workgroup of size `items` is entirely
+# inside or outside of the box of size `inside` at its start
+function whole_tiles_box(N, items, inside)
+    inside == items && return true
+    tile_inside = false
+    for (l, I) in enumerate(CartesianIndices(items))
+        isinside = all(Tuple(I) .<= inside)
+        if (l - 1) % N == 0
+            tile_inside = isinside
+        elseif isinside != tile_inside
+            return false
+        end
+    end
+    return true
 end

@@ -676,10 +676,12 @@ construct_kernel(backend, f, size::_Size, range::_Size; tile = nothing) = constr
 function construct(backend::B, ::S, ::NDRange, xpu_name::XPUName; tile = nothing) where {B <: Backend, S <: _Size, NDRange <: _Size, XPUName}
     N = resolve_tile_width(backend, coalesce(tile_policy(xpu_name), nothing), tile)
     if N !== nothing
-        # the ndrange is checked again at launch, with the final workgroup size
-        ndrange = NDRange <: StaticSize ? extents(get(NDRange)) : (N,)
-        workgroupsize = S <: StaticSize ? KI.pad3(extents(get(S))) : (N, 1, 1)
-        check_tiles(backend, N, ndrange, workgroupsize)
+        # what is known before the launch, which checks the rest
+        check_tile_width(backend, N)
+        NDRange <: StaticSize && check_tile_items(N, extents(get(NDRange)))
+        S <: StaticSize && check_tile_workgroup(backend, N, extents(get(S)))
+        NDRange <: StaticSize && S <: StaticSize &&
+            check_tiles(backend, N, extents(get(NDRange)), extents(get(S)))
     end
     return Kernel{B, S, NDRange, XPUName, N}(backend, xpu_name)
 end
