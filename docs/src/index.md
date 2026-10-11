@@ -151,6 +151,11 @@ end
 - The `CPU` backend runs kernels on as many threads as Julia was started with (`julia -t`),
   like the thread-based `CPU` backend of 0.9 did, and no longer on one thread per hardware
   thread. Set `JULIA_KA_CPU_THREADS` to use a different number of threads; see [`CPU`](@ref).
+- A `CPU` launch without a workgroup size is split into about one workgroup per thread, like
+  PoCL does when an OpenCL launch doesn't give a local size, with workgroups of up to 4096
+  work-items, instead of into workgroups of 1024 work-items. Small launches therefore use
+  more threads, and large ones larger workgroups. The default assumes that the work is
+  balanced across the work-items; see [Quickstart](@ref).
 - `@private` arrays are a `KernelAbstractions.PrivateArray` in stack storage on every backend,
   instead of a `StaticArrays.MArray` on most GPU backends, which was heap-allocated when passed
   to a function that isn't inlined. It is still a `StaticArray`, but static-array arithmetic,

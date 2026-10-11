@@ -561,19 +561,31 @@ end
 
 @testset "POCL workgroup size" begin
     workgroupsize = POCL.POCLKernels.cpu_workgroupsize
-    for threads in (1, 4, 7, 64), max_items in (1, 7, 64, 4096), nitems in (nothing, 0, 1, 1000, 4096, 2^20, typemax(Int))
-        items = workgroupsize(nitems, threads, max_items)
+    for threads in (1, 3, 4, 7, 64), max_items in (1, 7, 64, 4096), nitems in (nothing, 0, 1, 1000, 4096, 2^20, typemax(Int))
+        items = workgroupsize(nitems, threads, max_items, 8)
         @test 1 <= items <= max_items
         # a power of two, unless limited by `max_items`
-        @test ispow2(items) || items == max_items
+        ispow2(max_items) && @test ispow2(items)
+        # PoCL stops splitting with more than half as many workgroups as threads, or when
+        # splitting over the remaining threads would make workgroups smaller than 4 times
+        # the preferred multiple
+        if nitems !== nothing
+            splits = threads ÷ cld(max(nitems, 1), items)
+            @test splits <= 1 || items < splits * min(32, max_items)
+        end
     end
-    # a launch with several workgroups' worth of work-items gets several per thread
-    @test cld(4096, workgroupsize(4096, 4, 4096)) >= 4
-    @test cld(2^20, workgroupsize(2^20, 64, 4096)) >= 64
-    # but launches that are too small for that don't get tiny workgroups
-    @test workgroupsize(64, 64, 4096) >= 32
+    # PoCL's choice for the same launches (`pocl_default_local_size_optimizer`)
+    for (nitems, threads, items) in (
+            (1024, 1, 1024), (1024, 4, 256), (1024, 8, 128), (4096, 4, 1024), (4096, 8, 512),
+            (16384, 4, 4096), (16384, 8, 2048), (65536, 8, 4096), (64, 64, 64), (4096, 64, 64),
+        )
+        @test workgroupsize(nitems, threads, 4096, 8) == items
+    end
+    # the floor follows the preferred multiple
+    @test workgroupsize(1024, 32, 4096, 8) == 32
+    @test workgroupsize(1024, 32, 4096, 16) >= 64
     # more threads don't mean larger workgroups
-    @test issorted([workgroupsize(4096, threads, 4096) for threads in 1:64]; rev = true)
+    @test issorted([workgroupsize(4096, threads, 4096, 8) for threads in 1:64]; rev = true)
 end
 
 # the shared testsuite only covers the launch configuration POCL selects
