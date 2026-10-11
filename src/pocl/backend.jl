@@ -203,9 +203,6 @@ KI.supports_independent_subgroups(::POCLBackend) = false
 # with tiles narrower than the sub-group get one tile per work-group
 KI.supports_independent_segments(::POCLBackend) = false
 
-# PoCL limitation: every shuffle is a work-group barrier, also for each word of a struct; see
-# `KI.shfl_word_tuple`, which could exchange them at once with `cl_intel_spirv_subgroups`.
-
 # The types `sub_group_shuffle` supports; other types are shuffled as words. `Float16` and
 # `Float64` are reported as unsupported on devices without `cl_khr_fp16` or `cl_khr_fp64`,
 # rather than shuffled as words: the overrides below are selected by type, not by device.
@@ -294,6 +291,31 @@ end
 
 @device_override KI.shfl_xor(val::T, mask::Integer) where {T <: ShuffleTypes} =
     SPIRVIntrinsics.sub_group_shuffle_xor(val, mask)
+
+# Every shuffle is a work-group barrier, so the words of a packed struct are exchanged with
+# vector shuffles (`POCL.vector_shuffle`), a barrier per up to 16 words rather than per word.
+# The last vector is padded to a size that exists (2, 3, 4, 8 or 16 words).
+@generated function shuffle_word_vectors(words::NTuple{N, UInt32}, lane::Int32) where {N}
+    body = Any[Expr(:meta, :inline)]
+    results = Any[]
+    for first in 1:16:N
+        k = min(N - first + 1, 16)
+        if k == 1
+            push!(results, :(KI.shfl(words[$first], lane)))
+            continue
+        end
+        n = k <= 4 ? k : k <= 8 ? 8 : 16
+        elements = ((j < k ? :(VecElement(words[$(first + j)])) : :(VecElement(UInt32(0)))) for j in 0:(n - 1))
+        v = Symbol(:v, first)
+        push!(body, :($v = POCL.vector_shuffle(($(elements...),), lane)))
+        append!(results, (:($v[$j].value) for j in 1:k))
+    end
+    push!(body, :(($(results...),)))
+    return Expr(:block, body...)
+end
+
+@device_override @inline KI.shfl_word_tuple(op::KI.ShuffleOp, words::NTuple{N, UInt32}) where {N} =
+    shuffle_word_vectors(words, KI.shuffle_source(op))
 
 @device_override KI.sub_group_any(pred::Bool) = SPIRVIntrinsics.sub_group_any(pred)
 

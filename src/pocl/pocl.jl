@@ -111,6 +111,7 @@ include("device/array.jl")
 include("device/quirks.jl")
 include("device/runtime.jl")
 include("device/random.jl")
+include("device/shuffle.jl")
 
 include("compiler/compilation.jl")
 include("compiler/execution.jl")
