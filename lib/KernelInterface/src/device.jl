@@ -271,6 +271,11 @@ localmemory(::Type{T}, ::Val) where {T} =
 # The shuffles, votes, collectives and `sub_group_barrier` have to be executed by all
 # work-items of a sub-group together, in control flow that is uniform over the work-group
 # unless `supports_independent_subgroups`. The id and size queries above can be used anywhere.
+#
+# Their variants with a `width` work within segments of `width` consecutive lanes. If
+# `supports_independent_segments`, only the work-items of a segment have to execute those
+# together, so that the segments of a sub-group can diverge; otherwise, they have to be
+# executed like the functions without a `width`.
 
 """
     shfl(val::T, lane::Integer)::T
@@ -548,16 +553,40 @@ for a `width`:
 
 Reading from a lane of the segment that has no work-item (in a partial sub-group) gives an
 unspecified value. `width` has to be a power of two of at most the sub-group width
-[`get_max_sub_group_size`](@ref), and the same for all work-items of the sub-group.
+[`get_max_sub_group_size`](@ref), and the same for all work-items of the sub-group, so that
+the segments partition it. It should be a constant of the generated code.
 
-The `width` only changes which lanes are read from: as for the shuffles without a `width`, all
-work-items of the sub-group have to execute them together, not just those of a segment.
+If [`supports_independent_segments`](@ref), only the work-items of the caller's segment have
+to execute them together: the segments of a sub-group can diverge, e.g. loop a different
+number of times. Otherwise, all work-items of the sub-group have to execute them together,
+as for the shuffles without a `width`.
 
 !!! note
-    Backends **may** implement these, e.g. if they have native shuffles with a width. The
-    fallbacks use [`shfl`](@ref) from a lane.
+    Backends **may** implement these for the types they support natively, e.g. if they have
+    native shuffles with a width. A backend that implements
+    [`supports_independent_segments`](@ref) **must** implement them unless its `shfl` from a
+    lane can be executed by a segment alone. The fallbacks pack other types into `UInt32`
+    words, and shuffle those with `shfl` from a lane.
 """
-@inline function shfl(val, lane::Integer, width::Integer)
+@inline shfl(val, lane::Integer, width::Integer) = shfl_fallback(ShuffleOp(shfl, (lane, width)), val)
+@inline shfl_down(val, offset::Integer, width::Integer) =
+    shfl_fallback(ShuffleOp(shfl_down, (offset, width)), val)
+@inline shfl_up(val, offset::Integer, width::Integer) =
+    shfl_fallback(ShuffleOp(shfl_up, (offset, width)), val)
+@inline shfl_xor(val, mask::Integer, width::Integer) =
+    shfl_fallback(ShuffleOp(shfl_xor, (mask, width)), val)
+
+@inline shfl(val::UInt64, lane::Integer, width::Integer) =
+    shfl_words(ShuffleOp(shfl, (lane, width)), val)
+@inline shfl_down(val::UInt64, offset::Integer, width::Integer) =
+    shfl_words(ShuffleOp(shfl_down, (offset, width)), val)
+@inline shfl_up(val::UInt64, offset::Integer, width::Integer) =
+    shfl_words(ShuffleOp(shfl_up, (offset, width)), val)
+@inline shfl_xor(val::UInt64, mask::Integer, width::Integer) =
+    shfl_words(ShuffleOp(shfl_xor, (mask, width)), val)
+
+# A `UInt32` within a segment is read with `shfl` from the computed lane
+@inline function shfl(val::UInt32, lane::Integer, width::Integer)
     l0 = get_sub_group_local_id(Int32) - Int32(1)
     w = width % Int32
     base = l0 & ~(w - Int32(1))
@@ -567,7 +596,7 @@ end
 
 # The offsets are compared with the width before they are narrowed to `Int32`, so that large
 # offsets read from outside of the segment.
-@inline function shfl_down(val, offset::Integer, width::Integer)
+@inline function shfl_down(val::UInt32, offset::Integer, width::Integer)
     l0 = get_sub_group_local_id(Int32) - Int32(1)
     w = width % Int32
     pos = l0 & (w - Int32(1))
@@ -576,7 +605,7 @@ end
     return shfl(val, src + Int32(1))
 end
 
-@inline function shfl_up(val, offset::Integer, width::Integer)
+@inline function shfl_up(val::UInt32, offset::Integer, width::Integer)
     l0 = get_sub_group_local_id(Int32) - Int32(1)
     w = width % Int32
     pos = l0 & (w - Int32(1))
@@ -585,7 +614,7 @@ end
     return shfl(val, src + Int32(1))
 end
 
-@inline function shfl_xor(val, mask::Integer, width::Integer)
+@inline function shfl_xor(val::UInt32, mask::Integer, width::Integer)
     l0 = get_sub_group_local_id(Int32) - Int32(1)
     return shfl(val, (l0 ⊻ (mask % Int32)) + Int32(1))
 end
@@ -651,6 +680,46 @@ It exchanges values, not memory: it is not a memory fence, see [`sub_group_barri
     ```
 """
 function sub_group_ballot end
+
+"""
+    sub_group_any(pred::Bool, width::Integer)::Bool
+    sub_group_all(pred::Bool, width::Integer)::Bool
+    sub_group_ballot(pred::Bool, width::Integer)::UInt64
+
+The votes within segments of `width` consecutive lanes of the sub-group, as for the shuffles
+with a `width` (see [`shfl`](@ref shfl(::Any, ::Integer, ::Integer))): whether `pred` is
+`true` for any or all work-items of the caller's segment, or a mask of those for which it is,
+relative to the segment: bit `i - 1` for the `i`-th lane of the segment. Lanes without a
+work-item don't count.
+
+For a `width` smaller than the sub-group width, they need a sub-group width of at most 64.
+
+!!! note
+    Backends **may** implement these. A backend that implements
+    [`supports_independent_segments`](@ref) **must** implement them unless its
+    [`sub_group_ballot`](@ref) can be executed by a segment alone and only reports the
+    work-items that execute it. The fallbacks use the votes without a `width` if `width` is
+    the sub-group width, and [`sub_group_ballot`](@ref) otherwise.
+"""
+@inline function sub_group_ballot(pred::Bool, width::Integer)
+    width == get_max_sub_group_size(Int32) && return sub_group_ballot(pred)
+    l0 = get_sub_group_local_id(Int32) - Int32(1)
+    base = l0 & ~(width % Int32 - Int32(1))
+    return (sub_group_ballot(pred) >> base) & segment_mask(width)
+end
+
+@inline function sub_group_any(pred::Bool, width::Integer)
+    width == get_max_sub_group_size(Int32) && return sub_group_any(pred)
+    return sub_group_ballot(pred, width) != 0
+end
+
+@inline function sub_group_all(pred::Bool, width::Integer)
+    width == get_max_sub_group_size(Int32) && return sub_group_all(pred)
+    return sub_group_ballot(!pred, width) == 0
+end
+
+# The bits of the lanes of a segment of `width` lanes in a ballot relative to the segment
+@inline segment_mask(width) = ifelse(width >= 64, typemax(UInt64), (UInt64(1) << (width % UInt32)) - UInt64(1))
 
 """
     sub_group_reduce(op, val::T)::T
@@ -780,6 +849,66 @@ It exchanges values, not memory: it is not a memory fence, see [`sub_group_barri
     return get_sub_group_local_id(Int32) == Int32(1) ? init : op(init, prefix)
 end
 
+"""
+    sub_group_reduce(op, val::T, width::Integer)::T
+    sub_group_scan(op, val::T, width::Integer)::T
+    sub_group_exclusive_scan(op, val::T, init::T, width::Integer)::T
+
+The collectives within segments of `width` consecutive lanes of the sub-group, as for the
+shuffles with a `width` (see [`shfl`](@ref shfl(::Any, ::Integer, ::Integer))): the
+reduction and scans of [`sub_group_reduce`](@ref), [`sub_group_scan`](@ref) and
+[`sub_group_exclusive_scan`](@ref), over the work-items of the caller's segment, in the order
+of its lanes. `init` has to be the same for the work-items of a segment.
+
+!!! note
+    Backends **may** implement these, like the collectives without a `width`. The fallbacks
+    use the collectives without a `width` if `width` is the sub-group width, and the shuffles
+    with a `width` otherwise, like the fallbacks of the collectives without one.
+"""
+@inline function sub_group_reduce(op, val, width::Integer)
+    width == get_max_sub_group_size(Int32) && return sub_group_reduce(op, val)
+    w = width % Int32
+    sgsize = get_sub_group_size(Int32)
+    lane0 = get_sub_group_local_id(Int32) - Int32(1)
+    # the butterfly of `sub_group_reduce`, within the segment; a partial segment (in a partial
+    # sub-group) gets the result of its first lane
+    mask = Int32(1)
+    while mask < w
+        other = shfl_xor(val, mask, width)
+        if (lane0 ⊻ mask) < sgsize
+            if lane0 & mask == Int32(0)
+                val = op(val, other)
+            else
+                val = op(other, val)
+            end
+        end
+        mask <<= 1
+    end
+    first = shfl(val, 1, width)
+    return ifelse((lane0 & ~(w - Int32(1))) + w <= sgsize, val, first)
+end
+
+@inline function sub_group_scan(op, val, width::Integer)
+    width == get_max_sub_group_size(Int32) && return sub_group_scan(op, val)
+    w = width % Int32
+    pos = (get_sub_group_local_id(Int32) - Int32(1)) & (w - Int32(1))
+    offset = Int32(1)
+    while offset < w
+        other = shfl_up(val, offset, width)
+        if pos >= offset
+            val = op(other, val)
+        end
+        offset <<= 1
+    end
+    return val
+end
+
+@inline function sub_group_exclusive_scan(op, val, init, width::Integer)
+    width == get_max_sub_group_size(Int32) && return sub_group_exclusive_scan(op, val, init)
+    prefix = shfl_up(sub_group_scan(op, val, width), 1, width)
+    first = (get_sub_group_local_id(Int32) - Int32(1)) & (width % Int32 - Int32(1)) == Int32(0)
+    return first ? init : op(init, prefix)
+end
 
 
 ## synchronization
@@ -825,6 +954,22 @@ function sub_group_barrier()
     error("Sub-group barrier used outside kernel or not captured")
 end
 
+"""
+    sub_group_barrier(width::Integer)
+
+Like [`sub_group_barrier`](@ref), for the work-items of the caller's segment of `width`
+consecutive lanes of the sub-group, as for the shuffles with a `width` (see
+[`shfl`](@ref shfl(::Any, ::Integer, ::Integer))): wait until they have reached the barrier,
+and make their writes to global and local memory before it visible to the segment. It
+doesn't order memory with other segments.
+
+!!! note
+    Backends **may** implement this. A backend that implements
+    [`supports_independent_segments`](@ref) **must** implement it unless its
+    [`sub_group_barrier`](@ref) can be executed by a segment alone. The fallback is
+    [`sub_group_barrier`](@ref).
+"""
+@inline sub_group_barrier(width::Integer) = sub_group_barrier()
 
 
 ## printing

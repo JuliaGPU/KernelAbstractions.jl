@@ -314,15 +314,38 @@ sub-group, but not over the work-group: e.g. a loop whose trip count differs bet
 sub-groups, or after an early `return` of whole sub-groups. Otherwise, all sub-groups of a
 work-group have to execute the same communication functions, in the same order.
 
-This covers physical sub-groups, not the segments of the shuffles with a `width`, and doesn't
-promise forward progress: a sub-group spin-waiting for another one can still hang. Implies
-[`supports_subgroups`](@ref).
+This covers physical sub-groups, not the segments of the functions with a `width` (see
+[`supports_independent_segments`](@ref)), and doesn't promise forward progress: a sub-group
+spin-waiting for another one can still hang. Implies [`supports_subgroups`](@ref).
 
 !!! note
     Backend implementations **should** implement this function if sub-groups are
     independent. The fallback returns `false`.
 """
 supports_independent_subgroups(::Backend) = false
+
+"""
+    supports_independent_segments(::Backend)::Bool
+
+Whether the sub-group communication functions with a `width` (the shuffles, votes,
+collectives and [`sub_group_barrier`](@ref) with a `width`, e.g.
+[`shfl`](@ref shfl(::Any, ::Integer, ::Integer))) only have to be executed by the work-items
+of the caller's segment of `width` consecutive lanes, rather than by the whole sub-group: the
+segments of a sub-group can diverge, e.g. loop a different number of times, or skip the
+functions altogether. Whether the sub-groups of a work-group have to execute them together is
+still up to [`supports_independent_subgroups`](@ref).
+
+Like that query, this doesn't promise forward progress between segments. Implies
+[`supports_subgroups`](@ref).
+
+!!! note
+    Backend implementations **should** implement this function if their implementation of
+    the functions with a `width` guarantees it, which takes more than the execution of a
+    sub-group in lock-step being observed: e.g. a barrier for the lanes of a segment, or an
+    execution model of the hardware that the backend relies on and validates, such as the
+    lock-step execution of SIMD-groups on Apple GPUs. The fallback returns `false`.
+"""
+supports_independent_segments(::Backend) = false
 
 """
     supports_shuffle(::Backend, ::Type{T})::Bool

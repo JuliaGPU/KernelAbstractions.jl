@@ -74,10 +74,10 @@ What a backend implements, at a glance. The docstrings below have the details.
 | **Execution** | [`synchronize`](@ref) (cooperative) | [`record_event`](@ref)/[`wait_event`](@ref) (synchronize), [`priority!`](@ref) (no-op) |
 | **Devices** | with more than one device: [`ndevices`](@ref), [`device`](@ref), [`device!`](@ref), `device(backend, A)` | all four (a single device) |
 | **Queries** | [`max_work_group_size`](@ref) (for the backend and for a kernel), [`max_work_group_dims`](@ref), [`max_num_groups`](@ref) | [`launch_configuration`](@ref) (the limit), [`multiprocessor_count`](@ref) (0), [`functional`](@ref) (`missing`), [`versioninfo`](@ref) |
-| **Capabilities** | | [`supports_float64`](@ref), [`supports_atomics`](@ref), [`supports_unified`](@ref), [`supports_subgroups`](@ref), [`supports_linear_subgroups`](@ref), [`supports_independent_subgroups`](@ref) (all `false`), [`supports_shuffle`](@ref) (`false` unless derived from the natively supported types, see its docstring) |
+| **Capabilities** | | [`supports_float64`](@ref), [`supports_atomics`](@ref), [`supports_unified`](@ref), [`supports_subgroups`](@ref), [`supports_linear_subgroups`](@ref), [`supports_independent_subgroups`](@ref), [`supports_independent_segments`](@ref) (all `false`), [`supports_shuffle`](@ref) (`false` unless derived from the natively supported types, see its docstring) |
 | **Compilation** | [`argconvert`](@ref), [`kernel_function`](@ref), [`launch`](@ref) | |
 | **Device** | [`get_local_id`](@ref), [`get_group_id`](@ref), [`get_local_size`](@ref), [`get_num_groups`](@ref), [`localmemory`](@ref), [`barrier`](@ref) | [`get_global_id`](@ref), [`get_global_size`](@ref) (derived from the primitive queries), [`_print`](@ref KernelInterface._print) (host `print`) |
-| **Sub-groups** | if `supports_subgroups`: [`sub_group_size`](@ref), the sub-group queries (with a constant [`get_max_sub_group_size`](@ref)), [`sub_group_barrier`](@ref), [`sub_group_any`](@ref), [`sub_group_all`](@ref), and [`sub_group_ballot`](@ref) for widths of at most 64; if `supports_shuffle(backend, T)`: [`shfl`](@ref), [`shfl_down`](@ref), [`shfl_up`](@ref), [`shfl_xor`](@ref) for the primitive `T` supported natively, including `UInt32` | shuffles with a `width`, [`sub_group_reduce`](@ref), [`sub_group_scan`](@ref), [`sub_group_exclusive_scan`](@ref) (built on the shuffles); shuffles of other primitive types (as `UInt32` or `UInt64` words) and of structs (packed into `UInt32` words) |
+| **Sub-groups** | if `supports_subgroups`: [`sub_group_size`](@ref), the sub-group queries (with a constant [`get_max_sub_group_size`](@ref)), [`sub_group_barrier`](@ref), [`sub_group_any`](@ref), [`sub_group_all`](@ref), and [`sub_group_ballot`](@ref) for widths of at most 64; if `supports_shuffle(backend, T)`: [`shfl`](@ref), [`shfl_down`](@ref), [`shfl_up`](@ref), [`shfl_xor`](@ref) for the primitive `T` supported natively, including `UInt32` | [`sub_group_reduce`](@ref), [`sub_group_scan`](@ref), [`sub_group_exclusive_scan`](@ref) (built on the shuffles); the functions with a `width` (built on those without, or on the ballot); shuffles of other primitive types (as `UInt32` or `UInt64` words) and of structs (packed into `UInt32` words) |
 
 Everything else, such as [`zeros`](@ref KernelInterface.zeros), [`ones`](@ref KernelInterface.ones),
 the launch-keyword handling of [`Kernel`](@ref) and [`@launch`](@ref KernelInterface.@launch),
@@ -171,7 +171,7 @@ A sub-group is partial when it has fewer work-items than the width: the lanes
 values, and the votes, [`sub_group_reduce`](@ref) and the scans only take the work-items of
 the sub-group into account.
 
-Backends that guarantee more say so with two queries:
+Backends that guarantee more say so with these queries:
 
 - [`supports_linear_subgroups`](@ref): if the work-group is 1-D, or its x extent is a
   multiple of `W`, sub-groups are formed from consecutive work-items, x fastest: the
@@ -188,17 +188,21 @@ Backends that guarantee more say so with two queries:
   trip count depends on the sub-group, or after an early `return` of whole sub-groups.
   Otherwise, all sub-groups of a work-group have to execute the same communication
   functions in the same order.
+- [`supports_independent_segments`](@ref): the communication functions with a `width`, which
+  work within segments of `width` consecutive lanes, only have to be executed by the
+  work-items of a segment, so that the segments of a sub-group can diverge. This needs a
+  barrier for the lanes of a segment, which not every API has.
 
-| Backend | `supports_linear_subgroups` | `supports_independent_subgroups` |
-|---|---|---|
-| CUDA, AMDGPU | `true` | `true` |
-| Metal | `true` (not specified by Metal, but tested) | `true` |
-| oneAPI | once the layout is tested on Intel's GPU compiler | `true` |
-| OpenCL.jl | on runtimes known to form them linearly | `true`, except on PoCL |
-| KernelAbstractions' POCL backend | `true` | `false`: sub-group operations are work-group barriers |
+| Backend | `supports_linear_subgroups` | `supports_independent_subgroups` | `supports_independent_segments` |
+|---|---|---|---|
+| CUDA, AMDGPU | `true` | `true` | `true` |
+| Metal | `true` (not specified by Metal, but tested) | `true` | `true`: Apple GPUs execute a SIMD-group in lock-step, so the barrier for a segment is a SIMD-group-scope fence (not specified by Metal, but validated on M1 and M3) |
+| oneAPI | once the layout is tested on Intel's GPU compiler | `true` | `true` |
+| OpenCL.jl | on runtimes known to form them linearly | `true`, except on PoCL | on Intel's GPU runtime only: OpenCL has no barrier for part of a sub-group |
+| KernelAbstractions' POCL backend | `true` | `false`: sub-group operations are work-group barriers | `false` |
 
-In all cases, all work-items of a sub-group have to execute a communication function
-together, not in a branch that only some of its lanes take. The id and size queries can be
+Otherwise, all work-items of a sub-group have to execute a communication function together,
+not in a branch that only some of its lanes take. The id and size queries can be
 used anywhere.
 
 !!! note "Kernel languages"
@@ -221,6 +225,7 @@ get_sub_group_local_id
 ```@docs
 barrier
 sub_group_barrier
+sub_group_barrier(::Integer)
 ```
 
 ### Memory
@@ -246,9 +251,11 @@ shfl(::Any, ::Integer, ::Integer)
 sub_group_any
 sub_group_all
 sub_group_ballot
+sub_group_ballot(::Bool, ::Integer)
 sub_group_reduce
 sub_group_scan
 sub_group_exclusive_scan
+sub_group_reduce(::Any, ::Any, ::Integer)
 ```
 
 ### Printing
@@ -305,6 +312,7 @@ supports_float64
 supports_subgroups
 supports_linear_subgroups
 supports_independent_subgroups
+supports_independent_segments
 supports_shuffle
 ```
 
