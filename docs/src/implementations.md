@@ -83,9 +83,6 @@ it should return its method tables from `GPUCompiler.method_tables` rather than 
   the `ndrange` as `nitems`, e.g. to prefer more workgroups over larger ones.
 - [`KernelAbstractions.compiler_options`](@ref): compiler options for a kernel, e.g. a
   register hint derived from its static workgroup size.
-- [`KernelAbstractions.preferred_index_type`](@ref): the type in which [`@index`](@ref)
-  computes when the iteration space fits it, `Int32` by default. CPU backends should
-  prefer `Int`.
 - `Adapt.adapt_storage(::KernelAbstractions.ConstAdaptor, x)` for the backend's device
   arrays, which implements [`@Const`](@ref). KernelAbstractions marks `@Const` arguments
   when launching a kernel, and they are constified by the backend's argument conversion,
@@ -97,8 +94,7 @@ it should return its method tables from `GPUCompiler.method_tables` rather than 
 shape of the iteration space ([`NDLaunch`](@ref KernelAbstractions.NDLaunch), for up to as
 many dimensions as the backend's grid has), which doesn't need any divisions, or on a 1-D
 grid ([`LinearLaunch`](@ref KernelAbstractions.LinearLaunch)). Either way it computes in a
-narrow index type such as `Int32` when the iteration space fits (see
-[`preferred_index_type`](@ref KernelAbstractions.preferred_index_type)), which is why the typed
+narrow index type such as `Int32` when the iteration space fits, which is why the typed
 [`KI.get_group_id`](@ref KernelInterface.get_group_id) and
 [`KI.get_local_id`](@ref KernelInterface.get_local_id) queries have to compute in that type
 too, as KernelInterface specifies. For the same reason, backends **must not** override

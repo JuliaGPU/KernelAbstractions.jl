@@ -119,6 +119,5 @@ KernelAbstractions.NDLaunch
 KernelAbstractions.select_launch
 KernelAbstractions.launch_workgroupsize
 KernelAbstractions.compiler_options
-KernelAbstractions.preferred_index_type
 KernelAbstractions.PrivateArray
 ```

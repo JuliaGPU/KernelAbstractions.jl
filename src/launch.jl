@@ -42,17 +42,11 @@ const Launch = Union{LinearLaunch, NDLaunch}
 index_type(::LinearLaunch{T}) where {T} = T
 index_type(::NDLaunch{T}) where {T} = T
 
-"""
-    preferred_index_type(backend)::Type{<:Union{Int32, Int}}
-
-The integer type in which `@index` computes on `backend` when the iteration space fits it
-(see [`select_launch`](@ref)). Backends **may** implement this for their backend type; the
-default is `Int32`, which is cheaper than `Int` on GPUs. A backend whose work-item ids are
-`Int`s and for which `Int` arithmetic is as cheap, e.g. a CPU backend, should return `Int`:
-narrowing the ids to `Int32` and widening the indices again hides from LLVM that they can't
-wrap, which e.g. keeps it from vectorizing PoCL's loops over the work-items (#868).
-"""
-preferred_index_type(backend) = Int32
+# The type in which `@index` computes when the iteration space fits it: `Int32`, which is
+# cheaper than `Int` on GPUs, except on PoCL. Its work-item ids are `Int`s, and narrowing
+# them to `Int32` and widening the indices again hides from LLVM that they can't wrap, which
+# keeps it from vectorizing PoCL's loops over the work-items (#868).
+narrow_index_type(backend) = backend isa POCL.POCLBackend ? Int : Int32
 
 
 ## host side
@@ -64,8 +58,8 @@ Choose how to launch `kernel` with the (possibly preliminary) iteration space `i
 and the given `workgroupsize` (`nothing` if it will be tuned), as returned by
 `launch_config`: an [`NDLaunch`](@ref) if the iteration space fits the grid of
 `backend(kernel)`, i.e. its number of dimensions and per-dimension limits, and a
-[`LinearLaunch`](@ref) otherwise, both computing indices in
-[`preferred_index_type(backend(kernel))`](@ref preferred_index_type) if possible.
+[`LinearLaunch`](@ref) otherwise, both computing indices in `Int32` (`Int` on PoCL) if
+possible.
 
 If the workgroup size will be tuned, the choice holds for any workgroup size the backend
 tunes afterwards, so the context and thus the compiled kernel are the same before and
@@ -76,7 +70,7 @@ padded iteration space with a single workgroup, as `launch_config` does.
 Throws an `ArgumentError` if the iteration space has more than `typemax(Int)` work-items.
 
 The result is not inferred concretely: launching with it takes a dynamic dispatch, unless
-the caller checks for the common case of an `NDLaunch{Int32}` first.
+the caller checks for the common case of an `NDLaunch{Int32}` (`NDLaunch{Int}` on PoCL) first.
 """
 function select_launch(kernel::Kernel, workgroupsize, iterspace)
     b = backend(kernel)
@@ -86,7 +80,7 @@ function select_launch(kernel::Kernel, workgroupsize, iterspace)
     return select_launch(
         map(mul_extent, groups, items), tuned ? nothing : items,
         KI.max_work_group_size(b), KI.max_work_group_dims(b), KI.max_num_groups(b),
-        preferred_index_type(b)
+        narrow_index_type(b)
     )
 end
 

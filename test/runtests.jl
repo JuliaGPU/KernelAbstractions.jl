@@ -585,9 +585,7 @@ end
         A[ndrange] .= 0
         @test all(iszero, A)
 
-        # the launch is chosen from the iteration space, computing indices in the backend's
-        # preferred type
-        @test KA.preferred_index_type(CPU()) === Int
+        # the launch is chosen from the iteration space, computing indices in `Int` on PoCL
         @test KA.select_launch(kernel, nothing, iterspace) === KA.NDLaunch{Int}()
     end
     for launch in (nothing, KA.LinearLaunch{Int}(), KA.NDLaunch{Int}())

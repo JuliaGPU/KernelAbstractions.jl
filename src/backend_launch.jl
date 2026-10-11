@@ -88,11 +88,10 @@ function launch_tuple(obj::Kernel, args::Tuple; ndrange = nothing, workgroupsize
     # nothing to launch (or compile) for an empty ndrange
     any(iszero, size(blocks(iterspace))) && return nothing
 
-    # launch on an N-d grid, computing indices in the backend's preferred type, if possible.
-    # this doesn't depend on the tuned workgroup size, so the context (and thus the kernel)
-    # doesn't either.
+    # launch on an N-d grid, computing indices in a narrow type, if possible. this doesn't
+    # depend on the tuned workgroup size, so the context (and thus the kernel) doesn't either.
     launch = select_launch(obj, workgroupsize, iterspace)
-    T = preferred_index_type(backend(obj))
+    T = narrow_index_type(backend(obj))
     if launch === NDLaunch{T}()
         # the common case, specialized statically
         launch_kernel(obj, NDLaunch{T}(), ndrange, workgroupsize, iterspace, args)
