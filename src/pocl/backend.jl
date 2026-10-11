@@ -199,6 +199,9 @@ KI.supports_subgroups(::POCLBackend) = device_limits().sub_group_size > 0
 # work-group barriers, so they need work-group-uniform control flow (see `POCLBackend`)
 KI.supports_linear_subgroups(backend::POCLBackend) = KI.supports_subgroups(backend)
 KI.supports_independent_subgroups(::POCLBackend) = false
+# PoCL limitation: for the same reason, the segments of a sub-group can't diverge, so kernels
+# with tiles narrower than the sub-group get one tile per work-group
+KI.supports_independent_segments(::POCLBackend) = false
 
 # PoCL limitation: every shuffle is a work-group barrier, also for each word of a struct; see
 # `KI.shfl_word_tuple`, which could exchange them at once with `cl_intel_spirv_subgroups`.

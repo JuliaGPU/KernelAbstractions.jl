@@ -44,9 +44,10 @@ KI.supports_shuffle(::WordShuffleBackend, ::Type{UInt32}) = true
         @test isempty(methods(stub))
     end
 
-    # The votes have no fallbacks: backends that support sub-groups implement them.
+    # The votes have no fallbacks: backends that support sub-groups implement them. (Their
+    # variants with a `width` are built on them.)
     for vote in [KI.sub_group_any, KI.sub_group_all, KI.sub_group_ballot]
-        @test isempty(methods(vote))
+        @test isempty(methods(vote, Tuple{Bool}))
     end
 
     # The shuffles only have the fallbacks that shuffle other types as `UInt32` words, which
@@ -81,6 +82,7 @@ KI.supports_shuffle(::WordShuffleBackend, ::Type{UInt32}) = true
     @test !KI.supports_subgroups(PlainBackend())
     @test !KI.supports_linear_subgroups(PlainBackend())
     @test !KI.supports_independent_subgroups(PlainBackend())
+    @test !KI.supports_independent_segments(PlainBackend())
 
     # The primitive queries take an element type; only the zero-argument form has a
     # (forwarding) method, and it must reach the typed stub rather than recurse.
