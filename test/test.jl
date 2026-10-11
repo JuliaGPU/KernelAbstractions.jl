@@ -546,5 +546,56 @@ function unittest_testsuite(Backend, backend_str, backend_mod, BackendArrayT; sk
         end
     end
 
+    # https://github.com/JuliaGPU/KernelAbstractions.jl/issues/855
+    @kernel function index_only!(A)
+        i = @index(Global, Linear)
+        A[i] = @index(Group, Linear)
+    end
+
+    @kernel function index_reordered!(A)
+        i = @index(Global, Linear)
+        A[i] = -1
+        A[i] = @index(Group, Linear)
+    end
+
+    @kernel function index_nested!(A)
+        i = @index(Global, Linear)
+        A[i] = 2 * @index(Group, Linear)
+    end
+
+    @kernel function index_sync!(A, B)
+        i = @index(Global, Linear)
+        A[i] = @index(Local, Linear)
+        @synchronize
+        B[i] = A[i] + @index(Group, Linear)
+    end
+
+    @testset "`@index` on the right-hand side of a non-variable assignment (#855)" begin
+        backend = Backend()
+        expected = [1, 1, 1, 1, 2, 2, 2, 2]
+
+        A = KernelAbstractions.zeros(backend, Int, 8)
+        index_only!(backend, 4)(A; ndrange = 8)
+        synchronize(backend)
+        @test adapt(Array, A) == expected
+
+        A = KernelAbstractions.zeros(backend, Int, 8)
+        index_reordered!(backend, 4)(A; ndrange = 8)
+        synchronize(backend)
+        @test adapt(Array, A) == expected
+
+        A = KernelAbstractions.zeros(backend, Int, 8)
+        index_nested!(backend, 4)(A; ndrange = 8)
+        synchronize(backend)
+        @test adapt(Array, A) == 2 .* expected
+
+        A = KernelAbstractions.zeros(backend, Int, 8)
+        B = KernelAbstractions.zeros(backend, Int, 8)
+        index_sync!(backend, 4)(A, B; ndrange = 8)
+        synchronize(backend)
+        @test adapt(Array, A) == [1, 2, 3, 4, 1, 2, 3, 4]
+        @test adapt(Array, B) == [2, 3, 4, 5, 3, 4, 5, 6]
+    end
+
     return
 end
