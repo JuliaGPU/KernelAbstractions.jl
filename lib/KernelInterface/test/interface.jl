@@ -393,6 +393,43 @@ struct ExclusiveScan{O, T}
 end
 (s::ExclusiveScan)(x) = KI.sub_group_exclusive_scan(s.op, x, s.init)
 
+# The votes and collectives within segments of `width` lanes. The width is a field, rather
+# than a type parameter, so that a kernel is compiled once for all widths.
+struct WidthVote{F}
+    f::F
+    width::Int
+end
+(v::WidthVote)(p) = v.f(p, v.width)
+
+struct WidthReduce{O}
+    op::O
+    width::Int
+end
+(r::WidthReduce)(x) = KI.sub_group_reduce(r.op, x, r.width)
+
+struct WidthScan{O}
+    op::O
+    width::Int
+end
+(s::WidthScan)(x) = KI.sub_group_scan(s.op, x, s.width)
+
+struct WidthExclusiveScan{O, T}
+    op::O
+    init::T
+    width::Int
+end
+(s::WidthExclusiveScan)(x) = KI.sub_group_exclusive_scan(s.op, x, s.init, s.width)
+
+# the segment widths to test: the powers of two up to the sub-group width
+segment_widths(sg_size) = ispow2(sg_size) ? filter(<=(sg_size), [1, 2, 4, 8, 16, 32, 64]) : Int[]
+
+# the lanes of the segment of `width` lanes that lane `l` of a sub-group of `size` work-items
+# is in
+function segment_lanes(l, width, size)
+    first = fld(l - 1, width) * width + 1
+    return first:min(first + width - 1, size)
+end
+
 # an associative but not commutative operator: the composition of affine maps
 compose_affine(f, g) = (g[1] * f[1], g[1] * f[2] + g[2])
 # the (value, index) of the smallest value, the first one of equal values
@@ -402,6 +439,12 @@ argmin_op(x, y) = ifelse(y[1] < x[1], y, x)
 collective_result(r::Reduce, vals, l) = foldl(r.op, vals)
 collective_result(s::Scan, vals, l) = foldl(s.op, vals[1:l])
 collective_result(s::ExclusiveScan, vals, l) = l == 1 ? s.init : s.op(s.init, foldl(s.op, vals[1:(l - 1)]))
+collective_result(r::WidthReduce, vals, l) = foldl(r.op, vals[segment_lanes(l, r.width, length(vals))])
+collective_result(s::WidthScan, vals, l) = foldl(s.op, vals[first(segment_lanes(l, s.width, length(vals))):l])
+function collective_result(s::WidthExclusiveScan, vals, l)
+    f = first(segment_lanes(l, s.width, length(vals)))
+    return l == f ? s.init : s.op(s.init, foldl(s.op, vals[f:(l - 1)]))
+end
 
 # Floating-point `+` and `*` may be reassociated, so they are compared with a tolerance
 # (other than for the `init` of an exclusive scan, which lane 1 gets unchanged).
@@ -443,6 +486,29 @@ function vote_testsuite(backend, AT, sg_size, pred)
                 vote === KI.sub_group_all ? all(p) :
                 reduce(|, (UInt64(1) << (l - 1) for l in eachindex(p) if p[l]); init = UInt64(0))
             ok &= all(i -> out[i] == expected, g)
+        end
+        @test ok
+    end
+    return
+end
+
+# the expected result of a vote over the predicates `p` of a sub-group or segment
+function vote_result(vote, p)
+    vote === KI.sub_group_any && return any(p)
+    vote === KI.sub_group_all && return all(p)
+    return reduce(|, (UInt64(1) << (l - 1) for l in eachindex(p) if p[l]); init = UInt64(0))
+end
+
+function width_vote_testsuite(backend, AT, sg_size, pred)
+    for w in segment_widths(sg_size), (vote, T) in ((KI.sub_group_any, Bool), (KI.sub_group_all, Bool), (KI.sub_group_ballot, UInt64))
+        # the votes within segments narrower than the sub-group use its ballot
+        (vote === KI.sub_group_ballot || w < sg_size) && sg_size > 64 && continue
+        res = sub_group_apply(backend, AT, WidthVote(vote, w), pred, T)
+        res === nothing && continue
+        out, groups = res
+        ok = true
+        for g in groups, (l, i) in enumerate(g)
+            ok &= out[i] == vote_result(vote, pred[g[segment_lanes(l, w, length(g))]])
         end
         @test ok
     end
@@ -540,6 +606,125 @@ function sub_group_barrier_kernel(ids, scratch, out, ::Val{N}) where {N}
     return
 end
 
+# Like `sub_group_barrier_kernel`, reading the next lane's write within segments of `width`
+# lanes after a barrier of the segment.
+function segment_barrier_kernel(ids, scratch, out, width, ::Val{N}) where {N}
+    i = KI.get_local_id().x
+    record_sub_group!(ids, i)
+    lane = KI.get_sub_group_local_id()
+    base = (KI.get_sub_group_id() - 1) * KI.get_max_sub_group_size()
+    first = fld(lane - 1, width) * width
+    other = base + first + mod1(lane - first + 1, min(width, KI.get_sub_group_size() - first))
+    lm = KI.localmemory(Int32, N)
+    @inbounds lm[base + lane] = i
+    @inbounds scratch[base + lane] = -i
+    KI.sub_group_barrier(width)
+    @inbounds out[i, 1] = lm[other]
+    @inbounds out[i, 2] = scratch[other]
+    return
+end
+
+# Every segment of `width` lanes executes the communication functions with that width a
+# different number of times, and some return early, which needs
+# `supports_partitionable_subgroups`. Each segment exchanges values through local memory after a
+# barrier of the segment. `N` is the size of the work-group, of full sub-groups.
+function partitioned_subgroups_kernel(ids, out, a, width, ::Val{N}) where {N}
+    i = KI.get_local_id().x
+    record_sub_group!(ids, i)
+    lane = KI.get_sub_group_local_id()
+    W = KI.get_max_sub_group_size()
+    pos = (lane - 1) % width
+    seg = (KI.get_sub_group_id() - 1) * (W ÷ width) + (lane - 1) ÷ width
+    val = @inbounds a[i]
+    acc = zero(val)
+    for _ in 1:(seg % 3 + 1)
+        acc += KI.shfl(val, pos + 2, width)
+    end
+    @inbounds out[1, i] = acc
+    seg % 4 == 1 && return
+    lm = KI.localmemory(Int32, N)
+    slot = (KI.get_sub_group_id() - 1) * W + lane
+    @inbounds lm[slot] = val
+    KI.sub_group_barrier(width)
+    @inbounds out[2, i] = lm[slot - pos + (pos + 1) % width]
+    @inbounds out[3, i] = KI.sub_group_reduce(+, val, width)
+    @inbounds out[4, i] = KI.sub_group_scan(+, val, width)
+    @inbounds out[5, i] = KI.sub_group_any(val > Int32(1900), width)
+    if KI.sub_group_all(val > Int32(500), width)
+        @inbounds out[6, i] = 1
+    end
+    return
+end
+
+# Segments of `width` lanes repeatedly exchange values through local and global memory, a
+# different number of times each, with a barrier of the segment after writing and after
+# reading: counts the values that weren't the neighbour's write of the same iteration.
+function segment_exchange_kernel(errors, scratch, width, ::Val{N}) where {N}
+    i = KI.get_local_id().x
+    lane = KI.get_sub_group_local_id()
+    W = KI.get_max_sub_group_size()
+    pos = (lane - 1) % width
+    seg = (KI.get_sub_group_id() - 1) * (W ÷ width) + (lane - 1) ÷ width
+    slot = (KI.get_sub_group_id() - 1) * W + lane
+    other = slot - pos + (pos + 1) % width
+    other_lane = lane - pos + (pos + 1) % width
+    offset = (KI.get_group_id().x - 1) * N
+    lm = KI.localmemory(Int32, N)
+    err = Int32(0)
+    for it in Int32(1):Int32(seg % 7 + 1)
+        @inbounds lm[slot] = it * Int32(4096) + Int32(lane)
+        @inbounds scratch[offset + slot] = -(it * Int32(4096) + Int32(lane))
+        KI.sub_group_barrier(width)
+        expected = it * Int32(4096) + Int32(other_lane)
+        err += (@inbounds(lm[other]) != expected) + (@inbounds(scratch[offset + other]) != -expected)
+        KI.sub_group_barrier(width)
+    end
+    @inbounds errors[offset + i] = err
+    return
+end
+
+function partitioned_subgroups_testsuite(backend, AT, sg_size)
+    for w in segment_widths(sg_size)
+        w < sg_size || continue
+        n = 4 * sg_size
+        a = Int32[rand(Bool) ? rand(501:2000) : rand(1:2000) for _ in 1:n]
+        ids, out = AT(zeros(Int, 3, n)), AT(zeros(Int32, 6, n))
+        kernel = KI.@launch backend launch = false partitioned_subgroups_kernel(ids, out, AT(a), w, Val(n))
+        m = min(n, fld(KI.max_work_group_size(kernel), sg_size) * sg_size)
+        kernel(ids, out, AT(a), w, Val(n); workgroupsize = m)
+        KI.synchronize(backend)
+        out = Array(out)
+        ok = true
+        for (sg, g) in enumerate(observed_sub_groups(Array(ids)[:, 1:m])), (l, i) in enumerate(g)
+            lanes = segment_lanes(l, w, length(g))
+            vals = a[g[lanes]]
+            pos = l - first(lanes) + 1
+            seg = (sg - 1) * (sg_size ÷ w) + (l - 1) ÷ w
+            next = vals[mod1(pos + 1, length(vals))]
+            expected = zeros(Int32, 6)
+            expected[1] = (seg % 3 + 1) * next
+            if seg % 4 != 1
+                expected[2:6] = [next, sum(vals), sum(vals[1:pos]), any(>(1900), vals), all(>(500), vals)]
+            end
+            ok &= out[:, i] == expected
+        end
+        @test ok
+
+        groups = 64
+        errors, scratch = AT(fill(Int32(-1), n * groups)), AT(zeros(Int32, n * groups))
+        kernel = KI.@launch backend launch = false segment_exchange_kernel(errors, scratch, w, Val(n))
+        m = min(n, fld(KI.max_work_group_size(kernel), sg_size) * sg_size)
+        for _ in 1:10
+            kernel(errors, scratch, w, Val(n); workgroupsize = m, numgroups = groups)
+            KI.synchronize(backend)
+            errs = reshape(Array(errors), n, groups)
+            ok &= all(iszero, errs[1:m, :])
+        end
+        @test ok
+    end
+    return
+end
+
 struct ShuffleStruct
     a::Float32
     b::Int64
@@ -613,12 +798,27 @@ function subgroup_communication_testsuite(backend::KI.Backend, AT, sg_size)
             other = g[mod1(l + 1, length(g))]
             @test out[i, :] == [other, -other]
         end
+
+        @testset "with a width of $w" for w in segment_widths(sg_size)
+            ids = AT(zeros(Int, 3, n))
+            scratch = AT(zeros(Int32, n * sg_size))
+            out = AT(zeros(Int32, n, 2))
+            KI.@launch backend workgroupsize = n segment_barrier_kernel(ids, scratch, out, w, Val(n * sg_size))
+            KI.synchronize(backend)
+            out = Array(out)
+            for g in observed_sub_groups(Array(ids)), (l, i) in enumerate(g)
+                lanes = segment_lanes(l, w, length(g))
+                other = g[first(lanes) + mod1(l - first(lanes) + 2, length(lanes)) - 1]
+                @test out[i, :] == [other, -other]
+            end
+        end
     end
 
     @testset "votes" begin
         @testset "$n work-items" for n in sizes
             for pred in (falses(n), trues(n), [i % 3 == 1 for i in 1:n], [i == n for i in 1:n], rand(Bool, n))
                 vote_testsuite(backend, AT, sg_size, collect(pred))
+                width_vote_testsuite(backend, AT, sg_size, collect(pred))
             end
         end
     end
@@ -731,6 +931,25 @@ function subgroup_communication_testsuite(backend::KI.Backend, AT, sg_size)
             collective_testsuite(backend, AT, ExclusiveScan(+, -0.0f0), Float32.(rand(1:100, n)))
             collective_testsuite(backend, AT, ExclusiveScan(+, -0.0f0), fill(-0.0f0, n))
         end
+
+        @testset "with a width, $n work-items" for n in sizes
+            for w in segment_widths(sg_size)
+                ops = Any[
+                    (+, Int32.(rand(1:100, n))), (max, Int64.(rand(-100:100, n))),
+                    (+, Float32.(rand(n))),
+                    (compose_affine, [(Int32(rand((-1, 1, 2))), Int32(rand(-5:5))) for _ in 1:n]),
+                ]
+                for (op, a) in ops
+                    collective_testsuite(backend, AT, WidthReduce(op, w), a)
+                    collective_testsuite(backend, AT, WidthScan(op, w), a)
+                end
+                collective_testsuite(backend, AT, WidthExclusiveScan(+, Int32(7), w), Int32.(rand(1:100, n)))
+                collective_testsuite(
+                    backend, AT, WidthExclusiveScan(compose_affine, (Int32(2), Int32(3)), w),
+                    [(Int32(rand((-1, 1, 2))), Int32(rand(-5:5))) for _ in 1:n]
+                )
+            end
+        end
     end
 
     @testset "sub_group_reduce and sub_group_scan of divergent values" begin
@@ -741,6 +960,12 @@ function subgroup_communication_testsuite(backend::KI.Backend, AT, sg_size)
     if KI.supports_independent_subgroups(backend)
         @testset "independent sub-groups" begin
             independent_sub_groups_testsuite(backend, AT, sg_size)
+        end
+    end
+
+    if KI.supports_partitionable_subgroups(backend)
+        @testset "partitionable sub-groups" begin
+            partitioned_subgroups_testsuite(backend, AT, sg_size)
         end
     end
     return
@@ -875,9 +1100,11 @@ function interface_testsuite(backend::KI.Backend, AT)
         @test KI.supports_subgroups(b) isa Bool
         @test KI.supports_linear_subgroups(b) isa Bool
         @test KI.supports_independent_subgroups(b) isa Bool
-        # both imply sub-group support
+        @test KI.supports_partitionable_subgroups(b) isa Bool
+        # all imply sub-group support
         KI.supports_linear_subgroups(b) && @test KI.supports_subgroups(b)
         KI.supports_independent_subgroups(b) && @test KI.supports_subgroups(b)
+        KI.supports_partitionable_subgroups(b) && @test KI.supports_independent_subgroups(b)
         @test KI.supports_shuffle(b, Float32) isa Bool
         @test KI.functional(b) isa Union{Missing, Bool}
         @test KI.multiprocessor_count(b) isa Int

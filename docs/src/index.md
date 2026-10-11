@@ -203,6 +203,11 @@ end
   than with 0.9.
 - `foreach_index(f, A)` runs `f` once per index of the array `A` without writing a kernel out,
   and `foreach_index(f, backend, indices)` once per index in a range or `CartesianIndices`.
+- KernelInterface 0.4 adds sub-groups: ids, shuffles, votes, reductions and scans, also
+  within segments of a sub-group. They are the low-level API for backends, for kernels
+  written against KernelInterface and for kernel languages built on it; capability queries
+  say how a backend forms its sub-groups, whether they may diverge, and which types it can
+  shuffle. See [Sub-groups](@ref ki_subgroups).
 
 ## Semantic differences
 
