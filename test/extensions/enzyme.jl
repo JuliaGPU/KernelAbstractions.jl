@@ -89,13 +89,15 @@ function enzyme_testsuite(backend, ArrayT, supports_reverse = true)
         KernelAbstractions.synchronize(backend())
         @test all(isnan, dA)
 
-        A .= 1
-        dA .= 0
+        # Strong zero is not available in the Enzyme versions for Julia < 1.10
+        if isdefined(Enzyme, :set_strong_zero)
+            A .= 1
+            dA .= 0
 
-        Enzyme.autodiff(Enzyme.set_strong_zero(Forward), mul_caller, Duplicated(A, dA), Const(Inf), Const(backend()))
-        KernelAbstractions.synchronize(backend())
-        @test all(iszero, dA)
-
+            Enzyme.autodiff(Enzyme.set_strong_zero(Forward), mul_caller, Duplicated(A, dA), Const(Inf), Const(backend()))
+            KernelAbstractions.synchronize(backend())
+            @test all(iszero, dA)
+        end
     end
     return
 end
