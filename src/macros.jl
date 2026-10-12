@@ -25,7 +25,7 @@ function unblock_lines(ex)
 end
 
 # XXX: Proper errors
-function __kernel(expr, __source__::LineNumberNode, __module__::Module, force_inbounds = false, unsafe_indices = false, generated = false)
+function __kernel(expr, __source__::LineNumberNode, __module__::Module, force_inbounds = false, unsafe_indices = false, generated = false, tile = nothing)
     def = splitdef(expr)
     name = def[:name]
     args = def[:args]
@@ -49,6 +49,8 @@ function __kernel(expr, __source__::LineNumberNode, __module__::Module, force_in
     # a kernel returns `nothing` anyway, but a `ConstArgs` query returns its mask
     delete!(def_gpu, :rtype)
     forwarders = default_forwarders!(def_gpu, gpu_name, constargs)
+    tile === nothing && find_tile(def[:body]) &&
+        error("`@tile()` and `@index(Tile)` need a kernel with tiles: `@kernel tile function ...`")
     transform_gpu!(def_gpu, constargs, force_inbounds, unsafe_indices)
     if generated
         # Turn the kernel into a generated function: the transformed body is
@@ -79,28 +81,29 @@ function __kernel(expr, __source__::LineNumberNode, __module__::Module, force_in
     # constructors, they are defined with the first method of the kernel, since a method can't
     # be overwritten during precompilation.
     queries = Any[]
+    # see `tile_policy`; only for kernels with tiles, since adding a method to a function in a
+    # branch makes a local function a `Core.Box`
+    tile === nothing || push!(queries, :($gpu_name(::$TilesQuery) = true))
     if find_collective(def[:body])
         # see `uses_collectives`
         push!(queries, :($gpu_name(::$CollectivesQuery) = true))
     end
 
-    # create constructor functions
-    _name = Symbol(:_, name)
+    # create constructor functions (a single method with keywords: in a local scope, several
+    # would capture each other in a `Core.Box`)
     constructors = quote
         if $(name isa Symbol ? :(!@isdefined($name)) : true)
-            function $_name(dev::Dev, sz::S, range::NDRange) where {Dev, S <: $_Size, NDRange <: $_Size}
-                return $construct(dev, sz, range, $gpu_name)
-            end
-            Core.@__doc__ $name(dev) = $_name(dev, $DynamicSize(), $DynamicSize())
-            $name(dev, size) = $_name(dev, $StaticSize(size), $DynamicSize())
-            $name(dev, size, range) = $_name(dev, $StaticSize(size), $StaticSize(range))
-            $name(dev, size::$_Size, range::$_Size) = $_name(dev, size, range)
+            Core.@__doc__ $name(dev, sizes...; tile = nothing) = $construct_kernel(dev, $gpu_name, sizes...; tile)
             $(queries...)
         end
     end
     constructors = relocate_lines(constructors, __source__)
 
-    return Expr(:block, esc(gpu_function), esc(forwarders), esc(constructors))
+    # all methods of a kernel function have to be declared with the same tiles as the first
+    defined = name isa Symbol ? :(@isdefined($name)) : false
+    declare_policy = :($declare_tile_policy($gpu_name, $tile, $defined))
+
+    return Expr(:block, esc(gpu_function), esc(forwarders), esc(declare_policy), esc(constructors))
 end
 
 """
@@ -304,6 +307,17 @@ end
 function is_scope_construct(expr::Expr)
     return expr.head === :block # ||
     # expr.head === :let
+end
+
+# Whether `stmt` uses the tile of the work-item, `@tile()` or `@index(Tile)`
+function find_tile(stmt)
+    result = Ref(false)
+    postwalk(stmt) do expr
+        result[] |= is_macrocall(expr, Symbol("@tile")) ||
+            (is_macrocall(expr, Symbol("@index")) && any(==(:Tile), expr.args))
+        expr
+    end
+    return result[]
 end
 
 function find_collective(stmt)
