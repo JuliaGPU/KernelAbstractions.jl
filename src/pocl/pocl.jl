@@ -96,7 +96,10 @@ function queue()
 end
 
 using GPUCompiler
-using LLVM, LLVM.IR, LLVM.Build, LLVM.Interop
+using LLVM, LLVM.Build, LLVM.Interop
+# not all of LLVM.IR, whose `context` would clash with ours
+using LLVM.IR: BasicBlock, ConstantArray, ConstantInt, DILocation, GlobalVariable, LLVMType,
+    MDNode, MD_invariant_load, MD_tbaa, MemoryEffects, StringAttribute, Value
 using SPIRV_LLVM_Backend_jll, SPIRV_Tools_jll
 using Adapt
 
