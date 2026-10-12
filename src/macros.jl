@@ -79,22 +79,20 @@ function __kernel(expr, __source__::LineNumberNode, __module__::Module, force_in
     # constructors, they are defined with the first method of the kernel, since a method can't
     # be overwritten during precompilation.
     queries = Any[]
+    if find_tile(def[:body])
+        # see `uses_tiles`
+        push!(queries, :($gpu_name(::$TilesQuery) = true))
+    end
     if find_collective(def[:body])
         # see `uses_collectives`
         push!(queries, :($gpu_name(::$CollectivesQuery) = true))
     end
 
-    # create constructor functions
-    _name = Symbol(:_, name)
+    # create constructor functions (a single method with keywords: in a local scope, several
+    # would capture each other in a `Core.Box`)
     constructors = quote
         if $(name isa Symbol ? :(!@isdefined($name)) : true)
-            function $_name(dev::Dev, sz::S, range::NDRange) where {Dev, S <: $_Size, NDRange <: $_Size}
-                return $construct(dev, sz, range, $gpu_name)
-            end
-            Core.@__doc__ $name(dev) = $_name(dev, $DynamicSize(), $DynamicSize())
-            $name(dev, size) = $_name(dev, $StaticSize(size), $DynamicSize())
-            $name(dev, size, range) = $_name(dev, $StaticSize(size), $StaticSize(range))
-            $name(dev, size::$_Size, range::$_Size) = $_name(dev, size, range)
+            Core.@__doc__ $name(dev, sizes...; tile = nothing) = $construct_kernel(dev, $gpu_name, sizes...; tile)
             $(queries...)
         end
     end
@@ -304,6 +302,17 @@ end
 function is_scope_construct(expr::Expr)
     return expr.head === :block # ||
     # expr.head === :let
+end
+
+# Whether `stmt` uses the tile of the work-item, `@tile()` or `@index(Tile)`
+function find_tile(stmt)
+    result = Ref(false)
+    postwalk(stmt) do expr
+        result[] |= is_macrocall(expr, Symbol("@tile")) ||
+            (is_macrocall(expr, Symbol("@index")) && any(==(:Tile), expr.args))
+        expr
+    end
+    return result[]
 end
 
 function find_collective(stmt)
