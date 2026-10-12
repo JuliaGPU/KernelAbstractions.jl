@@ -191,6 +191,15 @@ Adapt.adapt_structure(to, k::GridStride{Sync}) where {Sync} = GridStride{Sync}(A
     return nothing
 end
 
+# Whether a grid-stride launch on `backend` synchronizes the workgroup between the groups of
+# the iteration space even if the kernel doesn't need it. PoCL runs a workgroup on a single
+# thread, looping over its work-items between barriers: without one, it loops over the
+# work-items around the whole grid-stride loop, so that every work-item walks the iteration
+# space by itself, with a stride of the number of work-items launched, which isn't
+# vectorized and is up to 40x slower for memory-bound kernels. A barrier puts the loop over
+# the work-items inside the grid-stride loop instead, and costs PoCL next to nothing.
+gridstride_barrier(backend) = backend isa POCL.POCLBackend
+
 # Whether kernel function `f` may synchronize its workgroup when called with `args`.
 @inline @generated function kernel_may_synchronize(backend, f, args::Tuple)
     n = fieldcount(args)
@@ -201,6 +210,12 @@ end
         return f(SyncQuery(), $(converted...)) === Val(true)
     end
 end
+
+# The name of the kernel function `F` compiled for the argument types `TT`, which the kernel
+# of a grid-stride launch takes rather than that of the wrapper, as without a stride. Mangling
+# it takes longer than the rest of a launch, so do it once per signature.
+@generated kernel_name(::Type{F}, ::Type{TT}) where {F, TT} =
+    GPUCompiler.mangle_sig(Tuple{F, TT.parameters...})
 
 # Launch `obj` on at most `maxgroups` groups (`nothing`: about as many as can be active at
 # once), each looping over a share of the groups of the iteration space.
@@ -217,10 +232,8 @@ function launch_gridstride(obj::Kernel, maxgroups, ndrange, _workgroupsize, iter
 
     ctx = mkcontext(obj, ndrange, iterspace, launch)
     args, tt = prepare_arguments(b, obj.f, ctx, args)
-    f = GridStride{kernel_may_synchronize(b, obj.f, args)}(obj.f)
-    # name the kernel after the kernel function rather than the wrapper, as without a stride
-    name = GPUCompiler.mangle_sig(Tuple{Core.Typeof(obj.f), tt.parameters...})
-    kernel = KI.kernel_function(b, f, tt; name, compiler_options(obj)...)
+    f = GridStride{gridstride_barrier(b) || kernel_may_synchronize(b, obj.f, args)}(obj.f)
+    kernel = KI.kernel_function(b, f, tt; name = kernel_name(Core.Typeof(obj.f), tt), compiler_options(obj)...)
 
     if workgroupsize(obj) <: DynamicSize && _workgroupsize === nothing
         range = something(ndrange, static_ndrange(obj))
