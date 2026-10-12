@@ -1,15 +1,17 @@
 # EXCLUDE FROM TESTING
+# Run with `POCL_AFFINITY=1` to pin the threads that run the kernels, e.g.
+#   POCL_AFFINITY=1 julia -t 128 examples/numa_aware.jl
 using BenchmarkTools
-using Statistics
-using Random
-using ThreadPinning
 using KernelAbstractions
-
-ThreadPinning.pinthreads(:numa)
 
 @kernel function saxpy_kernel(a, @Const(X), Y)
     I = @index(Global)
     @inbounds Y[I] = a * X[I] + Y[I]
+end
+
+@kernel function fill_kernel(A, x)
+    I = @index(Global)
+    @inbounds A[I] = x
 end
 
 """
@@ -24,16 +26,21 @@ function measure_membw(
     )
     bytes = 3 * sizeof(dtype) * N # num bytes transferred in SAXPY
     flops = 2 * N # num flops in SAXY
+    workgroup_size = 1024
 
     a = dtype(3.1415)
+    X = KernelAbstractions.allocate(backend, dtype, N)
+    Y = KernelAbstractions.allocate(backend, dtype, N)
     if init == :serial
-        X = rand(dtype, N)
-        Y = rand(dtype, N)
+        # The calling thread touches all the memory first
+        fill!(X, dtype(1))
+        fill!(Y, dtype(2))
     else
-        X = copyto!(KernelAbstractions.zeros(backend, dtype, N), rand(dtype, N))
-        Y = copyto!(KernelAbstractions.zeros(backend, dtype, N), rand(dtype, N))
+        # The threads that run the kernels touch the memory first
+        fill_kernel(backend, workgroup_size)(X, dtype(1), ndrange = size(X))
+        fill_kernel(backend, workgroup_size)(Y, dtype(2), ndrange = size(Y))
+        KernelAbstractions.synchronize(backend)
     end
-    workgroup_size = 1024
 
     t = @belapsed begin
         kernel = saxpy_kernel($backend, $workgroup_size, $(size(Y)))
@@ -51,10 +58,7 @@ function measure_membw(
     return mem_rate, flop_rate
 end
 
-# Static should be much better (on a system with multiple NUMA domains)
 measure_membw(CPU());
-measure_membw(CPU(; static = true));
 
-# The following has significantly worse performance (even on systems with a single memory domain)!
+# On a system with multiple NUMA domains, this places all the memory in the domain of the calling thread
 # measure_membw(CPU(); init=:serial);
-# measure_membw(CPU(; static=true); init=:serial);

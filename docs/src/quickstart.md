@@ -69,6 +69,36 @@ synchronize(dev)
 
 See also [Memcopy with static NDRange](@ref memcopy_static).
 
+### [Opting out of the bounds check](@id unsafe_indices)
+
+The `ndrange` is padded to a multiple of the workgroup size, so a kernel checks for every
+work-item whether it is inside the `ndrange` before running the body, and the body only
+runs for the work-items that are. A kernel can opt out of the check with `unsafe_indices = true`.
+Its body then also runs for the padded work-items, so it has to test the index itself before touching memory:
+
+```@example mul2_kernel
+@kernel unsafe_indices = true function mul2_unsafe_kernel(A)
+    g = @index(Group, Linear)
+    l = @index(Local, Linear)
+    I = (g - 1) * prod(@groupsize()) + l
+    if I <= length(A)
+        A[I] = 2 * A[I]
+    end
+end
+
+mul2_unsafe_kernel(dev, 64)(A, ndrange = length(A))
+synchronize(dev)
+@assert all(A .== 8)
+```
+
+Don't use `@index(Global)` in any form in such a kernel. Compute the global index from
+`@index(Group)`, `@index(Local)` and [`@groupsize`](@ref) instead, as above, and compare it
+with the size of the range.
+
+!!! note
+    The padded work-items also take part in [`@synchronize`](@ref),
+    so they must reach every barrier that the other work-items of their workgroup reach.
+
 ## Launching kernel on the backend
 
 To launch the kernel on a backend (e.g., `CUDABackend()`, `ROCBackend()`, `oneAPIBackend()`, `MetalBackend()`), we generate the kernel

@@ -133,6 +133,22 @@ end
 ```
 
 ### 0.10
+- KernelAbstractions requires Julia 1.10 or later.
+- The `CPU` backend is an OpenCL backend: `CPU` is an alias of `POCLBackend`, which compiles
+  kernels like the GPU backends do and runs them with [PoCL](https://portablecl.org) on
+  PoCL's own threads, and no longer on Julia tasks. `CPU(; static=true)` has been removed,
+  as there is no dynamic task scheduling to opt out of anymore.
+- KernelAbstractions is built on [KernelInterface](@ref kernelinterface), which defines
+  `Backend` and the host-side functions (`allocate`, `synchronize`, …) that
+  KernelAbstractions re-exports. User code is unaffected, but backends have to implement
+  KernelInterface; see the [notes for backend implementations](@ref implementations_notes).
+- The Enzyme extension has been removed temporarily, and is planned to return in a later
+  0.10 release.
+- [`KernelAbstractions.@spawn`](@ref) launches kernels from a task like `Threads.@spawn`
+  does, and additionally orders them after the work the spawning task has queued, and can
+  select the device the task uses; see the [Quickstart](@ref).
+- `KernelAbstractions.isgpu` has been removed. Like for `GPU` below, query a capability
+  instead.
 - `ndrange` entries may be index ranges, given statically (`kernel(backend, workgroupsize, (-2:N+3, 0:M+1))`)
   or at launch (`ndrange=(-2:N+3, 0:M+1)`, a single range, or a `CartesianIndices`).
   `@index(Global, Cartesian)` and `@index(Global, NTuple)` return the shifted indices.
@@ -165,6 +181,26 @@ end
   `GPUCompiler.SHARED_METHOD_TABLE`, which backends that override
   `GPUCompiler.method_table_view` have to include, e.g., by implementing
   `GPUCompiler.method_tables` instead.
+- [`@Const`](@ref) arguments are constified on the host when the kernel is launched, instead
+  of at the start of the kernel. Arguments whose Adapt.jl rules don't compile for GPUs, e.g.
+  a `StepRangeLen` or `LinRange`, can now be passed as `@Const`.
+  Backends have to convert kernel arguments with Adapt.jl, both in `KI.argconvert` and in `KI.launch`,
+  since that conversion now constifies them; see the [notes for backend implementations](@ref implementations_notes).
+- Launching a kernel on the `CPU` backend costs more than in 0.9: the kernel is handed to
+  PoCL's threads and the launching task waits for them, which takes about 5 µs per launch
+  even for an empty kernel. Code that launches many small kernels suffers the most. For
+  example, a 7-point stencil over a 4×4×4 range took about 3.5 µs per launch, against 0.2 µs
+  with 0.9. Over a 16×16×16 range, which 0.9 also ran on all threads, both took about 7 µs.
+- On the `CPU` backend, don't pass a fixed workgroup size such as `64`. Omit it
+  (`kernel(CPU())` instead of `kernel(CPU(), 64)`), so that it is automatically chosen for every launch. A
+  one-dimensional workgroup size pads a multidimensional range: with a workgroup size of 64
+  and a range of `(16, 16, 16)`, each of the 256 workgroups has 64 work-items, of which 16
+  are inside the range. A 7-point stencil over that range took about 13 µs per launch with a
+  workgroup size of 64, and 7 µs with the chosen one. Over a 128×128×128 range the chosen
+  size was still 5 to 15% faster.
+- On the `CPU` backend, every work-item checks whether it is inside the range, even when the
+  workgroups cover the range exactly. This can make kernels with a cheap body slightly slower
+  than with 0.9.
 - `foreach_index(f, A)` runs `f` once per index of the array `A` without writing a kernel out,
   and `foreach_index(f, backend, indices)` once per index in a range or `CartesianIndices`.
 
