@@ -277,6 +277,18 @@ else
     global_cartesian(ctx, launch, iterspace, ndrange) in ndrange
 end
 
+# Whether the current workgroup lies entirely inside the ndrange. This is the same for all
+# work-items of the workgroup.
+@inline full_group(ctx, launch::Launch, iterspace, ndrange) =
+if builtin(iterspace) && ndrange isa CartesianIndices
+    T = index_type(launch)
+    groupsize = narrow(T, size(workitems(iterspace)))
+    reduce(&, map((g, w, n) -> g * w <= n, group_position(ctx, launch), groupsize, narrow(T, size(ndrange))); init = true)
+else
+    false
+end
+@inline full_group(ctx, launch::Launch) = full_group(ctx, launch, __iterspace(ctx), __ndrange(ctx))
+
 # `@index` entry points, see `__index_*`
 @inline local_linear(ctx, ::LinearLaunch{T}) where {T} = widen_index(KI.get_local_id(T).x)
 @inline group_linear(ctx, ::LinearLaunch{T}) where {T} = widen_index(KI.get_group_id(T).x)
