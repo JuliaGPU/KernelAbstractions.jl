@@ -195,12 +195,17 @@ end
   (`kernel(CPU())` instead of `kernel(CPU(), 64)`), so that it is automatically chosen for every launch. A
   one-dimensional workgroup size pads a multidimensional range: with a workgroup size of 64
   and a range of `(16, 16, 16)`, each of the 256 workgroups has 64 work-items, of which 16
-  are inside the range. A 7-point stencil over that range took about 12 µs per launch with a
+  are inside the range. A 7-point stencil over that range took about 13 µs per launch with a
   workgroup size of 64, and 7 µs with the chosen one. Over a 128×128×128 range the chosen
-  size was still about 5% faster.
+  size was still 5 to 15% faster.
 - The `CPU` backend checks in every kernel whether a work-item is inside the range, even when
-  the workgroups cover the range exactly, so kernels with a cheap body can be about twice
-  as slow as with 0.9 ([#845](https://github.com/JuliaGPU/KernelAbstractions.jl/issues/845)).
+  the workgroups cover the range exactly, which makes kernels with a cheap body slower than
+  with 0.9 ([#845](https://github.com/JuliaGPU/KernelAbstractions.jl/issues/845)): a 7-point
+  stencil over a 128×128×128 range took about 140 µs per launch against 95 µs with 0.9, and
+  an `axpy` over 2²² elements 185 µs against 55 µs. A kernel that is launched with an
+  `ndrange` that is a multiple of its workgroup size can opt out of the check with
+  `@kernel unsafe_indices = true`, which brought the stencil to 80 µs and the `axpy` to
+  85 µs; see [Opting out of the bounds check](@ref unsafe_indices).
 - `foreach_index(f, A)` runs `f` once per index of the array `A` without writing a kernel out,
   and `foreach_index(f, backend, indices)` once per index in a range or `CartesianIndices`.
 
