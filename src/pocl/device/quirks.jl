@@ -58,6 +58,24 @@ end
     end
 end
 
+# The constructor's errors interpolate `len` and `offset` into their message, which
+# allocates a string, so a float range like `0.0:dt:1.0` would fail to compile (#124).
+# Report the errors with `@gputhrow` instead, as CUDA.jl does.
+@eval @device_override function Base.StepRangeLen{T, R, S, L}(
+        ref::R, step::S, len::Integer, offset::Integer = 1
+    ) where {T, R, S, L}
+    if T <: Integer && !isinteger(ref + step)
+        @gputhrow "ArgumentError" "StepRangeLen{<:Integer} cannot have non-integer step"
+    end
+    len = convert(L, len)
+    len >= zero(len) || @gputhrow "ArgumentError" "StepRangeLen: length cannot be negative"
+    offset = convert(L, offset)
+    L1 = oneunit(typeof(len))
+    L1 <= offset <= max(L1, len) ||
+        @gputhrow "ArgumentError" "StepRangeLen: offset must be in [1, length]"
+    return $(Expr(:new, :(StepRangeLen{T, R, S, L}), :ref, :step, :len, :offset))
+end
+
 # trig.jl
 @device_override @noinline Base.Math.sincos_domain_error(x) =
     @gputhrow "DomainError" "sincos(x) is only defined for finite x"

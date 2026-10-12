@@ -536,5 +536,35 @@ function unittest_testsuite(Backend, backend_str, backend_mod, BackendArrayT; sk
         end
     end
 
+    # Float ranges are `StepRangeLen`s, whose constructor interpolates its arguments
+    # into error messages (#124).
+    @kernel function sum_range!(A, dt)
+        i = @index(Global)
+        s = zero(eltype(A))
+        for t in zero(dt):dt:one(dt)
+            s += t
+        end
+        @inbounds A[i] = s
+    end
+    @kernel function index_range!(A, a, dt, b)
+        i = @index(Global)
+        @inbounds A[i] = (a:dt:b)[i]
+    end
+
+    @testset "float ranges (#124)" begin
+        backend = Backend()
+        @testset "$T" for T in (Float32, Float64)
+            A = KernelAbstractions.zeros(backend, T, 8)
+            sum_range!(backend, 4)(A, T(0.25); ndrange = 8)
+            synchronize(backend)
+            @test Array(A) == fill(sum(zero(T):T(0.25):one(T)), 8)
+
+            B = KernelAbstractions.zeros(backend, T, 5)
+            index_range!(backend, 4)(B, T(0.5), T(0.5), T(2.5); ndrange = 5)
+            synchronize(backend)
+            @test Array(B) == collect(T(0.5):T(0.5):T(2.5))
+        end
+    end
+
     return
 end
