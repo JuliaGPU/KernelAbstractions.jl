@@ -28,6 +28,49 @@ end
     @test KernelAbstractions.precompiled_launch[] skip = !workloads
 end
 
+# A package with overloaded kernels, which have to define the kernel's properties only once,
+# since methods can't be overwritten during precompilation
+@testset "Precompiling overloaded kernels" begin
+    mktempdir() do dir
+        mkpath(joinpath(dir, "OverloadedKernels", "src"))
+        write(
+            joinpath(dir, "OverloadedKernels", "src", "OverloadedKernels.jl"),
+            """
+            module OverloadedKernels
+            using KernelAbstractions
+            @kernel function plain!(a)
+                a[@index(Global)] = 1
+            end
+            @kernel function plain!(a, b)
+                a[@index(Global)] = b
+            end
+            @kernel function tiled!(a)
+                a[@index(Global)] = tile_width(@tile())
+            end
+            @kernel function tiled!(a, b)
+                a[@index(Global)] = b
+            end
+            @kernel function reduced!(a)
+                res = @groupreduce(+, a[@index(Global)], zero(eltype(a)); groupsize = 64)
+                a[@index(Global)] = res
+            end
+            @kernel function reduced!(a, b)
+                res = @groupreduce(+, b, zero(eltype(a)); groupsize = 64)
+                a[@index(Global)] = res
+            end
+            end
+            """
+        )
+        pushfirst!(LOAD_PATH, dir)
+        try
+            id = Base.PkgId("OverloadedKernels")
+            @test Base.compilecache(id) isa Union{String, Tuple}
+        finally
+            popfirst!(LOAD_PATH)
+        end
+    end
+end
+
 KernelAbstractions.versioninfo(POCLBackend())
 @info "Configuration" pocl = KernelAbstractions.POCL.nanoOpenCL.pocl_standalone_jll.libpocl
 

@@ -175,6 +175,14 @@ end
 - [`@groupreduce`](@ref) and [`@groupscan`](@ref) reduce and scan a value over the
   workgroup, on every backend. `@groupreduce` uses sub-groups internally where the backend
   can shuffle the values. See [Reductions and scans](@ref group_collectives).
+- Tiles let small groups of consecutive work-items exchange values with shuffles, votes,
+  reductions and scans (`tile_shfl`, `tile_reduce`, ...), while different tiles take
+  different branches or loop a different number of times. A kernel gets tiles by being
+  constructed with a width, `f(backend; tile = N)`, without a declaration in the kernel.
+  [`supports_tiles(backend, N)`](@ref supports_tiles) reports whether a backend supports a
+  width; the `CPU` backend has no tiles. See [Tiles](@ref tiles). A `@kernel` uses tiles or
+  the workgroup collectives; KernelInterface's sub-group functions are for kernels written
+  directly against KernelInterface.
 
 ## Semantic differences
 

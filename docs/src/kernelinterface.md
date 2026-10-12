@@ -209,13 +209,11 @@ execute the same communication functions in the same order. The id and size quer
 used anywhere.
 
 !!! note "Kernel languages"
-    The sub-group functions are meant for kernels written against KernelInterface, and for
-    kernel languages built on it. A kernel is either a KernelInterface kernel or a
-    KernelAbstractions `@kernel`, never a mix: `@kernel` adds padding work-items to partial
-    work-groups, which skip the kernel's body, so KernelInterface's sub-group functions called
-    in a `@kernel` aren't reached by all work-items. A `@kernel` uses KernelAbstractions'
-    collectives instead, e.g. [`@groupreduce`](@ref KernelAbstractions.@groupreduce). Host
-    code may use the queries of both.
+    The sub-group functions are meant for kernels written against KernelInterface and for
+    implementations of kernel languages. Don't call them in a KernelAbstractions `@kernel`:
+    use its [reductions and scans](@ref group_collectives) or [tiles](@ref tiles) instead,
+    which follow the participation rules of `@kernel`. Host code may use the queries of
+    both.
 
 ```@docs
 get_sub_group_size

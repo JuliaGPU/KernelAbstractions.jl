@@ -246,12 +246,93 @@ reduces each sub-group, and then combines those results through local memory.
 KernelAbstractions picks this automatically. The order in which values are combined can
 differ, so floating-point results may vary between backends and launch configurations.
 
-A kernel is either a `@kernel` or a kernel written against
+## [Tiles](@id tiles)
+
+A tile is a group of `N` consecutive work-items, by `@index(Local, Linear)`. Constructing a
+kernel with a tile width, `f(backend; tile = N)`, divides its workgroups into tiles, and
+[`@tile()`](@ref @tile) returns the work-item's tile in the kernel. The work-items of a tile
+exchange values with operations such as [`tile_shfl`](@ref) and [`tile_reduce`](@ref), without
+going through local memory. All work-items of a tile have to execute each tile operation
+together, but different tiles may take different branches, loop a different number of times,
+or `return` early.
+
+```julia
+@kernel function tile_maxima!(out, @Const(x))
+    t = @tile()
+    m = tile_reduce(t, max, x[@index(Global, Linear)])
+    if t.lane == 1
+        out[@index(Tile)] = m
+    end
+end
+
+kernel = tile_maxima!(backend; tile = 16)
+kernel(out, x; ndrange = 16 * length(out))
+```
+
+The workgroup size has to be a multiple of `N`, and every tile has to lie entirely inside or
+entirely outside of the `ndrange`; see [`@tile`](@ref) for the details. The `ndrange` can have
+several dimensions, as long as that holds. Here, each tile holds the 4 × 4 nodes of an
+element, and each workgroup holds four elements:
+
+```julia
+@kernel function element_sums!(out, @Const(u))
+    t = @tile()
+    I = @index(Global, NTuple)
+    out[I...] = tile_reduce(t, +, u[I...])
+end
+element_sums!(backend, (4, 4, 4); tile = 16)(out, u; ndrange = size(u))    # size(u) == (4, 4, nelements)
+```
+
+### Choosing the tile width
+
+Tiles aren't declared in the kernel: pass the width when constructing it, `f(backend;
+tile = 16)` or `f(backend, workgroupsize; tile = 16)`. A kernel that uses `@tile()` or
+`@index(Tile)` needs one. [`tile_width(kernel)`](@ref tile_width) returns it on the host, and
+`tile_width(t)` in the kernel, where it is a constant. Like a static workgroup size, the width
+is compiled into the kernel; construct the kernel again for another width.
+
+Tiles are built on the backend's sub-groups (warps, wavefronts or SIMD-groups). The width
+has to be a power of two of at most the sub-group width `W`, and tiles narrower than `W` share
+a sub-group, yet still take their own paths. Not every backend can do that:
+[`supports_tiles(backend, N)`](@ref supports_tiles) says whether it supports tiles of `N`
+work-items, and constructing a kernel with a width it doesn't support is an error. CUDA,
+AMDGPU, Metal and oneAPI, and OpenCL.jl on Intel GPUs, support widths of up to 32. For tiles of
+the full sub-group width, pass `tile = KernelInterface.sub_group_size(backend)`.
+
+KernelAbstractions' CPU backend has no tiles: its sub-group operations involve the whole
+workgroup, so tiles can't take their own paths. To support it, write a variant of the kernel
+that uses local memory or the workgroup collectives instead:
+
+```julia
+kernel = supports_tiles(backend, 16) ? element_sums!(backend; tile = 16) :
+    element_sums_localmem!(backend)
+```
+
+## Choosing how work-items communicate
+
+| To | Use | Available |
+|---|---|---|
+| share data in any pattern within a workgroup | [`@localmem`](@ref) and [`@synchronize`](@ref) | on every backend |
+| reduce or scan a value over the workgroup | [`@groupreduce`](@ref), [`@groupscan`](@ref) | on every backend |
+| exchange values within small groups of work-items whose control flow may differ between groups, e.g. the nodes of an element | [tiles](@ref tiles) | where [`supports_tiles(backend, N)`](@ref supports_tiles) is `true` |
+| program the hardware's sub-groups directly | a [KernelInterface](@ref kernelinterface) kernel | as its [capability queries](@ref ki_subgroups) report |
+
+Use the collectives for reductions and scans over the workgroup, and local memory with
+`@synchronize` for other patterns; both work everywhere. Tiles fit when values only need to
+move within small groups that take their own paths. They avoid local memory, but that doesn't
+guarantee a faster kernel: on some GPUs, the local-memory version is as fast or faster.
+Compare both on the devices you care about, and keep the local-memory version for the backends
+without tiles.
+
+### Kernel languages
+
+KernelInterface is the low-level API that backends implement, and `@kernel` is a language
+built on it, which takes care of the work-items that pad a partial workgroup and of who takes
+part in collectives. A kernel is either a `@kernel` or a kernel written against
 [KernelInterface](@ref kernelinterface), never a mix: don't call KernelInterface's device
-functions, such as its sub-group shuffles and votes, in a `@kernel`. They have to be executed
-by all work-items of a sub-group, but in a `@kernel` with the default bounds checking, every
-statement other than the collectives above only runs on the work-items that are part of the
-`ndrange`. Host code can use KernelInterface's queries, e.g. to pick a kernel.
+functions, such as its sub-group shuffles and votes, in a `@kernel`. In a `@kernel`, use the
+collectives or tiles instead. Host code can use KernelInterface's queries, e.g. to pick a
+kernel or a tile width.
 
 ## Launching kernels
 

@@ -407,6 +407,8 @@ A cartesian index is a general N-dimensional index that is derived from the iter
   - `Global`: Used to access global memory.
   - `Group`: The index of the `workgroup`.
   - `Local`: The within `workgroup` index.
+  - `Tile`: The global linear index of the work-item's tile, in kernels with tiles (see
+    [`@tile`](@ref)). It takes no index kind.
 
 # Index kind
 
@@ -428,8 +430,12 @@ If the index kind is not provided it defaults to `Linear`, this is subject to ch
 ```
 """
 macro index(locale, args...)
+    if locale === :Tile
+        isempty(args) || error("@index(Tile) takes no further arguments")
+        return :($__index_Tile($(esc(:__ctx__)), $__tile_width($(esc(:__ctx__)))))
+    end
     if !(locale === :Global || locale === :Local || locale === :Group)
-        error("@index requires as first argument either :Global, :Local or :Group")
+        error("@index requires as first argument either :Global, :Local, :Group or :Tile")
     end
 
     if length(args) >= 1
@@ -525,9 +531,10 @@ import .NDIteration: get
 ###
 
 """
-    Kernel{Backend, WorkgroupSize, NDRange, Func}
+    Kernel{Backend, WorkgroupSize, NDRange, Func, TileWidth}
 
-Host-side handle for a kernel specialized on a backend, workgroup size, and `ndrange`.
+Host-side handle for a kernel specialized on a backend, workgroup size, `ndrange`, and for a
+kernel with tiles, the tile width (an `Int`, or `nothing`, see [`tile_width`](@ref)).
 
 Kernels are created by calling a [`@kernel`](@ref) function on a backend, for example
 `my_kernel(CUDABackend(), 256)`. The returned object is callable:
@@ -544,13 +551,17 @@ and [`backend`](@ref KernelAbstractions.backend) to inspect a kernel's static co
 Kernels are launched on any backend that implements [KernelInterface](@ref kernelinterface);
 see the [notes for backend implementations](@ref implementations_notes).
 """
-struct Kernel{Backend, WorkgroupSize <: _Size, NDRange <: _Size, Fun}
+struct Kernel{Backend, WorkgroupSize <: _Size, NDRange <: _Size, Fun, TileWidth}
     backend::Backend
     f::Fun
 end
 
-function Base.similar(kernel::Kernel{D, WS, ND}, f::F) where {D, WS, ND, F}
-    return Kernel{D, WS, ND, F}(kernel.backend, f)
+# a kernel without tiles
+Kernel{B, WS, ND, F}(backend, f) where {B, WS, ND, F} = Kernel{B, WS, ND, F, nothing}(backend, f)
+
+function Base.similar(kernel::Kernel{D, WS, ND, <:Any, T}, f::F) where {D, WS, ND, F, T}
+    T === nothing && uses_tiles(f) && tile_error(nothing, tile_width_message)
+    return Kernel{D, WS, ND, F, T}(kernel.backend, f)
 end
 
 """
@@ -654,8 +665,25 @@ last (possibly partial) workgroup. Primarily used by backend implementations and
     return iterspace, dynamic
 end
 
-function construct(backend::B, ::S, ::NDRange, xpu_name::XPUName) where {B <: Backend, S <: _Size, NDRange <: _Size, XPUName}
-    return Kernel{B, S, NDRange, XPUName}(backend, xpu_name)
+# The constructors of a `@kernel` function `f`: `f(backend)`, `f(backend, workgroupsize)` and
+# `f(backend, workgroupsize, ndrange)`
+construct_kernel(backend, f; tile = nothing) = construct(backend, DynamicSize(), DynamicSize(), f; tile)
+construct_kernel(backend, f, size; tile = nothing) = construct(backend, StaticSize(size), DynamicSize(), f; tile)
+construct_kernel(backend, f, size, range; tile = nothing) =
+    construct(backend, StaticSize(size), StaticSize(range), f; tile)
+construct_kernel(backend, f, size::_Size, range::_Size; tile = nothing) = construct(backend, size, range, f; tile)
+
+function construct(backend::B, ::S, ::NDRange, xpu_name::XPUName; tile = nothing) where {B <: Backend, S <: _Size, NDRange <: _Size, XPUName}
+    N = resolve_tile_width(xpu_name, tile)
+    if N !== nothing
+        # what is known before the launch, which checks the rest
+        check_tile_width(backend, N)
+        NDRange <: StaticSize && check_tile_items(N, extents(get(NDRange)))
+        S <: StaticSize && check_tile_workgroup(N, extents(get(S)))
+        NDRange <: StaticSize && S <: StaticSize &&
+            check_tiles(backend, N, extents(get(NDRange)), extents(get(S)))
+    end
+    return Kernel{B, S, NDRange, XPUName, N}(backend, xpu_name)
 end
 
 ###
@@ -683,6 +711,7 @@ end
 
 include("macros.jl")
 include("groupreduction.jl")
+include("tiles.jl")
 include("spawn.jl")
 include("foreach_index.jl")
 
