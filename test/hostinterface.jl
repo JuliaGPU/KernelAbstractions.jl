@@ -108,7 +108,9 @@ function hostinterface_testsuite(_backend, AT)
         @test all(==(12), Array(y))
 
         # the contents of the arrays may change between calls
-        copyto!(x, fill(2.0f0, N))
+        twos = fill(2.0f0, N)
+        KernelAbstractions.copyto!(backend, x, twos)
+        synchronize(backend)
         graph()
         synchronize(backend)
         @test all(==(18), Array(y))
