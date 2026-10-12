@@ -157,8 +157,10 @@ end
   the CPU backend became an OpenCL backend meant every backend. Use
   `KernelAbstractions.@device_code_llvm` and `KernelAbstractions.@device_code_typed` instead,
   which report on the code a backend actually generates; see [Reflection](@ref).
-- `KernelAbstractions.GPU` is deprecated: and backends should now subtype `KernelAbstractions.Backend` directly. `GPU` is now an alias of `Backend` and will be removed in a future release. Code dispatching on `::GPU` should dispatch on `::Backend`, on concrete
-  backend types, or on a capability such as `KernelAbstractions.supports_float64`.
+- `KernelAbstractions.GPU` is deprecated, and backends should subtype
+  `KernelAbstractions.Backend` directly. `GPU` is now an alias of `Backend` and will be
+  removed in a future release. Code dispatching on `::GPU` should dispatch on `::Backend`, on
+  concrete backend types, or on a capability such as `KernelAbstractions.supports_float64`.
 - An exception thrown in a kernel on the `CPU` backend is reported as a
   `KernelAbstractions.POCL.KernelException` when the kernel has completed, like on GPU
   backends, and no longer as the original exception (e.g., a `BoundsError`). Depending on
@@ -203,11 +205,15 @@ end
   than with 0.9.
 - `foreach_index(f, A)` runs `f` once per index of the array `A` without writing a kernel out,
   and `foreach_index(f, backend, indices)` once per index in a range or `CartesianIndices`.
-- KernelInterface 0.4 adds sub-groups: ids, shuffles, votes, reductions and scans, also
+- KernelInterface 0.4 extends its sub-groups beyond the ids, `sub_group_barrier` and
+  `shfl_down` of 0.3: `shfl`, `shfl_up` and `shfl_xor` of any `isbits` value, the votes
+  `sub_group_any`, `sub_group_all` and `sub_group_ballot`, and reductions and scans, also
   within segments of a sub-group. They are the low-level API for backends, for kernels
-  written against KernelInterface and for kernel languages built on it; capability queries
-  say how a backend forms its sub-groups, whether they may diverge, and which types it can
-  shuffle. See [Sub-groups](@ref ki_subgroups).
+  written against KernelInterface and for kernel languages built on it. KernelInterface no
+  longer promises how work-items form sub-groups: `supports_linear_subgroups` says whether
+  they are consecutive work-items, and `supports_independent_subgroups` and
+  `supports_partitionable_subgroups` whether sub-groups and their segments may diverge. See
+  [Sub-groups](@ref ki_subgroups).
 - [`@groupreduce`](@ref) and [`@groupscan`](@ref) reduce and scan a value over the
   workgroup, on every backend. `@groupreduce` uses sub-groups internally where the backend
   can shuffle the values. See [Reductions and scans](@ref group_collectives).
@@ -218,7 +224,7 @@ end
 
 1. The kernels are automatically bounds-checked against either the dynamic or statically
    provided `ndrange`.
-2. Kernels implictly return `nothing`
+2. Kernels implicitly return `nothing`
 
 ## Contributing
 Please file any bug reports through Github issues or fixes through a pull

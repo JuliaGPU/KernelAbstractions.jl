@@ -19,8 +19,8 @@ using KernelInterface: KernelInterface, Backend, get_backend, functional, synchr
 import KernelInterface as KI
 export KernelInterface
 
-# `GPU` is deprecated in 0.10:  and backends ends now subtype `Backend` directly. Keep the name working for code written
-# against 0.9, both `x::GPU` and `struct MyBackend <: GPU`.
+# `GPU` is deprecated in 0.10, and backends now subtype `Backend` directly. Keep the name
+# working for code written against 0.9, both `x::GPU` and `struct MyBackend <: GPU`.
 Base.@deprecate_binding GPU Backend
 
 """
@@ -85,7 +85,7 @@ end
 
 This allows for the following configurations:
 
-1. `cpu={true, false}`: **Deprecated** in KernelAbstractions 0.11; this option is ignored.
+1. `cpu={true, false}`: **Deprecated** in KernelAbstractions 0.10; this option is ignored.
 2. `inbounds={false, true}`: Enables a forced `@inbounds` macro around the function definition in the case the user is using too many `@inbounds` already in their kernel. Note that this can lead to incorrect results, crashes, etc and is fundamentally unsafe. Be careful!
 3. `unsafe_indices={false, true}`: Disables the implicit validation of indices, users must avoid `@index(Global)`.
 4. `generated={false, true}`: Turns the kernel into a [generated function](https://docs.julialang.org/en/v1/manual/metaprogramming/#Generated-functions), see *Generated* below.
