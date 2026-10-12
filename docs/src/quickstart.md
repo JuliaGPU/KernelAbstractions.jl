@@ -71,35 +71,32 @@ See also [Memcopy with static NDRange](@ref memcopy_static).
 
 ### [Opting out of the bounds check](@id unsafe_indices)
 
-The `ndrange` is padded to a multiple of the workgroup size, so every kernel checks for each
-work-item whether it is inside the `ndrange`, and runs the body only for the work-items that
-are. On the `CPU` backend this check is a branch in the loop over the work-items of a
-workgroup, which for a kernel with a cheap body costs about as much as the body itself (see
-[#845](https://github.com/JuliaGPU/KernelAbstractions.jl/issues/845)). A check that the
-kernel writes itself costs the same. Such a kernel can opt out of the check with
-`unsafe_indices = true`, which only pays off when there are no padded work-items: every
-extent of the `ndrange` has to be a multiple of the workgroup size, which the launch has to
-guarantee, as the body then runs for every work-item unconditionally.
+The `ndrange` is padded to a multiple of the workgroup size, so a kernel checks for every
+work-item whether it is inside the `ndrange` before running the body, and the body only
+runs for the work-items that are. A kernel can opt out of the check with `unsafe_indices = true`.
+Its body then also runs for the padded work-items, so it has to test the index itself before touching memory:
 
 ```@example mul2_kernel
 @kernel unsafe_indices = true function mul2_unsafe_kernel(A)
-    I = @index(Global)
-    A[I] = 2 * A[I]
+    I = @index(Global, NTuple)
+    if all(I .<= @ndrange())
+        A[I...] = 2 * A[I...]
+    end
 end
 
-@assert length(A) % 64 == 0
-mul2_unsafe_kernel(dev, 64)(A, ndrange = length(A))
+mul2_unsafe_kernel(dev, 64)(A, ndrange = size(A))
 synchronize(dev)
 @assert all(A .== 8)
 ```
 
-If the kernel has to run with padded work-items after all, e.g. because the `ndrange` isn't
-a multiple of the workgroup size, it has to test the index itself before touching memory,
-and gains nothing over the check it replaced. For a multidimensional `ndrange`, compare
-`@index(Global, NTuple)` with [`@ndrange`](@ref) rather than the linear index, which for a
-padded work-item can coincide with the index of a work-item inside the `ndrange`. Padded
-work-items also take part in [`@synchronize`](@ref), so they must reach every barrier that
-the other work-items of their workgroup reach.
+We recommend against using `@index(Global)` with `unsafe_indices = true`. Use
+`@index(Global, NTuple)` or `@index(Global, Cartesian)` and compare it with
+[`@ndrange`](@ref) instead: the linear index of a padded work-item is computed as if it
+were inside the `ndrange`, and can coincide with the index of a work-item that is.
+
+!!! note
+    The padded work-items also take part in [`@synchronize`](@ref),
+    so they must reach every barrier that the other work-items of their workgroup reach.
 
 ## Launching kernel on the backend
 
