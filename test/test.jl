@@ -536,5 +536,39 @@ function unittest_testsuite(Backend, backend_str, backend_mod, BackendArrayT; sk
         end
     end
 
+    # The annotation may be qualified, like the other kernel-language macros (#616).
+    @kernel function qualified_const!(A, KernelAbstractions.@Const(B))
+        i = @index(Global)
+        @inbounds A[i] = 2 * B[i]
+    end
+
+    @testset "qualified `@Const` (#616)" begin
+        # whether the expansion of a `@kernel` marks the argument `var` constant
+        function marks_const(ex, var::Symbol)
+            found = false
+            KernelAbstractions.MacroTools.postwalk(ex) do x
+                if Meta.isexpr(x, :(=), 2) && x.args[1] === var &&
+                        Meta.isexpr(x.args[2], :call) &&
+                        x.args[2].args[1] === KernelAbstractions.constify
+                    found = true
+                end
+                x
+            end
+            return found
+        end
+        ex = @macroexpand @kernel function f(A, KernelAbstractions.@Const(B))
+            A[1] = B[1]
+        end
+        @test marks_const(ex, :B)
+        @test !marks_const(ex, :A)
+
+        backend = Backend()
+        B = adapt(backend, collect(1:8))
+        A = KernelAbstractions.zeros(backend, Int, 8)
+        qualified_const!(backend, 4)(A, B; ndrange = 8)
+        synchronize(backend)
+        @test adapt(Array, A) == 2 .* (1:8)
+    end
+
     return
 end

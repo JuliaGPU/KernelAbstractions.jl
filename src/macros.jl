@@ -32,13 +32,12 @@ function __kernel(expr, __source__::LineNumberNode, __module__::Module, force_in
 
     constargs = Array{Bool}(undef, length(args))
     for (i, arg) in enumerate(args)
-        if isexpr(arg, :macrocall)
-            if arg.args[1] === Symbol("@Const")
-                # arg.args[2] is a LineInfo node
-                args[i] = arg.args[3] # strip @Const
-                constargs[i] = true
-                continue
-            end
+        # also matches qualified uses such as `KA.@Const(x)` (#616)
+        if is_macrocall(arg, Symbol("@Const"))
+            # arg.args[2] is a LineInfo node
+            args[i] = arg.args[3] # strip @Const
+            constargs[i] = true
+            continue
         end
         constargs[i] = false
     end
