@@ -35,7 +35,7 @@ include("host.jl")
             # compilation and launch
             :Kernel, :kernel_function, :argconvert, :launch, Symbol("@launch"),
             :launch_configuration, :max_work_group_size, :max_work_group_dims,
-            :max_num_groups, :sub_group_size, :multiprocessor_count,
+            :max_num_groups, :sub_group_size, :multiprocessor_count, :max_active_groups,
             # host side
             :allocate, :zeros, :ones, :copyto!, :pagelock!, :unsafe_free!,
             :synchronize, :record_event, :wait_event, :priority!,

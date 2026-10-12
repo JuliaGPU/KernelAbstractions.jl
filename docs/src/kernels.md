@@ -253,6 +253,27 @@ Inside the kernel `@index(Global, Cartesian)` and `@index(Global, NTuple)` retur
 indices, `@index(Global, Linear)` counts the indices of the region from 1 in column-major order,
 and `@ndrange()` returns the extents.
 
+### Grid-stride launches
+
+By default a kernel is launched with one workgroup per workgroup of the iteration space. With
+`gridstride`, it is launched with fewer, and each one loops over several workgroups of the
+iteration space, those whose linear index is congruent to its own modulo the number of
+workgroups launched:
+
+```julia
+kernel(A, ndrange=size(A), gridstride=true)  # about as many workgroups as can run at once
+kernel(A, ndrange=size(A), gridstride=64)    # at most 64 workgroups
+```
+
+`@index` returns the same indices as without `gridstride`, `return` skips the rest of the body
+for the current index only, and `@uniform` and `@private` are evaluated anew for every
+workgroup of the iteration space. `@localmem` is the same storage for each of them, and its
+contents are undefined at the start of each. A kernel that may synchronize its workgroup (one
+with a `@synchronize`, or that uses `@context` or `unsafe_indices=true`) synchronizes before
+each next workgroup, so that it doesn't overwrite local memory that the previous one still
+reads. `KI.get_group_id` and `KI.get_num_groups` called directly in a kernel return the
+workgroups that were launched.
+
 Obtain the backend from an array with [`get_backend`](@ref) and always call [`synchronize`](@ref) before reading results on the host.
 See the [Quickstart](@ref) for a full walkthrough and the Examples section of the manual for larger patterns.
 

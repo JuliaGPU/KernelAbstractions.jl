@@ -514,6 +514,13 @@ Adapt.adapt_structure(to, arg::ConstArg) = constify(adapt(to, arg.x))
 # context, the check is folded away.
 struct ConstArgs end
 
+# Calling a kernel function with `SyncQuery()` instead of its context, on the host, returns
+# `Val(true)` if the kernel may synchronize its workgroup (see `may_synchronize`), and
+# `Val(false)` otherwise. A grid-stride launch then synchronizes the workgroup before it
+# moves on to the next group of the iteration space, so that the work-items of one group
+# don't overwrite local memory that those of the previous one still read.
+struct SyncQuery end
+
 include("nditeration.jl")
 using .NDIteration
 import .NDIteration: get
@@ -535,6 +542,11 @@ kernel = my_kernel(backend, 64)
 kernel(A, B, ndrange=length(A))   # launch asynchronously
 synchronize(backend)
 ```
+
+Besides `ndrange` and `workgroupsize`, a launch takes `gridstride`: `true` to launch about as many
+workgroups as the device runs at once, or a number of workgroups to launch at most, each of
+which then loops over several workgroups of the iteration space. See *Grid-stride launches* in
+the manual.
 
 Use [`workgroupsize`](@ref KernelAbstractions.workgroupsize), [`ndrange`](@ref KernelAbstractions.ndrange),
 and [`backend`](@ref KernelAbstractions.backend) to inspect a kernel's static configuration.

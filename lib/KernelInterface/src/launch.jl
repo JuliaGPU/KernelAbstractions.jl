@@ -365,6 +365,23 @@ heuristics, e.g. to choose how many work-groups a grid-stride loop launches.
 """
 multiprocessor_count(::Backend) = 0
 
+"""
+    max_active_groups(kernel::Kernel, workgroupsize::Int)::Int
+
+The number of work-groups of `workgroupsize` work-items each that the device can run
+`kernel` on at the same time, or 0 if unknown. A grid-stride launch launches about this
+many work-groups, each of which loops over a share of the iteration space.
+
+!!! note
+    Backend implementations **may** implement:
+    ```
+    max_active_groups(kernel::Kernel{<:NewBackend}, workgroupsize::Int)::Int
+    ```
+    e.g. from an occupancy calculation. The fallback is
+    [`multiprocessor_count`](@ref), one work-group per multiprocessor.
+"""
+max_active_groups(kernel::Kernel, workgroupsize::Integer) = multiprocessor_count(kernel.backend)
+
 
 ## compilation
 

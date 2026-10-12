@@ -37,10 +37,27 @@ in the padded iteration space. It still returns `Int`s.
 """
 struct NDLaunch{T <: Integer} end
 
-const Launch = Union{LinearLaunch, NDLaunch}
+"""
+    GridStrideLaunch{T, L}(group)
+
+Launch configuration for a grid-stride launch: the hardware grid is 1-D and has fewer
+groups than `blocks(iterspace)`, so every hardware group loops over the groups of the
+iteration space ("virtual groups") with a stride of the number of hardware groups, see
+[`GridStride`](@ref). `group` is the 0-based linear index of the current virtual group
+in `blocks(iterspace)`. The work-items of a group are launched as with `L`, a
+[`LinearLaunch{T}`](@ref LinearLaunch) or an [`NDLaunch{T}`](@ref NDLaunch).
+"""
+struct GridStrideLaunch{T <: Integer, L <: Union{LinearLaunch{T}, NDLaunch{T}}}
+    group::T
+end
+
+const Launch = Union{LinearLaunch, NDLaunch, GridStrideLaunch}
 
 index_type(::LinearLaunch{T}) where {T} = T
 index_type(::NDLaunch{T}) where {T} = T
+index_type(::GridStrideLaunch{T}) where {T} = T
+
+local_launch(::GridStrideLaunch{T, L}) where {T, L} = L()
 
 # The type in which `@index` computes when the iteration space fits it: `Int32`, which is
 # cheaper than `Int` on GPUs, except on PoCL. Its work-item ids are `Int`s, and narrowing
@@ -240,6 +257,12 @@ end
     return ind2sub(dims, assume_bounded(KI.get_local_id(T).x - one(T), dims))
 end
 
+@inline function group_position(ctx, launch::GridStrideLaunch{T}) where {T}
+    dims = narrow(T, size(blocks(__iterspace(ctx))))
+    return ind2sub(dims, assume_bounded(launch.group, dims))
+end
+@inline local_position(ctx, launch::GridStrideLaunch) = local_position(ctx, local_launch(launch))
+
 # 1-based position of the current work-item in the padded iteration space
 @inline function blocked_position(ctx, launch::Launch)
     T = index_type(launch)
@@ -309,6 +332,9 @@ end
 @inline group_linear(ctx, launch::NDLaunch{T}) where {T} = widen_index(
     linearize(T, narrow(T, size(blocks(__iterspace(ctx)))), group_position(ctx, launch))
 )
+@inline local_linear(ctx, launch::GridStrideLaunch) = local_linear(ctx, local_launch(launch))
+@inline group_linear(ctx, launch::GridStrideLaunch{T}) where {T} =
+    widen_index(add_nowrap(launch.group, one(T)))
 @inline local_cartesian(ctx, launch::Launch) = local_index(ctx, launch)
 @inline group_cartesian(ctx, launch::Launch) = group_index(ctx, launch)
 @inline global_cartesian(ctx, launch::Launch) =

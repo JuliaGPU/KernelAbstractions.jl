@@ -83,10 +83,16 @@ argconvert(kernel::Kernel{<:KI.Backend}, arg) = KI.argconvert(backend(kernel), a
 Core.kwcall(kwargs::NamedTuple, obj::Kernel{<:KI.Backend}, args::Vararg{Any, N}) where {N} =
     launch_tuple(obj, args; kwargs...)
 
-function launch_tuple(obj::Kernel, args::Tuple; ndrange = nothing, workgroupsize = nothing)
+function launch_tuple(obj::Kernel, args::Tuple; ndrange = nothing, workgroupsize = nothing, gridstride = false)
     ndrange, workgroupsize, iterspace, dynamic = launch_config(obj, ndrange, workgroupsize)
     # nothing to launch (or compile) for an empty ndrange
     any(iszero, size(blocks(iterspace))) && return nothing
+
+    if gridstride !== false
+        maxgroups = check_gridstride(gridstride)
+        Base.inferencebarrier(launch_gridstride)(obj, maxgroups, ndrange, workgroupsize, iterspace, args)
+        return nothing
+    end
 
     # launch on an N-d grid, computing indices in a narrow type, if possible. this doesn't
     # depend on the tuned workgroup size, so the context (and thus the kernel) doesn't either.
@@ -127,6 +133,112 @@ function launch_kernel(obj::Kernel, launch, ndrange, _workgroupsize, iterspace, 
     else
         groups, items = (prod(groups), 1, 1), (prod(items), 1, 1)
     end
+    KI.check_work_group_size(kernel, items)
+    KI.launch(kernel, groups, items, prepend(ctx, args))
+    return nothing
+end
+
+## grid-stride launches
+
+# the number of groups a grid-stride launch may use, `nothing` to let the backend choose
+check_gridstride(gridstride::Bool) = nothing
+function check_gridstride(gridstride::Integer)
+    gridstride >= 1 || throw(ArgumentError("`gridstride` must be `true`, `false` or a positive number of workgroups, got $gridstride"))
+    return Int(gridstride)
+end
+check_gridstride(gridstride) =
+    throw(ArgumentError("`gridstride` must be `true`, `false` or a positive number of workgroups, got $(repr(gridstride))"))
+
+"""
+    GridStride{Sync}(f)
+
+The kernel function of a grid-stride launch: every hardware group calls the kernel
+function `f` for the groups of the iteration space whose (0-based) linear index is
+congruent to its own modulo the number of hardware groups, with a context whose
+[`GridStrideLaunch`](@ref) holds that index. If `Sync`, the kernel may synchronize its
+workgroup, and the groups synchronize before every next call, so that the work-items of
+the call don't overwrite local memory that those of the previous one still read.
+
+The number of calls is the same for all work-items of a group, which keeps a
+`@synchronize` in `f` legal, and `f` returns from its call, not the loop, so that
+`return` in the kernel body skips the rest of the body for the current index only.
+"""
+struct GridStride{Sync, F}
+    f::F
+    GridStride{Sync}(f::F) where {Sync, F} = new{Sync, F}(f)
+end
+Adapt.adapt_structure(to, k::GridStride{Sync}) where {Sync} = GridStride{Sync}(Adapt.adapt(to, k.f))
+
+@inline with_launch(cm::CompilerMetadata{NDRange, CB, Nothing}, launch) where {NDRange, CB} =
+    CompilerMetadata{NDRange, CB}(cm.ndrange, cm.iterspace; launch)
+
+@inline function (k::GridStride{Sync})(ctx::CompilerMetadata, args::Vararg{Any, N}) where {Sync, N}
+    launch = __launch(ctx)
+    T = index_type(launch)
+    n = length(blocks(__iterspace(ctx))) % T
+    stride = KI.get_num_groups(T).x
+    group = KI.get_group_id(T).x - one(T)
+    # the host launches at most `n` groups, so `n - stride` doesn't wrap; comparing to it
+    # rather than computing `group + stride` keeps the loop from wrapping either
+    NDIteration.assume(stride <= n)
+    NDIteration.assume(group < stride)
+    while true
+        @inline k.f(with_launch(ctx, typeof(launch)(group)), args...)
+        group >= n - stride && break
+        Sync && KI.barrier()
+        group += stride
+    end
+    return nothing
+end
+
+# Whether kernel function `f` may synchronize its workgroup when called with `args`.
+@inline @generated function kernel_may_synchronize(backend, f, args::Tuple)
+    n = fieldcount(args)
+    converted = [Symbol(:arg, i) for i in 1:n]
+    conversions = (:($(converted[i]) = KI.argconvert(backend, args[$i])) for i in 1:n)
+    return quote
+        $(conversions...)
+        return f(SyncQuery(), $(converted...)) === Val(true)
+    end
+end
+
+# Launch `obj` on at most `maxgroups` groups (`nothing`: about as many as can be active at
+# once), each looping over a share of the groups of the iteration space.
+function launch_gridstride(obj::Kernel, maxgroups, ndrange, _workgroupsize, iterspace, args::Tuple)
+    b = backend(obj)
+
+    # the work-items of a group are launched as without a grid stride, and the index type
+    # has to hold the padded iteration space, so choose as for a launch without one. the
+    # groups are launched on a 1-D grid, which is at most as large as the number of groups
+    # of the iteration space, so its limits on the number of groups don't matter
+    inner = select_launch(obj, _workgroupsize, iterspace)
+    T = index_type(inner)
+    launch = GridStrideLaunch{T, typeof(inner)}(zero(T))
+
+    ctx = mkcontext(obj, ndrange, iterspace, launch)
+    args, tt = prepare_arguments(b, obj.f, ctx, args)
+    f = GridStride{kernel_may_synchronize(b, obj.f, args)}(obj.f)
+    # name the kernel after the kernel function rather than the wrapper, as without a stride
+    name = GPUCompiler.mangle_sig(Tuple{Core.Typeof(obj.f), tt.parameters...})
+    kernel = KI.kernel_function(b, f, tt; name, compiler_options(obj)...)
+
+    if workgroupsize(obj) <: DynamicSize && _workgroupsize === nothing
+        range = something(ndrange, static_ndrange(obj))
+        threads = KI.launch_configuration(kernel; nitems = saturated_prod(extents(range))).workgroupsize
+        iterspace, _ = partition(obj, ndrange, launch_workgroupsize(b, inner, threads, range))
+        ctx = mkcontext(obj, ndrange, iterspace, launch)
+    end
+
+    items = size(workitems(iterspace))
+    items = inner isa NDLaunch ? KI.pad3(items) : (prod(items), 1, 1)
+    nblocks = length(blocks(iterspace))
+    if maxgroups === nothing
+        maxgroups = KI.max_active_groups(kernel, prod(items))
+        # unknown: one group per group of the iteration space, i.e. no stride
+        maxgroups = maxgroups > 0 ? maxgroups : nblocks
+    end
+    groups = (min(nblocks, maxgroups, first(KI.max_num_groups(b))), 1, 1)
+
     KI.check_work_group_size(kernel, items)
     KI.launch(kernel, groups, items, prepend(ctx, args))
     return nothing
