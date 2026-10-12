@@ -213,6 +213,46 @@ statements, and [`@uniform`](@ref) evaluates an expression outside the work-item
 can be reused across `@synchronize` statements. For scratch storage that does not need to
 survive across `@synchronize`, an `MArray` can be used instead.
 
+## [Reductions and scans](@id group_collectives)
+
+[`@groupreduce`](@ref) combines a value from every work-item of the workgroup and returns the
+result to all of them. [`@groupscan`](@ref) gives each work-item the result up to itself, in
+the order of `@index(Local, Linear)`; it is inclusive by default, and exclusive with
+`inclusive = false`. Both take an associative operator and its neutral element, and
+`@groupreduce` also needs the operator to be commutative.
+
+```julia
+@kernel function group_sums!(out, @Const(x))
+    i = @index(Global, Linear)
+    s = @groupreduce(+, x[i], zero(eltype(out)); groupsize = 256)
+    if @index(Local, Linear) == 1
+        out[@index(Group, Linear)] = s
+    end
+end
+```
+
+Like [`@synchronize`](@ref), they are collectives: every work-item of the workgroup has to
+reach them, not in a branch or loop that only some of them take, or after an early `return`.
+Use them as a statement of their own, optionally assigning the result, as in
+`res = @groupreduce(+, val, zero(T))`. Work-items that pad a partial workgroup take part as
+well: they contribute the neutral element, without evaluating `val`.
+
+Both go through local memory, whose size has to be known when the kernel is compiled: a
+kernel without a static workgroup size passes `groupsize`, a constant upper bound on the
+number of work-items per workgroup.
+
+They work on every backend. Where the backend can shuffle the values, `@groupreduce` first
+reduces each sub-group, and then combines those results through local memory.
+KernelAbstractions picks this automatically. The order in which values are combined can
+differ, so floating-point results may vary between backends and launch configurations.
+
+A kernel is either a `@kernel` or a kernel written against
+[KernelInterface](@ref kernelinterface), never a mix: don't call KernelInterface's device
+functions, such as its sub-group shuffles and votes, in a `@kernel`. They have to be executed
+by all work-items of a sub-group, but in a `@kernel` with the default bounds checking, every
+statement other than the collectives above only runs on the work-items that are part of the
+`ndrange`. Host code can use KernelInterface's queries, e.g. to pick a kernel.
+
 ## Launching kernels
 
 Construct a kernel by calling the kernel function on a backend and optional static sizes, then
