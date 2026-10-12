@@ -75,9 +75,11 @@ end
         fadd_f64_global = true, fadd_f64_local = true
     )
     @test POCL.compiler_config(dev).target.atomics == atomics
-    # explicitly requested extensions are kept
+    # explicitly requested extensions are kept, in addition to the default ones
+    @test POCL.compiler_config(dev).target.extensions == "+SPV_KHR_no_integer_wrap_decoration"
     config = POCL.compiler_config(dev; extensions = "+SPV_KHR_expect_assume")
-    @test config.target.extensions == "+SPV_KHR_expect_assume"
+    @test config.target.extensions ==
+        "+SPV_KHR_no_integer_wrap_decoration,+SPV_KHR_expect_assume"
     @test config.target.atomics == atomics
     @test POCL.compiler_config(dev; extensions = nothing).target ==
         POCL.compiler_config(dev).target
@@ -614,8 +616,8 @@ end
         A[ndrange] .= 0
         @test all(iszero, A)
 
-        # the launch is chosen from the iteration space
-        @test KA.select_launch(kernel, nothing, iterspace) === KA.NDLaunch{Int32}()
+        # the launch is chosen from the iteration space, computing indices in `Int` on PoCL
+        @test KA.select_launch(kernel, nothing, iterspace) === KA.NDLaunch{Int}()
     end
     for launch in (nothing, KA.LinearLaunch{Int}(), KA.NDLaunch{Int}())
         function launcher(kernel, args...; ndrange, workgroupsize = nothing)
