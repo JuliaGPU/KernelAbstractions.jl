@@ -189,17 +189,18 @@ end
   both in `KI.argconvert` and in `KI.launch`, since that conversion now constifies them; see
   the [notes for backend implementations](@ref implementations_notes).
 - Launching a kernel on the `CPU` backend costs more than in 0.9: the kernel is handed to
-  PoCL's threads and the launching task waits for them, which takes several microseconds
-  per launch even for an empty kernel. Code that launches many small kernels pays this every
-  time. For example, a kernel over a 16×16×16 range took about 2.5 times as long per launch as
-  with 0.9, and one over a 4×4×4 range about 3 times as long.
+  PoCL's threads and the launching task waits for them, which takes about 5 µs per launch
+  even for an empty kernel, whereas 0.9 ran a launch that fit in one workgroup on the
+  launching task itself. Code that launches many small kernels pays this every time. For
+  example, a 7-point stencil over a 4×4×4 range took about 3.5 µs per launch, against 0.2 µs
+  with 0.9. Over a 16×16×16 range, which 0.9 also ran on all threads, both took about 7 µs.
 - On the `CPU` backend, don't pass a fixed workgroup size such as `64`. Omit it
   (`kernel(CPU())` instead of `kernel(CPU(), 64)`), so that it is chosen for every launch. A
   one-dimensional workgroup size pads a multidimensional range: with a workgroup size of 64
   and a range of `(16, 16, 16)`, each of the 256 workgroups has 64 work-items, of which 16
-  are inside the range. A 7-point stencil over that range took 24 µs per launch with a
-  workgroup size of 64, and 8 µs with the chosen one. Over a 128×128×128 range the chosen
-  size was still about 14% faster.
+  are inside the range. A 7-point stencil over that range took about 12 µs per launch with a
+  workgroup size of 64, and 7 µs with the chosen one. Over a 128×128×128 range the chosen
+  size was still about 5% faster.
 - The `CPU` backend checks in every kernel whether a work-item is inside the range, even when
   the workgroups cover the range exactly, so kernels with a cheap body can be about twice
   as slow as with 0.9 ([#845](https://github.com/JuliaGPU/KernelAbstractions.jl/issues/845)).
