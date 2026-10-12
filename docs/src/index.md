@@ -197,10 +197,10 @@ end
   and a range of `(16, 16, 16)`, each of the 256 workgroups has 64 work-items, of which 16
   are inside the range. A 7-point stencil over that range took about 13 µs per launch with a
   workgroup size of 64, and 7 µs with the chosen one. Over a 128×128×128 range the chosen
-  size was still about 5% faster.
+  size was still 5 to 15% faster.
 - On the `CPU` backend, every work-item checks whether it is inside the range, even when the
   workgroups cover the range exactly. This can make kernels with a cheap body slightly slower
-  than with 0.9 ([#845](https://github.com/JuliaGPU/KernelAbstractions.jl/issues/845)).
+  than with 0.9.
 - `foreach_index(f, A)` runs `f` once per index of the array `A` without writing a kernel out,
   and `foreach_index(f, backend, indices)` once per index in a range or `CartesianIndices`.
 
