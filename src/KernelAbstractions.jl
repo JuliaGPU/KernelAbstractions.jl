@@ -750,7 +750,7 @@ end
 
 # CPU backend
 include("pocl/pocl.jl")
-using .POCL
+using .POCL: POCL, POCLBackend
 export POCLBackend
 
 """
