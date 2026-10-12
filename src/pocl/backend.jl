@@ -233,9 +233,21 @@ function cpu_workgroupsize(nitems, threads, max_items, multiple)
 end
 
 KI.supports_subgroups(::POCLBackend) = device_limits().sub_group_size > 0
-function KI.supports_shuffle(backend::POCLBackend, ::Type{T}) where {T}
+# PoCL forms sub-groups from consecutive work-items, but executes sub-group operations as
+# work-group barriers, so they need work-group-uniform control flow (see `POCLBackend`)
+KI.supports_linear_subgroups(backend::POCLBackend) = KI.supports_subgroups(backend)
+KI.supports_independent_subgroups(::POCLBackend) = false
+# PoCL limitation: for the same reason, sub-groups can't be partitioned into segments that
+# diverge
+KI.supports_partitionable_subgroups(::POCLBackend) = false
+
+# The types `sub_group_shuffle` supports; other types are shuffled as words. `Float16` and
+# `Float64` are reported as unsupported on devices without `cl_khr_fp16` or `cl_khr_fp64`,
+# rather than shuffled as words: the overrides below are selected by type, not by device.
+const ShuffleTypes = Union{SPIRVIntrinsics.gentypes...}
+
+function KI.supports_shuffle(backend::POCLBackend, ::Type{T}) where {T <: ShuffleTypes}
     KI.supports_subgroups(backend) || return false
-    T in SPIRVIntrinsics.gentypes || return false
     T === Float64 && return "cl_khr_fp64" in device().extensions
     T === Float16 && return "cl_khr_fp16" in device().extensions
     return true
@@ -298,8 +310,85 @@ end
     sub_group_barrier(POCL.LOCAL_MEM_FENCE | POCL.GLOBAL_MEM_FENCE)
 end
 
-@device_override function KI.shfl_down(val::T, offset::Integer) where {T}
-    sub_group_shuffle(val, get_sub_group_local_id() + offset)
+@device_override KI.shfl(val::T, lane::Integer) where {T <: ShuffleTypes} =
+    SPIRVIntrinsics.sub_group_shuffle(val, lane)
+
+# past the sub-group width, `shfl_down` and `shfl_up` return the work-item's own value, which
+# `sub_group_shuffle` (like SPIR-V's `OpGroupNonUniformShuffleDown`) leaves undefined
+@device_override function KI.shfl_down(val::T, offset::Integer) where {T <: ShuffleTypes}
+    lane = get_sub_group_local_id()
+    # compared before adding, so that large offsets don't overflow
+    inside = offset <= get_max_sub_group_size() - lane
+    return SPIRVIntrinsics.sub_group_shuffle(val, ifelse(inside, lane + offset, lane))
+end
+
+@device_override function KI.shfl_up(val::T, offset::Integer) where {T <: ShuffleTypes}
+    lane = get_sub_group_local_id()
+    return SPIRVIntrinsics.sub_group_shuffle(val, ifelse(lane > offset, lane - offset, lane))
+end
+
+@device_override KI.shfl_xor(val::T, mask::Integer) where {T <: ShuffleTypes} =
+    SPIRVIntrinsics.sub_group_shuffle_xor(val, mask)
+
+# Every shuffle is a work-group barrier, so the words of a packed struct are exchanged with
+# vector shuffles (`POCL.vector_shuffle`), a barrier per up to 16 words rather than per word.
+# The last vector is padded to a size that exists (2, 3, 4, 8 or 16 words).
+@generated function shuffle_word_vectors(words::NTuple{N, UInt32}, lane::Int32) where {N}
+    body = Any[Expr(:meta, :inline)]
+    results = Any[]
+    for first in 1:16:N
+        k = min(N - first + 1, 16)
+        if k == 1
+            push!(results, :(KI.shfl(words[$first], lane)))
+            continue
+        end
+        n = k <= 4 ? k : k <= 8 ? 8 : 16
+        elements = ((j < k ? :(VecElement(words[$(first + j)])) : :(VecElement(UInt32(0)))) for j in 0:(n - 1))
+        v = Symbol(:v, first)
+        push!(body, :($v = POCL.vector_shuffle(($(elements...),), lane)))
+        append!(results, (:($v[$j].value) for j in 1:k))
+    end
+    push!(body, :(($(results...),)))
+    return Expr(:block, body...)
+end
+
+@device_override @inline KI.shfl_word_tuple(op::KI.ShuffleOp, words::NTuple{N, UInt32}) where {N} =
+    shuffle_word_vectors(words, KI.shuffle_source(op))
+
+@device_override KI.sub_group_any(pred::Bool) = SPIRVIntrinsics.sub_group_any(pred)
+
+@device_override KI.sub_group_all(pred::Bool) = SPIRVIntrinsics.sub_group_all(pred)
+
+@device_override function KI.sub_group_ballot(pred::Bool)
+    mask = SPIRVIntrinsics.sub_group_ballot(pred)
+    return UInt64(mask[1].value) | (UInt64(mask[2].value) << 32)
+end
+
+# Native reductions and scans of `cl_khr_subgroups`, for `+` on 32- and 64-bit integers and
+# floats, and `min`/`max` on integers (OpenCL's `min` and `max` treat NaN and the sign of zero
+# differently from Julia's). They need the fix of PoCL 7.2's peeling of the first work-item
+# (pocl/pocl#2239), which `pocl_standalone_jll` includes since 7.2.1+1.
+const CollectiveIntTypes = Union{Int32, UInt32, Int64, UInt64}
+const CollectiveTypes = Union{CollectiveIntTypes, Float16, Float32, Float64}
+
+@device_override KI.sub_group_reduce(::typeof(+), val::CollectiveTypes) =
+    SPIRVIntrinsics.sub_group_reduce_add(val)
+@device_override KI.sub_group_reduce(::typeof(min), val::CollectiveIntTypes) =
+    SPIRVIntrinsics.sub_group_reduce_min(val)
+@device_override KI.sub_group_reduce(::typeof(max), val::CollectiveIntTypes) =
+    SPIRVIntrinsics.sub_group_reduce_max(val)
+
+@device_override KI.sub_group_scan(::typeof(+), val::CollectiveTypes) =
+    SPIRVIntrinsics.sub_group_scan_inclusive_add(val)
+@device_override KI.sub_group_scan(::typeof(min), val::CollectiveIntTypes) =
+    SPIRVIntrinsics.sub_group_scan_inclusive_min(val)
+@device_override KI.sub_group_scan(::typeof(max), val::CollectiveIntTypes) =
+    SPIRVIntrinsics.sub_group_scan_inclusive_max(val)
+
+# the exclusive scans of `cl_khr_subgroups` start from the identity, not from `init`
+@device_override function KI.sub_group_exclusive_scan(::typeof(+), val::T, init::T) where {T <: CollectiveTypes}
+    prefix = SPIRVIntrinsics.sub_group_scan_exclusive_add(val)
+    return ifelse(get_sub_group_local_id() == 1, init, init + prefix)
 end
 
 @device_override @inline function KI._print(args...)
