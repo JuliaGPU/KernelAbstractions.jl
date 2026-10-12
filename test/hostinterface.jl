@@ -1,3 +1,8 @@
+@kernel function graph_axpy_kernel!(y, @Const(x), a)
+    i = @index(Global)
+    @inbounds y[i] += a * x[i]
+end
+
 function hostinterface_testsuite(_backend, AT)
     backend = _backend()
 
@@ -76,6 +81,54 @@ function hostinterface_testsuite(_backend, AT)
         @test KI.max_work_group_size(kernel) isa Int
         @test KI.launch_configuration(kernel) isa @NamedTuple{workgroupsize::Int}
         @test KI.launch_configuration(kernel; max_work_group_size = 1).workgroupsize == 1
+    end
+
+    # Graphs are optional, so these results have to hold whether or not the backend
+    # records the work: the function follows the contract of `capture`.
+    @testset "graphs" begin
+        @test KernelAbstractions.supports_graphs(backend) isa Bool
+        strict = KernelAbstractions.supports_graphs(backend)
+        N = 64
+        x = AT(ones(Float32, N))
+        y = KernelAbstractions.zeros(backend, Float32, N)
+        z = KernelAbstractions.zeros(backend, Float32, N)
+        axpy! = graph_axpy_kernel!(backend)
+        work = () -> (axpy!(y, x, 1.0f0; ndrange = N); axpy!(y, x, 2.0f0; ndrange = N))
+
+        graph = KernelAbstractions.capture(work, backend; strict)
+        @test graph isa KernelAbstractions.Graph
+        @test KernelAbstractions.is_captured(graph) == strict
+        synchronize(backend)
+        @test all(==(3), Array(y))  # the warm-up executed the work once
+
+        for _ in 1:3
+            graph()
+        end
+        synchronize(backend)
+        @test all(==(12), Array(y))
+
+        # the contents of the arrays may change between calls
+        copyto!(x, fill(2.0f0, N))
+        graph()
+        synchronize(backend)
+        @test all(==(18), Array(y))
+
+        # other arrays and scalars need an update, which doesn't execute anything
+        KernelAbstractions.update!(graph, () -> axpy!(z, x, 0.5f0; ndrange = N); strict)
+        synchronize(backend)
+        @test all(iszero, Array(z))
+        graph()
+        synchronize(backend)
+        @test all(==(1), Array(z))
+        @test all(==(18), Array(y))
+
+        # `@captured` executes the work once per call, whatever is recorded
+        fill!(z, 0)
+        for a in 1.0f0:3.0f0
+            KernelAbstractions.@captured backend axpy!(z, x, a; ndrange = N)
+        end
+        synchronize(backend)
+        @test all(==(12), Array(z))
     end
 
     return nothing
