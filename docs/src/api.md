@@ -22,6 +22,26 @@
 @groupscan
 ```
 
+### Tiles
+
+```@docs
+@tile
+Tile
+tile_shfl
+tile_shfl_up
+tile_shfl_down
+tile_shfl_xor
+tile_any
+tile_all
+tile_ballot
+tile_reduce
+tile_scan
+tile_exclusive_scan
+tile_barrier
+tile_width
+supports_tiles
+```
+
 ## Host language
 
 !!! note

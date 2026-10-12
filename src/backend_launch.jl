@@ -15,9 +15,9 @@ The hidden context argument for launching `kernel` over `ndrange`, partitioned a
 backend's sub-group capabilities `subgroups` (see [`kernel_subgroups`](@ref)).
 """
 mkcontext(kernel::Kernel, _ndrange, iterspace) =
-    CompilerMetadata{ndrange(kernel), DynamicCheck}(_ndrange, iterspace)
+    CompilerMetadata{ndrange(kernel), DynamicCheck}(_ndrange, iterspace; tile = tile_val(kernel))
 mkcontext(kernel::Kernel, _ndrange, iterspace, launch; subgroups = nothing) =
-    CompilerMetadata{ndrange(kernel), DynamicCheck}(_ndrange, iterspace; launch, subgroups)
+    CompilerMetadata{ndrange(kernel), DynamicCheck}(_ndrange, iterspace; launch, subgroups, tile = tile_val(kernel))
 
 """
     kernel_subgroups(kernel::Kernel)
@@ -96,9 +96,12 @@ Core.kwcall(kwargs::NamedTuple, obj::Kernel{<:KI.Backend}, args::Vararg{Any, N})
     launch_tuple(obj, args; kwargs...)
 
 function launch_tuple(obj::Kernel, args::Tuple; ndrange = nothing, workgroupsize = nothing)
+    N = tile_width(obj)
     ndrange, workgroupsize, iterspace, dynamic = launch_config(obj, ndrange, workgroupsize)
     # nothing to launch (or compile) for an empty ndrange
     any(iszero, size(blocks(iterspace))) && return nothing
+    # reject an invalid launch of a kernel with tiles before compiling it
+    N === nothing || check_tiles_launch(obj, N, ndrange, workgroupsize, iterspace)
 
     # launch on an N-d grid, computing indices in a narrow type, if possible. this doesn't
     # depend on the tuned workgroup size, so the context (and thus the kernel) doesn't either.
@@ -135,13 +138,18 @@ function launch_kernel(obj::Kernel, launch, subgroups, ndrange, _workgroupsize, 
     if workgroupsize(obj) <: DynamicSize && _workgroupsize === nothing
         range = something(ndrange, static_ndrange(obj))
         threads = KI.launch_configuration(kernel; nitems = saturated_prod(extents(range))).workgroupsize
-        iterspace, _ = partition(obj, ndrange, launch_workgroupsize(b, launch, threads, range))
+        N = tile_width(obj)
+        items = N === nothing ? launch_workgroupsize(b, launch, threads, range) :
+            tile_launch_workgroupsize(b, launch, N, threads, range)
+        iterspace, _ = partition(obj, ndrange, items)
         ctx = mkcontext(obj, ndrange, iterspace, launch; subgroups)
     end
 
     # the geometry is valid by construction, except for the kernel's limits
     groups = size(blocks(iterspace))
     items = size(workitems(iterspace))
+    N = tile_width(obj)
+    N === nothing || check_tiles(b, N, extents(something(ndrange, static_ndrange(obj))), items)
     if launch isa NDLaunch
         groups, items = KI.pad3(groups), KI.pad3(items)
     else

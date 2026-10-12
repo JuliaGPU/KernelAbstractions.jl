@@ -222,6 +222,68 @@ statements of their own, e.g. `res = @groupreduce(+, val, zero(T))`. Work-items 
 partial workgroup take part as well, contributing the neutral element. On backends with
 sub-groups, `@groupreduce` uses them where it can.
 
+## Tiles
+
+A kernel constructed with a tile width, `f(backend; tile = N)`, divides its workgroups into tiles of
+consecutive work-items (by `@index(Local, Linear)`), whose work-items can exchange values with
+operations such as [`tile_shfl`](@ref) and [`tile_reduce`](@ref), without going through local
+memory. Unlike the work-group collectives, the tile operations only need the tile's
+work-items to execute them together: different tiles can take different branches, loop a
+different number of times, or `return` early. See [`@tile`](@ref) for the details, and for
+the restrictions on the launch. The `ndrange` can have several dimensions, e.g. one per index
+of the nodes of an element, if every tile lies entirely inside or outside of it, which holds
+when the workgroups cover its leading dimensions:
+
+```julia
+# an element of 4 × 4 nodes per tile, and 4 elements per workgroup
+@kernel function element_sums!(out, @Const(u))
+    t = @tile()
+    I = @index(Global, NTuple)
+    out[I...] = tile_reduce(t, +, u[I...])
+end
+element_sums!(backend, (4, 4, 4); tile = 16)(out, u; ndrange = size(u))    # size(u) == (4, 4, nelements)
+```
+
+```julia
+@kernel function tile_maxima!(out, @Const(x))
+    t = @tile()
+    m = tile_reduce(t, max, x[@index(Global, Linear)])
+    if t.lane == 1
+        out[@index(Tile)] = m
+    end
+end
+
+kernel = tile_maxima!(backend; tile = 16)
+kernel(out, x; ndrange = 16 * length(out))
+```
+
+### Choosing the tile width
+
+Tiles aren't declared in the kernel: the width is passed when the kernel is constructed,
+with the `tile` keyword: `f(backend; tile = 16)`, `f(backend, workgroupsize; tile = 16)`.
+A kernel that uses `@tile()` or `@index(Tile)` has to get one.
+[`tile_width(kernel)`](@ref tile_width) returns the width on the host, e.g. to size the
+`ndrange`, and `tile_width(t)` in the kernel, where it is a constant. Like a static workgroup
+size, the width is compiled into the kernel, so it can't change when launching it. For tiles
+of the backend's sub-group width `W`, pass `tile = KernelInterface.sub_group_size(backend)`.
+
+The tiles map onto the backend's sub-groups (warps, wavefronts or SIMD-groups), so not every
+backend supports every width. Tiles of `N` work-items need a power of two of at most `W`, and
+a workgroup can hold any number of them: tiles narrower than `W` share a sub-group, and diverge
+independently all the same. A backend either supports that, or constructing the kernel is an
+error; [`supports_tiles(backend, N)`](@ref supports_tiles) checks beforehand. All GPU backends
+support tiles of up to 32 work-items (their sub-groups have at least 32), but
+KernelAbstractions' CPU backend has no tiles: its sub-groups are executed as work-group
+barriers, which can't diverge. Kernels that should also run on the CPU need a variant without
+tiles, e.g. one that exchanges values through local memory:
+
+```julia
+kernel = supports_tiles(backend, 16) ? element_sums!(backend; tile = 16) :
+    element_sums_localmem!(backend)
+```
+
+## Kernel languages
+
 A kernel is either a `@kernel` or a kernel written against
 [KernelInterface](@ref kernelinterface), never a mix: don't call KernelInterface's device
 functions, such as its sub-group shuffles and votes, in a `@kernel`. They have to be executed

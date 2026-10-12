@@ -77,10 +77,12 @@ function select_launch(kernel::Kernel, workgroupsize, iterspace)
     groups = size(blocks(iterspace))
     items = size(workitems(iterspace))
     tuned = KernelAbstractions.workgroupsize(kernel) <: DynamicSize && workgroupsize === nothing
+    # kernels with tiles are launched on a 1-D grid unless the iteration space is 1-D, so that
+    # the linear local index is the one the backend forms sub-groups from
+    dims = tile_width(kernel) !== nothing && length(items) > 1 ? () : KI.max_work_group_dims(b)
     return select_launch(
         map(mul_extent, groups, items), tuned ? nothing : items,
-        KI.max_work_group_size(b), KI.max_work_group_dims(b), KI.max_num_groups(b),
-        narrow_index_type(b)
+        KI.max_work_group_size(b), dims, KI.max_num_groups(b), narrow_index_type(b)
     )
 end
 
