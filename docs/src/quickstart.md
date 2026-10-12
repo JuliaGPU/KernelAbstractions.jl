@@ -78,7 +78,9 @@ Its body then also runs for the padded work-items, so it has to test the index i
 
 ```@example mul2_kernel
 @kernel unsafe_indices = true function mul2_unsafe_kernel(A)
-    I = @index(Global, NTuple)
+    g = @index(Group, NTuple)
+    l = @index(Local, NTuple)
+    I = (g .- 1) .* @groupsize() .+ l
     if all(I .<= @ndrange())
         A[I...] = 2 * A[I...]
     end
@@ -89,10 +91,9 @@ synchronize(dev)
 @assert all(A .== 8)
 ```
 
-We recommend against using `@index(Global)` with `unsafe_indices = true`. Use
-`@index(Global, NTuple)` or `@index(Global, Cartesian)` and compare it with
-[`@ndrange`](@ref) instead: the linear index of a padded work-item is computed as if it
-were inside the `ndrange`, and can coincide with the index of a work-item that is.
+Don't use `@index(Global)` in any form in such a kernel. Compute the global index from
+`@index(Group)`, `@index(Local)` and [`@groupsize`](@ref) instead, as above, and compare it
+with [`@ndrange`](@ref).
 
 !!! note
     The padded work-items also take part in [`@synchronize`](@ref),
