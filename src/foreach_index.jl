@@ -110,7 +110,8 @@ results on the host. Bounds checks are not elided, so write `@inbounds` in the b
 warranted, as in a hand-written kernel.
 
 The keyword argument `workgroupsize` sets the workgroup size of the launch; by default the
-backend chooses it.
+backend chooses it. `gridstride` launches the loop as a grid-stride loop, see the
+[`Kernel`](@ref KernelAbstractions.Kernel) launch options.
 
 # Extended help
 
@@ -131,11 +132,11 @@ See also [`@kernel`](@ref) to write the kernel out, which is what to reach for w
 needs more of the kernel language than an index (workgroup-level indices, local memory, or
 synchronization).
 """
-function foreach_index(f::F, backend::Backend, indices; workgroupsize = nothing) where {F}
+function foreach_index(f::F, backend::Backend, indices; workgroupsize = nothing, gridstride = false) where {F}
     kernel = foreach_index_kernel(backend, indices)
     check_captures(f)
     isempty(indices) && return nothing
-    kernel(f; ndrange = foreach_index_ndrange(indices), workgroupsize)
+    kernel(f; ndrange = foreach_index_ndrange(indices), workgroupsize, gridstride)
     return nothing
 end
 
@@ -158,12 +159,12 @@ function merge_backend(a, b)
     return a
 end
 
-function foreach_index(f::F, A::AbstractArray, Bs::AbstractArray...; workgroupsize = nothing) where {F}
+function foreach_index(f::F, A::AbstractArray, Bs::AbstractArray...; workgroupsize = nothing, gridstride = false) where {F}
     backend = common_backend(A, Bs...)
     backend === nothing && throw(
         ArgumentError(
             "`foreach_index` cannot determine a backend from arrays that are not stored, such as ranges; pass it explicitly, as in `foreach_index(f, backend, eachindex(A, Bs...))`"
         )
     )
-    return foreach_index(f, backend, eachindex(A, Bs...); workgroupsize)
+    return foreach_index(f, backend, eachindex(A, Bs...); workgroupsize, gridstride)
 end

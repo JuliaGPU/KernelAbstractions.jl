@@ -116,6 +116,8 @@ KernelAbstractions.NDIteration.offsets
 KernelAbstractions.NDIteration.linear_index
 KernelAbstractions.LinearLaunch
 KernelAbstractions.NDLaunch
+KernelAbstractions.GridStrideLaunch
+KernelAbstractions.GridStride
 KernelAbstractions.select_launch
 KernelAbstractions.launch_workgroupsize
 KernelAbstractions.compiler_options

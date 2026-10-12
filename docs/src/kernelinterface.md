@@ -73,7 +73,7 @@ What a backend implements, at a glance. The docstrings below have the details.
 | **Memory** | [`allocate`](@ref), [`copyto!`](@ref) | `allocate(...; unified=true)` (throws), [`pagelock!`](@ref) (`missing`), [`unsafe_free!`](@ref) (no-op) |
 | **Execution** | [`synchronize`](@ref) (cooperative) | [`record_event`](@ref)/[`wait_event`](@ref) (synchronize), [`priority!`](@ref) (no-op) |
 | **Devices** | with more than one device: [`ndevices`](@ref), [`device`](@ref), [`device!`](@ref), `device(backend, A)` | all four (a single device) |
-| **Queries** | [`max_work_group_size`](@ref) (for the backend and for a kernel), [`max_work_group_dims`](@ref), [`max_num_groups`](@ref) | [`launch_configuration`](@ref) (the limit), [`multiprocessor_count`](@ref) (0), [`functional`](@ref) (`missing`), [`versioninfo`](@ref) |
+| **Queries** | [`max_work_group_size`](@ref) (for the backend and for a kernel), [`max_work_group_dims`](@ref), [`max_num_groups`](@ref) | [`launch_configuration`](@ref) (the limit), [`multiprocessor_count`](@ref) (0), [`max_active_groups`](@ref) (`multiprocessor_count`), [`functional`](@ref) (`missing`), [`versioninfo`](@ref) |
 | **Capabilities** | | [`supports_float64`](@ref), [`supports_atomics`](@ref), [`supports_unified`](@ref), [`supports_subgroups`](@ref), [`supports_shuffle`](@ref) (all `false`) |
 | **Compilation** | [`argconvert`](@ref), [`kernel_function`](@ref), [`launch`](@ref) | |
 | **Device** | [`get_local_id`](@ref), [`get_group_id`](@ref), [`get_local_size`](@ref), [`get_num_groups`](@ref), [`localmemory`](@ref), [`barrier`](@ref) | [`get_global_id`](@ref), [`get_global_size`](@ref) (derived from the primitive queries), [`_print`](@ref KernelInterface._print) (host `print`) |
@@ -259,6 +259,7 @@ max_work_group_dims
 max_num_groups
 sub_group_size
 multiprocessor_count
+max_active_groups
 ```
 
 ### Compilation and launching

@@ -81,6 +81,9 @@ it should return its method tables from `GPUCompiler.method_tables` rather than 
 - [`KI.launch_configuration`](@ref KernelInterface.launch_configuration): the workgroup size
   used when the kernel has no static or given one. It receives the number of work-items in
   the `ndrange` as `nitems`, e.g. to prefer more workgroups over larger ones.
+- [`KI.max_active_groups`](@ref KernelInterface.max_active_groups): the number of
+  workgroups a `gridstride=true` launch uses, e.g. from an occupancy calculation. The
+  fallback is [`KI.multiprocessor_count`](@ref KernelInterface.multiprocessor_count).
 - [`KernelAbstractions.compiler_options`](@ref): compiler options for a kernel, e.g. a
   register hint derived from its static workgroup size.
 - `Adapt.adapt_storage(::KernelAbstractions.ConstAdaptor, x)` for the backend's device

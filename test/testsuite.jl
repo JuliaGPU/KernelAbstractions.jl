@@ -37,6 +37,7 @@ include("nditeration.jl")
 include("offsets.jl")
 include("launch.jl")
 include("foreach_index.jl")
+include("gridstride.jl")
 include("copyto.jl")
 include("devices.jl")
 include("print_test.jl")
@@ -93,6 +94,10 @@ function testsuite(backend, backend_str, backend_mod, AT, DAT; skip_tests = Set{
 
     @conditional_testset "foreach_index" skip_tests begin
         foreach_index_testsuite(backend, AT)
+    end
+
+    @conditional_testset "gridstride" skip_tests begin
+        gridstride_testsuite(backend, AT)
     end
 
     @conditional_testset "copyto!" skip_tests begin

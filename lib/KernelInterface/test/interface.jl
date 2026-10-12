@@ -307,6 +307,8 @@ function interface_testsuite(backend::KI.Backend, AT)
         arr = KI.zeros(backend, Int32, (1, 1, 1))
         kernel = KI.@launch backend launch = false launch_kernel(arr)
         max_items = KI.max_work_group_size(kernel)
+        @test KI.max_active_groups(kernel, max_items) isa Int
+        @test KI.max_active_groups(kernel, max_items) >= 0
         max_dims = KI.max_work_group_dims(backend)
 
         @test_throws ArgumentError kernel(arr; numgroups = (2, 2, 2, 2), workgroupsize = (2, 2, 2))

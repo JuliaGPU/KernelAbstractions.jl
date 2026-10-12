@@ -48,8 +48,9 @@ function __kernel(expr, __source__::LineNumberNode, __module__::Module, force_in
     def_gpu[:name] = gpu_name = Symbol(:gpu_, name)
     # a kernel returns `nothing` anyway, but a `ConstArgs` query returns its mask
     delete!(def_gpu, :rtype)
-    forwarders = default_forwarders!(def_gpu, gpu_name, constargs)
-    transform_gpu!(def_gpu, constargs, force_inbounds, unsafe_indices)
+    sync = may_synchronize(def_gpu[:body], unsafe_indices)
+    forwarders = default_forwarders!(def_gpu, gpu_name, constargs, sync)
+    transform_gpu!(def_gpu, constargs, sync, force_inbounds, unsafe_indices)
     if generated
         # Turn the kernel into a generated function: the transformed body is
         # quoted so that it is returned as an expression. Passing the quote
@@ -183,7 +184,7 @@ end
 # generate itself. Like those, each supplies the next default, so that a default can refer to
 # the ones before it, but these first answer `ConstArgs` queries, so that a query doesn't
 # evaluate the defaults on the host. Strips the defaults from `def`.
-function default_forwarders!(def, gpu_name, constargs)
+function default_forwarders!(def, gpu_name, constargs, sync)
     args = def[:args]
     first_default = findfirst(arg -> isexpr(arg, :kw), args)
     first_default === nothing && return Expr(:block)
@@ -212,6 +213,7 @@ function default_forwarders!(def, gpu_name, constargs)
             :whereparams => filter(in(used), whereparams),
             :body => quote
                 __ctx__ isa $ConstArgs && return $(constargs_mask(constargs[1:n]))
+                __ctx__ isa $SyncQuery && return $(Val(sync))
                 # as in the methods Julia generates: referring to the function by name
                 # would capture it when it's a closure
                 return var"#self#"(__ctx__, $(map(argname, kept)...), $default)
@@ -225,12 +227,14 @@ end
 
 # The easy case, transform the function for GPU execution
 # - answer which arguments are marked `@Const` (see `ConstArgs`)
-function transform_gpu!(def, constargs, force_inbounds, unsafe_indices)
+# - answer whether the kernel may synchronize its workgroup (see `SyncQuery`)
+function transform_gpu!(def, constargs, sync, force_inbounds, unsafe_indices)
     pushfirst!(def[:args], :__ctx__)
     # `Any[]`, since `split` hands back `LineNumberNode`s alongside `Expr`s
     new_stmts = Any[]
     push!(new_stmts, :(__ctx__ isa $ConstArgs && return $(constargs_mask(constargs))))
     body = MacroTools.flatten(def[:body])
+    push!(new_stmts, :(__ctx__ isa $SyncQuery && return $(Val(sync))))
     if !unsafe_indices
         push!(new_stmts, :(__active_lane__ = $__validindex(__ctx__)))
     end
@@ -248,6 +252,19 @@ function transform_gpu!(def, constargs, force_inbounds, unsafe_indices)
     push!(new_stmts, :(return nothing))
     def[:body] = Expr(:block, new_stmts...)
     return
+end
+
+# Whether the kernel body may synchronize the workgroup, for a `SyncQuery`. Besides a
+# `@synchronize` in the body, a function the body passes its context to, or any function
+# called by a kernel that doesn't validate its indices, may do so.
+function may_synchronize(body, unsafe_indices)
+    unsafe_indices && return true
+    found = false
+    postwalk(body) do expr
+        found |= is_sync(expr) || is_macrocall(expr, Symbol("@context"))
+        expr
+    end
+    return found
 end
 
 struct WorkgroupLoop
