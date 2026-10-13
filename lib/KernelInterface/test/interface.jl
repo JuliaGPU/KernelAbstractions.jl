@@ -835,14 +835,14 @@ function subgroup_communication_testsuite(backend::KI.Backend, AT, sg_size)
 
         # other types, natively or as words or fields
         values = Any[
-            Int8 => i -> Int8(i % 100), UInt8 => i -> UInt8(i), Int16 => i -> Int16(-i),
+            Int8 => i -> Int8(i % 100), UInt8 => i -> i % UInt8, Int16 => i -> Int16(-i),
             UInt16 => i -> (1000i) % UInt16, UInt32 => i -> UInt32(i) << 20, Float16 => Float16,
             Int64 => i -> (Int64(i) << 40) - i, UInt64 => i -> typemax(UInt64) - i,
             Float32 => i -> Float32(i) / 3, Bool => isodd, Char => i -> Char(0x0001F600 + i),
             Bits64 => i -> Bits64((UInt64(i) << 40) - i), Bits16 => i -> Bits16(0xa000 + i),
             ShuffleStruct => i -> ShuffleStruct(i, -i, (i, 2i, 3i)),
             # fields of less than 4 bytes share words
-            Tuple{Bool, Int8, Float16, UInt16} => i -> (isodd(i), Int8(-i), Float16(i), UInt16(1000i % 65536)),
+            Tuple{Bool, Int8, Float16, UInt16} => i -> (isodd(i), -i % Int8, Float16(i), UInt16(1000i % 65536)),
             FallbackStruct => i -> FallbackStruct(isodd(i), Char(64 + i), Bits64(-i), (i, -i, 2i, typemin(Int64) + i)),
         ]
         fp64 && push!(values, Float64 => i -> 1 / i)
