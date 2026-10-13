@@ -10,7 +10,7 @@ using Test
         gcart[C] = C
         group[C] = @index(Group, Linear)
         loc[C] = @index(Local, Linear)
-        ngroups[C] = KI.get_num_groups().x
+        ngroups[C] = (g = KI.get_num_groups(); g.x * g.y * g.z)
     end
 end
 
@@ -78,7 +78,10 @@ function gridstride_testsuite(Backend, AT)
                 end
                 ngroups = Array(out[5])
                 @test allequal(ngroups)
-                if gs isa Int && wgs !== nothing
+                if gs === true && backend isa KernelAbstractions.POCL.POCLBackend
+                    # PoCL already balances the groups over its threads: no stride
+                    wgs === nothing || @test first(ngroups) == nblocks
+                elseif gs isa Int && wgs !== nothing
                     @test first(ngroups) == min(gs, nblocks)
                 elseif wgs !== nothing
                     @test first(ngroups) <= nblocks

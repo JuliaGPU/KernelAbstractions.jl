@@ -255,17 +255,24 @@ and `@ndrange()` returns the extents.
 
 ### Grid-stride launches
 
-By default a kernel is launched with one workgroup per workgroup of the iteration space. With
-`gridstride`, it is launched with fewer, and each one loops over several workgroups of the
-iteration space, those whose linear index is congruent to its own modulo the number of
-workgroups launched:
+A kernel is launched with one workgroup per workgroup of the iteration space, unless the
+backend's grid can't hold that many (see [`KI.max_num_groups`](@ref KernelInterface.max_num_groups)).
+Then it is launched with as many as the grid holds, and each one loops over several workgroups
+of the iteration space, those whose linear index is congruent to its own modulo the number of
+workgroups launched. This happens transparently. `gridstride` asks for such a launch with fewer
+workgroups:
 
 ```julia
 kernel(A, ndrange=size(A), gridstride=true)  # about as many workgroups as can run at once
 kernel(A, ndrange=size(A), gridstride=64)    # at most 64 workgroups
 ```
 
-`@index` returns the same indices as without `gridstride`, `return` skips the rest of the body
+On the `CPU` backend, `gridstride=true` launches a workgroup per workgroup of the iteration
+space, as it already balances the workgroups over its threads. A loop over the workgroups
+keeps it from vectorizing over the work-items, which can make memory-bound kernels several
+times slower.
+
+`@index` returns the same indices as without a grid stride, `return` skips the rest of the body
 for the current index only, and `@uniform` and `@private` are evaluated anew for every
 workgroup of the iteration space. `@localmem` is the same storage for each of them, and its
 contents are undefined at the start of each. A kernel that may synchronize its workgroup (one

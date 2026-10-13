@@ -88,6 +88,9 @@ function launch_tuple(obj::Kernel, args::Tuple; ndrange = nothing, workgroupsize
     # nothing to launch (or compile) for an empty ndrange
     any(iszero, size(blocks(iterspace))) && return nothing
 
+    if gridstride === true && !occupancy_gridstride(backend(obj))
+        gridstride = false
+    end
     if gridstride !== false
         maxgroups = check_gridstride(gridstride)
         Base.inferencebarrier(launch_gridstride)(obj, maxgroups, ndrange, workgroupsize, iterspace, args)
@@ -101,12 +104,27 @@ function launch_tuple(obj::Kernel, args::Tuple; ndrange = nothing, workgroupsize
     if launch === NDLaunch{T}()
         # the common case, specialized statically
         launch_kernel(obj, NDLaunch{T}(), ndrange, workgroupsize, iterspace, args)
+    elseif !(launch isa NDLaunch) && exceeds_grid(obj, workgroupsize, iterspace)
+        # the grid can't hold a group per group of the iteration space: launch as many
+        # groups as it holds, each looping over several groups of the iteration space
+        Base.inferencebarrier(launch_gridstride)(obj, typemax(Int), ndrange, workgroupsize, iterspace, args)
     else
         # the other modes are rare: hide the callee from inference, so that it doesn't
         # analyze the whole launch chain for each of them when compiling every kernel
         Base.inferencebarrier(launch_kernel)(obj, launch, ndrange, workgroupsize, iterspace, args)
     end
     return nothing
+end
+
+# Whether launching `iterspace` on a 1-D grid may take more groups than the grid of the
+# backend holds (an N-d launch fits by construction, see `select_launch`). If the workgroup
+# size will be tuned, `iterspace` is preliminary, and the number of groups is only known
+# after compiling the kernel; a tuned workgroup has at least one work-item of the `ndrange`,
+# so assume the worst, one group per work-item.
+function exceeds_grid(obj::Kernel, workgroupsize, iterspace)
+    tuned = KernelAbstractions.workgroupsize(obj) <: DynamicSize && workgroupsize === nothing
+    groups = saturated_prod(size(tuned ? workitems(iterspace) : blocks(iterspace)))
+    return groups > first(KI.max_num_groups(backend(obj)))
 end
 
 function launch_kernel(obj::Kernel, launch, ndrange, _workgroupsize, iterspace, args::Tuple)
@@ -191,6 +209,13 @@ Adapt.adapt_structure(to, k::GridStride{Sync}) where {Sync} = GridStride{Sync}(A
     return nothing
 end
 
+# Whether `gridstride = true` launches fewer groups than the iteration space has on
+# `backend`. On PoCL it doesn't: PoCL has no limit on the number of groups, it already hands
+# the groups to its threads as they become idle, which is what a grid-stride loop does on a
+# GPU, and a grid-stride loop keeps it from vectorizing over the work-items, which makes
+# memory-bound kernels 2-4x slower (see `gridstride_barrier`).
+occupancy_gridstride(backend) = !(backend isa POCL.POCLBackend)
+
 # Whether a grid-stride launch on `backend` synchronizes the workgroup between the groups of
 # the iteration space even if the kernel doesn't need it. PoCL runs a workgroup on a single
 # thread, looping over its work-items between barriers: without one, it loops over the
@@ -218,7 +243,8 @@ end
     GPUCompiler.mangle_sig(Tuple{F, TT.parameters...})
 
 # Launch `obj` on at most `maxgroups` groups (`nothing`: about as many as can be active at
-# once), each looping over a share of the groups of the iteration space.
+# once), and at most as many as the grid of the backend holds, each looping over a share of
+# the groups of the iteration space.
 function launch_gridstride(obj::Kernel, maxgroups, ndrange, _workgroupsize, iterspace, args::Tuple)
     b = backend(obj)
 

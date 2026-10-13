@@ -632,6 +632,43 @@ end
     end
 end
 
+@testset "grid-stride launch past the grid limits" begin
+    # in a fresh process, with a grid of at most 4 groups per dimension, so that a launch of
+    # more groups is launched as a grid-stride loop
+    julia = Cmd(filter(arg -> !startswith(arg, "--code-coverage"), Base.julia_cmd().exec))
+    script = raw"""
+    using KernelAbstractions, Test
+    import KernelAbstractions.KernelInterface as KI
+    KI.max_num_groups(::POCLBackend) = (4, 4, 4)
+
+    @kernel function indices!(A, G)
+        I = @index(Global, Cartesian)
+        @inbounds A[I] = @index(Global, Linear)
+        @inbounds G[I] = KI.get_num_groups().x
+    end
+    function launch(ndrange; workgroupsize = nothing)
+        A = zeros(Int, ndrange)
+        G = zeros(Int, ndrange)
+        indices!(CPU())(A, G; ndrange, workgroupsize)
+        return A, G
+    end
+
+    # 63 and 5x5 groups: past the grid, so on 4 groups
+    A, G = launch((1000,); workgroupsize = 16)
+    @test A == 1:1000 && all(==(4), G)
+    A, G = launch((20, 20); workgroupsize = (4, 4))
+    @test A == LinearIndices(A) && all(==(4), G)
+    # a tuned workgroup size might take more groups than the grid holds
+    A, G = launch((1000,))
+    @test A == 1:1000 && all(<=(4), G)
+    # 2x2 groups fit an N-d grid
+    A, G = launch((8, 8); workgroupsize = (4, 4))
+    @test A == LinearIndices(A) && all(==(2), G)
+    """
+    cmd = `$julia --startup-file=no --threads=2 --project=$(Base.active_project()) -e $script`
+    @test success(pipeline(cmd; stdout, stderr))
+end
+
 @testset "CPU back-end" begin
     Testsuite.testsuite(CPU, "CPU", POCL, Array, POCL.CLDeviceArray)
 end

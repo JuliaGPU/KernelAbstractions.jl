@@ -545,8 +545,9 @@ synchronize(backend)
 
 Besides `ndrange` and `workgroupsize`, a launch takes `gridstride`: `true` to launch about as many
 workgroups as the device runs at once, or a number of workgroups to launch at most, each of
-which then loops over several workgroups of the iteration space. See *Grid-stride launches* in
-the manual.
+which then loops over several workgroups of the iteration space. A launch that needs more
+workgroups than the backend's grid holds is launched like that without asking. See
+*Grid-stride launches* in the manual.
 
 Use [`workgroupsize`](@ref KernelAbstractions.workgroupsize), [`ndrange`](@ref KernelAbstractions.ndrange),
 and [`backend`](@ref KernelAbstractions.backend) to inspect a kernel's static configuration.
