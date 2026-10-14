@@ -109,14 +109,13 @@ end
 Marker type a `generated=true` kernel returns when its generator failed, carrying the
 error message in its type parameter. A kernel that returns this shows up in the
 `KernelError` GPUCompiler raises for kernels that return a value, which is the only
-channel through which a failure at generation time can be reported.
+channel through which a failure at generation time can be reported. The type prints
+as `GeneratedKernelError{Symbol("message")}`.
 """
 struct GeneratedKernelError{Msg} end
+# Overloading `show` on the type for nicer output would invalidate thousands of
+# `show(::IO, ::Type)` callers when the package loads.
 GeneratedKernelError(msg::AbstractString) = GeneratedKernelError{Symbol(msg)}()
-
-function Base.show(io::IO, ::Type{GeneratedKernelError{Msg}}) where {Msg}
-    return print(io, "KernelAbstractions.GeneratedKernelError(", repr(String(Msg)), ")")
-end
 
 # The left-hand side of a short-form method definition, `f(x) = ...`, possibly
 # wrapped in `where` clauses and a return type annotation: `f(x)::T where {T} = ...`.
