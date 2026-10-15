@@ -24,6 +24,8 @@ struct Session
 end
 
 function Session()
+    cl.pocl_standalone_jll.is_available() ||
+        error("The CPU back-end needs PoCL, which is not available for $(Sys.MACHINE)")
     idx = findfirst(p -> p.vendor == "The pocl project", cl.platforms())
     idx === nothing && error("POCL not available")
     platform = cl.platforms()[idx]

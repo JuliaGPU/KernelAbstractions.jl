@@ -8,7 +8,9 @@ using GPUToolbox: GPUToolbox, @gcsafe_ccall, cooperative_wait
 
 using Printf
 
-const libopencl = pocl_standalone_jll.libpocl
+# PoCL isn't built for every platform Julia runs on (e.g., 32-bit Windows). the package has
+# to load there anyway; `Session` reports the missing library when the back-end is used.
+const libopencl = pocl_standalone_jll.is_available() ? pocl_standalone_jll.libpocl : ""
 
 """
     @checked function foo(...)
