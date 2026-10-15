@@ -40,6 +40,10 @@ function KI.versioninfo(io::IO, ::POCLBackend)
     end
     println(io)
 
+    if !cl.pocl_standalone_jll.is_available()
+        println(io, "POCL is not available for this platform.")
+        return
+    end
     println(io, "POCL Version: ")
     for platform in cl.platforms()
         print(io, "  OpenCL $(platform.opencl_version.major).$(platform.opencl_version.minor)")
