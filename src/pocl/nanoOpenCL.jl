@@ -426,7 +426,8 @@ end
     throw(CLError(res))
 end
 
-function check(f)
+# inlined, so that `Ref`s passed to API calls in `f` can be allocated on the stack
+@inline function check(f)
     res = f()
 
     if res != CL_SUCCESS
