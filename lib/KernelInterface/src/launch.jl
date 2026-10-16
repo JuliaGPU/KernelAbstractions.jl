@@ -206,10 +206,16 @@ Not part of the public interface; used by KernelInterface's and KernelAbstractio
 code.
 """
 @inline function check_work_group_size(kernel::Kernel, items::Dims{3})
-    max_dims = max_work_group_dims(kernel.backend)
-    all(items .<= max_dims) || throw_work_group_dims_error(items, max_dims)
+    check_work_group_dims(kernel.backend, items)
     max_items = max_work_group_size(kernel)
     prod_exceeds(items, max_items) && throw_work_group_size_error(items, max_items)
+    return
+end
+
+# kept out of `check_work_group_size`, which is inlined into code compiled for every kernel
+@noinline function check_work_group_dims(backend::Backend, items::Dims{3})
+    max_dims = max_work_group_dims(backend)
+    all(items .<= max_dims) || throw_work_group_dims_error(items, max_dims)
     return
 end
 
