@@ -32,7 +32,7 @@ steps:
       julia -e 'println("+++ :julia: Running tests")
                 using Pkg
                 check = joinpath(pwd(), ".buildkite", "check_sources.jl")
-                Pkg.test("CUDA"; test_fn=() -> include(check), coverage=true, test_args=["core/kernelabstractions", "core/kernelinterface"])'
+                Pkg.test("CUDA"; test_fn=() -> include(check), coverage="@" * pwd(), test_args=["core/kernelabstractions", "core/kernelinterface"])'
     agents:
       queue: "cuda"
     if: |
@@ -68,7 +68,7 @@ steps:
       julia -e 'println("+++ :julia: Running tests")
                 using Pkg
                 check = joinpath(pwd(), ".buildkite", "check_sources.jl")
-                Pkg.test("Metal"; test_fn=() -> include(check), coverage=true, test_args=["kernelabstractions", "kernelinterface"])'
+                Pkg.test("Metal"; test_fn=() -> include(check), coverage="@" * pwd(), test_args=["kernelabstractions", "kernelinterface"])'
     agents:
       queue: "metal"
     if: |
@@ -107,7 +107,7 @@ steps:
       julia -e 'println("+++ :julia: Running tests")
                 using Pkg
                 check = joinpath(pwd(), ".buildkite", "check_sources.jl")
-                Pkg.test("oneAPI"; test_fn=() -> include(check), coverage=true, test_args=["kernelabstractions", "kernelinterface"])'
+                Pkg.test("oneAPI"; test_fn=() -> include(check), coverage="@" * pwd(), test_args=["kernelabstractions", "kernelinterface"])'
     agents:
       queue: "oneapi"
     if: |
@@ -147,7 +147,7 @@ steps:
       julia -e 'println("+++ :julia: Running tests")
                 using Pkg
                 check = joinpath(pwd(), ".buildkite", "check_sources.jl")
-                Pkg.test("AMDGPU"; test_fn=() -> include(check), coverage=true, test_args=["kernelabstractions", "kernelinterface"])'
+                Pkg.test("AMDGPU"; test_fn=() -> include(check), coverage="@" * pwd(), test_args=["kernelabstractions", "kernelinterface"])'
     agents:
       queue: "rocm"
     if: |
@@ -187,7 +187,7 @@ steps:
                 check = joinpath(pwd(), ".buildkite", "check_sources.jl")
                 tests = ["$(target)/$(test)" for target in ("pocl", "poclc", "nvidia")
                                                  for test in ("kernelabstractions", "kernelinterface")]
-                Pkg.test("OpenCL"; test_fn=() -> include(check), coverage=true, test_args=tests)'
+                Pkg.test("OpenCL"; test_fn=() -> include(check), coverage="@" * pwd(), test_args=tests)'
     agents:
       queue: "cuda"
     if: |
