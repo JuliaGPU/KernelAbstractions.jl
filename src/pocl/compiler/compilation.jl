@@ -190,7 +190,8 @@ const default_extensions = "+SPV_KHR_no_integer_wrap_decoration"
 const _toolchain = Ref{Any}()
 const _compiler_configs = Dict{UInt, OpenCLCompilerConfig}()
 function compiler_config(dev::cl.Device; kwargs...)
-    h = hash(dev, hash(kwargs))
+    # (as a `NamedTuple`: hashing the `Pairs` boxes each value, on every launch)
+    h = hash(dev, hash(values(kwargs)))
     # launches already hold this (reentrant) lock, but reflection doesn't
     return @lock clfunction_lock begin
         config = get(_compiler_configs, h, nothing)

@@ -423,6 +423,29 @@ end
     end
 end
 
+# launching a compiled kernel doesn't allocate
+@testset "POCL launch allocations" begin
+    mod = @eval module $(gensym())
+    import KernelAbstractions.POCL
+    kernel(A) = (A[POCL.get_global_id()] = 1; return)
+    compiler_config(dev, sub_group_size) = POCL.compiler_config(dev; name = nothing, sub_group_size)
+    # `tt` is only specialized on as a type parameter
+    clfunction(::Type{TT}, sub_group_size) where {TT} =
+        POCL.clfunction(kernel, TT; name = nothing, sub_group_size)
+    end
+    # with `args...`, Julia 1.11 and older box the result
+    allocated(f::F, args::Vararg{Any, N}) where {F, N} = (f(args...); @allocated f(args...))
+
+    # these allocate on Julia 1.10, and those that look up compiled code in GPUCompiler on 1.11
+    skip = VERSION < v"1.11"
+    skip_lookup = VERSION < v"1.12"
+    tt = Tuple{typeof(POCL.clconvert(zeros(Int, 4)))}
+    sub_group_size = POCL.device_limits().sub_group_size
+    sub_group_size = sub_group_size > 0 ? sub_group_size : nothing
+    @test allocated(mod.compiler_config, POCL.device(), sub_group_size) == 0 skip = skip
+    @test allocated(mod.clfunction, tt, sub_group_size) == 0 skip = skip_lookup
+end
+
 @testset "POCL exceptions" begin
     @kernel function exception_kernel!(A)
         I = @index(Global, Linear)
