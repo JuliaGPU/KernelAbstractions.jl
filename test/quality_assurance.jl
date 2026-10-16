@@ -144,8 +144,7 @@ end
 function quality_assurance_testsuite()
     @testset "Aqua" begin
         Aqua.test_all(
-            KernelAbstractions;
-            persistent_tasks = (; broken = Sys.islinux()),
+            KernelAbstractions
         )
     end
 
