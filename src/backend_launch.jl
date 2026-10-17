@@ -96,13 +96,11 @@ Core.kwcall(kwargs::NamedTuple, obj::Kernel{<:KI.Backend}, args::Vararg{Any, N})
     launch_tuple(obj, args; kwargs...)
 
 function launch_tuple(obj::Kernel, args::Tuple; ndrange = nothing, workgroupsize = nothing)
-    ndrange, workgroupsize, iterspace, dynamic = launch_config(obj, ndrange, workgroupsize)
+    setup = launch_setup(obj, ndrange, workgroupsize)
     # nothing to launch (or compile) for an empty ndrange
-    any(iszero, size(blocks(iterspace))) && return nothing
+    setup === nothing && return nothing
+    launch, ndrange, workgroupsize, iterspace = setup
 
-    # launch on an N-d grid, computing indices in a narrow type, if possible. this doesn't
-    # depend on the tuned workgroup size, so the context (and thus the kernel) doesn't either.
-    launch = select_launch(obj, workgroupsize, iterspace)
     T = narrow_index_type(backend(obj))
     if launch === NDLaunch{T}()
         # the common case, specialized statically
@@ -113,6 +111,21 @@ function launch_tuple(obj::Kernel, args::Tuple; ndrange = nothing, workgroupsize
         Base.inferencebarrier(launch_kernel)(obj, launch, ndrange, workgroupsize, iterspace, args)
     end
     return nothing
+end
+
+# The parts of the launch that don't depend on the arguments are kept out of
+# `launch_tuple` and `launch_kernel`, which are compiled for every kernel.
+
+# normalize the launch arguments and select the launch mode, or return `nothing` if
+# there is nothing to launch
+@noinline function launch_setup(obj::Kernel, ndrange, workgroupsize)
+    ndrange, workgroupsize, iterspace, dynamic = launch_config(obj, ndrange, workgroupsize)
+    any(iszero, size(blocks(iterspace))) && return nothing
+
+    # launch on an N-d grid, computing indices in a narrow type, if possible. this doesn't
+    # depend on the tuned workgroup size, so the context (and thus the kernel) doesn't either.
+    launch = select_launch(obj, workgroupsize, iterspace)
+    return launch, ndrange, workgroupsize, iterspace
 end
 
 function launch_kernel(obj::Kernel, launch, ndrange, _workgroupsize, iterspace, args::Tuple)
@@ -132,10 +145,25 @@ function launch_kernel(obj::Kernel, launch, subgroups, ndrange, _workgroupsize, 
     kernel = KI.kernel_function(b, obj.f, tt; compiler_options(obj)...)
 
     # tune the workgroup size, keeping the context type (and thus the kernel) the same
-    if workgroupsize(obj) <: DynamicSize && _workgroupsize === nothing
+    threads = if workgroupsize(obj) <: DynamicSize && _workgroupsize === nothing
         range = something(ndrange, static_ndrange(obj))
-        threads = KI.launch_configuration(kernel; nitems = saturated_prod(extents(range))).workgroupsize
-        iterspace, _ = partition(obj, ndrange, launch_workgroupsize(b, launch, threads, range))
+        KI.launch_configuration(kernel; nitems = saturated_prod(extents(range))).workgroupsize
+    else
+        nothing
+    end
+    ctx, groups, items = launch_geometry(obj, launch, subgroups, ndrange, iterspace, ctx, threads)
+
+    KI.check_work_group_size(kernel, items)
+    KI.launch(kernel, groups, items, prepend(ctx, args))
+    return nothing
+end
+
+# the context and launch geometry, re-partitioned for the tuned workgroup size `threads`
+@noinline function launch_geometry(obj::Kernel, launch, subgroups, ndrange, iterspace, ctx,
+                                   threads)
+    if threads !== nothing
+        range = something(ndrange, static_ndrange(obj))
+        iterspace, _ = partition(obj, ndrange, launch_workgroupsize(backend(obj), launch, threads, range))
         ctx = mkcontext(obj, ndrange, iterspace, launch; subgroups)
     end
 
@@ -147,9 +175,7 @@ function launch_kernel(obj::Kernel, launch, subgroups, ndrange, _workgroupsize, 
     else
         groups, items = (prod(groups), 1, 1), (prod(items), 1, 1)
     end
-    KI.check_work_group_size(kernel, items)
-    KI.launch(kernel, groups, items, prepend(ctx, args))
-    return nothing
+    return ctx, groups, items
 end
 
 # The helpers below avoid splatting the arguments, and `map`, which isn't type stable for 32
