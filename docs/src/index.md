@@ -147,6 +147,10 @@ end
 - [`KernelAbstractions.@spawn`](@ref) launches kernels from a task like `Threads.@spawn`
   does, and additionally orders them after the work the spawning task has queued, and can
   select the device the task uses; see the [Quickstart](@ref).
+- [`KernelAbstractions.capture`](@ref) records the device work of a function into a
+  [`KernelAbstractions.Graph`](@ref) that can be replayed with less host overhead, and
+  [`KernelAbstractions.@captured`](@ref) does the same for a block of code. Backends opt in
+  through [`KernelInterface.supports_graphs`](@ref); elsewhere the work runs eagerly.
 - `KernelAbstractions.isgpu` has been removed. Like for `GPU` below, query a capability
   instead.
 - `ndrange` entries may be index ranges, given statically (`kernel(backend, workgroupsize, (-2:N+3, 0:M+1))`)
