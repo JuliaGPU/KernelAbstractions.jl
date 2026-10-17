@@ -423,6 +423,64 @@ end
     end
 end
 
+# launching a compiled kernel doesn't allocate
+@testset "POCL launch allocations" begin
+    mod = @eval module $(gensym())
+    import KernelAbstractions, KernelAbstractions.POCL
+    using KernelAbstractions: @kernel, @index
+    kernel(A) = (A[POCL.get_global_id()] = 1; return)
+    compiler_config(dev) = POCL.compiler_config(dev; name = nothing)
+    # `tt` is only specialized on as a type parameter
+    clfunction(::Type{TT}) where {TT} = POCL.clfunction(kernel, TT; name = nothing)
+    kernel_function(::Type{TT}) where {TT} =
+        KernelAbstractions.KernelInterface.kernel_function(POCL.POCLBackend(), kernel, TT)
+    function launch_tuple(kernel, A, info)
+        event = POCL.launch_tuple(kernel, (A,), info; global_size = (4,), local_size = (4,))
+        wait(event)
+        POCL.cl.clReleaseEvent(event)
+    end
+    @kernel function ka_kernel!(A, n)
+        I = @index(Global, Linear)
+        x = A[I]
+        for _ in 1:n
+            x = sin(x)
+        end
+        @inbounds A[I] = x
+    end
+    launch(kernel, A, n) = kernel(A, n; ndrange = length(A))
+    end
+    # with `args...`, Julia 1.11 and older box the result
+    allocated(f::F, args::Vararg{Any, N}) where {F, N} = (f(args...); @allocated f(args...))
+
+    # these allocate on Julia 1.10, and those that look up compiled code in GPUCompiler on 1.11
+    skip = VERSION < v"1.11"
+    skip_lookup = VERSION < v"1.12"
+    tt = Tuple{typeof(POCL.clconvert(zeros(Int, 4)))}
+    @test allocated(mod.compiler_config, POCL.device()) == 0 skip = skip
+    @test allocated(mod.clfunction, tt) == 0 skip = skip_lookup
+    @test allocated(mod.kernel_function, tt) == 0 skip = skip_lookup
+
+    # neither does waiting for the kernel, also when it takes long enough for the wait to
+    # involve a completion callback (except on 1.11, and to shield it from task cancellation
+    # on 1.14+)
+    skip_wait = VERSION < v"1.12" || isdefined(Base, :CANCEL_TOKEN)
+    A = zeros(Int, 4)
+    info = POCL.exception_info()
+    GC.@preserve info begin
+        info_ptr = Base.unsafe_convert(Ptr{POCL.ExceptionInfo_st}, info)
+        kernel = mod.clfunction(tt)
+        mod.launch_tuple(kernel, A, info_ptr)
+        @test all(==(1), A)
+        @test allocated(mod.launch_tuple, kernel, A, info_ptr) == 0 skip = skip_wait
+    end
+    B = ones(4)
+    kernel = mod.ka_kernel!(CPU(), 4)
+    for n in (1, 100_000)
+        mod.launch(kernel, B, n)
+        @test allocated(mod.launch, kernel, B, n) == 0 skip = skip_wait
+    end
+end
+
 @testset "POCL exceptions" begin
     @kernel function exception_kernel!(A)
         I = @index(Global, Linear)

@@ -426,7 +426,8 @@ end
     throw(CLError(res))
 end
 
-function check(f)
+# inlined, so that `Ref`s passed to API calls in `f` can be allocated on the stack
+@inline function check(f)
     res = f()
 
     if res != CL_SUCCESS
@@ -1355,8 +1356,9 @@ function enqueue_kernel(
         if length(local_work_size) != work_dim
             throw(ArgumentError("global_work_size and local_work_size have differing dims"))
         end
+        # inlined, so that `ret_event` can be allocated on the stack
         ret_event = Ref{cl_event}()
-        clEnqueueNDRangeKernel(
+        @inline clEnqueueNDRangeKernel(
             queue(), k, cl_uint(work_dim),
             work_size(global_work_size), work_size(local_work_size), ret_event
         )

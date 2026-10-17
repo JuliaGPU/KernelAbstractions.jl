@@ -1,6 +1,6 @@
 name = "KernelAbstractions"
 uuid = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
-version = "0.10.0"
+version = "0.10.1"
 authors = ["Valentin Churavy <v.churavy@gmail.com> and contributors"]
 
 [workspace]
@@ -43,7 +43,7 @@ StaticArraysExt = "StaticArrays"
 Adapt = "0.4, 1.0, 2.0, 3.0, 4"
 Atomix = "1.5"
 GPUCompiler = "2.13"
-GPUToolbox = "3.3.3"
+GPUToolbox = "3.4.1"
 KernelInterface = "0.4"
 LLVM = "10"
 LinearAlgebra = "1.6"
