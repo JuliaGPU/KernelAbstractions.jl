@@ -483,6 +483,32 @@ end
     @test occursin("throw_boundserror", out)
 end
 
+@testset "POCL fused multiply-add" begin
+    # SPIR-V can't express that `muladd` may be fused, so it is fused into OpenCL's `fma` on
+    # devices with a fused multiply-add
+    dev = POCL.device()
+    has_fma = dev.single_fp_config & POCL.cl.CL_FP_FMA != 0
+    @test POCL.compiler_config(dev).target.fma == has_fma
+    @test !POCL.compiler_config(dev; fma = false).target.fma
+
+    function muladd_kernel!(y, a, x)
+        i = POCL.get_global_id()
+        @inbounds y[i] = muladd(a[i], x[i], y[i])
+        return
+    end
+    a, x, y0 = rand(Float32, 64), rand(Float32, 64), rand(Float32, 64)
+    fused, unfused = fma.(a, x, y0), a .* x .+ y0
+    @assert fused != unfused
+
+    y = copy(y0)
+    @opencl global_size = 64 muladd_kernel!(y, a, x)
+    @test y == (has_fma ? fused : unfused)
+
+    y = copy(y0)
+    @opencl global_size = 64 fma = false muladd_kernel!(y, a, x)
+    @test y == unfused
+end
+
 @testset "POCL compilation cache" begin
     mod = @eval module $(gensym())
     @noinline child() = return

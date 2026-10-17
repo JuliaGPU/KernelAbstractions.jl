@@ -155,6 +155,9 @@ const CL_DEVICE_MIN_DATA_TYPE_ALIGN_SIZE = 0x101a
 
 const CL_DEVICE_SINGLE_FP_CONFIG = 0x101b
 
+# `cl_device_fp_config` bits
+const CL_FP_FMA = 1 << 5
+
 const CL_DEVICE_GLOBAL_MEM_CACHE_TYPE = 0x101c
 
 const CL_DEVICE_GLOBAL_MEM_CACHELINE_SIZE = 0x101d
@@ -993,6 +996,15 @@ end
         clGetDeviceInfo(d, CL_DEVICE_EXTENSIONS, size[], result, C_NULL)
         bs = GC.@preserve result unsafe_string(pointer(result))
         return String[string(s) for s in split(bs)]
+    end
+
+    # the single-precision floating-point capabilities (`CL_FP_*` bits). unlike the
+    # double-precision ones, these only list a fused multiply-add if the device has one, as
+    # OpenCL doesn't mandate it
+    if s == :single_fp_config
+        config = Ref{cl_bitfield}(0)
+        clGetDeviceInfo(d, CL_DEVICE_SINGLE_FP_CONFIG, sizeof(cl_bitfield), config, C_NULL)
+        return config[]
     end
 
     # cl_ext_float_atomics: per-precision bitfields of natively supported floating-point
