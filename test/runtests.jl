@@ -426,12 +426,13 @@ end
 # launching a compiled kernel doesn't allocate
 @testset "POCL launch allocations" begin
     mod = @eval module $(gensym())
-    import KernelAbstractions.POCL
+    import KernelAbstractions, KernelAbstractions.POCL
     kernel(A) = (A[POCL.get_global_id()] = 1; return)
-    compiler_config(dev, sub_group_size) = POCL.compiler_config(dev; name = nothing, sub_group_size)
+    compiler_config(dev) = POCL.compiler_config(dev; name = nothing)
     # `tt` is only specialized on as a type parameter
-    clfunction(::Type{TT}, sub_group_size) where {TT} =
-        POCL.clfunction(kernel, TT; name = nothing, sub_group_size)
+    clfunction(::Type{TT}) where {TT} = POCL.clfunction(kernel, TT; name = nothing)
+    kernel_function(::Type{TT}) where {TT} =
+        KernelAbstractions.KernelInterface.kernel_function(POCL.POCLBackend(), kernel, TT)
     end
     # with `args...`, Julia 1.11 and older box the result
     allocated(f::F, args::Vararg{Any, N}) where {F, N} = (f(args...); @allocated f(args...))
@@ -440,10 +441,9 @@ end
     skip = VERSION < v"1.11"
     skip_lookup = VERSION < v"1.12"
     tt = Tuple{typeof(POCL.clconvert(zeros(Int, 4)))}
-    sub_group_size = POCL.device_limits().sub_group_size
-    sub_group_size = sub_group_size > 0 ? sub_group_size : nothing
-    @test allocated(mod.compiler_config, POCL.device(), sub_group_size) == 0 skip = skip
-    @test allocated(mod.clfunction, tt, sub_group_size) == 0 skip = skip_lookup
+    @test allocated(mod.compiler_config, POCL.device()) == 0 skip = skip
+    @test allocated(mod.clfunction, tt) == 0 skip = skip_lookup
+    @test allocated(mod.kernel_function, tt) == 0 skip = skip_lookup
 end
 
 @testset "POCL exceptions" begin

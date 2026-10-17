@@ -165,7 +165,8 @@ end
 
 The GPUCompiler configuration for compiling kernels for `dev`, cached per device and
 keyword arguments. Besides those of `CompilerConfig` (`kernel`, `name`, `always_inline`,
-`debug_level`) and `sub_group_size`, it takes:
+`debug_level`) and `sub_group_size` (the sub-group width to require, or `nothing` for none,
+defaulting to the width `KI.sub_group_size` reports), it takes:
 
 - `atomics`: override the atomic capabilities GPUCompiler may select directly. This
   replaces the whole device-derived `SPIRVAtomics` (see `spirv_atomics`), and defaults to
@@ -205,7 +206,7 @@ end
 @noinline function _compiler_config(
         dev; kernel = true, name = nothing, always_inline = false,
         debug_level = Base.JLOptions().debug_level,
-        sub_group_size::Union{Nothing, Int} = 32,
+        sub_group_size::Union{Nothing, Int} = default_sub_group_size(dev),
         atomics::SPIRVAtomics = spirv_atomics(dev),
         extensions::Union{Nothing, String} = nothing, kwargs...
     )

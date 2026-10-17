@@ -23,6 +23,15 @@ struct Session
     }
 end
 
+# the sub-group width kernels are compiled for, or `nothing` if the device has no sub-groups.
+# POCL can technically support any sub-group size; prefer the common GPU ones, and only
+# widths of up to 64, so that `KI.sub_group_ballot` (a `UInt64` mask) covers every lane.
+function default_sub_group_size(device::cl.Device)
+    sg_sizes = filter(<=(64), device.sub_group_sizes)
+    common = filter(in(sg_sizes), [32, 64, 16, sg_sizes...])
+    return isempty(common) ? nothing : first(common)
+end
+
 function Session()
     cl.pocl_standalone_jll.is_available() ||
         error("The CPU back-end needs PoCL, which is not available for $(Sys.MACHINE)")
@@ -39,15 +48,12 @@ function Session()
     context = cl.Context(device)
 
     sizes = device.max_work_item_size
-    # POCL can technically support any sub-group size; prefer the common GPU ones, and only
-    # widths of up to 64, so that `KI.sub_group_ballot` (a `UInt64` mask) covers every lane
-    sg_sizes = filter(<=(64), device.sub_group_sizes)
-    common = filter(in(sg_sizes), [32, 64, 16, sg_sizes...])
+    sub_group_size = default_sub_group_size(device)
     limits = (;
         max_work_group_size = Int(device.max_work_group_size),
         max_work_group_dims = ntuple(d -> d <= length(sizes) ? sizes[d] : 1, 3),
         # 0 if the device has no sub-groups
-        sub_group_size = isempty(common) ? 0 : first(common),
+        sub_group_size = something(sub_group_size, 0),
         # the threads PoCL runs work-groups on
         compute_units = Int(device.max_compute_units),
     )
