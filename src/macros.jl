@@ -72,6 +72,11 @@ function __kernel(expr, __source__::LineNumberNode, __module__::Module, force_in
         end
         def_gpu[:body] = Expr(:if, Expr(:generated), body, Expr(:meta, :generated_only))
     end
+    # Julia takes a method's location from the first `LineNumberNode` of its body, and only
+    # tracks coverage of methods whose file is tracked. The transformed body starts with
+    # generated statements, which would leave the kernel at `none:0` and thus untracked under
+    # `--code-coverage=@path`.
+    def_gpu[:body] = Expr(:block, __source__, def_gpu[:body])
     gpu_function = combinedef(def_gpu)
 
     # Properties of the kernel are methods of its function, rather than of a function of
