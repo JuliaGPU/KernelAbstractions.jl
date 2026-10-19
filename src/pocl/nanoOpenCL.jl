@@ -2,7 +2,8 @@ module nanoOpenCL
 
 using ..POCL: platform, device, context, queue
 
-import pocl_standalone_jll
+# experimental PoCL build with cl_pocl_host_kernel; it provides the same library
+import pocl_standalone_next_jll as pocl_standalone_jll
 
 using GPUToolbox: GPUToolbox, @gcsafe_ccall, cooperative_wait
 
