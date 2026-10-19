@@ -234,6 +234,7 @@ end
 
 
 ## exceptions
+## exceptions
 
 """
     KernelException
@@ -267,7 +268,57 @@ end
 
 const clfunction_lock = ReentrantLock()
 
+# The kernel `clfunction` last returned for a callable type, argument types and compiler
+# keyword argument types. Looking it up again takes a lock and queries GPUCompiler's cache,
+# which is most of the cost of launching a small kernel, so `clfunction` reuses it while the
+# task's world age, the session's context and the keyword values are the same. It only holds
+# the compiled artifacts, not the callable, which can hold large objects.
+mutable struct KernelCacheSlot
+    Base.@atomic entry::Any  # nothing, or (; world, context, kwargs, kernel, rng_state)
+end
+
+tls_world_age() = ccall(:jl_get_tls_world_age, UInt, ())
+
+@generated function kernel_cache_slot(::Type{F}, ::Type{TT}, ::Type{K}) where {F, TT, K}
+    slot = KernelCacheSlot(nothing)
+    return :($slot)
+end
+
+@inline function lookup_cached_kernel(::Type{F}, tt::Type{TT}, kwargs::K) where {F, TT, K}
+    # lookups report to `@device_code_*`, so don't bypass them while it is active
+    GPUCompiler.active_compile_hook[] === nothing || return nothing
+    entry = Base.@atomic :acquire kernel_cache_slot(F, TT, K).entry
+    entry === nothing && return nothing
+    entry = entry::@NamedTuple{
+        world::UInt, context::cl.Context, kwargs::K, kernel::cl.Kernel, rng_state::Bool,
+    }
+    if entry.world == tls_world_age() && entry.context === context() &&
+            isequal(entry.kwargs, kwargs)
+        return entry
+    end
+    return nothing
+end
+
 function clfunction(f::F, tt::TT = Tuple{}; kwargs...) where {F, TT}
+    cached = lookup_cached_kernel(F, tt, values(kwargs))
+    cached === nothing || return HostKernel{F, tt}(f, cached.kernel, cached.rng_state)
+    return clfunction_slow(f, tt; kwargs...)
+end
+
+@noinline function clfunction_slow(f::F, tt::TT; kwargs...) where {F, TT}
+    world = tls_world_age()
+    kernel = clfunction_uncached(f, tt; kwargs...)
+    if ccall(:jl_generating_output, Cint, ()) != 1
+        entry = (;
+            world, context = context(), kwargs = values(kwargs), kernel = kernel.fun,
+            kernel.rng_state,
+        )
+        Base.@atomic :release kernel_cache_slot(F, tt, typeof(values(kwargs))).entry = entry
+    end
+    return kernel
+end
+
+function clfunction_uncached(f::F, tt::TT = Tuple{}; kwargs...) where {F, TT}
     Base.@lock clfunction_lock begin
         config = compiler_config(device(); kwargs...)::OpenCLCompilerConfig
         source = methodinstance(F, tt)
