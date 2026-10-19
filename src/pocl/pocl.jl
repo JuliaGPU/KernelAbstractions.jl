@@ -21,6 +21,22 @@ struct Session
         max_work_group_size::Int, max_work_group_dims::NTuple{3, Int}, sub_group_size::Int,
         compute_units::Int,
     }
+    # the threads to run host kernels on (see `host_kernel`), or 0 if they're not used
+    host_kernel_threads::Int
+    # host kernel launches that took this many cycle counter ticks or more are long, see
+    # `host_dispatch`
+    host_kernel_long_ticks::UInt64
+end
+
+# a cheap monotonic counter (the TSC on x86, CNTVCT on AArch64); 0 where there is none
+@inline cycle_counter() = ccall("llvm.readcyclecounter", llvmcall, UInt64, ())
+
+function ticks_per_ns()
+    t0, c0 = time_ns(), cycle_counter()
+    while time_ns() - t0 < 1_000_000
+    end
+    t1, c1 = time_ns(), cycle_counter()
+    return (c1 - c0) / (t1 - t0)
 end
 
 # the sub-group width kernels are compiled for, or `nothing` if the device has no sub-groups.
@@ -58,7 +74,21 @@ function Session()
         compute_units = Int(device.max_compute_units),
     )
 
-    return Session(platform, device, context, limits)
+    # run kernels on Julia's threads, if the PoCL build supports it
+    host_kernel_threads = if "cl_pocl_host_kernel" in device.extensions &&
+            get(ENV, "JULIA_KA_POCL_HOST_KERNELS", "1") != "0"
+        min(limits.compute_units, Threads.nthreads(:default))
+    else
+        0
+    end
+
+    # 50 µs, which is long compared to the cost of letting other tasks run
+    rate = host_kernel_threads > 0 ? ticks_per_ns() : 0.0
+    host_kernel_long_ticks = rate > 0 ? round(UInt64, 50_000 * rate) : typemax(UInt64)
+
+    return Session(
+        platform, device, context, limits, host_kernel_threads, host_kernel_long_ticks
+    )
 end
 
 # created on first use, so that loading the package doesn't initialize PoCL
@@ -148,6 +178,8 @@ function __init__()
     initialization_world[] = Base.get_world_counter()
     # there shouldn't be any session from precompilation, see `reset_session_state!`
     Base.@atomic session_cache.session = nothing
+    # nor scratch areas, whose pointers don't survive serialization
+    Base.@atomic host_scratch.slots = HostScratch[]
     return
 end
 

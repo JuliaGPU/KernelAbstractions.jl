@@ -489,7 +489,12 @@ end
     kernel = mod.ka_kernel!(CPU(), 4)
     for n in (1, 100_000)
         mod.launch(kernel, B, n)
-        @test allocated(mod.launch, kernel, B, n) == 0 skip = skip_wait
+        if n > 1 && POCL.session().host_kernel_threads > 0
+            # a long host kernel launch runs on a task that the launching task waits for
+            @test allocated(mod.launch, kernel, B, n) < 1024
+        else
+            @test allocated(mod.launch, kernel, B, n) == 0 skip = skip_wait
+        end
     end
 end
 
