@@ -285,6 +285,18 @@ end
     )
 end
 
+# the RNG state takes two UInt32s of local memory per sub-group
+@testset "POCL device RNG: local memory" begin
+    rng_kernel(A) = (A[POCL.get_global_id()] = rand(Float32); return)
+    A = zeros(Float32, 32)
+    kernel = POCL.clfunction(rng_kernel, Tuple{typeof(POCL.clconvert(A))})
+    @test kernel.rng_state
+    kernel(A; global_size = 32, local_size = 32)
+    num_sub_groups = POCL.cl.sub_group_info(kernel.fun, POCL.device(), Csize_t[32]).sub_group_count
+    local_mem = POCL.cl.work_group_info(kernel.fun, POCL.device()).local_mem_size
+    @test local_mem == 2 * sizeof(UInt32) * num_sub_groups
+end
+
 # `randn`/`randexp` for Float16 route through Random's table-free fallback, whose polar
 # transform overflows in Float16 and whose `log1p` isn't available for Float16 on the
 # device. The device overlays compute in Float32 and convert, so results stay finite.
