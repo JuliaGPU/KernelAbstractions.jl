@@ -43,7 +43,8 @@ end
 ```
 
 The task's work on that device still runs after the spawning task's earlier work on its own
-device.
+device. `device=` only affects the spawned task: neither the spawning task nor tasks created
+later change device.
 
 !!! note
     `@spawn` does not order the task's work against work the spawning task queues

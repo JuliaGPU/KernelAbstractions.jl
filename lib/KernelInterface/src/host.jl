@@ -160,6 +160,10 @@ end
 Select the active device for `backend`. `id` is a 1-based device index; an `id` outside
 `1:ndevices(backend)` throws an `ArgumentError`.
 
+The selection applies to the calling task only. Which device a new task starts on is up to
+the backend, and is not changed by `device!`. To run a task on a given device, use
+[`KernelAbstractions.@spawn`](@ref) with `device=id`.
+
 `device!` is not a synchronization point: work queued before the switch is not ordered
 with respect to work queued after it. To order across a switch, either [`synchronize`](@ref)
 beforehand, or bracket the switch with [`record_event`](@ref) and [`wait_event`](@ref).
@@ -173,7 +177,8 @@ device!(CUDABackend(), 2)  # use the second CUDA device
 !!! note
     Backends supporting multiple devices **must** implement `device!(backend::Backend, id::Int)`,
     along with [`ndevices`](@ref) and [`device`](@ref). The fallback only works for a single
-    device, and throws if [`ndevices`](@ref) reports more.
+    device, and throws if [`ndevices`](@ref) reports more. `device!` **must not** change
+    the device of other tasks, nor the one that tasks created afterwards start on.
 """
 function device!(backend::Backend, id::Int)
     n = ndevices(backend)

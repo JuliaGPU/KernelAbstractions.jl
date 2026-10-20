@@ -50,9 +50,9 @@ A few rules hold throughout the interface:
 
 - **Execution is task-local.** A backend value (e.g. `CUDABackend()`) identifies a
   backend and its configuration, such as compiler options. Each Julia task has an active
-  device per backend (selected with [`device!`](@ref)) and a queue on it. Host-side
-  queries and compilation use the active device, allocations go to it, and copies and
-  launches go to the calling task's queue. [`synchronize`](@ref) waits for that queue,
+  device per backend (selected with [`device!`](@ref), which affects no other task) and a
+  queue on it. Host-side queries and compilation use the active device, allocations go to
+  it, and copies and launches go to the calling task's queue. [`synchronize`](@ref) waits for that queue,
   and [`record_event`](@ref)/[`wait_event`](@ref) order work across queues. Switching
   devices doesn't synchronize.
 - **Compiled kernels belong to a device.** Queries on a [`Kernel`](@ref)

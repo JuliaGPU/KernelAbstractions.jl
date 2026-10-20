@@ -36,6 +36,12 @@ the docstrings of both functions for what that requires. Backends with more than
 recorded on another device, since `@spawn backend device=id` records on the spawning task's
 device.
 
+[`device!`](@ref KernelAbstractions.device!) **must** only switch the calling task: it must
+not change the device of other tasks, nor the one that tasks created afterwards start on.
+Which device a fresh task starts on is up to the backend. Native APIs that also set a
+default for new tasks, like `CUDA.device!`, therefore can't implement `device!` directly;
+use the vendor library's task-local switch instead.
+
 Backends that track which queue last used an array, and wait for that queue before using the
 array on another one, **should** skip that wait when the current queue is already ordered
 after the array's last use: through an event recorded on the previous queue after that use
