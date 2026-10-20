@@ -581,10 +581,36 @@ end
 function (l::HostLaunch)()
     if l.nchunks == 1
         l(1)
-    elseif l.long
-        ThreadTeams.tforeach(l, 1:l.nchunks; scheduler = host_greedy_team)
     else
-        ThreadTeams.tforeach(l, 1:l.nchunks; scheduler = host_team)
+        # an interrupted team region returns while other threads still run their ranges,
+        # which use the launch's arguments, so only let it be interrupted afterwards.
+        # this also covers the worker task of a long launch.
+        uninterruptible(l.long ? run_greedy_team : run_team, l)
+    end
+    return
+end
+
+run_team(l::HostLaunch) = ThreadTeams.tforeach(l, 1:l.nchunks; scheduler = host_team)
+run_greedy_team(l::HostLaunch) =
+    ThreadTeams.tforeach(l, 1:l.nchunks; scheduler = host_greedy_team)
+
+# `f(x)`, with interrupts and (on Julia 1.14+) cancellation delivered after it returns
+@inline function uninterruptible(f::F, x) where {F}
+    @static if isdefined(Base, :CANCEL_TOKEN)
+        if Base.CANCEL_TOKEN[] === nothing
+            f(x)
+        else
+            Base.ScopedValues.with(() -> f(x), Base.CANCEL_TOKEN => nothing)
+            Base.checkcancel(Base.CANCEL_TOKEN[])
+        end
+    else
+        # `disable_sigint`, without a closure
+        Base.sigatomic_begin()
+        try
+            f(x)
+        finally
+            Base.sigatomic_end()
+        end
     end
     return
 end
@@ -636,27 +662,14 @@ function acquire_host_launch_worker()
 end
 
 # The argument storage lives on the caller's stack. Even an interrupted wait must finish
-# before that storage can be released. Cancellation shielding is needed on Julia 1.14+.
+# before that storage can be released.
 @noinline function host_dispatch_long(launch::HostLaunch)
     # tasks spawned during precompilation must not outlive it
     if ccall(:jl_generating_output, Cint, ()) != 0
         launch()
         return
     end
-    @static if isdefined(Base, :CANCEL_TOKEN)
-        if Base.CANCEL_TOKEN[] === nothing
-            host_dispatch_long_uninterrupted(launch)
-        else
-            Base.ScopedValues.with(Base.CANCEL_TOKEN => nothing) do
-                host_dispatch_long_uninterrupted(launch)
-            end
-            Base.checkcancel(Base.CANCEL_TOKEN[])
-        end
-    else
-        disable_sigint() do
-            host_dispatch_long_uninterrupted(launch)
-        end
-    end
+    uninterruptible(host_dispatch_long_uninterrupted, launch)
     return
 end
 

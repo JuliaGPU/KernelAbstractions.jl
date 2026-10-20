@@ -120,6 +120,34 @@ end
         h = POCL.host_kernel(k, sizes)
         @test h !== nothing
 
+        # the other threads still use the arguments when the launching task is interrupted,
+        # so cancellation is only delivered once every work-group finished. (SIGINT isn't
+        # tested: it lands in whichever task runs on thread 1, and on macOS before Julia
+        # 1.13 a process can lose every SIGINT, see JuliaLang/julia#62471.)
+        isdefined(Base, :CANCEL_TOKEN) &&
+            @testset "cancelled launches ($path)" for path in (:short, :long)
+            # the first work-group has nothing to do, the others take a while
+            fill!(n, 10^6)
+            n[1] = 0
+            fill!(A, 0)
+            Base.@atomic :monotonic h.last_duration = path == :short ? 0 : typemax(UInt64)
+            # a token cancelled beforehand is cancelled throughout the launch
+            src = Base.CancellationTokenSource()
+            Base.cancel!(src)
+            finished = nothing
+            err = try
+                Base.ScopedValues.with(Base.CANCEL_TOKEN => Base.CancellationToken(src)) do
+                    k(A, n; sizes...)
+                end
+                nothing
+            catch err
+                finished = count(!=(0), A)
+                err
+            end
+            @test err isa Base.CancellationRequest
+            @test finished == nt
+        end
+
         @testset "launch from a finalizer" begin
             # the first work-group has nothing to do, so a launch split over the threads
             # would wait for the others, which may switch tasks
