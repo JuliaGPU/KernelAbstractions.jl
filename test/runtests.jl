@@ -489,12 +489,68 @@ end
     kernel = mod.ka_kernel!(CPU(), 4)
     for n in (1, 100_000)
         mod.launch(kernel, B, n)
-        if n > 1 && POCL.session().host_kernel_threads > 0
-            # a long host kernel launch runs on a task that the launching task waits for
-            @test allocated(mod.launch, kernel, B, n) < 1024
-        else
-            @test allocated(mod.launch, kernel, B, n) == 0 skip = skip_wait
+        @test allocated(mod.launch, kernel, B, n) == 0 skip = skip_wait
+    end
+end
+
+@testset "POCL host launch workers" begin
+    if POCL.session().host_kernel_threads > 0
+        mod = @eval module $(gensym())
+        using KernelAbstractions.POCL
+        function kernel(A, n)
+            i = POCL.get_global_id()
+            x = A[i]
+            for _ in 1:n
+                x = sin(x)
+            end
+            A[i] = x
+            return
         end
+        end
+        A = ones(4)
+        kernel = POCL.clfunction(mod.kernel, POCL.argument_types((A, 1)))
+        sizes = (; global_size = (4, 1, 1), local_size = (4, 1, 1))
+        h = POCL.host_kernel(kernel, sizes)
+        @test h !== nothing
+        # Force the long path even on machines where this kernel finishes quickly.
+        function launch_long(kernel, h, A, n, sizes)
+            Base.@atomic :monotonic h.last_duration = typemax(UInt64)
+            kernel(A, n; sizes...)
+        end
+        allocated(f::F, args...) where {F} = (f(args...); @allocated f(args...))
+        # Shielding an active cancellation scope allocates on Julia 1.14+.
+        bytes = @static if isdefined(Base, :CANCEL_TOKEN)
+            Base.ScopedValues.with(Base.CANCEL_TOKEN => nothing) do
+                allocated(launch_long, kernel, h, A, 1, sizes)
+            end
+        else
+            allocated(launch_long, kernel, h, A, 1, sizes)
+        end
+        @test bytes == 0 skip = VERSION < v"1.12"
+
+        # Concurrent callers need separate requests and argument storage.
+        @sync for _ in 1:4
+            Threads.@spawn begin
+                B = ones(4)
+                for _ in 1:3
+                    launch_long(kernel, h, B, 1000, sizes)
+                end
+                expected = 1.0
+                for _ in 1:3000
+                    expected = sin(expected)
+                end
+                @test all(x -> isapprox(x, expected), B)
+            end
+        end
+
+        # A Julia-side failure is reported to the caller, and the worker remains usable.
+        # Zero scratch alignment fails before entering PoCL with the dummy handle.
+        bad = POCL.cl.HostKernelHandle(C_NULL, (1, 1, 1), 0, 0)
+        launch = POCL.HostLaunch(bad, C_NULL, C_NULL, 1, 1, 1, C_NULL, true)
+        @test_throws DivideError POCL.host_dispatch_long(launch)
+        fill!(A, 1)
+        launch_long(kernel, h, A, 1, sizes)
+        @test A ≈ fill(sin(1.0), 4)
     end
 end
 

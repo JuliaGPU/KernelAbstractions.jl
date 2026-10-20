@@ -508,6 +508,7 @@ const host_scratch = HostScratchSlots(HostScratch[], ReentrantLock())
         # may yield, so look the thread up again afterwards
         add_host_scratch_slots()
     end
+    return
 end
 
 # doesn't yield
@@ -589,6 +590,102 @@ function (l::HostLaunch)()
     return
 end
 
+# Reuse tasks for long launches. Only the pointer-based HostLaunch crosses this boundary,
+# so neither the worker nor its task closure specializes on the kernel or argument types.
+mutable struct HostLaunchWorker
+    const work::Base.Event
+    const done::Base.Event
+    # Store the handle separately so the remaining, isbits fields can be stored inline.
+    # Storing HostLaunch itself would box it on every submission.
+    h::Union{Nothing, cl.HostKernelHandle}
+    args::Tuple{Ptr{Ptr{Cvoid}}, Ptr{Csize_t}, Int, Int, Int, Ptr{ExceptionInfo_st}, Bool}
+    error::Any
+end
+
+# Reuse idle workers last-in-first-out; the pool grows only with concurrent long launches.
+const idle_host_launch_workers = HostLaunchWorker[]
+const host_launch_worker_lock = ReentrantLock()
+
+function host_launch_worker(w::HostLaunchWorker)
+    while true
+        wait(w.work)
+        try
+            HostLaunch(w.h::cl.HostKernelHandle, w.args...)()
+        catch err
+            w.error = err
+        finally
+            w.h = nothing
+            notify(w.done)
+        end
+    end
+    return
+end
+
+function acquire_host_launch_worker()
+    return @lock host_launch_worker_lock begin
+        if isempty(idle_host_launch_workers)
+            w = HostLaunchWorker(
+                Base.Event(true), Base.Event(true), nothing,
+                (C_NULL, C_NULL, 0, 0, 0, C_NULL, false), nothing
+            )
+            Threads.@spawn host_launch_worker(w)
+            w
+        else
+            pop!(idle_host_launch_workers)
+        end
+    end
+end
+
+# The argument storage lives on the caller's stack. Even an interrupted wait must finish
+# before that storage can be released. Cancellation shielding is needed on Julia 1.14+.
+@noinline function host_dispatch_long(launch::HostLaunch)
+    if ccall(:jl_generating_output, Cint, ()) != 0 || GC.in_finalizer()
+        launch()
+        return
+    end
+    @static if isdefined(Base, :CANCEL_TOKEN)
+        if Base.CANCEL_TOKEN[] === nothing
+            host_dispatch_long_uninterrupted(launch)
+        else
+            Base.ScopedValues.with(Base.CANCEL_TOKEN => nothing) do
+                host_dispatch_long_uninterrupted(launch)
+            end
+            Base.checkcancel(Base.CANCEL_TOKEN[])
+        end
+    else
+        disable_sigint() do
+            host_dispatch_long_uninterrupted(launch)
+        end
+    end
+    return
+end
+
+function host_dispatch_long_uninterrupted(launch::HostLaunch)
+    w = acquire_host_launch_worker()
+    w.h = launch.h
+    w.args = (
+        launch.arg_values, launch.num_groups, launch.total, launch.nchunks,
+        launch.items, launch.exception_info, launch.long,
+    )
+    notify(w.work)
+    interrupt = nothing
+    while true
+        try
+            wait(w.done)
+            break
+        catch err
+            err isa InterruptException || rethrow()
+            interrupt = err
+        end
+    end
+    err = w.error
+    w.error = nothing
+    @lock host_launch_worker_lock push!(idle_host_launch_workers, w)
+    interrupt === nothing || throw(interrupt)
+    err === nothing || throw(err)
+    return
+end
+
 # not inlined: it only depends on the number of arguments, so kernels share it
 @noinline function host_dispatch(
         h::cl.HostKernelHandle, arg_values::NTuple{N, Ptr{Cvoid}}, num_groups::Dims{3},
@@ -617,7 +714,7 @@ end
             h, args_ptr, groups_ptr, total, nchunks, items, exception_info, long
         )
         if long
-            wait(Threads.@spawn launch())
+            host_dispatch_long(launch)
         else
             launch()
         end
