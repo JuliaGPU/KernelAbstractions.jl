@@ -49,7 +49,20 @@ function events_testsuite(b::KI.Backend)
     time_launch(base)
     iters = clamp(round(Int, base * 0.01 / time_launch(base)), base, 2^30)
     launches = 20
-    expected = launches * time_launch(iters)
+    queue_launches() = for v in 1:launches
+        slow_fill(Float32(v), iters)
+    end
+
+    # The time it takes for the queued launches to drain, measured like the test below
+    # but waiting with a plain `synchronize`. Scaling a single launch would also count
+    # its launch and synchronization overhead once per launch, which can make up most of
+    # it (e.g. under compute-sanitizer), while the queue drains after paying it once.
+    expected = minimum(1:3) do _
+        queue_launches()
+        start = time_ns()
+        KI.synchronize(b)
+        (time_ns() - start) / 1.0e9
+    end
 
     @testset "ordered across tasks" begin
         # The child queues nothing but the wait, so its `synchronize` can only return
@@ -64,9 +77,7 @@ function events_testsuite(b::KI.Backend)
         # Collect beforehand so that a GC pause is unlikely to land inside the
         # measurement and mask a missing wait.
         GC.gc()
-        for v in 1:launches
-            slow_fill(Float32(v), iters)
-        end
+        queue_launches()
         start = time_ns()
         ev = KI.record_event(b)
         task = Threads.@spawn begin
