@@ -10,7 +10,7 @@ Abstract supertype for all KernelInterface backends. Backends subtype it directl
 
 A backend value identifies a backend and its configuration (e.g. compiler options). The
 device and the queue that operations use are task-local: each task selects its active device
-with [`device!`](@ref). Host-side queries answer for the calling task's active device, and
+with [`device!`](@ref), without affecting other tasks. Host-side queries answer for the calling task's active device, and
 work is queued on the calling task's queue of that device. Use [`get_backend`](@ref) to obtain the
 backend of an array and [`allocate`](@ref) to create storage on a backend.
 
