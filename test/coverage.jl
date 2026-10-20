@@ -59,6 +59,8 @@ function tracked_lines(tracefile)
 end
 
 function run_covered(dir)
+    # Julia canonicalizes the coverage filter, so use the same path for source locations.
+    dir = realpath(dir)
     script = joinpath(dir, SCRIPT_NAME)
     write(script, SCRIPT)
     log = joinpath(dir, "log.txt")
