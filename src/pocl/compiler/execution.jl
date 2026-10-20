@@ -542,9 +542,8 @@ end
 @inline function host_run(
         h::cl.HostKernelHandle, arg_values::Ptr{Ptr{Cvoid}}, num_groups::Ptr{Csize_t},
         first_group::Int, group_count::Int, items::Int, exception_info::Ptr{ExceptionInfo_st},
-        long::Bool
+        long::Bool, scratch::Ptr{Cvoid}
     )
-    scratch = host_scratch_ptr(h)
     gc_safe = long || group_count * items >= host_kernel_gc_safe_items
     err = cl.clRunHostKernelPOCL(
         h.id, arg_values, num_groups, first_group, group_count, scratch, gc_safe
@@ -574,7 +573,7 @@ function (l::HostLaunch)(i::Int)
     last = (i * l.total) ÷ l.nchunks
     host_run(
         l.h, l.arg_values, l.num_groups, first, last - first, l.items, l.exception_info,
-        l.long
+        l.long, host_scratch_ptr(l.h)
     )
     return
 end
@@ -639,7 +638,8 @@ end
 # The argument storage lives on the caller's stack. Even an interrupted wait must finish
 # before that storage can be released. Cancellation shielding is needed on Julia 1.14+.
 @noinline function host_dispatch_long(launch::HostLaunch)
-    if ccall(:jl_generating_output, Cint, ()) != 0 || GC.in_finalizer()
+    # tasks spawned during precompilation must not outlive it
+    if ccall(:jl_generating_output, Cint, ()) != 0
         launch()
         return
     end
@@ -693,6 +693,12 @@ end
     ) where {N}
     total = prod(num_groups)
     total == 0 && return
+    # finalizers can't switch tasks, which waiting for other threads and taking the lock
+    # of the scratch slots may do
+    if GC.in_finalizer()
+        host_dispatch_finalizer(h, arg_values, num_groups, exception_info)
+        return
+    end
     s = session()
     items = prod(h.local_size)
     nchunks = min(total, s.host_kernel_threads)
@@ -720,6 +726,32 @@ end
         end
     end
     Base.@atomic :monotonic h.last_duration = cycle_counter() - start
+    return
+end
+
+# runs every work-group on the calling thread, with a scratch area of its own
+@noinline function host_dispatch_finalizer(
+        h::cl.HostKernelHandle, arg_values::NTuple{N, Ptr{Cvoid}}, num_groups::Dims{3},
+        exception_info::Ptr{ExceptionInfo_st}
+    ) where {N}
+    # alignment is a power of two, and at least that of malloc
+    raw = Libc.malloc(h.scratch_size + h.scratch_alignment)
+    raw == C_NULL && throw(OutOfMemoryError())
+    scratch = Ptr{Cvoid}((UInt(raw) + h.scratch_alignment - 1) & ~UInt(h.scratch_alignment - 1))
+    args_ref = Ref(arg_values)
+    groups_ref = Ref(Csize_t.(num_groups))
+    try
+        GC.@preserve args_ref groups_ref begin
+            args_ptr = Ptr{Ptr{Cvoid}}(Base.unsafe_convert(Ptr{NTuple{N, Ptr{Cvoid}}}, args_ref))
+            groups_ptr = Ptr{Csize_t}(Base.unsafe_convert(Ptr{NTuple{3, Csize_t}}, groups_ref))
+            host_run(
+                h, args_ptr, groups_ptr, 0, prod(num_groups), prod(h.local_size),
+                exception_info, false, scratch
+            )
+        end
+    finally
+        Libc.free(raw)
+    end
     return
 end
 
