@@ -1148,6 +1148,18 @@ function interface_testsuite(backend::KI.Backend, AT)
                 KI.device!(b, dev)
             end
             @test KI.device(b) == dev
+
+            # switching in one task changes neither this task's device, nor the one a fresh
+            # task starts on (which is up to the backend, and may differ from `dev`)
+            fresh = fetch(Threads.@spawn KI.device(b))
+            switched = mod1(fresh + 1, KI.ndevices(b))
+            task = Threads.@spawn begin
+                KI.device!(b, switched)
+                KI.device(b)
+            end
+            @test fetch(task) == switched
+            @test KI.device(b) == dev
+            @test fetch(Threads.@spawn KI.device(b)) == fresh
         end
     end
 
