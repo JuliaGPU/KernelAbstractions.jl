@@ -96,7 +96,7 @@ function scan_method!(lines, m::Method, modules)
 end
 
 function check_no_boxes()
-    modules = Set(["Breeze"])
+    modules = Set(["KernelAbstractions", "KernelInterface"])
     format = "markdown"
     lines = Vector{NamedTuple}()
     Base.visit(Core.methodtable) do m
