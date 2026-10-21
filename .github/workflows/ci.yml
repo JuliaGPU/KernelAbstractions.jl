@@ -124,6 +124,12 @@ jobs:
   docs:
     name: Documentation
     runs-on: ubuntu-latest
+    # Documenter deploys with the DOCUMENTER_KEY deploy key
+    permissions:
+      contents: read
+      statuses: write   # report the deployed preview on pull requests
+      pull-requests: write  # link the preview from pull requests that change the docs
+      actions: write    # needed for julia-actions/cache to delete old caches
     steps:
       - uses: actions/checkout@v7
       - uses: julia-actions/setup-julia@v3
@@ -146,6 +152,33 @@ jobs:
         with:
           path: docs/build
           name: docs-build
+
+      # Documenter only reports the preview as a commit status, which is easy to miss, so
+      # link it from pull requests that change the documentation. Pull requests from forks
+      # don't get a preview.
+      - name: Link the preview
+        if: |
+          github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name == github.repository
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const {owner, repo} = context.repo;
+            const issue_number = context.issue.number;
+            const files = await github.paginate(github.rest.pulls.listFiles,
+                                                {owner, repo, pull_number: issue_number, per_page: 100});
+            if (!files.some(file => file.filename.startsWith('docs/'))) {
+              return;
+            }
+            const marker = '<!-- documentation-preview -->';
+            const comments = await github.paginate(github.rest.issues.listComments,
+                                                   {owner, repo, issue_number, per_page: 100});
+            if (comments.some(comment => comment.body?.startsWith(marker))) {
+              return;
+            }
+            const url = `https://juliagpu.github.io/KernelAbstractions.jl/previews/PR${issue_number}/`;
+            await github.rest.issues.createComment({owner, repo, issue_number,
+                                                   body: `${marker}\nDocumentation preview: ${url}`});
 
   doctests:
     name: Doctests
