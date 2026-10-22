@@ -195,7 +195,9 @@ uses(ex, name) = ex === name || (ex isa Expr && any(arg -> uses(arg, name), ex.a
 # the ones before it, but these first answer `ConstArgs` queries, so that a query doesn't
 # evaluate the defaults on the host. Strips the defaults from `def`.
 function default_forwarders!(def, gpu_name, constargs)
-    args = def[:args]
+    # `def` holds values of any type; assert the vector, so that the reductions below don't
+    # depend on generic iteration, which packages invalidate by extending it
+    args = def[:args]::Vector
     first_default = findfirst(arg -> isexpr(arg, :kw), args)
     first_default === nothing && return Expr(:block)
     nfixed = count(arg -> !isexpr(arg, :...), args)
@@ -287,7 +289,7 @@ is_sync(expr) = is_macrocall(expr, Symbol("@synchronize"))
 
 # Split the branches of an `if` that contains a `@synchronize`. The conditions run on all
 # lanes, but every branch needs to be guarded, including those without a `@synchronize`.
-function split_branches(expr, recurse)
+function split_branches(expr::Expr, recurse)
     cond = expr.args[1]
     find_sync(cond) && (cond = recurse(cond))
     branches = map(expr.args[2:end]) do branch

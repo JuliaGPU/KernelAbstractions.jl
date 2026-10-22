@@ -27,8 +27,8 @@ end
 # POCL can technically support any sub-group size; prefer the common GPU ones, and only
 # widths of up to 64, so that `KI.sub_group_ballot` (a `UInt64` mask) covers every lane.
 function default_sub_group_size(device::cl.Device)
-    sg_sizes = filter(<=(64), device.sub_group_sizes)
-    common = filter(in(sg_sizes), [32, 64, 16, sg_sizes...])
+    sg_sizes = filter(<=(64), device.sub_group_sizes::Tuple{Vararg{Int}})
+    common = filter(in(sg_sizes), Int[32, 64, 16, sg_sizes...])
     return isempty(common) ? nothing : first(common)
 end
 
