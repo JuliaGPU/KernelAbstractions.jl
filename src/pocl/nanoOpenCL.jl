@@ -932,9 +932,9 @@ end
     end
 
     # scalar values
-    @inline function get_scalar(prop, typ)
-        scalar = Ref{typ}()
-        clGetDeviceInfo(d, prop, sizeof(typ), scalar, C_NULL)
+    @inline function get_scalar(prop, ::Type{T}) where {T}
+        scalar = Ref{T}()
+        clGetDeviceInfo(d, prop, sizeof(T), scalar, C_NULL)
         return Int(scalar[])
     end
     if s === :vendor_id
@@ -999,7 +999,7 @@ end
     # cl_ext_float_atomics: per-precision bitfields of natively supported floating-point
     # atomic operations (zero when the device does not expose the extension)
     if s == :single_fp_atomic_capabilities || s == :double_fp_atomic_capabilities || s == :half_fp_atomic_capabilities
-        "cl_ext_float_atomics" in d.extensions || return zero(UInt64)
+        "cl_ext_float_atomics" in d.extensions::Vector{String} || return zero(UInt64)
         prop = s == :single_fp_atomic_capabilities ? CL_DEVICE_SINGLE_FP_ATOMIC_CAPABILITIES_EXT :
             s == :double_fp_atomic_capabilities ? CL_DEVICE_DOUBLE_FP_ATOMIC_CAPABILITIES_EXT :
             CL_DEVICE_HALF_FP_ATOMIC_CAPABILITIES_EXT
@@ -1032,7 +1032,7 @@ end
     end
 
     if s == :max_work_item_size
-        result = Vector{Csize_t}(undef, d.max_work_item_dims)
+        result = Vector{Csize_t}(undef, d.max_work_item_dims::Int)
         clGetDeviceInfo(d, CL_DEVICE_MAX_WORK_ITEM_SIZES, sizeof(result), result, C_NULL)
         return tuple([Int(r) for r in result]...)
     end
@@ -1153,7 +1153,7 @@ function Base.getproperty(p::Program, s::Symbol)
         clGetProgramInfo(p, CL_PROGRAM_NUM_DEVICES, sizeof(Cuint), count, C_NULL)
         return Int(count[])
     elseif s == :devices
-        device_ids = Vector{cl_device_id}(undef, p.num_devices)
+        device_ids = Vector{cl_device_id}(undef, p.num_devices::Int)
         clGetProgramInfo(p, CL_PROGRAM_DEVICES, sizeof(device_ids), device_ids, C_NULL)
         return [Device(id) for id in device_ids]
     elseif s == :source
@@ -1164,11 +1164,11 @@ function Base.getproperty(p::Program, s::Symbol)
         clGetProgramInfo(p, CL_PROGRAM_SOURCE, src_len[], src, C_NULL)
         return GC.@preserve src unsafe_string(pointer(src))
     elseif s == :binary_sizes
-        sizes = Vector{Csize_t}(undef, p.num_devices)
+        sizes = Vector{Csize_t}(undef, p.num_devices::Int)
         clGetProgramInfo(p, CL_PROGRAM_BINARY_SIZES, sizeof(sizes), sizes, C_NULL)
         return sizes
     elseif s == :binaries
-        sizes = p.binary_sizes
+        sizes = p.binary_sizes::Vector{Csize_t}
 
         bins = Vector{Ptr{UInt8}}(undef, length(sizes))
         # keep a reference to the underlying binary arrays
@@ -1188,7 +1188,7 @@ function Base.getproperty(p::Program, s::Symbol)
 
         binary_dict = Dict{Device, Array{UInt8}}()
         bidx = 1
-        for (i, d) in enumerate(p.devices)
+        for (i, d) in enumerate(p.devices::Vector{Device})
             if sizes[i] > 0
                 binary_dict[d] = bin_arrays[bidx]
                 bidx += 1
@@ -1201,7 +1201,7 @@ function Base.getproperty(p::Program, s::Symbol)
         return Context(ctx[], retain = true)
     elseif s == :build_status
         status_dict = Dict{Device, cl_build_status}()
-        for device in p.devices
+        for device in p.devices::Vector{Device}
             status = Ref{cl_build_status}()
             clGetProgramBuildInfo(p, device, CL_PROGRAM_BUILD_STATUS, sizeof(cl_build_status), status, C_NULL)
             status_dict[device] = status[]
@@ -1209,7 +1209,7 @@ function Base.getproperty(p::Program, s::Symbol)
         return status_dict
     elseif s == :build_log
         log_dict = Dict{Device, String}()
-        for device in p.devices
+        for device in p.devices::Vector{Device}
             size = Ref{Csize_t}()
             clGetProgramBuildInfo(p, device, CL_PROGRAM_BUILD_LOG, 0, C_NULL, size)
             log = Vector{Cchar}(undef, size[])
@@ -1502,9 +1502,9 @@ function Base.getproperty(ki::KernelWorkGroupInfo, s::Symbol)
     k = getfield(ki, :kernel)
     d = getfield(ki, :device)
 
-    function get(val, typ)
-        result = Ref{typ}()
-        clGetKernelWorkGroupInfo(k, d, val, sizeof(typ), result, C_NULL)
+    function get(val, ::Type{T}) where {T}
+        result = Ref{T}()
+        clGetKernelWorkGroupInfo(k, d, val, sizeof(T), result, C_NULL)
         return result[]
     end
 
@@ -1536,9 +1536,9 @@ function Base.getproperty(ki::KernelSubGroupInfo, s::Symbol)
     d = getfield(ki, :device)
     lsize = getfield(ki, :local_work_size)
 
-    function get(val, typ)
-        result = Ref{typ}()
-        clGetKernelSubGroupInfo(k, d, val, sizeof(lsize), lsize, sizeof(typ), result, C_NULL)
+    function get(val, ::Type{T}) where {T}
+        result = Ref{T}()
+        clGetKernelSubGroupInfo(k, d, val, sizeof(lsize), lsize, sizeof(T), result, C_NULL)
         return result[]
     end
 
