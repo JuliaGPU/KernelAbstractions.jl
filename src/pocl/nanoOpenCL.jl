@@ -390,6 +390,8 @@ const CL_BUILD_ERROR = -2
 
 const CL_BUILD_IN_PROGRESS = -3
 
+const CL_KERNEL_NUM_ARGS = 0x1191
+
 const CL_KERNEL_WORK_GROUP_SIZE = 0x11b0
 
 const CL_KERNEL_COMPILE_WORK_GROUP_SIZE = 0x11b1
@@ -654,6 +656,15 @@ end
     @gcsafe_ccall libopencl.POclSetKernelArgSVMPointer(
         kernel::cl_kernel, arg_index::cl_uint,
         arg_value::Ptr{Cvoid}
+    )::cl_int
+end
+
+@checked function clGetKernelInfo(
+        kernel, param_name, param_value_size, param_value, param_value_size_ret
+    )
+    @gcsafe_ccall libopencl.POclGetKernelInfo(
+        kernel::cl_kernel, param_name::cl_uint, param_value_size::Csize_t,
+        param_value::Ptr{Cvoid}, param_value_size_ret::Ptr{Csize_t}
     )::cl_int
 end
 
@@ -1236,6 +1247,12 @@ end
 
 Base.unsafe_convert(::Type{cl_kernel}, k::Kernel) = k.id
 
+function num_args(k::Kernel)
+    n = Ref{cl_uint}()
+    clGetKernelInfo(k, CL_KERNEL_NUM_ARGS, sizeof(cl_uint), n, C_NULL)
+    return Int(n[])
+end
+
 function Kernel(p::Program, kernel_name::String)
     for (dev, status) in p.build_status
         if status != CL_BUILD_SUCCESS
@@ -1413,11 +1430,11 @@ function enqueue_kernel(
             num_sub_groups = KernelSubGroupInfo(k, device(), Csize_t[]).max_num_sub_groups
         end
         if nargs === nothing
-            nargs = k.num_args - 2
+            nargs = num_args(k) - 2
         end
-        rng_state_size = sizeof(UInt32) * num_sub_groups
-        set_arg!(k, nargs + 1, LocalMem(UInt32, rng_state_size))
-        set_arg!(k, nargs + 2, LocalMem(UInt32, rng_state_size))
+        # one UInt32 per sub-group
+        set_arg!(k, nargs + 1, LocalMem(UInt32, num_sub_groups))
+        set_arg!(k, nargs + 2, LocalMem(UInt32, num_sub_groups))
     end
 
     n_events = cl_uint(0)
