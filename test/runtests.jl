@@ -684,6 +684,13 @@ end
     Testsuite.select_launch_testsuite()
 end
 
+@testset "select_launch on PoCL" begin
+    # tuned launches are folded for any number of work-items in the first three dimensions
+    kernel = mapped_indices!(CPU())
+    _, wgs, iterspace, _ = KernelAbstractions.launch_config(kernel, (1, 1, 1, 3000), nothing)
+    @test KernelAbstractions.select_launch(kernel, wgs, iterspace) === KernelAbstractions.NDLaunch{Int}()
+end
+
 @kernel function fill_index!(A)
     I = @index(Global, Linear)
     @inbounds A[I] = I

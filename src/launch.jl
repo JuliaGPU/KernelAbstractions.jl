@@ -63,8 +63,8 @@ and the given `workgroupsize` (`nothing` if it will be tuned), as returned by
 `backend(kernel)`, i.e. its per-dimension limits, and a [`LinearLaunch`](@ref) otherwise,
 both computing indices in `Int32` (`Int` on PoCL) if possible. A tuned workgroup of an
 iteration space with more than three dimensions only has work-items along the first three,
-so it is launched on the N-d grid only if these hold at least 64 work-items: GPUs run
-smaller workgroups slower than a linear launch.
+so it is launched on the N-d grid only if these hold at least
+[`fold_threshold(backend)`](@ref fold_threshold) work-items.
 
 If the workgroup size will be tuned, the choice holds for any workgroup size the backend
 tunes afterwards, so the context and thus the compiled kernel are the same before and
@@ -85,14 +85,14 @@ function select_launch(kernel::Kernel, workgroupsize, iterspace)
     return select_launch(
         map(mul_extent, groups, items), tuned ? nothing : items,
         KI.max_work_group_size(b), KI.max_work_group_dims(b), KI.max_num_groups(b),
-        narrow_index_type(b)
+        narrow_index_type(b); fold_items = fold_threshold(b)
     )
 end
 
 # `groupsize === nothing` means that the workgroup size will be tuned
 function select_launch(
         extent::Dims{N}, groupsize, max_items::Int,
-        max_dims::Dims, max_groups::Dims, ::Type{T} = Int32
+        max_dims::Dims, max_groups::Dims, ::Type{T} = Int32; fold_items::Int = 64
     ) where {N, T}
     # past three dimensions, an `NDLaunch` folds the later ones into the grid's z-dimension
     fold = N > 3 && length(max_dims) == 3
@@ -102,9 +102,9 @@ function select_launch(
     if groupsize === nothing
         if nd
             # a tuned workgroup has at least one work-item per dimension, and one past the
-            # third when folding, which is slower on GPUs if the first three hold fewer than 64
+            # third when folding, which is slow if the first three can't fill it
             nd = within(grid(extent), max_groups) &&
-                (!fold || prod(ntuple(d -> min(extent[d], max_dims[d]), Val(3))) >= 64)
+                (!fold || prod(ntuple(d -> min(extent[d], max_dims[d]), Val(3))) >= fold_items)
         end
         padded = tuned_padded(extent, max_items, nd ? limits : ())
     else
@@ -123,6 +123,21 @@ function select_launch(
         throw_too_large()
     end
 end
+
+"""
+    fold_threshold(backend)::Int
+
+The number of work-items that the first three dimensions of an iteration space with more
+dimensions have to hold for a tuned launch to be folded onto the N-d grid (see
+[`NDLaunch`](@ref)). Its workgroups then only have work-items along these dimensions, and
+GPUs run small workgroups slower than a [`LinearLaunch`](@ref), which decomposes its ids
+with divisions instead. Where that happens depends on the hardware, so backends without a
+measured value keep the default of 64, chosen for NVIDIA GPUs.
+
+Set here and in KernelAbstractions' extensions, not by the backends, so that it can be
+tuned without releasing them.
+"""
+fold_threshold(backend) = 64
 
 # arithmetic on the extents of an iteration space, which has to fit an `Int`
 @noinline throw_too_large() =
