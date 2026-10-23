@@ -143,7 +143,7 @@ function launch_kernel(obj::Kernel, launch, subgroups, ndrange, _workgroupsize, 
     groups = size(blocks(iterspace))
     items = size(workitems(iterspace))
     if launch isa NDLaunch
-        groups, items = KI.pad3(groups), KI.pad3(items)
+        groups, items = KI.pad3(nd_grid(groups)), KI.pad3(nd_grid(items))
     else
         groups, items = (prod(groups), 1, 1), (prod(items), 1, 1)
     end

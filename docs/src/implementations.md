@@ -97,9 +97,10 @@ it should return its method tables from `GPUCompiler.method_tables` rather than 
   to recurse into the arguments.
 
 [`@index`](@ref) computes its indices from how a kernel was launched: on a grid with the
-shape of the iteration space ([`NDLaunch`](@ref KernelAbstractions.NDLaunch), for up to as
-many dimensions as the backend's grid has), which doesn't need any divisions, or on a 1-D
-grid ([`LinearLaunch`](@ref KernelAbstractions.LinearLaunch)). Either way it computes in a
+shape of the iteration space ([`NDLaunch`](@ref KernelAbstractions.NDLaunch), where the
+dimensions past the third share the grid's z-dimension), which doesn't need any divisions
+for the ids of the work-items, or on a 1-D grid
+([`LinearLaunch`](@ref KernelAbstractions.LinearLaunch)). Either way it computes in a
 narrow index type such as `Int32` when the iteration space fits, which is why the typed
 [`KI.get_group_id`](@ref KernelInterface.get_group_id) and
 [`KI.get_local_id`](@ref KernelInterface.get_local_id) queries have to compute in that type
