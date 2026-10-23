@@ -215,8 +215,8 @@ function select_launch_testsuite()
     max_items = 1024
     max_dims = (1024, 1024, 64)
     max_groups = (Int(typemax(Int32)), 65535, 65535)
-    select(extent, groupsize = nothing; max_dims = max_dims, max_groups = max_groups) =
-        KernelAbstractions.select_launch(extent, groupsize, max_items, max_dims, max_groups)
+    select(extent, groupsize = nothing; max_dims = max_dims, max_groups = max_groups, fold_items = 64) =
+        KernelAbstractions.select_launch(extent, groupsize, max_items, max_dims, max_groups; fold_items)
     LinearLaunch = KernelAbstractions.LinearLaunch
     NDLaunch = KernelAbstractions.NDLaunch
 
@@ -244,6 +244,8 @@ function select_launch_testsuite()
         @test select((8, 8, 8, 1536)) === NDLaunch{Int32}()
         @test select((9, 7, 3, 5, 2)) === NDLaunch{Int32}()
         @test select((4, 4, 2, 1536)) === LinearLaunch{Int32}()
+        @test select((4, 4, 1, 1536); fold_items = 16) === NDLaunch{Int32}()
+        @test select((5, 3, 1, 1536); fold_items = 16) === LinearLaunch{Int32}()
         @test select((2, 3, 4, 5), (2, 3)) === NDLaunch{Int32}()
         @test select((2, 3, 4, 5), (1, 1, 1, 5)) === LinearLaunch{Int32}()
         @test select((1024, 1, 300, 300), (1024,)) === LinearLaunch{Int32}()

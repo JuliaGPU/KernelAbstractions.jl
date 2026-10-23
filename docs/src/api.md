@@ -124,6 +124,7 @@ KernelAbstractions.NDIteration.linear_index
 KernelAbstractions.LinearLaunch
 KernelAbstractions.NDLaunch
 KernelAbstractions.select_launch
+KernelAbstractions.fold_threshold
 KernelAbstractions.launch_workgroupsize
 KernelAbstractions.compiler_options
 KernelAbstractions.PrivateArray
