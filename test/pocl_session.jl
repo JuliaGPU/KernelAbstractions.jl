@@ -29,6 +29,17 @@ function pointer_value(out, p)
     return
 end
 
+# work-item i iterates n[i] times
+function busy(A, n)
+    i = POCL.get_global_id()
+    x = 1.0
+    for _ in 1:n[i]
+        x = sin(x) + 1.0
+    end
+    A[i] = x
+    return
+end
+
 @testset "POCL session" begin
     @test Threads.nthreads() > 1
 
@@ -97,6 +108,78 @@ end
         # before Julia 1.12, a `Ptr` argument is an integer
         out[1] = 1
         @test launch(Ptr{Float32}(C_NULL)) == 0
+    end
+
+    # host kernel launches on several threads, one work-group per thread
+    if POCL.session().host_kernel_threads > 1
+        nt = POCL.session().host_kernel_threads
+        sizes = (; global_size = (nt, 1, 1), local_size = (1, 1, 1))
+        A = zeros(nt)
+        n = zeros(Int, nt)
+        k = POCL.clfunction(busy, POCL.argument_types((A, n)))
+        h = POCL.host_kernel(k, sizes)
+        @test h !== nothing
+
+        # the other threads still use the arguments when the launching task is interrupted,
+        # so cancellation is only delivered once every work-group finished. (SIGINT isn't
+        # tested: it lands in whichever task runs on thread 1, and on macOS before Julia
+        # 1.13 a process can lose every SIGINT, see JuliaLang/julia#62471.)
+        isdefined(Base, :CANCEL_TOKEN) &&
+            @testset "cancelled launches ($path)" for path in (:short, :long)
+            # the first work-group has nothing to do, the others take a while
+            fill!(n, 10^6)
+            n[1] = 0
+            fill!(A, 0)
+            Base.@atomic :monotonic h.last_duration = path == :short ? 0 : typemax(UInt64)
+            # a token cancelled beforehand is cancelled throughout the launch
+            src = Base.CancellationTokenSource()
+            Base.cancel!(src)
+            finished = nothing
+            err = try
+                Base.ScopedValues.with(Base.CANCEL_TOKEN => Base.CancellationToken(src)) do
+                    k(A, n; sizes...)
+                end
+                nothing
+            catch err
+                finished = count(!=(0), A)
+                err
+            end
+            @test err isa Base.CancellationRequest
+            @test finished == nt
+        end
+
+        @testset "launch from a finalizer" begin
+            # the first work-group has nothing to do, so a launch split over the threads
+            # would wait for the others, which may switch tasks
+            fill!(n, 10^6)
+            n[1] = 0
+            fill!(A, 0)
+            err = Ref{Any}(nothing)
+            launched = Threads.Atomic{Bool}(false)
+            # not inlined, so that nothing here keeps the object alive
+            @noinline function garbage()
+                finalizer(Ref(0)) do _
+                    try
+                        k(A, n; sizes...)
+                    catch e
+                        err[] = e
+                    end
+                    launched[] = true
+                end
+                return
+            end
+            garbage()
+            # with the other threads awake, and a task to switch to
+            k(zero(A), zero(n); sizes...)
+            t = @async nothing
+            GC.gc()
+            wait(t)
+            # `GC.gc()` returns without running finalizers if another thread was already
+            # collecting; that thread runs them instead
+            @test timedwait(() -> launched[], 60) === :ok
+            @test err[] === nothing
+            @test all(!=(0), A)
+        end
     end
 
     @testset "reset" begin
