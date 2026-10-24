@@ -179,6 +179,11 @@ defaulting to the width `KI.sub_group_size` reports), it takes:
   `cl_intel_subgroups` (for the vector shuffles of packed structs). `nothing`, the default,
   enables no others.
 
+- `fma`: whether to fuse multiplications and additions that may be contracted (e.g.
+  `muladd`) into OpenCL's `fma`, as SPIR-V can't express that they may be fused otherwise.
+  Defaults to whether the device has a fused multiply-add (`CL_FP_FMA`); without one, the
+  device emulates `fma`, which is slow.
+
 Other keyword arguments are passed on to `SPIRVCompilerTarget`.
 """
 function compiler_config end
@@ -208,7 +213,8 @@ end
         debug_level = Base.JLOptions().debug_level,
         sub_group_size::Union{Nothing, Int} = default_sub_group_size(dev),
         atomics::SPIRVAtomics = spirv_atomics(dev),
-        extensions::Union{Nothing, String} = nothing, kwargs...
+        extensions::Union{Nothing, String} = nothing,
+        fma::Bool = dev.single_fp_config & cl.CL_FP_FMA != 0, kwargs...
     )
     supports_fp16 = "cl_khr_fp16" in dev.extensions
     supports_fp64 = "cl_khr_fp64" in dev.extensions
@@ -225,7 +231,7 @@ end
 
     # create GPUCompiler objects
     target = SPIRVCompilerTarget(;
-        supports_fp16, supports_fp64, atomics,
+        supports_fp16, supports_fp64, atomics, fma,
         extensions = join(filter(!isempty, [default_extensions, something(extensions, "")]), ","),
         validate = true, kwargs...
     )
