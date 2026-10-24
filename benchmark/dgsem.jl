@@ -53,6 +53,9 @@
 # (`dgsem_default_layout`): the variable index first on the CPU and last otherwise. The variants without a layout in
 # their name use the default, and those named "v-first" or "v-last" the other layout.
 #
+# With a KernelAbstractions that has tiles (`@kernel tile`), `dgsem_tiles.jl` adds variants
+# that exchange values between the work-items of an element with `tile_shfl` instead.
+#
 # These are compute-heavy kernels with small, `@synchronize`d workgroups and `@private`
 # arrays, so they are sensitive to how a back-end handles local memory, barriers and
 # private memory, unlike the bandwidth-bound kernels of the other groups. The values of `D` and `Ja`
@@ -469,8 +472,13 @@ function dgsem_variants(backend, ::Val{DIM}, N, nelem) where {DIM}
         name = "fluxdiff/node halfsweep$(dgsem_layout_name(backend, layout)) E=$Eh"
         push!(variants, name => per_node(dgsem_fluxdiff_halfsweep!, fluxdiff, Eh, Val(Eh), layout))
     end
+    DGSEM_TILES && append!(variants, dgsem_tile_variants(backend, Val(DIM), N, nelem))
     return variants
 end
+
+# Variants with tiles, for versions of KernelAbstractions that have them
+const DGSEM_TILES = isdefined(KernelAbstractions, :tile_shfl)
+DGSEM_TILES && include("dgsem_tiles.jl")
 
 # Small meshes on the CPU, to keep the time of the suite down, and meshes that fill a GPU
 # otherwise. All are divisible by the number of elements per workgroup.
