@@ -138,6 +138,8 @@ end
 
 KI.functional(::POCLBackend) = true
 KA.pagelock!(::POCLBackend, x) = nothing
+# its work-items are iterations of a loop, which is faster than dividing for any group size
+KA.fold_threshold(::POCLBackend) = 1
 
 KI.get_backend(::Array) = POCLBackend()
 
