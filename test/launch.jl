@@ -123,7 +123,10 @@ end
 
 function launch_testsuite(backend, AT; launcher = default_launcher, skip_tests = Set{String}())
     @testset "index layout" begin
-        shapes = Tuple[(), (7,), (37,), (5, 7), (33, 3), (3, 5, 7), (2, 3, 4, 5)]
+        shapes = Tuple[
+            (), (7,), (37,), (5, 7), (33, 3), (3, 5, 7), (2, 3, 4, 5), (2, 3, 2, 3, 2),
+            (9, 7, 3, 5, 2),
+        ]
         @testset "$shape, workgroupsize=$wgs" for shape in shapes,
                 wgs in (nothing, 4, (2, 3), (4, 1, 2))
             wgs !== nothing && length(wgs) > length(shape) && continue
@@ -237,6 +240,16 @@ function select_launch_testsuite()
         # tuning respects the per-dimension limits
         @test select((1, 1, 5000)) === NDLaunch{Int32}()
 
+        # and more if the workgroups have one work-item past the third
+        @test select((8, 8, 8, 1536)) === NDLaunch{Int32}()
+        @test select((9, 7, 3, 5, 2)) === NDLaunch{Int32}()
+        @test select((4, 4, 2, 1536)) === LinearLaunch{Int32}()
+        @test select((2, 3, 4, 5), (2, 3)) === NDLaunch{Int32}()
+        @test select((2, 3, 4, 5), (1, 1, 1, 5)) === LinearLaunch{Int32}()
+        @test select((1024, 1, 300, 300), (1024,)) === LinearLaunch{Int32}()
+        @test select((10, 10, 10, 10); max_dims = (1024, 1024), max_groups = (65535, 65535)) ===
+            LinearLaunch{Int32}()
+
         # indices are computed in Int32 if the padded iteration space fits
         @test select((1024, 1024, 1024)) === NDLaunch{Int32}()
         @test select((1025, 1024, 1024)) === NDLaunch{Int}()
@@ -269,7 +282,7 @@ function select_launch_testsuite()
                 (5,), (1000,), (3, 7), (33, 1000), (1, 1, 5000), (7, 9, 11),
                 (1500, 3, 2), (2, 3, 4, 5), (1, 1, 1, 3000), (0, 7),
             )
-            for limits in ((), max_dims)
+            for limits in ((), max_dims, KernelAbstractions.nd_limits(max_dims, extent))
                 bound = KernelAbstractions.tuned_padded(extent, max_items, limits)
                 @test all(1:max_items) do threads
                     wgs = KI.threads_to_workgroupsize(threads, extent, limits)

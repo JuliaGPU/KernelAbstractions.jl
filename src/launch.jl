@@ -21,13 +21,16 @@ struct LinearLaunch{T <: Integer} end
 """
     NDLaunch{T}()
 
-Launch configuration for a kernel launched on an N-d grid, where `N = ndims(iterspace)` is
-at most the number of grid dimensions of the backend (the length of
-[`KI.max_work_group_dims`](@ref KernelInterface.max_work_group_dims), i.e. 3): the grid
-consists of `size(blocks(iterspace))` groups of `size(workitems(iterspace))` work-items, so
-the x, y and z-components of the hardware group and local ids are the positions along the
-first `N` dimensions of the iteration space. This avoids decomposing linear ids into
-Cartesian positions, i.e., divisions.
+Launch configuration for a kernel launched on an N-d grid: the grid consists of
+`size(blocks(iterspace))` groups of `size(workitems(iterspace))` work-items, so the x, y
+and z-components of the hardware group and local ids are the positions along the
+dimensions of the iteration space (at most the three grid dimensions of the backend, see
+[`KI.max_work_group_dims`](@ref KernelInterface.max_work_group_dims)). This avoids
+decomposing linear ids into Cartesian positions, i.e., divisions.
+
+An iteration space with more dimensions is launched like this if its workgroups have one
+work-item along the dimensions past the third. These share the z-dimension of the grid
+with the third, so the group's z-id is decomposed along them, but the local id is not.
 
 The linear group and local indices are computed x-fastest, so they agree with the ordering
 of a [`LinearLaunch`](@ref) (and with how GPUs typically form sub-groups).
@@ -57,9 +60,11 @@ narrow_index_type(backend) = backend isa POCL.POCLBackend ? Int : Int32
 Choose how to launch `kernel` with the (possibly preliminary) iteration space `iterspace`
 and the given `workgroupsize` (`nothing` if it will be tuned), as returned by
 `launch_config`: an [`NDLaunch`](@ref) if the iteration space fits the grid of
-`backend(kernel)`, i.e. its number of dimensions and per-dimension limits, and a
-[`LinearLaunch`](@ref) otherwise, both computing indices in `Int32` (`Int` on PoCL) if
-possible.
+`backend(kernel)`, i.e. its per-dimension limits, and a [`LinearLaunch`](@ref) otherwise,
+both computing indices in `Int32` (`Int` on PoCL) if possible. A tuned workgroup of an
+iteration space with more than three dimensions only has work-items along the first three,
+so it is launched on the N-d grid only if these hold at least 64 work-items: GPUs run
+smaller workgroups slower than a linear launch.
 
 If the workgroup size will be tuned, the choice holds for any workgroup size the backend
 tunes afterwards, so the context and thus the compiled kernel are the same before and
@@ -89,17 +94,23 @@ function select_launch(
         extent::Dims{N}, groupsize, max_items::Int,
         max_dims::Dims, max_groups::Dims, ::Type{T} = Int32
     ) where {N, T}
-    nd = N <= length(max_dims)
+    # past three dimensions, an `NDLaunch` folds the later ones into the grid's z-dimension
+    fold = N > 3 && length(max_dims) == 3
+    nd = N <= length(max_dims) || fold
+    limits = nd_limits(max_dims, extent)
+    grid = fold ? nd_grid : identity
     if groupsize === nothing
         if nd
-            # a tuned workgroup has at least one work-item per dimension
-            nd = all(ntuple(d -> extent[d] <= max_groups[d], Val(N)))
+            # a tuned workgroup has at least one work-item per dimension, and one past the
+            # third when folding, which is slower on GPUs if the first three hold fewer than 64
+            nd = within(grid(extent), max_groups) &&
+                (!fold || prod(ntuple(d -> min(extent[d], max_dims[d]), Val(3))) >= 64)
         end
-        padded = tuned_padded(extent, max_items, nd ? max_dims : ())
+        padded = tuned_padded(extent, max_items, nd ? limits : ())
     else
         blocks, items, _ = NDIteration.partition(extent, groupsize)
         if nd
-            nd = all(ntuple(d -> items[d] <= max_dims[d] && blocks[d] <= max_groups[d], Val(N))) &&
+            nd = within(items, limits) && within(grid(blocks), max_groups) &&
                 prod(items) <= max_items
         end
         padded = map(mul_extent, blocks, items)
@@ -126,6 +137,13 @@ function add_extent(a::Int, b::Int)
     overflow && throw_too_large()
     return n
 end
+
+# the workgroup limits and grid of an `NDLaunch`, with one work-item past the third dimension
+nd_limits(max_dims::Dims, ::NTuple{N, Any}) where {N} =
+    ntuple(d -> d <= length(max_dims) ? max_dims[d] : 1, Val(N))
+nd_grid(dims::Dims{N}) where {N} =
+    N <= 3 ? dims : (dims[1], dims[2], prod(Base.tail(Base.tail(dims))))
+within(a::NTuple{N, Any}, b) where {N} = all(ntuple(d -> a[d] <= b[d], Val(N)))
 
 # Upper bound on the padded extents of an iteration space whose workgroup size is chosen
 # by `launch_workgroupsize`, i.e., by `KI.threads_to_workgroupsize` with at most `capacity`
@@ -160,8 +178,9 @@ The workgroup size for launching `threads` work-items per workgroup over `ndrang
 `launch` (see [`select_launch`](@ref)). Backends that tune the workgroup size of a kernel
 launched with a [`LinearLaunch`](@ref) or [`NDLaunch`](@ref) have to use this.
 """
-launch_workgroupsize(backend, ::NDLaunch, threads, ndrange) =
-    KI.threads_to_workgroupsize(threads, extents(ndrange), KI.max_work_group_dims(backend))
+launch_workgroupsize(backend, ::NDLaunch, threads, ndrange) = KI.threads_to_workgroupsize(
+    threads, extents(ndrange), nd_limits(KI.max_work_group_dims(backend), extents(ndrange))
+)
 launch_workgroupsize(backend, ::Union{LinearLaunch, Nothing}, threads, ndrange) =
     KI.threads_to_workgroupsize(threads, extents(ndrange))
 
@@ -206,7 +225,13 @@ end
     I[1], mul_nowrap(dims[1], sub_nowrap(linearize(T, Base.tail(dims), Base.tail(I)), one(T)))
 )
 
-@inline hardware_position(id, ::Val{N}) where {N} = ntuple(d -> (id.x, id.y, id.z)[d], Val(N))
+@inline hardware_position(id, ::Val{N}) where {N} =
+    ntuple(d -> d <= 3 ? (id.x, id.y, id.z)[d] : one(id.z), Val(N))
+# past three dimensions, the z-id of a group is its column-major position along the later ones
+@inline function group_hardware_position(id, dims::NTuple{N, Any}) where {N}
+    N <= 3 && return hardware_position(id, Val(N))
+    return (id.x, id.y, ind2sub(Base.tail(Base.tail(dims)), id.z - one(id.z))...)
+end
 
 # The hardware ids are bounded by the launch, which e.g. lets the compiler fold the validity
 # check of a statically-sized kernel.
@@ -225,7 +250,7 @@ end
 # work-item in `workitems(iterspace)`, as tuples of the index type
 @inline function group_position(ctx, ::NDLaunch{T}) where {T}
     dims = narrow(T, size(blocks(__iterspace(ctx))))
-    return assume_bounded(hardware_position(KI.get_group_id(T), Val(ndims(ctx))), dims)
+    return assume_bounded(group_hardware_position(KI.get_group_id(T), dims), dims)
 end
 @inline function local_position(ctx, ::NDLaunch{T}) where {T}
     dims = narrow(T, size(workitems(__iterspace(ctx))))
