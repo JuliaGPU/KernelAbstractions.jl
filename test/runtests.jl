@@ -836,6 +836,27 @@ end
     @test B == idx
 end
 
+@kernel function muladd_kernel!(D, @Const(A), @Const(B), @Const(C))
+    i = @index(Global)
+    @inbounds D[i] = muladd(A[i], B[i], C[i])
+end
+
+@testset "POCL muladd" begin
+    for T in (Float32, Float64)
+        A, B, C = rand(T, 64), rand(T, 64), rand(T, 64)
+        D = similar(A)
+        muladd_kernel!(CPU())(D, A, B, C; ndrange = length(D))
+        @test D ≈ muladd.(A, B, C)
+
+        # on CPUs with hardware FMA, the multiplication is not rounded: subtracting the
+        # rounded product leaves its rounding error
+        a = one(T) + eps(T)
+        A, B, C = fill(a, 4), fill(a, 4), fill(-(a * a), 4)
+        muladd_kernel!(CPU())(D, A, B, C; ndrange = 4)
+        @test all(==(POCL.fast_fma() ? fma(a, a, -(a * a)) : zero(T)), D[1:4])
+    end
+end
+
 @testset "POCL workgroup size" begin
     workgroupsize = POCL.POCLKernels.cpu_workgroupsize
     for threads in (1, 3, 4, 7, 64), max_items in (1, 7, 64, 4096), nitems in (nothing, 0, 1, 1000, 4096, 2^20, typemax(Int))
