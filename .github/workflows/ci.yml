@@ -39,6 +39,14 @@ jobs:
             arch: arm64
           - os: macOS-15
             arch: x64
+        include:
+          # 32-bit hosts, where the POCL back-end targets 32-bit SPIR-V
+          - version: '1.10'
+            os: ubuntu-24.04
+            arch: x86
+          - version: '1.13'
+            os: ubuntu-24.04
+            arch: x86
     steps:
       - uses: actions/checkout@v7
       - uses: julia-actions/setup-julia@v3
