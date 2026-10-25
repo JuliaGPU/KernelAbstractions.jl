@@ -102,6 +102,34 @@ jobs:
         with:
           files: lcov.info
 
+  threads:
+    # the main job runs the tests on one thread, where the CPU backend runs every launch on
+    # the launching task. with several threads, launches also run on a team of tasks.
+    name: CI with ${{ matrix.threads }} threads
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ['1.10', '1.13']
+        os: [ubuntu-24.04, macOS-15]
+        threads: ['4']
+    steps:
+      - uses: actions/checkout@v7
+      - uses: julia-actions/setup-julia@v3
+        with:
+          version: ${{ matrix.version }}
+      - uses: julia-actions/cache@v3
+      # see the CI job
+      - name: Dev KernelInterface
+        shell: bash
+        run: julia -e 'using Pkg; Pkg.activate("."); Pkg.develop(; path="lib/KernelInterface")'
+      - uses: julia-actions/julia-buildpkg@v1
+      - uses: julia-actions/julia-runtest@v1
+        env:
+          JULIA_NUM_THREADS: ${{ matrix.threads }}
+        with:
+          annotate: true
+
   KernelInterface:
     name: KernelInterface
     runs-on: ${{ matrix.os }}
