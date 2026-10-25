@@ -103,8 +103,8 @@ report_oom(sz) = return
 struct KernelState
     random_seed::UInt32
     # the address of an `ExceptionInfo_st`. not a pointer, as SPIR-V doesn't allow those in
-    # kernel arguments that are passed by value.
-    exception_info::UInt64
+    # kernel arguments that are passed by value, but pointer-sized, as it is converted to one.
+    exception_info::UInt
 end
 
 @inline @generated kernel_state() = GPUCompiler.kernel_state_value(KernelState)

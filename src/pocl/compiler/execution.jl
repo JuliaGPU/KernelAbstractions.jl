@@ -218,7 +218,7 @@ end
     pushfirst!(call_t, KernelState)
     pushfirst!(
         call_args,
-        :(KernelState(kernel.rng_state ? Base.rand(UInt32) : UInt32(0), UInt64(UInt(exception_info))))
+        :(KernelState(kernel.rng_state ? Base.rand(UInt32) : UInt32(0), UInt(exception_info)))
     )
 
     # finalize types
