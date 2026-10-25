@@ -187,8 +187,7 @@ function KI.launch(obj::KI.Kernel{POCLBackend}, groups::Dims{3}, items::Dims{3},
 end
 
 KI.max_work_group_size(kernel::KI.Kernel{<:POCLBackend})::Int =
-    max_work_group_size(kernel.kern.kernel.fun)
-@noinline max_work_group_size(kernel::cl.Kernel) = cl.work_group_info(kernel, device()).size
+    kernel.kern.kernel.fun.work_group_size
 KI.max_work_group_size(::POCLBackend)::Int = device_limits().max_work_group_size
 KI.max_work_group_dims(::POCLBackend)::NTuple{3, Int} = device_limits().max_work_group_dims
 # the grid is only limited by the size of `size_t`
@@ -208,10 +207,9 @@ KI.launch_configuration(
 
 # kept out of `KI.launch_configuration`, which is compiled for every kernel
 @noinline function launch_workgroupsize(kernel::cl.Kernel, nitems, max_work_group_size)
-    wginfo = cl.work_group_info(kernel, device())
-    max_items = min(wginfo.size, max_work_group_size)
+    max_items = min(kernel.work_group_size, max_work_group_size)
     items = cpu_workgroupsize(
-        nitems, device_limits().compute_units, max_items, wginfo.prefered_size_multiple
+        nitems, device_limits().compute_units, max_items, kernel.preferred_work_group_size_multiple
     )
     return Int(items)
 end
