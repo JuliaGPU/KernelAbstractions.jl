@@ -150,7 +150,9 @@ end
         @inbounds out[i] = lmem[i]
     end
 end
-@testset "POCL 8- and 16-bit atomics ($T)" for T in (Int8, UInt16, Float16)
+partword_types = Any[Int8, UInt16]
+"cl_khr_fp16" in POCL.device().extensions && push!(partword_types, Float16)
+@testset "POCL 8- and 16-bit atomics ($T)" for T in partword_types
     k = 64
     @testset "$n elements" for n in (1, 3, 5, 7, 1023)
         # the arrays that Julia allocates for us; their data being 4-byte aligned is a

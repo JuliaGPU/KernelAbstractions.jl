@@ -216,15 +216,16 @@ end
         end
     end
 
-    # PoCL computes indices in 64 bits, like its work-item ids, and the index arithmetic
-    # can't wrap. Narrowing the ids to 32 bits and widening the indices again keeps PoCL from
-    # vectorizing its loops over the work-items when they are short (#868).
+    # PoCL computes indices in `Int`, like its work-item ids (`size_t`), and the index
+    # arithmetic can't wrap. Narrowing the ids to 32 bits and widening the indices again
+    # keeps PoCL from vectorizing its loops over the work-items when they are short (#868).
     @testset "index type" begin
         B = KernelAbstractions.zeros(backend, Float32, 4, 64)
+        int = "i$(Sys.WORD_SIZE)"
         @test @filecheck implicit_check_not = "trunc i64" begin
             @check "define spir_kernel void @{{.*}}gpu_codegen_scale_cartesian"
-            @check "shl nuw nsw i64"
-            @check "add nuw {{(nsw )?}}i64"
+            @check "shl nuw nsw $int"
+            @check "add nuw {{(nsw )?}}$int"
             @check "ret void"
             @device_code_llvm debuginfo = :none codegen_scale_cartesian(backend, (4, 16))(B, ndrange = size(B))
             KernelAbstractions.synchronize(backend)

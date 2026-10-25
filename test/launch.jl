@@ -237,20 +237,30 @@ function select_launch_testsuite()
         # tuning respects the per-dimension limits
         @test select((1, 1, 5000)) === NDLaunch{Int32}()
 
-        # indices are computed in Int32 if the padded iteration space fits
+        # indices are computed in Int32 if the padded iteration space fits, and in `Int`
+        # otherwise, which on 32-bit hosts can't represent them either
         @test select((1024, 1024, 1024)) === NDLaunch{Int32}()
-        @test select((1025, 1024, 1024)) === NDLaunch{Int}()
         @test select((2^31 - 1024,)) === NDLaunch{Int32}()
-        @test select((2^31 - 1023,)) === NDLaunch{Int}()
         @test select((2^31 - 1,), (1,)) === NDLaunch{Int32}()
-        @test select((2^31 - 1,), (2,)) === NDLaunch{Int}()
-        @test select((2^16, 2^16, 2), (256,)) === LinearLaunch{Int}()
-        # ... and don't have to be representable at all
-        @test_throws ArgumentError select((2^40, 2^40))
+        int_extents = (((1025, 1024, 1024),), ((2^31 - 1023,),), ((2^31 - 1,), (2,)))
+        if Sys.WORD_SIZE == 64
+            for args in int_extents
+                @test select(args...) === NDLaunch{Int}()
+            end
+            @test select((2^16, 2^16, 2), (256,)) === LinearLaunch{Int}()
+        else
+            for args in int_extents
+                @test_throws ArgumentError select(args...)
+            end
+            @test_throws ArgumentError select((2^16, 2^16, 2), (256,))
+        end
+        # ... and don't have to be representable at all. `huge` is, but its square isn't.
+        huge = 2^(Sys.WORD_SIZE ÷ 2 + 8)
+        @test_throws ArgumentError select((huge, huge))
         @test_throws ArgumentError select((typemax(Int),))
         @test_throws ArgumentError select((typemax(Int),), (2,))
         # including when empty
-        @test select((2^40, 2^40, 0)) === LinearLaunch{Int32}()
+        @test select((huge, huge, 0)) === LinearLaunch{Int32}()
         @test select((2^20, 2^12, 0), (1024,)) === NDLaunch{Int32}()
 
         # a backend can prefer `Int`
@@ -258,8 +268,12 @@ function select_launch_testsuite()
             KernelAbstractions.select_launch(extent, groupsize, max_items, max_dims, max_groups, Int)
         @test selectint((1000,)) === NDLaunch{Int}()
         @test selectint((2, 3, 4, 5)) === LinearLaunch{Int}()
-        @test selectint((1025, 1024, 1024)) === NDLaunch{Int}()
-        @test_throws ArgumentError selectint((2^40, 2^40))
+        if Sys.WORD_SIZE == 64
+            @test selectint((1025, 1024, 1024)) === NDLaunch{Int}()
+        else
+            @test_throws ArgumentError selectint((1025, 1024, 1024))
+        end
+        @test_throws ArgumentError selectint((huge, huge))
     end
 
     # The index type is chosen before the workgroup size is tuned, so the padding that the

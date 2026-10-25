@@ -841,11 +841,16 @@ function subgroup_communication_testsuite(backend::KI.Backend, AT, sg_size)
             Float32 => i -> Float32(i) / 3, Bool => isodd, Char => i -> Char(0x0001F600 + i),
             Bits64 => i -> Bits64((UInt64(i) << 40) - i), Bits16 => i -> Bits16(0xa000 + i),
             ShuffleStruct => i -> ShuffleStruct(i, -i, (i, 2i, 3i)),
-            # fields of less than 4 bytes share words
-            Tuple{Bool, Int8, Float16, UInt16} => i -> (isodd(i), -i % Int8, Float16(i), UInt16(1000i % 65536)),
             FallbackStruct => i -> FallbackStruct(isodd(i), Char(64 + i), Bits64(-i), (i, -i, 2i, typemin(Int64) + i)),
         ]
         fp64 && push!(values, Float64 => i -> 1 / i)
+        # fields of less than 4 bytes share words. the kernels load and store the `Float16`
+        # field as such, which needs a device that supports `Float16`; the shuffle query is
+        # the only one that reflects that.
+        KI.supports_shuffle(backend, Float16) && push!(
+            values,
+            Tuple{Bool, Int8, Float16, UInt16} => i -> (isodd(i), -i % Int8, Float16(i), UInt16(1000i % 65536)),
+        )
         @testset "$T" for (T, f) in values
             KI.supports_shuffle(backend, T) || continue
             @testset "$n work-items" for n in sizes
