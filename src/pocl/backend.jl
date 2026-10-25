@@ -166,11 +166,17 @@ struct POCLKernel{K, F}
     f::F
 end
 
-function KI.kernel_function(backend::POCLBackend, f::F, tt::TT = Tuple{}; name = nothing, kwargs...) where {F, TT}
+function KI.kernel_function(backend::POCLBackend, f::F, tt::TT = Tuple{}; kwargs...) where {F, TT}
+    return KA.kernel_function_as(backend, f, tt, tt; kwargs...)
+end
+
+Base.@nospecializeinfer function KA.kernel_function_as(
+        backend::POCLBackend, f::F, @nospecialize(compiled_tt::Type), tt::TT; name = nothing, kwargs...
+    ) where {F, TT}
     # the sub-group width defaults to the one `KI.sub_group_size` reports. it is determined
     # when creating the compiler configuration, since passing it here would make the keyword
     # arguments' type depend on the device, and the call to `clfunction` dynamic.
-    kernel = clfunction(clconvert(f), tt; name, kwargs...)
+    kernel = clfunction(clconvert(f), tt, compiled_tt; name, kwargs...)
     kern = POCLKernel(kernel, f)
     return KI.Kernel{POCLBackend, typeof(kern)}(backend, kern)
 end
@@ -212,6 +218,16 @@ KI.launch_configuration(
         nitems, device_limits().compute_units, max_items, kernel.preferred_work_group_size_multiple
     )
     return Int(items)
+end
+
+# the workgroup size `KI.launch_configuration` tunes for kernels with the device's limits,
+# which is what PoCL kernels report, unless their estimated stack use limits their size
+function KA.expected_workgroupsize(::POCLBackend, nitems)
+    limits = device_limits()
+    return cpu_workgroupsize(
+        nitems, limits.compute_units, limits.max_work_group_size,
+        limits.preferred_work_group_size_multiple
+    )
 end
 
 # PoCL's own choice when a launch doesn't give a local size (`pocl_default_local_size_optimizer`

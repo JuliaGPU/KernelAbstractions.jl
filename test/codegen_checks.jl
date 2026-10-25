@@ -148,11 +148,12 @@ end
             KernelAbstractions.synchronize(backend)
         end
 
-        # a dynamic ndrange keeps the check, so the test above is not vacuous
+        # a dynamic ndrange with a partial workgroup keeps the check, so the test above is
+        # not vacuous (without one, the launch uses a kernel without the check)
         @test @filecheck begin
             @check "define spir_kernel void @{{.*}}gpu_codegen_mul2_inbounds"
             @check "br i1"
-            @device_code_llvm debuginfo = :none codegen_mul2_inbounds(backend, 16)(A, ndrange = 64)
+            @device_code_llvm debuginfo = :none codegen_mul2_inbounds(backend, 16)(A, ndrange = 60)
             KernelAbstractions.synchronize(backend)
         end
     end
@@ -220,7 +221,8 @@ end
     # can't wrap. Narrowing the ids to 32 bits and widening the indices again keeps PoCL from
     # vectorizing its loops over the work-items when they are short (#868).
     @testset "index type" begin
-        B = KernelAbstractions.zeros(backend, Float32, 4, 64)
+        # (with a partial workgroup: without the bounds check, LLVM turns the addition into an `or`)
+        B = KernelAbstractions.zeros(backend, Float32, 4, 60)
         @test @filecheck implicit_check_not = "trunc i64" begin
             @check "define spir_kernel void @{{.*}}gpu_codegen_scale_cartesian"
             @check "shl nuw nsw i64"
