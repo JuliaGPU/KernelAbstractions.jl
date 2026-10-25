@@ -102,7 +102,7 @@ function _create_tape_kernel(
     )
 
     # Allocate per thread
-    subtape = allocate(backend(kernel), TapeType, prod(ndrange))
+    subtape = allocate(backend(kernel), TapeType, _ka_nthreads(ndrange, iterspace))
 
     aug_kernel = similar(kernel, gpu_aug_fwd)
     return TapeType, subtape, aug_kernel
