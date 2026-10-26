@@ -767,6 +767,96 @@ end
     @test_throws ArgumentError fill_index!(CPU())(zeros(Int, 1); ndrange = (2^22, 2^22, 2^22, 1), workgroupsize = 1)
 end
 
+# whether the launch runs a kernel that checks its indices
+@kernel function bounds_checked!(A)
+    I = @index(Global, Linear)
+    @inbounds A[I] = KernelAbstractions.__dynamic_checkbounds(__ctx__)
+end
+
+@kernel function tuned_bounds_checked!(A)
+    I = @index(Global, Linear)
+    @inbounds A[I] = KernelAbstractions.__dynamic_checkbounds(__ctx__)
+end
+
+@kernel function partial_bounds_checked!(A)
+    I = @index(Global, Linear)
+    @inbounds A[I] = KernelAbstractions.__dynamic_checkbounds(__ctx__)
+end
+
+# with a workgroup size limited by the kernel's stack use: the sign of `A` is whether it
+# checks its indices, the magnitude the size of its workgroups
+@kernel function stack_bounds_checked!(A, B, @Const(idx))
+    I = @index(Global, Linear)
+    tmp = @private Float32 (1000,)
+    for j in 1:1000
+        @inbounds tmp[j] = j
+    end
+    @inbounds B[I] = tmp[idx[I]]
+    items = prod(@groupsize())
+    @inbounds A[I] = KernelAbstractions.__dynamic_checkbounds(__ctx__) ? -items : items
+end
+
+@testset "POCL bounds checks" begin
+    function checked(kernel, shape; workgroupsize = nothing)
+        A = fill(-1, shape)
+        kernel(A; ndrange = shape, workgroupsize)
+        all(==(A[1]), A) || error("inconsistent bounds checks")
+        return Bool(A[1])
+    end
+
+    # a kernel without the bounds check runs launches without partial workgroups
+    @test !checked(bounds_checked!(CPU()), 64; workgroupsize = 16)
+    @test checked(bounds_checked!(CPU()), 60; workgroupsize = 16)
+    @test !checked(bounds_checked!(CPU()), (8, 6); workgroupsize = (4, 3))
+    @test checked(bounds_checked!(CPU()), (8, 6); workgroupsize = (4, 4))
+    @test !checked(bounds_checked!(CPU()), (4, 6, 8); workgroupsize = (2, 3, 4))
+    @test checked(bounds_checked!(CPU()), (4, 6, 9); workgroupsize = (2, 3, 4))
+    @test !checked(bounds_checked!(CPU(), 8), 16)
+    @test checked(bounds_checked!(CPU(), 8), 12)
+    # also with a tuned workgroup size, which is a power of two on PoCL, unless a single
+    # workgroup covers the ndrange (e.g. on a single thread). an odd ndrange larger than
+    # the largest workgroup needs partial workgroups, however many threads PoCL uses.
+    @test !checked(bounds_checked!(CPU()), 1024)
+    @test checked(bounds_checked!(CPU()), POCL.device_limits().max_work_group_size + 1)
+    @test !checked(bounds_checked!(CPU()), (64, 32))
+
+    # only the kernel that the launch needs is compiled
+    compilations = POCL.compilations[]
+    @test !checked(tuned_bounds_checked!(CPU()), 4096)
+    @test POCL.compilations[] == compilations + 1
+    @test checked(partial_bounds_checked!(CPU()), 4097)
+    @test POCL.compilations[] == compilations + 2
+
+    # the tuned workgroup size is predicted from the device's limits, which a kernel's can
+    # be smaller than: then, its workgroups may not cover the ndrange, and need the check
+    A, B, idx = zeros(Int, 4096), zeros(Float32, 4096), rand(1:1000, 4096)
+    stack_bounds_checked!(CPU())(A, B, idx; ndrange = length(A))
+    @test all(==(A[1]), A)
+    @test (A[1] < 0) == !iszero(length(A) % abs(A[1]))
+    @test B == idx
+end
+
+@kernel function muladd_kernel!(D, @Const(A), @Const(B), @Const(C))
+    i = @index(Global)
+    @inbounds D[i] = muladd(A[i], B[i], C[i])
+end
+
+@testset "POCL muladd" begin
+    for T in (Float32, Float64)
+        A, B, C = rand(T, 64), rand(T, 64), rand(T, 64)
+        D = similar(A)
+        muladd_kernel!(CPU())(D, A, B, C; ndrange = length(D))
+        @test D ≈ muladd.(A, B, C)
+
+        # on CPUs with hardware FMA, the multiplication is not rounded: subtracting the
+        # rounded product leaves its rounding error
+        a = one(T) + eps(T)
+        A, B, C = fill(a, 4), fill(a, 4), fill(-(a * a), 4)
+        muladd_kernel!(CPU())(D, A, B, C; ndrange = 4)
+        @test all(==(POCL.fast_fma() ? fma(a, a, -(a * a)) : zero(T)), D[1:4])
+    end
+end
+
 @testset "POCL workgroup size" begin
     workgroupsize = POCL.POCLKernels.cpu_workgroupsize
     for threads in (1, 3, 4, 7, 64), max_items in (1, 7, 64, 4096), nitems in (nothing, 0, 1, 1000, 4096, 2^20, typemax(Int))

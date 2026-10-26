@@ -82,3 +82,18 @@ end
         @gputhrow "BoundsError" "Out-of-bounds access of scalar value"
     x
 end
+
+# float.jl
+# `muladd` allows contracting the multiplication and addition, but SPIR-V can only express
+# that with `SPV_KHR_float_controls2`, which we don't emit and the PoCL JLL can't read, so
+# PoCL computes it as a separate multiplication and addition. on CPUs with hardware FMA,
+# fuse them explicitly. these overlays are only used for jobs that set `fuse_muladd` (see
+# `fast_fma`). they are not consistent with Base's `muladd`, which may or may not fuse.
+# XXX: a stopgap (#865). remove it, and `fuse_muladd`, once the PoCL JLL is built with
+#      LLVM 23, whose SPIR-V translator reads the extension (pocl/pocl#2393), and we enable
+#      the extension for devices that report it (JuliaGPU/GPUCompiler.jl#1007).
+Base.Experimental.@MethodTable(muladd_method_table)
+for T in (Float32, Float64)
+    @eval Base.Experimental.@overlay muladd_method_table Base.muladd(x::$T, y::$T, z::$T) =
+        Base.fma(x, y, z)
+end

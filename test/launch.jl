@@ -123,9 +123,10 @@ end
 
 function launch_testsuite(backend, AT; launcher = default_launcher, skip_tests = Set{String}())
     @testset "index layout" begin
+        # with partial workgroups, and (for some workgroup sizes) without
         shapes = Tuple[
-            (), (7,), (37,), (5, 7), (33, 3), (3, 5, 7), (2, 3, 4, 5), (2, 3, 2, 3, 2),
-            (9, 7, 3, 5, 2),
+            (), (7,), (37,), (8,), (5, 7), (33, 3), (4, 6), (3, 5, 7), (8, 6, 2), (2, 3, 4, 5),
+            (2, 3, 2, 3, 2), (9, 7, 3, 5, 2),
         ]
         @testset "$shape, workgroupsize=$wgs" for shape in shapes,
                 wgs in (nothing, 4, (2, 3), (4, 1, 2))
@@ -139,6 +140,8 @@ function launch_testsuite(backend, AT; launcher = default_launcher, skip_tests =
         @testset "static workgroupsize" begin
             @test check_indices(launcher, backend(), AT, launch_indices!(backend(), (4, 2)), (9, 5))
             @test check_indices(launcher, backend(), AT, launch_indices!(backend(), 8), (9, 5, 3))
+            @test check_indices(launcher, backend(), AT, launch_indices!(backend(), (4, 2)), (8, 6))
+            @test check_indices(launcher, backend(), AT, launch_indices!(backend(), 8), (16, 5, 3))
         end
 
         @testset "static ndrange" begin
@@ -200,7 +203,7 @@ function launch_testsuite(backend, AT; launcher = default_launcher, skip_tests =
     end
 
     @testset "synchronize with padding lanes" begin
-        for (shape, wgs) in (((37,), (8,)), ((7, 6), (4, 4)), ((5, 3, 3), (2, 2, 2)))
+        for (shape, wgs) in (((37,), (8,)), ((7, 6), (4, 4)), ((5, 3, 3), (2, 2, 2)), ((8, 6), (4, 3)))
             A = AT(zeros(Int, shape))
             launcher(launch_sync!(backend(), wgs), A; ndrange = shape)
             synchronize(backend())

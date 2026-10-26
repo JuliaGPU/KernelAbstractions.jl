@@ -3,6 +3,8 @@
 Base.@kwdef struct OpenCLCompilerParams <: AbstractCompilerParams
     # request a fixed sub-group width via `intel_reqd_sub_group_size`
     sub_group_size::Union{Nothing, Int} = nothing
+    # lower `muladd` to `fma` (see `muladd_method_table`)
+    fuse_muladd::Bool = false
 end
 
 const OpenCLCompilerConfig = CompilerConfig{SPIRVCompilerTarget, OpenCLCompilerParams}
@@ -36,7 +38,10 @@ end
 
 GPUCompiler.runtime_module(::CompilerJob{<:Any, OpenCLCompilerParams}) = POCL
 
-GPUCompiler.method_tables(::OpenCLCompilerJob) = (method_table, SPIRVIntrinsics.method_table)
+GPUCompiler.method_tables(job::OpenCLCompilerJob) =
+    job.config.params.fuse_muladd ?
+    (muladd_method_table, method_table, SPIRVIntrinsics.method_table) :
+    (method_table, SPIRVIntrinsics.method_table)
 
 # filter out OpenCL built-ins
 # TODO: eagerly lower these using the translator API
@@ -229,8 +234,19 @@ end
         extensions = join(filter(!isempty, [default_extensions, something(extensions, "")]), ","),
         validate = true, kwargs...
     )
-    params = OpenCLCompilerParams(; sub_group_size)
+    params = OpenCLCompilerParams(; sub_group_size, fuse_muladd = fast_fma())
     return CompilerConfig(target, params; kernel, name, always_inline, debug_level)
+end
+
+# whether the CPU that PoCL runs kernels on, i.e., the host, executes `fma` in hardware, as
+# fast as a multiplication or addition. GPUCompiler's `have_fma` doesn't tell: on SPIR-V, it
+# holds whenever OpenCL's (correctly rounded) `fma` is available, possibly in software.
+function fast_fma()
+    Sys.ARCH === :aarch64 && return true
+    Sys.ARCH in (:x86_64, :i686) || return false
+    # LLVM's features of the host CPU, which PoCL compiles for
+    features = ccall(:jl_get_cpu_features, String, ())
+    return "+fma" in split(features, ',')
 end
 
 # The world in which this package was loaded. Running the compiler in that world reuses the

@@ -974,6 +974,8 @@ end
         return get_scalar(CL_DEVICE_LOCAL_MEM_SIZE, cl_ulong)
     elseif s === :max_work_group_size
         return get_scalar(CL_DEVICE_MAX_WORK_GROUP_SIZE, Csize_t)
+    elseif s === :preferred_work_group_size_multiple
+        return get_scalar(CL_DEVICE_PREFERRED_WORK_GROUP_SIZE_MULTIPLE, Csize_t)
     elseif s === :max_parameter_size
         return get_scalar(CL_DEVICE_MAX_PARAMETER_SIZE, Csize_t)
     elseif s === :profiling_timer_resolution

@@ -273,11 +273,27 @@ end
 
 const clfunction_lock = ReentrantLock()
 
-function clfunction(f::F, tt::TT = Tuple{}; kwargs...) where {F, TT}
+# `compiled_tt` are the argument types to compile the kernel for, if they aren't `tt`. they
+# may only differ in ways that don't change how the arguments are passed (e.g. in the type
+# parameters of a struct). it isn't specialized on, so that looking up either kernel is the
+# same code.
+Base.@nospecializeinfer function clfunction(
+        f::F, tt::TT = Tuple{}, @nospecialize(compiled_tt::Type) = tt; kwargs...
+    ) where {F, TT}
     kw = values(kwargs)
-    # besides the signature, the kernel only depends on the session and the compiler options
-    kernel, rng_state = GPUCompiler.cached_lookup(Tuple{cl.Kernel, Bool}, F, tt, (context(), kw)) do
-        lookup_kernel(F, tt, kw)
+    # besides the signature, the kernel only depends on the session and the compiler options.
+    # the kernel compiled for other types has a key of another type, and thus a cache of its
+    # own: launches alternating between both kernels then find either on the fast path.
+    kernel, rng_state = if compiled_tt === tt
+        GPUCompiler.cached_lookup(Tuple{cl.Kernel, Bool}, F, tt, (context(), kw)) do
+            lookup_kernel(F, tt, kw)
+        end
+    else
+        # (wrapped, so that the types of the key and the lookup don't depend on it)
+        compiled = Some{Type}(compiled_tt)
+        GPUCompiler.cached_lookup(Tuple{cl.Kernel, Bool}, F, tt, (context(), kw, compiled)) do
+            lookup_kernel(F, something(compiled), kw)
+        end
     end
     # not cached: that would keep every callable that was ever launched alive
     return HostKernel{F, tt}(f, kernel, rng_state)
