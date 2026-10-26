@@ -595,6 +595,55 @@ end
     @test count() == n + 2
 end
 
+# `clfunction` reuses the kernel it returned last for a call site
+@testset "POCL kernel reuse" begin
+    mod = @eval module $(gensym())
+    import KernelAbstractions.POCL
+    @noinline helper(x) = x + 1
+    kernel(A, x::Number) = (A[1] = helper(x); return)
+    launch(A, x) = (POCL.@opencl kernel(A, x); A[1])
+    struct Constant
+        x::Int
+    end
+    (c::Constant)(A) = (A[1] = c.x; return)
+    launch_callable(f, A) = (POCL.@opencl f(A); A[1])
+    end
+
+    count() = POCL.compilations[]
+    launch(A, x) = Base.invokelatest(mod.launch, A, x)
+    A = zeros(Int, 1)
+    @test launch(A, 1) == 2
+    n = count()
+    @test launch(A, 2) == 3
+    @test count() == n
+
+    # defining unrelated methods changes the world, but not the kernel
+    @eval mod unrelated() = nothing
+    @test launch(A, 2) == 3
+    @test count() == n
+
+    # redefining a callee recompiles
+    @eval mod @noinline helper(x) = x + 10
+    @test launch(A, 2) == 12
+    @test count() == n + 1
+
+    # a more specific method of the kernel is used, although the code of the other one is
+    # still valid
+    world = Base.get_world_counter()
+    @eval mod kernel(A, x::Int) = (A[1] = -x; return)
+    @test launch(A, 2) == -2
+    @test count() == n + 2
+
+    # launches in an older world use the methods of that world
+    @test Base.invoke_in_world(world, mod.launch, A, 2) == 12
+    @test launch(A, 2) == -2
+    @test count() == n + 2
+
+    # callables of the same type are launched with their own values
+    @test Base.invokelatest(mod.launch_callable, mod.Constant(1), A) == 1
+    @test Base.invokelatest(mod.launch_callable, mod.Constant(2), A) == 2
+end
+
 @testset "POCL session" begin
     # in a fresh process, to check initialization, and with threads, which the tests
     # usually don't have

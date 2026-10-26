@@ -186,10 +186,8 @@ function KI.launch(obj::KI.Kernel{POCLBackend}, groups::Dims{3}, items::Dims{3},
     return nothing
 end
 
-function KI.max_work_group_size(kernel::KI.Kernel{<:POCLBackend})::Int
-    wginfo = cl.work_group_info(kernel.kern.kernel.fun, device())
-    return Int(wginfo.size)
-end
+KI.max_work_group_size(kernel::KI.Kernel{<:POCLBackend})::Int =
+    kernel.kern.kernel.fun.work_group_size
 KI.max_work_group_size(::POCLBackend)::Int = device_limits().max_work_group_size
 KI.max_work_group_dims(::POCLBackend)::NTuple{3, Int} = device_limits().max_work_group_dims
 # the grid is only limited by the size of `size_t`
@@ -202,16 +200,18 @@ KI.multiprocessor_count(::POCLBackend)::Int = device_limits().compute_units
 # single thread, so split it into about as many work-groups as there are threads, as long as
 # the work-groups stay large enough to vectorize. this assumes that the work is balanced
 # across the work-items.
-function KI.launch_configuration(
-        kernel::KI.Kernel{<:POCLBackend}; nitems::Union{Integer, Nothing} = nothing,
-        max_work_group_size::Integer = typemax(Int)
-    )
-    wginfo = cl.work_group_info(kernel.kern.kernel.fun, device())
-    max_items = min(wginfo.size, max_work_group_size)
+KI.launch_configuration(
+    kernel::KI.Kernel{<:POCLBackend}; nitems::Union{Integer, Nothing} = nothing,
+    max_work_group_size::Integer = typemax(Int)
+) = (; workgroupsize = launch_workgroupsize(kernel.kern.kernel.fun, nitems, max_work_group_size))
+
+# kept out of `KI.launch_configuration`, which is compiled for every kernel
+@noinline function launch_workgroupsize(kernel::cl.Kernel, nitems, max_work_group_size)
+    max_items = min(kernel.work_group_size, max_work_group_size)
     items = cpu_workgroupsize(
-        nitems, device_limits().compute_units, max_items, wginfo.prefered_size_multiple
+        nitems, device_limits().compute_units, max_items, kernel.preferred_work_group_size_multiple
     )
-    return (; workgroupsize = Int(items))
+    return Int(items)
 end
 
 # PoCL's own choice when a launch doesn't give a local size (`pocl_default_local_size_optimizer`

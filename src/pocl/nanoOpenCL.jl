@@ -1238,8 +1238,26 @@ mutable struct Kernel
     # kernel arguments are state of the kernel object, see `call`
     const lock::ReentrantLock
 
+    # the work-group limits for the session's device, which every launch needs. they don't
+    # change, so they are queried once (see `work_group_info` for the others)
+    const work_group_size::Int
+    const preferred_work_group_size_multiple::Int
+
     function Kernel(k::cl_kernel)
-        kernel = new(k, ReentrantLock())
+        function get(param)
+            result = Ref{Csize_t}()
+            clGetKernelWorkGroupInfo(k, device(), param, sizeof(Csize_t), result, C_NULL)
+            return Int(result[])
+        end
+        kernel = try
+            new(
+                k, ReentrantLock(), get(CL_KERNEL_WORK_GROUP_SIZE),
+                get(CL_KERNEL_PREFERRED_WORK_GROUP_SIZE_MULTIPLE)
+            )
+        catch
+            clReleaseKernel(k)
+            rethrow()
+        end
         finalizer(clReleaseKernel, kernel)
         return kernel
     end
