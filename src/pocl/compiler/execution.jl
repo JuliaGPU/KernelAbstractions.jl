@@ -181,14 +181,20 @@ function launch_and_wait(kernel::AbstractKernel, args::Tuple; kwargs...)
     info[] = ExceptionInfo_st()
     GC.@preserve args info begin
         event = launch_tuple(kernel, args, Base.unsafe_convert(Ptr{ExceptionInfo_st}, info); kwargs...)
-        try
-            wait(event)
-        finally
-            cl.clReleaseEvent(event)
-        end
+        wait_for_kernel(event, info)
+    end
+    return nothing
+end
+
+# kept out of `launch_and_wait`, which is compiled for every kernel
+@noinline function wait_for_kernel(event::cl.Event, info::Base.RefValue{ExceptionInfo_st})
+    try
+        wait(event)
+    finally
+        cl.clReleaseEvent(event)
     end
     info[].status == 0 || throw(KernelException(device()))
-    return nothing
+    return
 end
 
 @inline launch_tuple(
@@ -278,8 +284,11 @@ function clfunction(f::F, tt::TT = Tuple{}; kwargs...) where {F, TT}
 end
 
 # Returns the `cl.Kernel` for `F` and `tt` on the session's context, and whether it uses
-# the device-side RNG.
-function lookup_kernel(::Type{F}, tt::Type{TT}, kwargs::NamedTuple) where {F, TT}
+# the device-side RNG. Nothing in here depends on the types of the kernel or its arguments,
+# so it is inferred and compiled once, rather than for every new kernel.
+@noinline Base.@nospecializeinfer function lookup_kernel(
+        @nospecialize(F::Type), @nospecialize(tt::Type), @nospecialize(kwargs::NamedTuple)
+    )
     Base.@lock clfunction_lock begin
         config = compiler_config(device(); kwargs...)::OpenCLCompilerConfig
         source = methodinstance(F, tt)
@@ -327,7 +336,7 @@ end
 # observes cached kernels without recompiling them.
 # Keep this specialized so the caller can avoid boxing `CompilerJob`. Its type parameters
 # only identify the target and compiler parameters, so this is bounded per back-end rather
-# than specialized for every kernel; `@noinline` keeps the body out of each `clfunction`.
+# than specialized for every kernel.
 @noinline function compile_or_lookup(job::CompilerJob)::OpenCLResults
     GPUCompiler.run_compile_hook(job)
     res = GPUCompiler.cached_results(OpenCLResults, job)
