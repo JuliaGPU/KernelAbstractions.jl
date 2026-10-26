@@ -102,6 +102,35 @@ end
 # `unsafe_wrap`) are the user's responsibility, as documented for `CPU`.
 KI.allocate(::POCLBackend, ::Type{T}, dims::Tuple; unified::Bool = false) where {T} = Array{T}(undef, dims)
 
+# Initialized
+
+KA.@kernel function fill_kernel(A, x)
+    I = KA.@index(Global)
+    @inbounds A[I] = x
+end
+
+# Filling an array with a kernel first-touches its pages from PoCL's threads, which spreads
+# them over the threads' memory domains instead of placing all of them in the calling
+# thread's (see the NUMA example). Below 1 MiB, the launch overhead makes that up to several
+# times slower than filling from the host, while there are too few pages for placement to
+# matter.
+const KERNEL_FILL_BYTES = 1 << 20
+
+# arrays of bits unions, whose element type isn't `isbitstype`, are filled from the host
+function fill_initialized!(backend::POCLBackend, A::Array{T}, x) where {T}
+    if isbitstype(T) && sizeof(A) >= KERNEL_FILL_BYTES
+        fill_kernel(backend)(A, x; ndrange = length(A))
+    else
+        fill!(A, x)
+    end
+    return A
+end
+
+KI.zeros(backend::POCLBackend, ::Type{T}, dims::Tuple; kwargs...) where {T} =
+    fill_initialized!(backend, KI.allocate(backend, T, dims; kwargs...), zero(T))
+KI.ones(backend::POCLBackend, ::Type{T}, dims::Tuple; kwargs...) where {T} =
+    fill_initialized!(backend, KI.allocate(backend, T, dims; kwargs...), one(T))
+
 #  Adapt.jl's `Array` rule converts every `AbstractArray` leaf; `isbits` arrays (ranges, view indices)
 # which we want to keep as they are.
 Adapt.adapt_storage(::POCLBackend, x::AbstractArray) = isbits(x) ? x : Adapt.adapt(Array, x)
