@@ -712,6 +712,30 @@ end
     end
 end
 
+struct ZeroOnePair
+    a::Int16
+    b::Float32
+end
+Base.zero(::Type{ZeroOnePair}) = ZeroOnePair(0, 0.0f0)
+Base.one(::Type{ZeroOnePair}) = ZeroOnePair(1, 1.0f0)
+
+# large arrays are filled with a kernel, small ones from the host
+@testset "POCL zeros/ones of large arrays" begin
+    threshold = POCL.POCLKernels.KERNEL_FILL_BYTES
+    for T in (Float32, Int8, ComplexF64, ZeroOnePair)
+        n = cld(threshold, sizeof(T)) + 3
+        for dims in ((n,), (cld(n, 7), 7), (1,))
+            Z = KernelAbstractions.zeros(POCLBackend(), T, dims)
+            @test Z isa Array{T, length(dims)} && size(Z) == dims
+            @test all(==(zero(T)), Z)
+
+            O = KernelAbstractions.ones(POCLBackend(), T, dims...)
+            @test O isa Array{T, length(dims)} && size(O) == dims
+            @test all(==(one(T)), O)
+        end
+    end
+end
+
 # a mapping KernelAbstractions doesn't know, which the index functions have to go
 # through `expand`, `in` and `linear_index` for
 struct TransposedMapping end
