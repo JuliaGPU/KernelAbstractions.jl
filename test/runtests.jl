@@ -772,8 +772,10 @@ end
     for launch in (nothing, KA.LinearLaunch{Int}(), KA.NDLaunch{Int}())
         function launcher(kernel, args...; ndrange, workgroupsize = nothing)
             ndrange, workgroupsize, iterspace, _ = KA.launch_config(kernel, ndrange, workgroupsize)
-            # an N-d launch is limited to three dimensions
-            l = launch isa KA.NDLaunch && ndims(iterspace) > 3 ? KA.LinearLaunch{Int}() : launch
+            # an N-d launch needs one work-item past the third dimension, as tuned workgroups have
+            fold = KA.workgroupsize(kernel) <: KA.DynamicSize && workgroupsize === nothing ||
+                all(==(1), size(KA.workitems(iterspace))[4:end])
+            l = launch isa KA.NDLaunch && !fold ? KA.LinearLaunch{Int}() : launch
             KernelAbstractions.launch_kernel(kernel, l, ndrange, workgroupsize, iterspace, args)
         end
         @testset "$launch" begin
