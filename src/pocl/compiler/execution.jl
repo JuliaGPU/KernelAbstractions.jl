@@ -268,6 +268,18 @@ end
 const clfunction_lock = ReentrantLock()
 
 function clfunction(f::F, tt::TT = Tuple{}; kwargs...) where {F, TT}
+    kw = values(kwargs)
+    # besides the signature, the kernel only depends on the session and the compiler options
+    kernel, rng_state = GPUCompiler.cached_lookup(Tuple{cl.Kernel, Bool}, F, tt, (context(), kw)) do
+        lookup_kernel(F, tt, kw)
+    end
+    # not cached: that would keep every callable that was ever launched alive
+    return HostKernel{F, tt}(f, kernel, rng_state)
+end
+
+# Returns the `cl.Kernel` for `F` and `tt` on the session's context, and whether it uses
+# the device-side RNG.
+function lookup_kernel(::Type{F}, tt::Type{TT}, kwargs::NamedTuple) where {F, TT}
     Base.@lock clfunction_lock begin
         config = compiler_config(device(); kwargs...)::OpenCLCompilerConfig
         source = methodinstance(F, tt)
@@ -300,8 +312,7 @@ function clfunction(f::F, tt::TT = Tuple{}; kwargs...) where {F, TT}
             cached
         end
 
-        # not cached: that would keep every callable that was ever launched alive
-        return HostKernel{F, tt}(f, kernel, res.device_rng)
+        return kernel::cl.Kernel, res.device_rng
     end
 end
 
