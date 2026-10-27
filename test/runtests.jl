@@ -800,6 +800,35 @@ end
     @test KernelAbstractions.select_launch(kernel, wgs, iterspace) === KernelAbstractions.NDLaunch{Int}()
 end
 
+@testset "POCL N-d work-group sizes" begin
+    # tuned work-groups shrink to divisors of the ndrange where possible, avoiding partial groups
+    wgs(ndrange) = KernelAbstractions.launch_workgroupsize(
+        CPU(), KernelAbstractions.NDLaunch{Int}(), 4096, ndrange
+    )
+    # (searching the work-group counts)
+    @test wgs((126, 126, 126)) == (126, 21, 1)
+    @test wgs((100, 100)) == (100, 25)
+    @test wgs((5000, 10)) == (2500, 1)
+    # (searching the sizes)
+    @test wgs((1024, 1002)) == (1024, 3)
+    @test wgs((64, 64, 64)) == (64, 64, 1)
+    # each dimension shrinks to at least half
+    @test wgs((127, 127, 127)) == (127, 32, 1)
+    @test wgs((1024, 1001)) == (1024, 4)
+    @test wgs((0, 7)) == (1, 7)
+
+    # an explicit workgroup size is kept
+    @kernel function groupsize!(A)
+        if @index(Global, Linear) == 1
+            A[1], A[2] = @groupsize()
+        end
+    end
+    A = zeros(Int, 2)
+    groupsize!(CPU())(A; ndrange = (126, 126), workgroupsize = (126, 32))
+    KernelAbstractions.synchronize(CPU())
+    @test A == [126, 32]
+end
+
 @kernel function fill_index!(A)
     I = @index(Global, Linear)
     @inbounds A[I] = I

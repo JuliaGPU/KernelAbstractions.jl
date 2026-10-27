@@ -257,6 +257,35 @@ function KA.expected_workgroupsize(::POCLBackend, nitems)
     )
 end
 
+# a work-group that is partial in some dimension runs the bounds-checked kernel, whose
+# work-item loop vectorizes poorly (without masked loads and stores, as on AArch64, it is
+# about 3x slower for a stencil), and a partial dimension makes a whole slab of work-groups
+# partial. so shrink each dimension of the generic choice to the largest size that divides
+# the ndrange, if that keeps at least half of it. (shrinking only, so that the padding stays
+# within the bound `KA.select_launch` assumes.)
+function KA.launch_workgroupsize(::POCLBackend, ::KA.NDLaunch, threads, ndrange)
+    extent = KA.extents(ndrange)
+    limits = KA.nd_limits(device_limits().max_work_group_dims, extent)
+    items = KI.threads_to_workgroupsize(threads, extent, limits)
+    return map((n, x) -> n % x == 0 ? x : largest_divisor(n, x), extent, items)
+end
+
+# the largest divisor of `n` in `cld(x, 2):x`, or `x` if there is none, searching the sizes
+# or the work-group counts, whichever are fewer
+function largest_divisor(n::Int, x::Int)
+    lo = cld(x, 2)
+    if x - lo <= fld(n, lo) - cld(n, x)
+        for d in (x - 1):-1:lo
+            n % d == 0 && return d
+        end
+    else
+        for g in cld(n, x):fld(n, lo)
+            n % g == 0 && return n ÷ g
+        end
+    end
+    return x
+end
+
 # PoCL's own choice when a launch doesn't give a local size (`pocl_default_local_size_optimizer`
 # in `lib/CL/devices/pocl_local_size.c`), in one dimension: start from the largest work-group,
 # and split it while there are at most half as many work-groups as threads, but not below
