@@ -244,9 +244,12 @@ end
     KernelState(rng_state ? rng_seed() : UInt32(0), UInt64(UInt(exception_info)))
 @noinline rng_seed() = Base.rand(UInt32)
 
-# the call's tuple type and argument expressions for `launch_converted`. (on vectors, so that
-# it compiles once for all argument counts.)
-function kernel_call_arguments(@nospecialize(F), @nospecialize(TT), nargs::Int)
+# For the generators below: the argument types of a kernel compiled for `F` and the
+# argument types `TT`, as a tuple type, and the expressions that compute the arguments from
+# `kernel`, its `nargs` arguments `args` and `exception_info`, with `null` for the values of
+# non-isbits arguments. (a function of its own, working on vectors, so that it is compiled
+# once rather than for every number of arguments.)
+function kernel_call_arguments(@nospecialize(F), @nospecialize(TT), nargs::Int, null)
     params = Any[F, TT.parameters...]   # Base.signature_type with a function type
     exprs = Any[:(kernel.f); Any[:(clconvert(args[$i])) for i in 1:nargs]]
     call_t = Type[KernelState]
@@ -257,7 +260,7 @@ function kernel_call_arguments(@nospecialize(F), @nospecialize(TT), nargs::Int)
         # replace non-isbits arguments (they should be unused, or compilation would have
         # failed)
         push!(call_t, isbitstype(dt) ? dt : Ptr{Any})
-        push!(call_args, isbitstype(dt) ? ex : :C_NULL)
+        push!(call_args, isbitstype(dt) ? ex : null)
     end
     return Base.to_tuple_type(call_t), call_args
 end
@@ -265,7 +268,7 @@ end
 @inline @generated function launch_converted(
         kernel::AbstractKernel{F, TT}, args::Tuple, exception_info, global_size, local_size
     ) where {F, TT}
-    call_tt, call_args = kernel_call_arguments(F, TT, fieldcount(args))
+    call_tt, call_args = kernel_call_arguments(F, TT, fieldcount(args), :C_NULL)
 
     # the converted arguments only hold pointers to the arrays in `args`
     return quote
@@ -875,23 +878,9 @@ end
         kernel::AbstractKernel{F, TT}, args::Tuple, exception_info, h, num_groups, full,
         extent
     ) where {F, TT}
-    sig = Tuple{F, TT.parameters...}
-    args = (:(kernel.f), (:(clconvert(args[$i])) for i in 1:fieldcount(args))...)
-
-    to_pass = map(pass_arg, sig.parameters)
-    call_t = Type[x[1] for x in zip(sig.parameters, to_pass) if x[2]]
-    call_args = Union{Expr, Symbol}[x[1] for x in zip(args, to_pass) if x[2]]
-    for (i, dt) in enumerate(call_t)
-        if !isbitstype(dt)
-            call_t[i] = Ptr{Any}
-            call_args[i] = :(Ptr{Any}(C_NULL))
-        end
-    end
-    pushfirst!(call_t, KernelState)
-    pushfirst!(call_args, :(kernel_state(kernel.rng_state, exception_info)))
-    call_tt = Base.to_tuple_type(call_t)
-    arg_ptrs = [:(base + $(fieldoffset(call_tt, i))) for i in 1:length(call_t)]
-    N = length(call_t)
+    call_tt, call_args = kernel_call_arguments(F, TT, fieldcount(args), :(Ptr{Any}(C_NULL)))
+    N = length(call_args)
+    arg_ptrs = Expr[:(base + $(fieldoffset(call_tt, i))) for i in 1:N]
 
     # the converted arguments only hold pointers to the arrays in `args`. the local memory
     # arguments of RNG kernels are set on the host kernel, so they get no value.
