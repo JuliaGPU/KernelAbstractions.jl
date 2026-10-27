@@ -16,10 +16,11 @@ struct Session
     platform::cl.Platform
     device::cl.Device
     context::cl.Context
-    # querying the device allocates, so cache the limits that every launch needs
+    # querying the device allocates, so cache what launches need
     limits::@NamedTuple{
         max_work_group_size::Int, max_work_group_dims::NTuple{3, Int}, sub_group_size::Int,
         compute_units::Int, preferred_work_group_size_multiple::Int,
+        fp16::Bool, fp64::Bool,
     }
 end
 
@@ -48,6 +49,7 @@ function Session()
     context = cl.Context(device)
 
     sizes = device.max_work_item_size
+    extensions = device.extensions
     sub_group_size = default_sub_group_size(device)
     limits = (;
         max_work_group_size = Int(device.max_work_group_size),
@@ -58,6 +60,9 @@ function Session()
         compute_units = Int(device.max_compute_units),
         # what kernels report, unless PoCL chose another for them
         preferred_work_group_size_multiple = Int(device.preferred_work_group_size_multiple),
+        # collectives check these on every launch
+        fp16 = "cl_khr_fp16" in extensions,
+        fp64 = "cl_khr_fp64" in extensions,
     )
 
     return Session(platform, device, context, limits)

@@ -2,7 +2,7 @@ module POCLKernels
 
 using ..POCL
 using ..POCL: @device_override, cl, method_table
-using ..POCL: device, device_limits, clconvert, clfunction
+using ..POCL: device_limits, clconvert, clfunction
 
 using SPIRV_LLVM_Backend_jll, SPIRV_Tools_jll
 
@@ -179,7 +179,7 @@ KI.get_backend(::Array) = POCLBackend()
 ## must synchronize upon kernel launch and can't rely on synchronization upon
 ## array access. Therefore, `synchronize` is a no-op.
 KI.synchronize(::POCLBackend) = nothing
-KI.supports_float64(::POCLBackend) = "cl_khr_fp64" in device().extensions
+KI.supports_float64(::POCLBackend) = device_limits().fp64
 KI.supports_unified(::POCLBackend) = true
 KI.supports_atomics(::POCLBackend) = true
 
@@ -298,8 +298,8 @@ const ShuffleTypes = Union{SPIRVIntrinsics.gentypes...}
 
 function KI.supports_shuffle(backend::POCLBackend, ::Type{T}) where {T <: ShuffleTypes}
     KI.supports_subgroups(backend) || return false
-    T === Float64 && return "cl_khr_fp64" in device().extensions
-    T === Float16 && return "cl_khr_fp16" in device().extensions
+    T === Float64 && return device_limits().fp64
+    T === Float16 && return device_limits().fp16
     return true
 end
 
