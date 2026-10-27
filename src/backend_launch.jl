@@ -162,7 +162,12 @@ function launch_kernel(
     # compiled once.
     tuned = workgroupsize(obj) <: DynamicSize && _workgroupsize === nothing
     range = something(ndrange, static_ndrange(obj))
-    unchecked = !checked && skip_bounds_check(b) && expect_coverage(b, launch, range, iterspace, tuned)
+    # predicted workgroup size (`expected`) and per-dimension sizes (`predicted`)
+    unchecked, expected, predicted = if !checked && skip_bounds_check(b)
+        expect_coverage(b, launch, range, iterspace, tuned)
+    else
+        false, 0, size(workitems(iterspace))
+    end
     kernel = if skip_bounds_check(b)
         # hide the check type from inference, so that the lookup compiles once for both
         compiled_tt = Base.compilerbarrier(:type, unchecked ? without_bounds_check(tt) : tt)::Type
@@ -173,17 +178,21 @@ function launch_kernel(
     end
 
     # tune the workgroup size, keeping the context type (and thus the kernel) the same
-    threads = if tuned
-        KI.launch_configuration(kernel; nitems = saturated_prod(extents(range))).workgroupsize
-    else
+    threads = if !tuned
         nothing
+    elseif expected > 0 && tunes_as_expected(kernel)
+        expected
+    else
+        KI.launch_configuration(kernel; nitems = saturated_prod(extents(range))).workgroupsize
     end
     ctx, groups, items = launch_geometry(sizes_only(obj), launch, subgroups, ndrange, iterspace, ctx, threads)
 
-    # partial workgroups need bounds checks. if kernel-specific tuning introduced them
-    # unexpectedly, relaunch checked. otherwise, split-capable backends can run full
-    # workgroups unchecked.
-    if !checked && skip_bounds_check(b) && bounded(range, iterspace) && !covers(range, ctx)
+    # partial workgroups need bounds checks. if kernel-specific tuning adds them unexpectedly,
+    # relaunch checked; otherwise, split-capable backends can run full workgroups unchecked.
+    # reuse coverage only if workgroup sizes match the prediction; custom `partition` may
+    # change them.
+    if !checked && skip_bounds_check(b) && bounded(range, iterspace) &&
+            !(size(workitems(__iterspace(ctx))) == predicted ? unchecked : covers(range, ctx))
         unchecked &&
             return launch_kernel(obj, launch, subgroups, ndrange, _workgroupsize, iterspace, args, true)
         extent = split_extent(size(cartesian(range)), items)
@@ -253,6 +262,15 @@ work-items, computed without a kernel. Only called if `skip_bounds_check(backend
 """
 function expected_workgroupsize end
 
+"""
+    tunes_as_expected(kernel)::Bool
+
+Whether [`expected_workgroupsize`](@ref) predicts the size from `KI.launch_configuration`,
+so tuning can be skipped (e.g. when kernel and device limits match).
+Only called if `skip_bounds_check(backend)`.
+"""
+tunes_as_expected(kernel) = false
+
 # the argument types `tt` of a launch, with `NoDynamicCheck` in the type of the context
 # (which `argconvert` doesn't change) instead of `DynamicCheck`. computed from the types, as
 # constructing the context takes more host code to compile for every kernel.
@@ -277,16 +295,13 @@ covers(range, items::Dims) =
 @noinline covers(range, ctx::CompilerMetadata) = covers(range, size(workitems(__iterspace(ctx))))
 
 # whether the workgroups of a launch over `range`, partitioned as `iterspace` or with a
-# `tuned` workgroup size, are expected to cover it exactly (see `bounded` and `covers`)
+# `tuned` size, should cover it exactly (see `bounded` and `covers`), plus the predicted
+# tuned size (0 if not `tuned`) and per-dimension workgroup sizes
 @noinline function expect_coverage(b, launch, range, iterspace, tuned::Bool)
-    bounded(range, iterspace) || return false
-    items = if tuned
-        expected = expected_workgroupsize(b, saturated_prod(extents(range)))
-        launch_workgroupsize(b, launch, expected, range)
-    else
-        size(workitems(iterspace))
-    end
-    return covers(range, items)
+    expected = tuned ? expected_workgroupsize(b, saturated_prod(extents(range))) : 0
+    bounded(range, iterspace) || return false, expected, size(workitems(iterspace))
+    items = tuned ? launch_workgroupsize(b, launch, expected, range) : size(workitems(iterspace))
+    return covers(range, items), expected, items
 end
 
 # the context and launch geometry, re-partitioned for the tuned workgroup size `threads`

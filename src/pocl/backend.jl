@@ -273,6 +273,11 @@ end
 
 # the workgroup size `KI.launch_configuration` tunes for kernels with the device's limits,
 # which is what PoCL kernels report, unless their estimated stack use limits their size
+function KA.tunes_as_expected(kernel::KI.Kernel{POCLBackend})
+    k, limits = kernel.kern.kernel.fun, device_limits()
+    return k.tuned_work_group_size == limits.max_work_group_size &&
+        k.preferred_work_group_size_multiple == limits.preferred_work_group_size_multiple
+end
 function KA.expected_workgroupsize(::POCLBackend, nitems)
     limits = device_limits()
     return cpu_workgroupsize(
@@ -352,8 +357,7 @@ function cpu_workgroupsize(nitems, threads, max_items, multiple)
     items = min(nextpow2(min(nitems, max_items)), max_items)
     # one work-group, which isn't split (without dividing, for small launches)
     items >= nitems && items < 2 * min_items && return items
-    # (dividing as little as possible: launches tune twice, and a division takes tens of
-    # cycles on some CPUs)
+    # avoid divisions: each costs tens of cycles on some CPUs
     groups = cld_items(nitems, items)
     while threads >= 2 * groups && items >= 2 * min_items
         splits = min(threads ÷ groups, items ÷ min_items)

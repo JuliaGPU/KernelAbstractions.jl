@@ -1429,6 +1429,7 @@ end
     # the device's largest work-group needs more stack than a host kernel may use
     @test fun.private_mem_size * fun.work_group_size > POCL.host_kernel_stack_limit
     items = KernelAbstractions.KernelInterface.launch_configuration(kernel; nitems = n).workgroupsize
+    @test !KernelAbstractions.tunes_as_expected(kernel)
     sizes = (; global_size = (n, 1, 1), local_size = (items, 1, 1))
     @test POCL.host_kernel(kernel.kern.kernel, sizes, nothing) !== nothing
     kernel(B, idx; workgroupsize = items, numgroups = cld(n, items))
