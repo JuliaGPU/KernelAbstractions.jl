@@ -432,6 +432,9 @@ const host_steal_max_groups = Int(typemax(Int32))
 # 8192 work-items to recover that cost on 4 or 8 threads (see `host_schedule`).
 const host_kernel_serial_items = 8192
 
+# untimed launches after a short sample in `run_short`; resampling detects longer work
+const host_untimed_launches = 15
+
 # host kernels use the calling thread's stack; Julia task stacks are at least 4 MiB. cap
 # estimated use at 1 MiB, using PoCL's upper bound per work-item. tuning shrinks work-groups
 # to fit (see `link_kernel`); sizes that still exceed the limit use the queue.
@@ -788,6 +791,8 @@ end
         launch()
         Base.@atomic :monotonic h.last_duration = cycle_counter() - start
         Base.@atomic :monotonic h.last_groups = total
+        # resample on the launching task: team timings may not apply
+        Base.@atomic :monotonic h.untimed = 0
     end
     # yield after team or long launches so repeated launches don't starve tasks, timers or
     # I/O
@@ -849,12 +854,27 @@ end
 # supplies both the serial estimate and the last-launch duration
 @inline function run_short(l::HostLaunch)
     scratch = host_scratch_ptr(l.scratch_size, l.scratch_alignment)
-    start = cycle_counter()
-    host_run(l, 0, l.total, scratch)
-    duration = cycle_counter() - start
-    record_serial_sample(l.h, l.total, duration)
-    Base.@atomic :monotonic l.h.last_duration = duration
-    Base.@atomic :monotonic l.h.last_groups = l.total
+    h = l.h
+    # counter reads can cost tens of cycles. sample every `host_untimed_launches + 1` launches
+    # after a short sample; detecting longer work can lag that long or miss work varying
+    # with that period entirely. always time grids with no estimate or a changed work-group
+    # count: estimates are per grid, the countdown per kernel; no estimate means one thread.
+    untimed = Base.@atomic :monotonic h.untimed
+    if untimed == 0 ||
+            (Base.@atomic :monotonic h.last_duration) >= session().host_kernel_short_ticks ||
+            (Base.@atomic :monotonic h.last_groups) != l.total ||
+            serial_duration(h, l.total) == 0
+        start = cycle_counter()
+        host_run(l, 0, l.total, scratch)
+        duration = cycle_counter() - start
+        record_serial_sample(h, l.total, duration)
+        Base.@atomic :monotonic h.last_duration = duration
+        Base.@atomic :monotonic h.untimed = host_untimed_launches
+    else
+        host_run(l, 0, l.total, scratch)
+        Base.@atomic :monotonic h.untimed = untimed - 1
+    end
+    Base.@atomic :monotonic h.last_groups = l.total
     return
 end
 

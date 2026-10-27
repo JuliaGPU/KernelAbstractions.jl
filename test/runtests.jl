@@ -629,10 +629,11 @@ end
         @test POCL.host_schedule(h, s, nt, false) == (1, false)
         # large grids select the full team
         @test POCL.host_schedule(h, s, 10^6, false)[1] == nt
-        # estimates are per grid: a short one-group launch must not make a heavy grid run
-        # serially
-        kernel(A, 10^5; sizes...)
-        kernel(A, 10^5; sizes...)
+        # estimates are per grid: a short one-group launch must not keep a heavy grid serial.
+        # allow enough launches to resample longer work.
+        for _ in 1:(POCL.host_untimed_launches + 2)
+            kernel(A, 10^5; sizes...)
+        end
         kernel(A, 0; global_size = (1, 1, 1), local_size = (1, 1, 1))
         @test POCL.host_schedule(h, s, nt, false)[1] == nt
 
@@ -647,6 +648,39 @@ end
             @test POCL.host_schedule(h, s, smax + 1, true) == (nt, false)
             @test POCL.host_schedule(h, s, tmax, true) == (nt, false)
         end
+
+        # time grid changes: a heavy grid alternating with a cheap one must not evade
+        # sampling and stay on one thread (per-kernel countdown, per-grid estimates).
+        B = ones(4)
+        grid(n) = (; global_size = (n, 1, 1), local_size = (1, 1, 1))
+        for _ in 1:2
+            kernel(B, 0; grid(2)...)
+            kernel(B, 0; grid(3)...)
+        end
+        Base.@atomic h.untimed = POCL.host_untimed_launches
+        Base.@atomic h.last_duration = 0
+        for _ in 1:(POCL.host_untimed_launches + 1)
+            kernel(B, 10^5; grid(2)...)
+            kernel(B, 0; grid(3)...)
+        end
+        @test POCL.host_schedule(h, s, 2, false)[1] == 2
+        # missing estimates override the countdown
+        kernel(B, 0; grid(1)...)
+        Base.@atomic h.last_duration = 1
+        kernel(B, 0; grid(1)...)
+        @test (Base.@atomic h.last_duration) != 1
+        @test POCL.serial_duration(h, 1) > 0
+        untimed = Base.@atomic h.untimed
+        Base.@atomic h.last_duration = 1
+        kernel(B, 0; grid(1)...)
+        @test (Base.@atomic h.last_duration) == 1
+        @test (Base.@atomic h.untimed) == untimed - 1
+        # resample on one thread after a team launch
+        POCL.record_serial_sample(h, nt, typemax(UInt64))
+        POCL.record_serial_sample(h, nt, typemax(UInt64))
+        Base.@atomic h.last_duration = 0
+        kernel(A, 0; sizes...)
+        @test (Base.@atomic h.untimed) == 0
     end
 end
 
@@ -714,6 +748,24 @@ end
         end
         @test woke[]
         wait(task)
+
+        # sample short launches after two runs establish the grid's estimate
+        one = (; global_size = (1, 1, 1), local_size = (1, 1, 1))
+        Base.@atomic h.untimed = 0
+        Base.@atomic h.last_duration = 0
+        kernel(A; one...)
+        kernel(A; one...)
+        @test POCL.serial_duration(h, 1) > 0
+        @test (Base.@atomic h.untimed) == POCL.host_untimed_launches
+        Base.@atomic h.last_duration = 1
+        kernel(A; one...)
+        @test (Base.@atomic h.last_duration) == 1
+        @test (Base.@atomic h.untimed) == POCL.host_untimed_launches - 1
+        # time every long launch
+        Base.@atomic h.last_duration = s.host_kernel_short_ticks
+        kernel(A; one...)
+        @test (Base.@atomic h.last_duration) != s.host_kernel_short_ticks
+
     end
 end
 
