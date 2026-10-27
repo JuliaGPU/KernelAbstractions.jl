@@ -184,7 +184,7 @@ end
                 info = Ref(POCL.ExceptionInfo_st())
                 GC.@preserve info begin
                     ptr = Base.unsafe_convert(Ptr{POCL.ExceptionInfo_st}, info)
-                    POCL.host_launch_converted(k, (B, m), ptr, h, (2, 1, 1), full, (1, 1, 1))
+                    POCL.host_launch_converted(k, POCL.converted_arguments(k, (B, m)), ptr, h, (2, 1, 1), full, (1, 1, 1))
                 end
             end
             err = try
