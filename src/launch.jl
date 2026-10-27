@@ -82,10 +82,12 @@ function select_launch(kernel::Kernel, workgroupsize, iterspace)
     groups = size(blocks(iterspace))
     items = size(workitems(iterspace))
     tuned = KernelAbstractions.workgroupsize(kernel) <: DynamicSize && workgroupsize === nothing
+    # only tuned launches of more than three dimensions can be folded
+    fold_items = tuned && length(groups) > 3 ? tuning(fold_threshold, b) : 0
     return select_launch(
         map(mul_extent, groups, items), tuned ? nothing : items,
         KI.max_work_group_size(b), KI.max_work_group_dims(b), KI.max_num_groups(b),
-        narrow_index_type(b); fold_items = fold_threshold(b)
+        narrow_index_type(b); fold_items
     )
 end
 
@@ -135,9 +137,16 @@ with divisions instead. Where that happens depends on the hardware, so backends 
 measured value keep the default of 64, chosen for NVIDIA GPUs.
 
 Set here and in KernelAbstractions' extensions, not by the backends, so that it can be
-tuned without releasing them.
+tuned without releasing them. Look it up with `tuning`.
 """
 fold_threshold(backend) = 64
+
+# Values tuned per backend, like `fold_threshold`, are looked up with `tuning(hook, backend)`,
+# hidden from inference. The backends' packages precompile launches, and code that depends on
+# a hook's generic method is invalidated when the extension that adds the backend's method
+# is loaded.
+tuning(hook, backend) = Base.inferencebarrier(hook)(backend)::tuning_type(hook)
+tuning_type(::typeof(fold_threshold)) = Int
 
 # arithmetic on the extents of an iteration space, which has to fit an `Int`
 @noinline throw_too_large() =
