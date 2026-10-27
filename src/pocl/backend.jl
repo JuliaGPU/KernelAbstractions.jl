@@ -274,6 +274,11 @@ end
 
 # the workgroup size `KI.launch_configuration` tunes for kernels with the device's limits,
 # which is what PoCL kernels report, unless their estimated stack use limits their size
+function KA.tunes_as_expected(kernel::KI.Kernel{POCLBackend})
+    k, limits = kernel.kern.kernel.fun, device_limits()
+    return k.tuned_work_group_size == limits.max_work_group_size &&
+        k.preferred_work_group_size_multiple == limits.preferred_work_group_size_multiple
+end
 function KA.expected_workgroupsize(::POCLBackend, nitems)
     limits = device_limits()
     return cpu_workgroupsize(
