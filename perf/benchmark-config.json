@@ -1,0 +1,24 @@
+{
+  "dashboard": "https://juliagpu.org/perf/?pkg=kernelabstractions",
+  "stat": "min",
+  "categories": [
+    {
+      "id": "performance",
+      "label": "Performance",
+      "description": "Compiled kernels that each isolate a feature of KernelAbstractions or of the code it generates, and serial Julia loops doing the same work for reference.",
+      "floor": 0.03
+    },
+    {
+      "id": "latency",
+      "label": "Latency",
+      "description": "Time to precompile and load the package, to compile and launch a first kernel in a fresh process, to compile further kernels, and to launch a kernel that does next to nothing.",
+      "floor": 0.05
+    },
+    {
+      "id": "applications",
+      "label": "Applications",
+      "description": "Kernels and sequences of kernels from applications: DGSEM volume integrals as in Trixi.jl, and a stencil.",
+      "floor": 0.03
+    }
+  ]
+}
