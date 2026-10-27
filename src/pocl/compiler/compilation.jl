@@ -79,8 +79,11 @@ function GPUCompiler.finish_module!(
         ft = typeof(f)
         tt = Tuple{}
 
-        # create a deferred compilation job for `initialize_rng_state`
-        src = methodinstance(ft, tt, job.world)
+        # create a deferred compilation job for `initialize_rng_state`. it is an overlay, so
+        # look it up in the job's method tables.
+        src = GPUCompiler.generic_methodinstance(
+            ft, tt, job.world; method_table_view = GPUCompiler.method_table_view(job)
+        )
         cfg = CompilerConfig(job.config; kernel = false, name = nothing)
         job = CompilerJob(src, cfg, job.world)
         id = length(GPUCompiler.deferred_codegen_jobs) + 1
@@ -107,10 +110,9 @@ function GPUCompiler.finish_module!(
             end
             fptr = call!(builder, deferred_codegen_ft, deferred_codegen, [ConstantInt(id)])
 
-            # call the `initialize_rng_state` function
-            rt = Core.Compiler.return_type(f, tt)
-            llvm_rt = convert(LLVMType, rt)
-            llvm_ft = LLVM.FunctionType(llvm_rt)
+            # call the `initialize_rng_state` function, which returns nothing. inferring its
+            # return type natively would leave host code for it in sysimages.
+            llvm_ft = LLVM.FunctionType(LLVM.VoidType())
             fptr = inttoptr!(builder, fptr, LLVM.PointerType(llvm_ft))
             call!(builder, llvm_ft, fptr)
             br!(builder, top_bb)

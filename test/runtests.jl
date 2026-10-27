@@ -1,6 +1,7 @@
 using KernelAbstractions
 using Random
 using Test
+import GPUToolbox
 
 include("quality_assurance.jl")
 include("linenumbers.jl")
@@ -557,6 +558,12 @@ end
     @test count("ERROR: ", out) == 1
     @test occursin("Stacktrace:", out)
     @test occursin("throw_boundserror", out)
+end
+
+# sysimage builds compile methods for the host, which must not reach device-only code, or
+# the sysimage references device intrinsics and fails to load (JuliaGPU/GPUCompiler.jl#611)
+@testset "host leaks" begin
+    @test isempty(GPUToolbox.Overlays.host_leaks(KernelAbstractions))
 end
 
 @testset "POCL compilation cache" begin
