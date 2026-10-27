@@ -5,7 +5,7 @@
 
 @kernel function precompile_kernel(A, @Const(B))
     i = @index(Global, Linear)
-    @inbounds A[i] = 2 * B[i] + 1
+    @inbounds A[i] = fma(2, B[i], 1)
 end
 
 # on Julia 1.11, the launch leaks GPUCompiler's runtime into the package image, which then
