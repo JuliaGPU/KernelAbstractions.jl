@@ -202,33 +202,30 @@ end
     global_size = (1,), local_size = nothing
 ) = launch_converted(kernel, args, exception_info, global_size, local_size)
 
+# the call's tuple type and argument expressions for `launch_converted`. (on vectors, so that
+# it compiles once for all argument counts.)
+function kernel_call_arguments(@nospecialize(F), @nospecialize(TT), nargs::Int)
+    params = Any[F, TT.parameters...]   # Base.signature_type with a function type
+    exprs = Any[:(kernel.f); Any[:(clconvert(args[$i])) for i in 1:nargs]]
+    call_t = Type[KernelState]
+    call_args = Any[
+        :(KernelState(kernel.rng_state ? Base.rand(UInt32) : UInt32(0), UInt64(UInt(exception_info)))),
+    ]
+    for (dt, ex) in zip(params, exprs)
+        # filter out ghost arguments that shouldn't be passed
+        pass_arg(dt) || continue
+        # replace non-isbits arguments (they should be unused, or compilation would have
+        # failed)
+        push!(call_t, isbitstype(dt) ? dt : Ptr{Any})
+        push!(call_args, isbitstype(dt) ? ex : :C_NULL)
+    end
+    return Base.to_tuple_type(call_t), call_args
+end
+
 @inline @generated function launch_converted(
         kernel::AbstractKernel{F, TT}, args::Tuple, exception_info, global_size, local_size
     ) where {F, TT}
-    sig = Tuple{F, TT.parameters...}    # Base.signature_type with a function type
-    args = (:(kernel.f), (:(clconvert(args[$i])) for i in 1:fieldcount(args))...)
-
-    # filter out ghost arguments that shouldn't be passed
-    to_pass = map(pass_arg, sig.parameters)
-    call_t = Type[x[1] for x in zip(sig.parameters, to_pass) if x[2]]
-    call_args = Union{Expr, Symbol}[x[1] for x in zip(args, to_pass)            if x[2]]
-
-    # replace non-isbits arguments (they should be unused, or compilation would have failed)
-    for (i, dt) in enumerate(call_t)
-        if !isbitstype(dt)
-            call_t[i] = Ptr{Any}
-            call_args[i] = :C_NULL
-        end
-    end
-
-    pushfirst!(call_t, KernelState)
-    pushfirst!(
-        call_args,
-        :(KernelState(kernel.rng_state ? Base.rand(UInt32) : UInt32(0), UInt64(UInt(exception_info))))
-    )
-
-    # finalize types
-    call_tt = Base.to_tuple_type(call_t)
+    call_tt, call_args = kernel_call_arguments(F, TT, fieldcount(args))
 
     # the converted arguments only hold pointers to the arrays in `args`
     return quote
