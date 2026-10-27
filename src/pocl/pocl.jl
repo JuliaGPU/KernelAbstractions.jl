@@ -11,21 +11,22 @@ import .nanoOpenCL as cl
 
 ## session state
 
-# what every task shares: one context, so that kernels are only linked once per process
-struct Session
-    platform::cl.Platform
-    device::cl.Device
-    context::cl.Context
+# shared context: link kernels once per process.
+# mutable so `session()` returns a reference, avoiding repeated copies per launch.
+mutable struct Session
+    const platform::cl.Platform
+    const device::cl.Device
+    const context::cl.Context
     # querying the device allocates, so cache what launches need
-    limits::@NamedTuple{
+    const limits::@NamedTuple{
         max_work_group_size::Int, max_work_group_dims::NTuple{3, Int}, sub_group_size::Int,
         compute_units::Int, preferred_work_group_size_multiple::Int,
         fp16::Bool, fp64::Bool,
     }
     # duration threshold in cycle counter ticks for long launches (see `host_dispatch`)
-    host_kernel_long_ticks::UInt64
+    const host_kernel_long_ticks::UInt64
     # serial-duration threshold in ticks for small launches (see `host_schedule`)
-    host_kernel_serial_ticks::UInt64
+    const host_kernel_serial_ticks::UInt64
 end
 
 # a cheap monotonic counter: the TSC on x86, the virtual timer on AArch64 (where
