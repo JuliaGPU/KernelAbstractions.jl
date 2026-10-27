@@ -881,16 +881,26 @@ end
             (Base.@atomic :monotonic h.last_groups) != l.total ||
             serial_duration(h, l.total) == 0
         start = cycle_counter()
-        host_run(l, 0, l.total, scratch)
+        host_run_all(l, scratch)
         duration = cycle_counter() - start
         record_serial_sample(h, l.total, duration)
         Base.@atomic :monotonic h.last_duration = duration
         Base.@atomic :monotonic h.untimed = host_untimed_launches
     else
-        host_run(l, 0, l.total, scratch)
+        host_run_all(l, scratch)
         Base.@atomic :monotonic h.untimed = untimed - 1
     end
     Base.@atomic :monotonic h.last_groups = l.total
+    return
+end
+
+# unsplit launches call PoCL directly to avoid materializing `HostLaunch` in memory
+@inline function host_run_all(l::HostLaunch, scratch::Ptr{Cvoid})
+    if l.full === l.h
+        host_run(l.h, l.arg_values, l.num_groups, 0, l.total, l.exception_info, scratch)
+    else
+        host_run(l, 0, l.total, scratch)
+    end
     return
 end
 
