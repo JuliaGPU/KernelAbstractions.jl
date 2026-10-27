@@ -257,21 +257,29 @@ function KA.expected_workgroupsize(::POCLBackend, nitems)
     )
 end
 
-# a work-group that is partial in some dimension runs the bounds-checked kernel, whose
-# work-item loop vectorizes poorly (without masked loads and stores, as on AArch64, it is
-# about 3x slower for a stencil), and a partial dimension makes a whole slab of work-groups
-# partial. so shrink each dimension of the generic choice to the largest size that divides
-# the ndrange, if that keeps at least half of it. (shrinking only, so that the padding stays
-# within the bound `KA.select_launch` assumes.)
+# partial work-groups run the bounds-checked kernel, whose work-item loop vectorizes poorly
+# without masked loads and stores (AArch64: ~3x slower for a stencil), or uses costly masked
+# loads and stores (Zen 2: 12x slower). a partial dimension makes a whole slab of work-groups
+# partial. shrink each dimension of the generic choice to the largest divisor of the ndrange
+# that retains at least half its size, or to a quarter if none exists. this bounds the work
+# in partial work-groups.
+# (only shrink, so padding stays within the bound `KA.select_launch` assumes.)
 function KA.launch_workgroupsize(::POCLBackend, ::KA.NDLaunch, threads, ndrange)
     extent = KA.extents(ndrange)
     limits = KA.nd_limits(device_limits().max_work_group_dims, extent)
     items = KI.threads_to_workgroupsize(threads, extent, limits)
-    return map((n, x) -> n % x == 0 ? x : largest_divisor(n, x), extent, items)
+    return map(fit_workgroup, extent, items)
 end
 
-# the largest divisor of `n` in `cld(x, 2):x`, or `x` if there is none, searching the sizes
-# or the work-group counts, whichever are fewer
+function fit_workgroup(n::Int, x::Int)
+    n % x == 0 && return x
+    d = largest_divisor(n, x)
+    return d == 0 ? cld(x, 4) : d
+end
+
+# the largest divisor of `n` in `cld(x, 2):x`, or 0 if none exists. search sizes or
+# work-group counts, whichever are fewer. requires `n % x != 0`: the size search skips `x`
+# (`largest_divisor(8, 4) == 2`).
 function largest_divisor(n::Int, x::Int)
     lo = cld(x, 2)
     if x - lo <= fld(n, lo) - cld(n, x)
@@ -283,7 +291,7 @@ function largest_divisor(n::Int, x::Int)
             n % g == 0 && return n ÷ g
         end
     end
-    return x
+    return 0
 end
 
 # PoCL's own choice when a launch doesn't give a local size (`pocl_default_local_size_optimizer`

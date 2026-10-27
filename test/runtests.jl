@@ -812,9 +812,10 @@ end
     # (searching the sizes)
     @test wgs((1024, 1002)) == (1024, 3)
     @test wgs((64, 64, 64)) == (64, 64, 1)
-    # each dimension shrinks to at least half
-    @test wgs((127, 127, 127)) == (127, 32, 1)
-    @test wgs((1024, 1001)) == (1024, 4)
+    # shrink to a divisor retaining at least half of each dimension, or to a quarter otherwise
+    @test wgs((127, 127, 127)) == (127, 8, 1)
+    @test wgs((1024, 1001)) == (1024, 1)
+    @test wgs((100003,)) == (1024,)
     @test wgs((0, 7)) == (1, 7)
 
     # an explicit workgroup size is kept
