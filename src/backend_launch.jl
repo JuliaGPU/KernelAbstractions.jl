@@ -95,8 +95,14 @@ argconvert(kernel::Kernel{<:KI.Backend}, arg) = KI.argconvert(backend(kernel), a
 Core.kwcall(kwargs::NamedTuple, obj::Kernel{<:KI.Backend}, args::Vararg{Any, N}) where {N} =
     launch_tuple(obj, args; kwargs...)
 
+# strip singleton functions (like those of `@kernel`) to share launch code across kernels
+# with the same backend and static sizes. hooks can't dispatch on such a function's type;
+# callables with state keep theirs (see `test/launch.jl`).
+@inline sizes_only(obj::Kernel{B, WS, ND, F}) where {B, WS, ND, F} =
+    Base.issingletontype(F) ? similar(obj, nothing) : obj
+
 function launch_tuple(obj::Kernel, args::Tuple; ndrange = nothing, workgroupsize = nothing)
-    setup = launch_setup(obj, ndrange, workgroupsize)
+    setup = launch_setup(sizes_only(obj), ndrange, workgroupsize)
     # nothing to launch (or compile) for an empty ndrange
     setup === nothing && return nothing
     ndrange, workgroupsize, iterspace = setup
@@ -105,7 +111,7 @@ function launch_tuple(obj::Kernel, args::Tuple; ndrange = nothing, workgroupsize
     # depend on the tuned workgroup size, so the context (and thus the kernel) doesn't either.
     # (not done by `launch_setup`: the launch mode isn't inferred concretely, so returning
     # it would box the result)
-    launch = @noinline select_launch(obj, workgroupsize, iterspace)
+    launch = @noinline select_launch(sizes_only(obj), workgroupsize, iterspace)
     T = narrow_index_type(backend(obj))
     if launch === NDLaunch{T}()
         # the common case, specialized statically
@@ -168,7 +174,7 @@ function launch_kernel(
     else
         nothing
     end
-    ctx, groups, items = launch_geometry(obj, launch, subgroups, ndrange, iterspace, ctx, threads)
+    ctx, groups, items = launch_geometry(sizes_only(obj), launch, subgroups, ndrange, iterspace, ctx, threads)
 
     # the kernel's limits aren't the device's, and the workgroups tuned for them don't cover
     # the ndrange: launch the checked kernel instead
