@@ -1008,6 +1008,34 @@ struct NewBackend <: KernelAbstractions.Backend end
     @test KernelAbstractions.functional(backend) === missing
 end
 
+# a GPU back-end, whose kernel type depends on the function and argument types
+struct StaticBackend <: KernelAbstractions.GPU end
+struct StaticKernel{F, TT} end
+const KI = KernelAbstractions.KernelInterface
+KI.argconvert(::StaticBackend, x) = x
+KI.kernel_function(b::StaticBackend, ::F, ::Type{TT}; kwargs...) where {F, TT} =
+    KI.Kernel{StaticBackend, StaticKernel{F, TT}}(b, StaticKernel{F, TT}())
+KI.launch(::KI.Kernel{StaticBackend}, groups, items, args) = nothing
+KI.max_work_group_size(::Union{StaticBackend, KI.Kernel{StaticBackend}}) = 1024
+KI.max_work_group_dims(::StaticBackend) = (1024, 1024, 64)
+KI.max_num_groups(::StaticBackend) = (2^31 - 1, 65535, 65535)
+KI.launch_configuration(::KI.Kernel{StaticBackend}; kwargs...) = (; workgroupsize = 256)
+@testset "Kernel type is inferred" begin
+    KA = KernelAbstractions
+    kernel = mapped_indices!(StaticBackend())
+    @testset "workgroupsize $ws" for ws in (nothing, 8)
+        ndrange, _, iterspace, _ = KA.launch_config(kernel, 10, ws)
+        tt = Tuple{
+            typeof(kernel), Nothing, Nothing, typeof(ndrange), typeof(ws), typeof(iterspace),
+            Tuple{Vector{Int}}, Bool,
+        }
+        ci, _ = only(code_typed(KA.launch_kernel, tt; optimize = false))
+        kernels = filter(T -> T !== Union{} && T <: KI.Kernel, map(Core.Compiler.widenconst, ci.ssavaluetypes))
+        @test !isempty(kernels)
+        @test all(isconcretetype, kernels)
+    end
+end
+
 @testset "Deprecated GPU alias" begin
     @test KernelAbstractions.GPU === KernelAbstractions.Backend
     @test CPU() isa KernelAbstractions.GPU

@@ -163,10 +163,14 @@ function launch_kernel(
     tuned = workgroupsize(obj) <: DynamicSize && _workgroupsize === nothing
     range = something(ndrange, static_ndrange(obj))
     unchecked = !checked && skip_bounds_check(b) && expect_coverage(b, launch, range, iterspace, tuned)
-    # (which of the types it is is hidden from inference, which would compile the lookup for
-    # both)
-    compiled_tt = Base.compilerbarrier(:type, unchecked ? without_bounds_check(tt) : tt)::Type
-    kernel = kernel_function_as(b, obj.f, compiled_tt, tt; compiler_options(obj)...)
+    kernel = if skip_bounds_check(b)
+        # hide the check type from inference, so that the lookup compiles once for both
+        compiled_tt = Base.compilerbarrier(:type, unchecked ? without_bounds_check(tt) : tt)::Type
+        kernel_function_as(b, obj.f, compiled_tt, tt; compiler_options(obj)...)
+    else
+        # infer the kernel's type, avoiding dynamic dispatch in the rest of the launch
+        KI.kernel_function(b, obj.f, tt; compiler_options(obj)...)
+    end
 
     # tune the workgroup size, keeping the context type (and thus the kernel) the same
     threads = if tuned
@@ -197,11 +201,10 @@ skip_bounds_check(backend) = backend isa POCL.POCLBackend
 
 `KI.kernel_function(backend, f, compiled_tt; kwargs...)`, as a kernel that is launched with
 arguments of the types `tt`, which only differ from `compiled_tt` in the type parameters of
-the context. Backends for which `skip_bounds_check` holds implement it, and shouldn't
-specialize on `compiled_tt`; for others, `compiled_tt` is always `tt`.
+the context. Backends for which `skip_bounds_check` holds implement it, without
+specializing on `compiled_tt`.
 """
-Base.@nospecializeinfer kernel_function_as(backend, f, @nospecialize(compiled_tt), tt; kwargs...) =
-    KI.kernel_function(backend, f, tt; kwargs...)
+function kernel_function_as end
 
 """
     expected_workgroupsize(backend, nitems)
