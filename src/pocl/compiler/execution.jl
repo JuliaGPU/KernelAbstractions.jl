@@ -190,12 +190,14 @@ function launch_and_wait(
         # unavailable, run every work-group checked.
         hp = host_kernel(with_fun(kernel, partial), values(kwargs), groups)
         h = hp === nothing ? nothing : full_host_kernel(kernel, partial, hp)
+        # share conversion, the bulk of each path's per-kernel code
+        converted = converted_arguments(kernel, args)
         if hp === nothing
             info = exception_info()
             info[] = ExceptionInfo_st()
             GC.@preserve info begin
                 info_ptr = Base.unsafe_convert(Ptr{ExceptionInfo_st}, info)
-                event = launch_tuple(with_fun(kernel, partial), args, info_ptr; kwargs...)
+                event = launch_queued(with_fun(kernel, partial), converted, info_ptr; kwargs...)
                 wait_for_kernel(event)
             end
             check_exception(info)
@@ -207,7 +209,7 @@ function launch_and_wait(
             info = Ref(ExceptionInfo_st())
             GC.@preserve info begin
                 info_ptr = Base.unsafe_convert(Ptr{ExceptionInfo_st}, info)
-                host_launch_converted(kernel, args, info_ptr, hp, num_groups, h, extent)
+                host_launch_converted(kernel, converted, info_ptr, hp, num_groups, h, extent)
             end
             # passing the status avoids allocating `info`
             check_exception(info[].status)
@@ -236,7 +238,15 @@ end
 @inline launch_tuple(
     kernel::AbstractKernel, args::Tuple, exception_info::Ptr;
     global_size = (1,), local_size = nothing
-) = launch_converted(kernel, args, exception_info, global_size, local_size)
+) = GC.@preserve args launch_converted(
+    kernel, converted_arguments(kernel, args), exception_info, global_size, local_size
+)
+
+# `launch_tuple` for preconverted arguments
+@inline launch_queued(
+    kernel::AbstractKernel, converted::Tuple, exception_info::Ptr;
+    global_size = (1,), local_size = nothing
+) = launch_converted(kernel, converted, exception_info, global_size, local_size)
 
 # kept out of the launches, which are compiled for every kernel: inlining `rand` makes them
 # several times as expensive to compile
@@ -244,37 +254,43 @@ end
     KernelState(rng_state ? rng_seed() : UInt32(0), UInt64(UInt(exception_info)))
 @noinline rng_seed() = Base.rand(UInt32)
 
-# For the generators below: the argument types of a kernel compiled for `F` and the
-# argument types `TT`, as a tuple type, and the expressions that compute the arguments from
-# `kernel`, its `nargs` arguments `args` and `exception_info`, with `null` for the values of
-# non-isbits arguments. (a function of its own, working on vectors, so that it is compiled
-# once rather than for every number of arguments.)
-function kernel_call_arguments(@nospecialize(F), @nospecialize(TT), nargs::Int, null)
+# argument expressions for a kernel compiled for `F` and `TT`.
+# vectors let this helper compile once for all argument counts.
+function converted_argument_exprs(@nospecialize(F), @nospecialize(TT), nargs::Int)
     params = Any[F, TT.parameters...]   # Base.signature_type with a function type
     exprs = Any[:(kernel.f); Any[:(clconvert(args[$i])) for i in 1:nargs]]
-    call_t = Type[KernelState]
-    call_args = Any[:(kernel_state(kernel.rng_state, exception_info))]
+    converted = Any[]
     for (dt, ex) in zip(params, exprs)
         # filter out ghost arguments that shouldn't be passed
         pass_arg(dt) || continue
         # replace non-isbits arguments (they should be unused, or compilation would have
         # failed)
-        push!(call_t, isbitstype(dt) ? dt : Ptr{Any})
-        push!(call_args, isbitstype(dt) ? ex : null)
+        push!(converted, isbitstype(dt) ? ex : :(Ptr{Any}(C_NULL)))
     end
-    return Base.to_tuple_type(call_t), call_args
+    return converted
 end
 
-@inline @generated function launch_converted(
-        kernel::AbstractKernel{F, TT}, args::Tuple, exception_info, global_size, local_size
+# arguments for `kernel(args...)`, excluding kernel state.
+# array arguments become pointers; the caller must keep `args` alive.
+@inline @generated function converted_arguments(
+        kernel::AbstractKernel{F, TT}, args::Tuple
     ) where {F, TT}
-    call_tt, call_args = kernel_call_arguments(F, TT, fieldcount(args), :C_NULL)
+    exprs = converted_argument_exprs(F, TT, fieldcount(args))
+    return :(($(exprs...),))
+end
 
-    # the converted arguments only hold pointers to the arrays in `args`
+kernel_argument_types(@nospecialize(converted::Type)) = Tuple{KernelState, converted.parameters...}
+
+@inline @generated function launch_converted(
+        kernel::AbstractKernel, converted::Tuple, exception_info, global_size, local_size
+    )
+    call_tt = kernel_argument_types(converted)
+    vals = Expr[:(converted[$i]) for i in 1:fieldcount(converted)]
     return quote
-        GC.@preserve args begin
-            $cl.clcall(kernel.fun, $call_tt, ($(call_args...),); global_size, local_size, kernel.rng_state)
-        end
+        $cl.clcall(
+            kernel.fun, $call_tt, (kernel_state(kernel.rng_state, exception_info), $(vals...));
+            global_size, local_size, kernel.rng_state
+        )
     end
 end
 
@@ -895,18 +911,17 @@ end
 
 # like `launch_converted`, but passes a pointer to each converted argument
 @inline @generated function host_launch_converted(
-        kernel::AbstractKernel{F, TT}, args::Tuple, exception_info, h, num_groups, full,
-        extent
-    ) where {F, TT}
-    call_tt, call_args = kernel_call_arguments(F, TT, fieldcount(args), :(Ptr{Any}(C_NULL)))
-    N = length(call_args)
+        kernel::AbstractKernel, converted::Tuple, exception_info, h, num_groups, full, extent
+    )
+    call_tt = kernel_argument_types(converted)
+    N = fieldcount(call_tt)
+    vals = Expr[:(converted[$i]) for i in 1:fieldcount(converted)]
     arg_ptrs = Expr[:(base + $(fieldoffset(call_tt, i))) for i in 1:N]
 
-    # the converted arguments only hold pointers to the arrays in `args`. the local memory
-    # arguments of RNG kernels are set on the host kernel, so they get no value.
+    # RNG local memory arguments are set on the host kernel; pass no values here
     return quote
-        vals = Ref{$call_tt}(($(call_args...),))
-        GC.@preserve args vals begin
+        vals = Ref{$call_tt}((kernel_state(kernel.rng_state, exception_info), $(vals...)))
+        GC.@preserve vals begin
             base = Ptr{Cvoid}(Base.unsafe_convert(Ptr{$call_tt}, vals))
             ptrs = Ref{NTuple{$(N + 2), Ptr{Cvoid}}}(($(arg_ptrs...), C_NULL, C_NULL))
             GC.@preserve ptrs begin
