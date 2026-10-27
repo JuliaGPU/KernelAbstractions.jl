@@ -1,0 +1,25 @@
+name: Benchmarks
+
+# Publishes the results of the benchmark job on Buildkite to the benchmark history at
+# https://juliagpu.org/perf/, and comments on pull requests with a comparison against it.
+#
+# Buildkite posts a commit status for every step, so we can react to the benchmark step
+# finishing instead of keeping a runner busy polling for it. Status events are delivered
+# to this repository even for pull requests from forks, and always run this workflow as
+# it exists on the default branch, with access to secrets. The publishing workflow never
+# checks out or executes code from the commit being benchmarked.
+on: status
+
+jobs:
+  publish:
+    if: |
+      github.event.context == 'buildkite/kernelabstractions-dot-jl/racehorse-benchmarks' &&
+      github.event.state == 'success'
+    permissions:
+      contents: write       # update the history in the gh-pages branch
+      pull-requests: write  # comment on pull requests
+    uses: JuliaGPU/benchmark-action/.github/workflows/publish.yml@3256ba402977d955df0d4aae5fdf1356199f8f40
+    with:
+      pipeline: kernelabstractions-dot-jl
+    secrets:
+      BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
