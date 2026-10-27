@@ -27,6 +27,8 @@ mutable struct Session
     const host_kernel_long_ticks::UInt64
     # serial-duration threshold in ticks for small launches (see `host_schedule`)
     const host_kernel_serial_ticks::UInt64
+    # below this duration (ticks), sample timings on the launching task; see `run_short`
+    const host_kernel_short_ticks::UInt64
 end
 
 # a cheap monotonic counter: the TSC on x86, the virtual timer on AArch64 (where
@@ -101,10 +103,12 @@ function Session()
     host_kernel_long_ticks = round(UInt64, 50_000 * rate)
     # 4 µs, several times what starting and joining a team costs, see `host_schedule`
     host_kernel_serial_ticks = round(UInt64, 4_000 * rate)
+    # 1 µs, compared with tens of nanoseconds to time a launch
+    host_kernel_short_ticks = round(UInt64, 1_000 * rate)
 
     return Session(
         platform, device, context, limits, host_kernel_long_ticks,
-        host_kernel_serial_ticks
+        host_kernel_serial_ticks, host_kernel_short_ticks
     )
 end
 
