@@ -25,10 +25,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        version: ['1.10', '1.11', '1.12', '1.13', 'nightly']
+        # pull requests only test the oldest and newest supported release
+        version: ${{ fromJSON(github.event_name == 'pull_request' && '["1.10", "1.13"]' ||
+                              '["1.10", "1.11", "1.12", "1.13", "nightly"]') }}
         os: [ubuntu-24.04, ubuntu-24.04-arm, macOS-15-intel, macOS-15, windows-2022]
         arch: [x64, arm64]
         exclude:
+          # the Intel macOS runners are slow and scarce, so pull requests only use them for
+          # the newest release (on other events, this matches the excluded arm64 variant)
+          - os: macOS-15-intel
+            version: '1.10'
+            arch: ${{ github.event_name == 'pull_request' && 'x64' || 'arm64' }}
           - os: ubuntu-24.04
             arch: arm64
           - os: windows-2022
@@ -101,8 +108,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        version: ['1.10', '1.11', '1.12', '1.13', 'nightly']
-        os: [ubuntu-24.04, macOS-15, windows-2022]
+        # KernelAbstractions' tests also run the KernelInterface testsuite on every platform,
+        # so pull requests only check here that the package works on its own
+        version: ${{ fromJSON(github.event_name == 'pull_request' && '["1.10", "1.13"]' ||
+                              '["1.10", "1.11", "1.12", "1.13", "nightly"]') }}
+        os: ${{ fromJSON(github.event_name == 'pull_request' && '["ubuntu-24.04"]' ||
+                         '["ubuntu-24.04", "macOS-15", "windows-2022"]') }}
     steps:
       - uses: actions/checkout@v7
       - uses: julia-actions/setup-julia@v3

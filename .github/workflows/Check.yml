@@ -2,8 +2,8 @@ name: Check
 on:
   push:
     branches:
-      - 'master'
-      - 'release-'
+      - 'main'
+      - 'release-*'
     tags:
       - '*'
   pull_request:

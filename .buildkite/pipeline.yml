@@ -4,17 +4,20 @@
 # or `[skip tests]` does the opposite. (`opencl` selects the OpenCL.jl tests, on PoCL and on
 # CUDA hardware.)
 #
+# Pull requests only test the oldest and newest supported Julia release; the releases in
+# between are tested on branch builds, or on pull requests when selected with `[only julia]`
+# (for every back end) or by the name of a back end.
+#
 # A back end whose branch can't be installed together with this KernelAbstractions (e.g.
 # because it doesn't support this KernelInterface yet) soft-fails with exit status 3,
 # instead of failing the build; test failures still fail it.
 steps:
-  - label: "CUDA Julia {{matrix.version}}"
+  - &cuda
+    label: "CUDA Julia {{matrix.version}}"
     matrix:
       setup:
         version:
           - "1.10"
-          - "1.11"
-          - "1.12"
           - "1.13"
     plugins:
       - JuliaCI/julia#v1:
@@ -46,13 +49,24 @@ steps:
     env:
       JULIA_PROJECT: "@cuda"
 
-  - label: "Metal Julia {{matrix.version}}"
+  # intermediate releases, not tested on pull requests
+  - <<: *cuda
+    matrix:
+      setup:
+        version:
+          - "1.11"
+          - "1.12"
+    if: |
+      build.message !~ /\[skip [^\]]*(tests|cuda|julia)/ &&
+      (build.message =~ /\[only [^\]]*(tests|cuda|julia)/ ||
+       build.message !~ /\[only / && build.pull_request.id == null)
+
+  - &metal
+    label: "Metal Julia {{matrix.version}}"
     matrix:
       setup:
         version:
           - "1.10"
-          - "1.11"
-          - "1.12"
           - "1.13"
     plugins:
       - JuliaCI/julia#v1:
@@ -82,13 +96,24 @@ steps:
     env:
       JULIA_PROJECT: "@metal"
 
-  - label: "oneAPI Julia {{matrix.version}}"
+  # intermediate releases, not tested on pull requests
+  - <<: *metal
+    matrix:
+      setup:
+        version:
+          - "1.11"
+          - "1.12"
+    if: |
+      build.message !~ /\[skip [^\]]*(tests|metal|julia)/ &&
+      (build.message =~ /\[only [^\]]*(tests|metal|julia)/ ||
+       build.message !~ /\[only / && build.pull_request.id == null)
+
+  - &oneapi
+    label: "oneAPI Julia {{matrix.version}}"
     matrix:
       setup:
         version:
           - "1.10"
-          - "1.11"
-          - "1.12"
           - "1.13"
     plugins:
       - JuliaCI/julia#v1:
@@ -121,13 +146,24 @@ steps:
     env:
       JULIA_PROJECT: "@oneAPI"
 
-  - label: "AMDGPU Julia {{matrix.version}}"
+  # intermediate releases, not tested on pull requests
+  - <<: *oneapi
+    matrix:
+      setup:
+        version:
+          - "1.11"
+          - "1.12"
+    if: |
+      build.message !~ /\[skip [^\]]*(tests|oneapi|julia)/ &&
+      (build.message =~ /\[only [^\]]*(tests|oneapi|julia)/ ||
+       build.message !~ /\[only / && build.pull_request.id == null)
+
+  - &amdgpu
+    label: "AMDGPU Julia {{matrix.version}}"
     matrix:
       setup:
         version:
           - "1.10"
-          - "1.11"
-          - "1.12"
           - "1.13"
     plugins:
       - JuliaCI/julia#v1:
@@ -162,13 +198,24 @@ steps:
       JULIA_PROJECT: "@amdgpu"
       JULIA_NUM_THREADS: 4
 
-  - label: "OpenCL Julia {{matrix.version}}"
+  # intermediate releases, not tested on pull requests
+  - <<: *amdgpu
+    matrix:
+      setup:
+        version:
+          - "1.11"
+          - "1.12"
+    if: |
+      build.message !~ /\[skip [^\]]*(tests|amdgpu|julia)/ &&
+      (build.message =~ /\[only [^\]]*(tests|amdgpu|julia)/ ||
+       build.message !~ /\[only / && build.pull_request.id == null)
+
+  - &opencl
+    label: "OpenCL Julia {{matrix.version}}"
     matrix:
       setup:
         version:
           - "1.10"
-          - "1.11"
-          - "1.12"
           - "1.13"
     plugins:
       - JuliaCI/julia#v1:
@@ -201,6 +248,18 @@ steps:
     env:
       OCL_ICD_FILENAMES: "libnvidia-opencl.so.1"
       JULIA_PROJECT: "@OpenCL"
+
+  # intermediate releases, not tested on pull requests
+  - <<: *opencl
+    matrix:
+      setup:
+        version:
+          - "1.11"
+          - "1.12"
+    if: |
+      build.message !~ /\[skip [^\]]*(tests|opencl|julia)/ &&
+      (build.message =~ /\[only [^\]]*(tests|opencl|julia)/ ||
+       build.message !~ /\[only / && build.pull_request.id == null)
 
   # the label determines the commit status context .github/workflows/Benchmark.yml reacts to
   - label: ":racehorse: Benchmarks"
