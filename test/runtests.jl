@@ -491,6 +491,12 @@ end
         mod.launch(kernel, B, n)
         @test allocated(mod.launch, kernel, B, n) == 0 skip = skip_wait
     end
+
+    # nor does checking what the device supports, which launches of collectives do
+    for T in (Float16, Float32, Float64)
+        @test allocated(KernelAbstractions.KernelInterface.supports_shuffle, CPU(), T) == 0
+    end
+    @test allocated(KernelAbstractions.supports_float64, CPU()) == 0
 end
 
 @testset "POCL exceptions" begin
