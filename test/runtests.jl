@@ -828,6 +828,9 @@ end
     groupsize!(CPU())(A; ndrange = (126, 126), workgroupsize = (126, 32))
     KernelAbstractions.synchronize(CPU())
     @test A == [126, 32]
+    # report the kernel's total-size limit even for a linearized launch
+    n = KernelAbstractions.KernelInterface.max_work_group_size(CPU()) ÷ 64 + 1
+    @test_throws "work-items" groupsize!(CPU(), (64, n))(A; ndrange = (64, n, 2))
 end
 
 @kernel function fill_index!(A)
