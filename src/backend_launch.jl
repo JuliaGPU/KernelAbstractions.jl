@@ -271,7 +271,8 @@ bounded(range, iterspace) = builtin(iterspace) && cartesian(range) isa Cartesian
 
 # whether workgroups of `items` work-items, partitioning the `range`, which is `bounded`,
 # cover it exactly
-covers(range, items::Dims) = all(map((n, i) -> iszero(n % i), size(cartesian(range)), items))
+covers(range, items::Dims) =
+    all(map((n, i) -> iszero(NDIteration.fldmod_extent(n, i)[2]), size(cartesian(range)), items))
 # (kept out of `launch_kernel`, which is compiled for every kernel)
 @noinline covers(range, ctx::CompilerMetadata) = covers(range, size(workitems(__iterspace(ctx))))
 

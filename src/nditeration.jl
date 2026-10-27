@@ -253,6 +253,17 @@ Base.@propagate_inbounds function expand(ndrange::NDRange{N}, groupidx::Integer,
     return expand(ndrange, blocks(ndrange)[groupidx], idx)
 end
 
+# `fldmod(n, w)` for `w > 0`, without division for powers of two or `w == n`.
+# tuning uses powers of two unless range or kernel limits intervene; preliminary
+# partitions use `w == n`. repeated divisions cost tens of cycles each on some CPUs.
+@inline function fldmod_extent(n::Int, w::Int)
+    n == w && return 1, 0
+    if w & (w - 1) == 0
+        return n >> trailing_zeros(w), n & (w - 1)
+    end
+    return fldmod(n, w)
+end
+
 """
     partition(ndrange, workgroupsize)
 
@@ -277,8 +288,9 @@ needs to perform dynamic bounds-checking.
         dynamic = Ref(false)
         blocks = ntuple(Val(length(ndrange))) do I
             Base.@_inline_meta
-            dynamic[] |= mod(ndrange[I], workgroupsize[I]) != 0
-            return fld1(ndrange[I], workgroupsize[I])
+            q, r = fldmod_extent(ndrange[I], workgroupsize[I])
+            dynamic[] |= r != 0
+            return q + (r != 0)
         end
 
         return blocks, workgroupsize, dynamic[] ? DynamicCheck() : NoDynamicCheck()
