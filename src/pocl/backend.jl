@@ -109,11 +109,11 @@ KA.@kernel function fill_kernel(A, x)
     @inbounds A[I] = x
 end
 
-# Filling an array with a kernel first-touches its pages from PoCL's threads, which spreads
-# them over the threads' memory domains instead of placing all of them in the calling
-# thread's (see the NUMA example). Below 1 MiB, the launch overhead makes that up to several
-# times slower than filling from the host, while there are too few pages for placement to
-# matter.
+# Filling or copying into an array with a kernel first-touches its pages from PoCL's threads,
+# which spreads them over the threads' memory domains instead of placing all of them in the
+# calling thread's (see the NUMA example). Below 1 MiB, the launch overhead makes that up to
+# several times slower than writing from the host, while there are too few pages for
+# placement to matter.
 const KERNEL_FILL_BYTES = 1 << 20
 
 # arrays of bits unions, whose element type isn't `isbitstype`, are filled from the host
@@ -149,20 +149,18 @@ KA.@kernel function copy_kernel(A, @Const(B))
 end
 
 
+# small copies, copies of bits unions and overlapping copies are done from the host
 function KI.copyto!(backend::POCLBackend, A, B)
     length(A) == length(B) ||
         throw(ArgumentError("Arrays must match in length, got $(length(A)) and $(length(B))"))
-    if KI.get_backend(A) == KI.get_backend(B) && KI.get_backend(A) isa POCLBackend
-        if Base.mightalias(A, B)
-            error("Arrays may not alias")
-        end
-        kernel = copy_kernel(backend)
-        kernel(A, B, ndrange = length(A))
-        return A
+    T = eltype(A)
+    if KI.get_backend(A) == KI.get_backend(B) && KI.get_backend(A) isa POCLBackend &&
+            isbitstype(T) && length(A) * sizeof(T) >= KERNEL_FILL_BYTES && !Base.mightalias(A, B)
+        copy_kernel(backend)(A, B, ndrange = length(A))
     else
         Base.copyto!(A, B)
-        return A
     end
+    return A
 end
 
 KI.functional(::POCLBackend) = true

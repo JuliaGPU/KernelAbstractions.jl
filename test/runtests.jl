@@ -736,6 +736,24 @@ Base.one(::Type{ZeroOnePair}) = ZeroOnePair(1, 1.0f0)
     end
 end
 
+# large copies use a kernel, small ones the host, as do overlapping ones
+@testset "POCL copyto!" begin
+    threshold = POCL.POCLKernels.KERNEL_FILL_BYTES
+    values = (Float32 => Float32, Union{Missing, Int32} => i -> isodd(i) ? Int32(i) : missing)
+    for (T, value) in values
+        @testset "$T, $m elements" for m in (16, cld(threshold, 4) + 3)
+            x = T[value(i) for i in 1:m]
+            y = Array{T}(undef, m)
+            @test KernelAbstractions.copyto!(POCLBackend(), y, x) === y
+            @test isequal(y, x)
+
+            z = copy(x)
+            KernelAbstractions.copyto!(POCLBackend(), view(z, 2:m), view(z, 1:(m - 1)))
+            @test isequal(z, [x[1]; x[1:(m - 1)]])
+        end
+    end
+end
+
 # a mapping KernelAbstractions doesn't know, which the index functions have to go
 # through `expand`, `in` and `linear_index` for
 struct TransposedMapping end
