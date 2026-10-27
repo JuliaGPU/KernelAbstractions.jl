@@ -1,7 +1,8 @@
-# Tests of the KernelAbstractions-related parts of the GPU back-ends. Draft pull requests skip
-# them, unless selected by name in the last commit message: `[only cuda]`, `[only metal, oneapi]`
-# or `[only tests]` for all of them. `[skip amdgpu]` or `[skip tests]` does the opposite.
-# (`opencl` selects the OpenCL.jl tests, on PoCL and on CUDA hardware.)
+# Tests of the KernelAbstractions-related parts of the GPU back-ends, and the benchmarks. Draft
+# pull requests skip them, unless selected by name in the last commit message: `[only cuda]`,
+# `[only metal, oneapi]`, `[only tests]` for all tests, or `[only benchmarks]`. `[skip amdgpu]`
+# or `[skip tests]` does the opposite. (`opencl` selects the OpenCL.jl tests, on PoCL and on
+# CUDA hardware.)
 #
 # A back end whose branch can't be installed together with this KernelAbstractions (e.g.
 # because it doesn't support this KernelInterface yet) soft-fails with exit status 3,
@@ -200,6 +201,33 @@ steps:
     env:
       OCL_ICD_FILENAMES: "libnvidia-opencl.so.1"
       JULIA_PROJECT: "@OpenCL"
+
+  # the label determines the commit status context .github/workflows/Benchmark.yml reacts to
+  - label: ":racehorse: Benchmarks"
+    plugins:
+      - JuliaCI/julia#v1:
+          version: "1.13"
+    command: |
+      julia --project=perf -e 'println("--- :julia: Instantiating project")
+                               using Pkg
+                               Pkg.instantiate()
+                               Pkg.precompile()'
+      echo "+++ :julia: Benchmarking"
+      julia --project=perf perf/runbenchmarks.jl benchmarks.json
+    artifact_paths:
+      - "benchmarks.json"
+    agents:
+      queue: "cuda"
+      benchmark: "true"
+    # the benchmark agent also takes ordinary CUDA jobs when the other agents are busy;
+    # when it frees up, it should pick a waiting benchmark job first
+    priority: 1
+    if: |
+      build.message !~ /\[skip [^\]]*(benchmarks)/ &&
+      (build.message =~ /\[only [^\]]*(benchmarks)/ ||
+       build.message !~ /\[only / && !build.pull_request.draft)
+    timeout_in_minutes: 30
+    soft_fail: true
 
 env:
   JULIA_PKG_PRECOMPILE_AUTO: false
