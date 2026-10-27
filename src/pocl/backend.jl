@@ -8,6 +8,7 @@ using SPIRV_LLVM_Backend_jll, SPIRV_Tools_jll
 
 import KernelAbstractions as KA
 import KernelInterface as KI
+using KernelAbstractions.NDIteration: fldmod_extent, cld_extent, nextpow2
 
 import SPIRVIntrinsics
 
@@ -313,7 +314,7 @@ end
 # that divides `n`. if none exists, use a quarter of `x` (a multiple of `m`) when `shrink`,
 # or keep `x` otherwise
 function fit_workgroup(n::Int, x::Int, m::Int, shrink::Bool)
-    n % x == 0 && return x
+    iszero(fldmod_extent(n, x)[2]) && return x
     d = largest_divisor(n, x, m)
     d == 0 || return d
     shrink || return x
@@ -325,7 +326,7 @@ end
 # skips `x` (`largest_divisor(8, 4, 1) == 2`).
 function largest_divisor(n::Int, x::Int, m::Int)
     # (a multiple of `m` only divides multiples of `m`)
-    n % m == 0 || return 0
+    iszero(fldmod_extent(n, m)[2]) || return 0
     lo = cld(x, 2)
     hi = (x - 1) ÷ m * m
     if (hi - lo) ÷ m <= fld(n, lo) - cld(n, x)
@@ -356,17 +357,15 @@ function cpu_workgroupsize(nitems, threads, max_items, multiple)
     items = min(nextpow2(min(nitems, max_items)), max_items)
     # one work-group, which isn't split (without dividing, for small launches)
     items >= nitems && items < 2 * min_items && return items
-    groups = cld(nitems, items)
-    while (splits = min(threads ÷ groups, items ÷ min_items)) > 1
+    groups = cld_extent(nitems, items)
+    while threads >= 2 * groups && items >= 2 * min_items
+        splits = min(threads ÷ groups, items ÷ min_items)
         # PoCL splits by the largest factor of at most `splits` that divides the work-group
-        items ÷= prevpow(2, splits)
-        groups = cld(nitems, items)
+        items >>= trailing_zeros(prevpow(2, splits))
+        groups = cld_extent(nitems, items)
     end
     return items
 end
-
-# `nextpow(2, n)` for `n >= 1`, inlined
-@inline nextpow2(n::Integer) = n <= 1 ? one(n) : one(n) << (8 * sizeof(n) - leading_zeros(n - one(n)))
 
 KI.supports_subgroups(::POCLBackend) = device_limits().sub_group_size > 0
 # PoCL forms sub-groups from consecutive work-items, but executes sub-group operations as

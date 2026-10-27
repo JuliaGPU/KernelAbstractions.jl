@@ -253,6 +253,30 @@ Base.@propagate_inbounds function expand(ndrange::NDRange{N}, groupidx::Integer,
     return expand(ndrange, blocks(ndrange)[groupidx], idx)
 end
 
+## integer arithmetic for launch geometry
+
+# launches compute their geometry every time, and a 64-bit division costs tens of cycles on
+# some CPUs. these avoid dividing in the common cases: tuned work-group sizes are powers of
+# two unless the range or kernel limits intervene, and preliminary partitions divide an
+# extent by itself. (Base's `fldmod` and `cld` always divide unless the divisor is a
+# constant, and `nextpow` keeps a `DomainError` path even when inlined.)
+
+# `fldmod(n, d)` for `n >= 0` and `d > 0`
+@inline function fldmod_extent(n::Int, d::Int)
+    n == d && return 1, 0
+    ispow2(d) && return n >> trailing_zeros(d), n & (d - 1)
+    return fldmod(n, d)
+end
+
+# `cld(n, d)` for `n >= 0` and `d > 0`
+@inline function cld_extent(n::Int, d::Int)
+    q, r = fldmod_extent(n, d)
+    return q + !iszero(r)
+end
+
+# `nextpow(2, n)` for `n >= 1`
+@inline nextpow2(n::Int) = n <= 1 ? 1 : 1 << (8 * sizeof(n) - leading_zeros(n - 1))
+
 """
     partition(ndrange, workgroupsize)
 
@@ -277,8 +301,9 @@ needs to perform dynamic bounds-checking.
         dynamic = Ref(false)
         blocks = ntuple(Val(length(ndrange))) do I
             Base.@_inline_meta
-            dynamic[] |= mod(ndrange[I], workgroupsize[I]) != 0
-            return fld1(ndrange[I], workgroupsize[I])
+            q, r = fldmod_extent(ndrange[I], workgroupsize[I])
+            dynamic[] |= r != 0
+            return q + (r != 0)
         end
 
         return blocks, workgroupsize, dynamic[] ? DynamicCheck() : NoDynamicCheck()
