@@ -1287,9 +1287,11 @@ mutable struct HostKernelHandle
     const local_size::NTuple{3, Int}
     const scratch_size::Int
     const scratch_alignment::Int
-    # how long the last launch took, in cycle counter ticks, and how many work-groups it had
+    # last sampled duration (counter ticks) and last launch's work-group count
     Base.@atomic last_duration::UInt64
     Base.@atomic last_groups::Int
+    # untimed launches remaining on the launching task
+    Base.@atomic untimed::Int
     # serial estimates for the last two work-group counts (`a` is latest): work per item can
     # vary with grid size. scale the first range's time to the whole grid, in cycle counter
     # ticks. use the smaller of two samples (zero without a previous sample) to discount a
@@ -1302,7 +1304,7 @@ mutable struct HostKernelHandle
     Base.@atomic serial_duration_b::UInt64
 
     function HostKernelHandle(id, local_size, scratch_size = 0, scratch_alignment = 1)
-        h = new(id, local_size, scratch_size, scratch_alignment, 0, 0, 0, 0, 0, 0, 0, 0)
+        h = new(id, local_size, scratch_size, scratch_alignment, 0, 0, 0, 0, 0, 0, 0, 0, 0)
         id == C_NULL || finalizer(h -> clReleaseHostKernelPOCL(h.id), h)
         return h
     end

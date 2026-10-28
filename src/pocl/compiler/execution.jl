@@ -190,12 +190,14 @@ function launch_and_wait(
         # unavailable, run every work-group checked.
         hp = host_kernel(with_fun(kernel, partial), values(kwargs), groups)
         h = hp === nothing ? nothing : full_host_kernel(kernel, partial, hp)
+        # share conversion, the bulk of each path's per-kernel code
+        converted = converted_arguments(kernel, args)
         if hp === nothing
             info = exception_info()
             info[] = ExceptionInfo_st()
             GC.@preserve info begin
                 info_ptr = Base.unsafe_convert(Ptr{ExceptionInfo_st}, info)
-                event = launch_tuple(with_fun(kernel, partial), args, info_ptr; kwargs...)
+                event = launch_queued(with_fun(kernel, partial), converted, info_ptr; kwargs...)
                 wait_for_kernel(event)
             end
             check_exception(info)
@@ -207,7 +209,7 @@ function launch_and_wait(
             info = Ref(ExceptionInfo_st())
             GC.@preserve info begin
                 info_ptr = Base.unsafe_convert(Ptr{ExceptionInfo_st}, info)
-                host_launch_converted(kernel, args, info_ptr, hp, num_groups, h, extent)
+                host_launch_converted(kernel, converted, info_ptr, hp, num_groups, h, extent)
             end
             # passing the status avoids allocating `info`
             check_exception(info[].status)
@@ -236,7 +238,15 @@ end
 @inline launch_tuple(
     kernel::AbstractKernel, args::Tuple, exception_info::Ptr;
     global_size = (1,), local_size = nothing
-) = launch_converted(kernel, args, exception_info, global_size, local_size)
+) = GC.@preserve args launch_converted(
+    kernel, converted_arguments(kernel, args), exception_info, global_size, local_size
+)
+
+# `launch_tuple` for preconverted arguments
+@inline launch_queued(
+    kernel::AbstractKernel, converted::Tuple, exception_info::Ptr;
+    global_size = (1,), local_size = nothing
+) = launch_converted(kernel, converted, exception_info, global_size, local_size)
 
 # kept out of the launches, which are compiled for every kernel: inlining `rand` makes them
 # several times as expensive to compile
@@ -244,34 +254,43 @@ end
     KernelState(rng_state ? rng_seed() : UInt32(0), UInt64(UInt(exception_info)))
 @noinline rng_seed() = Base.rand(UInt32)
 
-# the call's tuple type and argument expressions for `launch_converted`. (on vectors, so that
-# it compiles once for all argument counts.)
-function kernel_call_arguments(@nospecialize(F), @nospecialize(TT), nargs::Int)
+# argument expressions for a kernel compiled for `F` and `TT`.
+# vectors let this helper compile once for all argument counts.
+function converted_argument_exprs(@nospecialize(F), @nospecialize(TT), nargs::Int)
     params = Any[F, TT.parameters...]   # Base.signature_type with a function type
     exprs = Any[:(kernel.f); Any[:(clconvert(args[$i])) for i in 1:nargs]]
-    call_t = Type[KernelState]
-    call_args = Any[:(kernel_state(kernel.rng_state, exception_info))]
+    converted = Any[]
     for (dt, ex) in zip(params, exprs)
         # filter out ghost arguments that shouldn't be passed
         pass_arg(dt) || continue
         # replace non-isbits arguments (they should be unused, or compilation would have
         # failed)
-        push!(call_t, isbitstype(dt) ? dt : Ptr{Any})
-        push!(call_args, isbitstype(dt) ? ex : :C_NULL)
+        push!(converted, isbitstype(dt) ? ex : :(Ptr{Any}(C_NULL)))
     end
-    return Base.to_tuple_type(call_t), call_args
+    return converted
 end
 
-@inline @generated function launch_converted(
-        kernel::AbstractKernel{F, TT}, args::Tuple, exception_info, global_size, local_size
+# arguments for `kernel(args...)`, excluding kernel state.
+# array arguments become pointers; the caller must keep `args` alive.
+@inline @generated function converted_arguments(
+        kernel::AbstractKernel{F, TT}, args::Tuple
     ) where {F, TT}
-    call_tt, call_args = kernel_call_arguments(F, TT, fieldcount(args))
+    exprs = converted_argument_exprs(F, TT, fieldcount(args))
+    return :(($(exprs...),))
+end
 
-    # the converted arguments only hold pointers to the arrays in `args`
+kernel_argument_types(@nospecialize(converted::Type)) = Tuple{KernelState, converted.parameters...}
+
+@inline @generated function launch_converted(
+        kernel::AbstractKernel, converted::Tuple, exception_info, global_size, local_size
+    )
+    call_tt = kernel_argument_types(converted)
+    vals = Expr[:(converted[$i]) for i in 1:fieldcount(converted)]
     return quote
-        GC.@preserve args begin
-            $cl.clcall(kernel.fun, $call_tt, ($(call_args...),); global_size, local_size, kernel.rng_state)
-        end
+        $cl.clcall(
+            kernel.fun, $call_tt, (kernel_state(kernel.rng_state, exception_info), $(vals...));
+            global_size, local_size, kernel.rng_state
+        )
     end
 end
 
@@ -428,6 +447,9 @@ const host_steal_max_groups = Int(typemax(Int32))
 # a team costs about 1 µs to start and join. a trivial kernel (store or axpy) needs about
 # 8192 work-items to recover that cost on 4 or 8 threads (see `host_schedule`).
 const host_kernel_serial_items = 8192
+
+# untimed launches after a short sample in `run_short`; resampling detects longer work
+const host_untimed_launches = 15
 
 # host kernels use the calling thread's stack; Julia task stacks are at least 4 MiB. cap
 # estimated use at 1 MiB, using PoCL's upper bound per work-item. tuning shrinks work-groups
@@ -785,6 +807,8 @@ end
         launch()
         Base.@atomic :monotonic h.last_duration = cycle_counter() - start
         Base.@atomic :monotonic h.last_groups = total
+        # resample on the launching task: team timings may not apply
+        Base.@atomic :monotonic h.untimed = 0
     end
     # yield after team or long launches so repeated launches don't starve tasks, timers or
     # I/O
@@ -846,12 +870,37 @@ end
 # supplies both the serial estimate and the last-launch duration
 @inline function run_short(l::HostLaunch)
     scratch = host_scratch_ptr(l.scratch_size, l.scratch_alignment)
-    start = cycle_counter()
-    host_run(l, 0, l.total, scratch)
-    duration = cycle_counter() - start
-    record_serial_sample(l.h, l.total, duration)
-    Base.@atomic :monotonic l.h.last_duration = duration
-    Base.@atomic :monotonic l.h.last_groups = l.total
+    h = l.h
+    # counter reads can cost tens of cycles. sample every `host_untimed_launches + 1` launches
+    # after a short sample; detecting longer work can lag that long or miss work varying
+    # with that period entirely. always time grids with no estimate or a changed work-group
+    # count: estimates are per grid, the countdown per kernel; no estimate means one thread.
+    untimed = Base.@atomic :monotonic h.untimed
+    if untimed == 0 ||
+            (Base.@atomic :monotonic h.last_duration) >= session().host_kernel_short_ticks ||
+            (Base.@atomic :monotonic h.last_groups) != l.total ||
+            serial_duration(h, l.total) == 0
+        start = cycle_counter()
+        host_run_all(l, scratch)
+        duration = cycle_counter() - start
+        record_serial_sample(h, l.total, duration)
+        Base.@atomic :monotonic h.last_duration = duration
+        Base.@atomic :monotonic h.untimed = host_untimed_launches
+    else
+        host_run_all(l, scratch)
+        Base.@atomic :monotonic h.untimed = untimed - 1
+    end
+    Base.@atomic :monotonic h.last_groups = l.total
+    return
+end
+
+# unsplit launches call PoCL directly to avoid materializing `HostLaunch` in memory
+@inline function host_run_all(l::HostLaunch, scratch::Ptr{Cvoid})
+    if l.full === l.h
+        host_run(l.h, l.arg_values, l.num_groups, 0, l.total, l.exception_info, scratch)
+    else
+        host_run(l, 0, l.total, scratch)
+    end
     return
 end
 
@@ -872,32 +921,17 @@ end
 
 # like `launch_converted`, but passes a pointer to each converted argument
 @inline @generated function host_launch_converted(
-        kernel::AbstractKernel{F, TT}, args::Tuple, exception_info, h, num_groups, full,
-        extent
-    ) where {F, TT}
-    sig = Tuple{F, TT.parameters...}
-    args = (:(kernel.f), (:(clconvert(args[$i])) for i in 1:fieldcount(args))...)
+        kernel::AbstractKernel, converted::Tuple, exception_info, h, num_groups, full, extent
+    )
+    call_tt = kernel_argument_types(converted)
+    N = fieldcount(call_tt)
+    vals = Expr[:(converted[$i]) for i in 1:fieldcount(converted)]
+    arg_ptrs = Expr[:(base + $(fieldoffset(call_tt, i))) for i in 1:N]
 
-    to_pass = map(pass_arg, sig.parameters)
-    call_t = Type[x[1] for x in zip(sig.parameters, to_pass) if x[2]]
-    call_args = Union{Expr, Symbol}[x[1] for x in zip(args, to_pass) if x[2]]
-    for (i, dt) in enumerate(call_t)
-        if !isbitstype(dt)
-            call_t[i] = Ptr{Any}
-            call_args[i] = :(Ptr{Any}(C_NULL))
-        end
-    end
-    pushfirst!(call_t, KernelState)
-    pushfirst!(call_args, :(kernel_state(kernel.rng_state, exception_info)))
-    call_tt = Base.to_tuple_type(call_t)
-    arg_ptrs = [:(base + $(fieldoffset(call_tt, i))) for i in 1:length(call_t)]
-    N = length(call_t)
-
-    # the converted arguments only hold pointers to the arrays in `args`. the local memory
-    # arguments of RNG kernels are set on the host kernel, so they get no value.
+    # RNG local memory arguments are set on the host kernel; pass no values here
     return quote
-        vals = Ref{$call_tt}(($(call_args...),))
-        GC.@preserve args vals begin
+        vals = Ref{$call_tt}((kernel_state(kernel.rng_state, exception_info), $(vals...)))
+        GC.@preserve vals begin
             base = Ptr{Cvoid}(Base.unsafe_convert(Ptr{$call_tt}, vals))
             ptrs = Ref{NTuple{$(N + 2), Ptr{Cvoid}}}(($(arg_ptrs...), C_NULL, C_NULL))
             GC.@preserve ptrs begin

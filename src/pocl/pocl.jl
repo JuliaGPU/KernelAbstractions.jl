@@ -11,21 +11,24 @@ import .nanoOpenCL as cl
 
 ## session state
 
-# what every task shares: one context, so that kernels are only linked once per process
-struct Session
-    platform::cl.Platform
-    device::cl.Device
-    context::cl.Context
+# shared context: link kernels once per process.
+# mutable so `session()` returns a reference, avoiding repeated copies per launch.
+mutable struct Session
+    const platform::cl.Platform
+    const device::cl.Device
+    const context::cl.Context
     # querying the device allocates, so cache what launches need
-    limits::@NamedTuple{
+    const limits::@NamedTuple{
         max_work_group_size::Int, max_work_group_dims::NTuple{3, Int}, sub_group_size::Int,
         compute_units::Int, preferred_work_group_size_multiple::Int,
         fp16::Bool, fp64::Bool,
     }
     # duration threshold in cycle counter ticks for long launches (see `host_dispatch`)
-    host_kernel_long_ticks::UInt64
+    const host_kernel_long_ticks::UInt64
     # serial-duration threshold in ticks for small launches (see `host_schedule`)
-    host_kernel_serial_ticks::UInt64
+    const host_kernel_serial_ticks::UInt64
+    # below this duration (ticks), sample timings on the launching task; see `run_short`
+    const host_kernel_short_ticks::UInt64
 end
 
 # a cheap monotonic counter: the TSC on x86, the virtual timer on AArch64 (where
@@ -100,10 +103,12 @@ function Session()
     host_kernel_long_ticks = round(UInt64, 50_000 * rate)
     # 4 µs, several times what starting and joining a team costs, see `host_schedule`
     host_kernel_serial_ticks = round(UInt64, 4_000 * rate)
+    # 1 µs, compared with tens of nanoseconds to time a launch
+    host_kernel_short_ticks = round(UInt64, 1_000 * rate)
 
     return Session(
         platform, device, context, limits, host_kernel_long_ticks,
-        host_kernel_serial_ticks
+        host_kernel_serial_ticks, host_kernel_short_ticks
     )
 end
 

@@ -273,6 +273,11 @@ end
 
 # the workgroup size `KI.launch_configuration` tunes for kernels with the device's limits,
 # which is what PoCL kernels report, unless their estimated stack use limits their size
+function KA.tunes_as_expected(kernel::KI.Kernel{POCLBackend})
+    k, limits = kernel.kern.kernel.fun, device_limits()
+    return k.tuned_work_group_size == limits.max_work_group_size &&
+        k.preferred_work_group_size_multiple == limits.preferred_work_group_size_multiple
+end
 function KA.expected_workgroupsize(::POCLBackend, nitems)
     limits = device_limits()
     return cpu_workgroupsize(
@@ -309,7 +314,7 @@ end
 # that divides `n`. if none exists, use a quarter of `x` (a multiple of `m`) when `shrink`,
 # or keep `x` otherwise
 function fit_workgroup(n::Int, x::Int, m::Int, shrink::Bool)
-    n % x == 0 && return x
+    iszero(KA.NDIteration.fldmod_extent(n, x)[2]) && return x
     d = largest_divisor(n, x, m)
     d == 0 || return d
     shrink || return x
@@ -321,7 +326,7 @@ end
 # skips `x` (`largest_divisor(8, 4, 1) == 2`).
 function largest_divisor(n::Int, x::Int, m::Int)
     # (a multiple of `m` only divides multiples of `m`)
-    n % m == 0 || return 0
+    iszero(KA.NDIteration.fldmod_extent(n, m)[2]) || return 0
     lo = cld(x, 2)
     hi = (x - 1) ÷ m * m
     if (hi - lo) ÷ m <= fld(n, lo) - cld(n, x)
@@ -352,14 +357,20 @@ function cpu_workgroupsize(nitems, threads, max_items, multiple)
     items = min(nextpow2(min(nitems, max_items)), max_items)
     # one work-group, which isn't split (without dividing, for small launches)
     items >= nitems && items < 2 * min_items && return items
-    groups = cld(nitems, items)
-    while (splits = min(threads ÷ groups, items ÷ min_items)) > 1
+    # avoid divisions: each costs tens of cycles on some CPUs
+    groups = cld_items(nitems, items)
+    while threads >= 2 * groups && items >= 2 * min_items
+        splits = min(threads ÷ groups, items ÷ min_items)
         # PoCL splits by the largest factor of at most `splits` that divides the work-group
-        items ÷= prevpow(2, splits)
-        groups = cld(nitems, items)
+        items >>= trailing_zeros(prevpow(2, splits))
+        groups = cld_items(nitems, items)
     end
     return items
 end
+
+# `cld(n, d)` for `n >= 0` and `d > 0`, without dividing if `d` is a power of two
+@inline cld_items(n::Integer, d::Integer) =
+    d & (d - one(d)) == 0 ? (n >> trailing_zeros(d)) + !iszero(n & (d - one(d))) : cld(n, d)
 
 # `nextpow(2, n)` for `n >= 1`, inlined
 @inline nextpow2(n::Integer) = n <= 1 ? one(n) : one(n) << (8 * sizeof(n) - leading_zeros(n - one(n)))
