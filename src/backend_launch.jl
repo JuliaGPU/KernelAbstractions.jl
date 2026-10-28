@@ -95,8 +95,14 @@ argconvert(kernel::Kernel{<:KI.Backend}, arg) = KI.argconvert(backend(kernel), a
 Core.kwcall(kwargs::NamedTuple, obj::Kernel{<:KI.Backend}, args::Vararg{Any, N}) where {N} =
     launch_tuple(obj, args; kwargs...)
 
+# strip singleton functions (like those of `@kernel`) to share launch code across kernels
+# with the same backend and static sizes. hooks can't dispatch on such a function's type;
+# callables with state keep theirs (see `test/launch.jl`).
+@inline sizes_only(obj::Kernel{B, WS, ND, F}) where {B, WS, ND, F} =
+    Base.issingletontype(F) ? similar(obj, nothing) : obj
+
 function launch_tuple(obj::Kernel, args::Tuple; ndrange = nothing, workgroupsize = nothing)
-    setup = launch_setup(obj, ndrange, workgroupsize)
+    setup = launch_setup(sizes_only(obj), ndrange, workgroupsize)
     # nothing to launch (or compile) for an empty ndrange
     setup === nothing && return nothing
     ndrange, workgroupsize, iterspace = setup
@@ -105,7 +111,7 @@ function launch_tuple(obj::Kernel, args::Tuple; ndrange = nothing, workgroupsize
     # depend on the tuned workgroup size, so the context (and thus the kernel) doesn't either.
     # (not done by `launch_setup`: the launch mode isn't inferred concretely, so returning
     # it would box the result)
-    launch = @noinline select_launch(obj, workgroupsize, iterspace)
+    launch = @noinline select_launch(sizes_only(obj), workgroupsize, iterspace)
     T = narrow_index_type(backend(obj))
     if launch === NDLaunch{T}()
         # the common case, specialized statically
@@ -157,10 +163,14 @@ function launch_kernel(
     tuned = workgroupsize(obj) <: DynamicSize && _workgroupsize === nothing
     range = something(ndrange, static_ndrange(obj))
     unchecked = !checked && skip_bounds_check(b) && expect_coverage(b, launch, range, iterspace, tuned)
-    # (which of the types it is is hidden from inference, which would compile the lookup for
-    # both)
-    compiled_tt = Base.compilerbarrier(:type, unchecked ? without_bounds_check(tt) : tt)::Type
-    kernel = kernel_function_as(b, obj.f, compiled_tt, tt; compiler_options(obj)...)
+    kernel = if skip_bounds_check(b)
+        # hide the check type from inference, so that the lookup compiles once for both
+        compiled_tt = Base.compilerbarrier(:type, unchecked ? without_bounds_check(tt) : tt)::Type
+        kernel_function_as(b, obj.f, compiled_tt, tt; compiler_options(obj)...)
+    else
+        # infer the kernel's type, avoiding dynamic dispatch in the rest of the launch
+        KI.kernel_function(b, obj.f, tt; compiler_options(obj)...)
+    end
 
     # tune the workgroup size, keeping the context type (and thus the kernel) the same
     threads = if tuned
@@ -168,7 +178,7 @@ function launch_kernel(
     else
         nothing
     end
-    ctx, groups, items = launch_geometry(obj, launch, subgroups, ndrange, iterspace, ctx, threads)
+    ctx, groups, items = launch_geometry(sizes_only(obj), launch, subgroups, ndrange, iterspace, ctx, threads)
 
     # the kernel's limits aren't the device's, and the workgroups tuned for them don't cover
     # the ndrange: launch the checked kernel instead
@@ -191,11 +201,10 @@ skip_bounds_check(backend) = backend isa POCL.POCLBackend
 
 `KI.kernel_function(backend, f, compiled_tt; kwargs...)`, as a kernel that is launched with
 arguments of the types `tt`, which only differ from `compiled_tt` in the type parameters of
-the context. Backends for which `skip_bounds_check` holds implement it, and shouldn't
-specialize on `compiled_tt`; for others, `compiled_tt` is always `tt`.
+the context. Backends for which `skip_bounds_check` holds implement it, without
+specializing on `compiled_tt`.
 """
-Base.@nospecializeinfer kernel_function_as(backend, f, @nospecialize(compiled_tt), tt; kwargs...) =
-    KI.kernel_function(backend, f, tt; kwargs...)
+function kernel_function_as end
 
 """
     expected_workgroupsize(backend, nitems)

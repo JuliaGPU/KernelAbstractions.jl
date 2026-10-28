@@ -88,6 +88,22 @@ end
     end
 end
 
+# a kernel function with state, whose `partition` hook fixes the workgroup size
+# (laid out like a closure, as AMDGPU only compiles functions, and adapts them as closures)
+struct FixedGroups{F, I} <: Function
+    f::F
+    items::I
+end
+(g::FixedGroups)(args...) = g.f(args...)
+KernelAbstractions.partition(
+    kernel::KernelAbstractions.Kernel{<:Any, <:Any, <:Any, <:FixedGroups}, ndrange::Tuple, workgroupsize
+) = invoke(KernelAbstractions.partition, Tuple{Any, Any, Any}, kernel, ndrange, (kernel.f.items,))
+
+@kernel function launch_groupsize!(A)
+    I = @index(Global, Linear)
+    @inbounds A[I] = @groupsize()[1]
+end
+
 default_launcher(kernel, args...; ndrange, workgroupsize = nothing) =
     kernel(args...; ndrange, workgroupsize)
 
@@ -200,6 +216,14 @@ function launch_testsuite(backend, AT; launcher = default_launcher, skip_tests =
         visits, position = Array(visits), Array(position)
         @test all(I -> visits[I] == (I in listed), CartesianIndices(shape))
         @test all(p -> position[listed[p]] == p, eachindex(listed))
+    end
+
+    @testset "partition for the kernel function" begin
+        kernel = launch_groupsize!(backend())
+        A = AT(zeros(Int, 10))
+        launcher(similar(kernel, FixedGroups(kernel.f, 3)), A; ndrange = length(A))
+        synchronize(backend())
+        @test all(==(3), Array(A))
     end
 
     @testset "synchronize with padding lanes" begin
