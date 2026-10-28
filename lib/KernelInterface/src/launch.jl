@@ -126,12 +126,13 @@ end
     return p
 end
 
-# whether the product of positive `dims` exceeds `limit`, without overflowing
+# whether the product of positive `dims` exceeds `limit`, without overflow or division
+# (this runs on every launch, and a division costs tens of cycles on some CPUs)
 @inline function prod_exceeds(dims::Dims, limit::Int)
     p = 1
     for d in dims
-        d > limit ÷ p && return true
-        p *= d
+        p, overflow = Base.mul_with_overflow(p, d)
+        (overflow || p > limit) && return true
     end
     return false
 end
@@ -206,9 +207,10 @@ Not part of the public interface; used by KernelInterface's and KernelAbstractio
 code.
 """
 @inline function check_work_group_size(kernel::Kernel, items::Dims{3})
-    check_work_group_dims(kernel.backend, items)
+    # check the total first: linearized launches put all work-items in the first dimension
     max_items = max_work_group_size(kernel)
     prod_exceeds(items, max_items) && throw_work_group_size_error(items, max_items)
+    check_work_group_dims(kernel.backend, items)
     return
 end
 

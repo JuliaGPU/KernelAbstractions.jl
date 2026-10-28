@@ -809,6 +809,10 @@ end
     # workgroup sizes are validated against the kernel's limits
     limit = KernelAbstractions.KI.max_work_group_size(CPU())
     @test_throws ArgumentError fill_index!(CPU())(zeros(Int, 2limit); ndrange = 2limit, workgroupsize = 2limit)
+    # report the total-size limit even when linearization puts all work-items in the
+    # first dimension
+    n = limit ÷ 64 + 1
+    @test_throws "work-items" fill_index!(CPU(), (64, n))(zeros(Int, 128n); ndrange = (64, n, 2))
 
     # iteration spaces with more work-items than an `Int` can count are rejected, instead
     # of launching nothing because the number of workgroups overflowed
