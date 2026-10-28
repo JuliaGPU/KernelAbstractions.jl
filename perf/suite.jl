@@ -1,10 +1,11 @@
 # Runs the benchmarks of one execution mode in this process, and saves their results:
 #
-#     julia --project=perf -t1 perf/suite.jl MODE GROUP OUTPUT
+#     julia --project=perf perf/suite.jl MODE GROUP OUTPUT
 #
 # with MODE `serial` or `parallel`, and GROUP `launch` (the launch-overhead benchmarks) or
-# `main` (all others). `runbenchmarks.jl` starts this with `JULIA_KA_CPU_THREADS` set to the
-# number of PoCL workers of the mode: it has to be set before the backend is first used.
+# `main` (all others). `runbenchmarks.jl` starts this with as many Julia threads as the mode
+# has workers, and `JULIA_KA_CPU_THREADS` set to that number: it has to be set before the
+# backend is first used.
 
 using KernelAbstractions
 using BenchmarkTools
