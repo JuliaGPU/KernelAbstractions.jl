@@ -1323,6 +1323,8 @@ mutable struct Kernel
     const work_group_size::Int
     const preferred_work_group_size_multiple::Int
     const private_mem_size::Int
+    # the largest work-group of tuned launches (see `POCL.link_kernel`)
+    tuned_work_group_size::Int
 
     function Kernel(k::cl_kernel)
         function get(param, T = Csize_t)
@@ -1331,10 +1333,11 @@ mutable struct Kernel
             return Int(result[])
         end
         kernel = try
+            work_group_size = get(CL_KERNEL_WORK_GROUP_SIZE)
             new(
-                k, ReentrantLock(), HostKernelHandle[], nothing, false,
-                get(CL_KERNEL_WORK_GROUP_SIZE), get(CL_KERNEL_PREFERRED_WORK_GROUP_SIZE_MULTIPLE),
-                get(CL_KERNEL_PRIVATE_MEM_SIZE, cl_ulong)
+                k, ReentrantLock(), HostKernelHandle[], nothing, false, work_group_size,
+                get(CL_KERNEL_PREFERRED_WORK_GROUP_SIZE_MULTIPLE),
+                get(CL_KERNEL_PRIVATE_MEM_SIZE, cl_ulong), work_group_size
             )
         catch
             clReleaseKernel(k)

@@ -430,9 +430,16 @@ const host_steal_max_groups = Int(typemax(Int32))
 const host_kernel_serial_items = 8192
 
 # host kernels use the calling thread's stack; Julia task stacks are at least 4 MiB. cap
-# estimated use at 1 MiB, using PoCL's upper bound per work-item; larger work-groups use the
-# queue.
+# estimated use at 1 MiB, using PoCL's upper bound per work-item. tuning shrinks work-groups
+# to fit (see `link_kernel`); sizes that still exceed the limit use the queue.
 const host_kernel_stack_limit = 1024 * 1024
+
+# the largest power-of-two work-group of `k` within `host_kernel_stack_limit` (1 if a single
+# work-item exceeds it)
+function host_kernel_max_items(k::cl.Kernel)
+    k.private_mem_size == 0 && return typemax(Int)
+    return prevpow(2, max(host_kernel_stack_limit ÷ k.private_mem_size, 1))
+end
 
 @inline function host_kernel(kernel::HostKernel, kwargs::NamedTuple, groups)
     haskey(kwargs, :local_size) && haskey(kwargs, :global_size) || return nothing

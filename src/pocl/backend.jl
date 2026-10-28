@@ -264,7 +264,7 @@ KI.launch_configuration(
 
 # kept out of `KI.launch_configuration`, which is compiled for every kernel
 @noinline function launch_workgroupsize(kernel::cl.Kernel, nitems, max_work_group_size)
-    max_items = min(kernel.work_group_size, max_work_group_size)
+    max_items = min(kernel.tuned_work_group_size, max_work_group_size)
     items = cpu_workgroupsize(
         nitems, device_limits().compute_units, max_items, kernel.preferred_work_group_size_multiple
     )
@@ -287,32 +287,50 @@ end
 # partial. shrink each dimension of the generic choice to the largest divisor of the ndrange
 # that retains at least half its size, or to a quarter if none exists. this bounds the work
 # in partial work-groups.
+# vectorization is across the first dimension. below 16 vectors (of the preferred multiple),
+# shrink it only to a vector-width multiple, never to a quarter: a scalar remainder costs
+# more than a partial work-group (axpy, 1000 work-items on 32 threads: 146 ns in work-groups
+# of 32, 162 ns of 25, 209 ns of 8).
 # (only shrink, so padding stays within the bound `KA.select_launch` assumes.)
 function KA.launch_workgroupsize(::POCLBackend, ::KA.NDLaunch, threads, ndrange)
     extent = KA.extents(ndrange)
-    limits = KA.nd_limits(device_limits().max_work_group_dims, extent)
-    items = KI.threads_to_workgroupsize(threads, extent, limits)
-    return map(fit_workgroup, extent, items)
+    limits = device_limits()
+    items = KI.threads_to_workgroupsize(threads, extent, KA.nd_limits(limits.max_work_group_dims, extent))
+    width = limits.preferred_work_group_size_multiple
+    return ntuple(Val(length(extent))) do d
+        Base.@_inline_meta
+        n, x = extent[d], items[d]
+        small = d == 1 && width <= x < 16 * width
+        fit_workgroup(n, x, small ? width : 1, !small)
+    end
 end
 
-function fit_workgroup(n::Int, x::Int)
+# keep `x` if it divides `n`; otherwise use the largest multiple of `m` in `cld(x, 2):x`
+# that divides `n`. if none exists, use a quarter of `x` (a multiple of `m`) when `shrink`,
+# or keep `x` otherwise
+function fit_workgroup(n::Int, x::Int, m::Int, shrink::Bool)
     n % x == 0 && return x
-    d = largest_divisor(n, x)
-    return d == 0 ? cld(x, 4) : d
+    d = largest_divisor(n, x, m)
+    d == 0 || return d
+    shrink || return x
+    return max(m, cld(x, 4) ÷ m * m)
 end
 
-# the largest divisor of `n` in `cld(x, 2):x`, or 0 if none exists. search sizes or
-# work-group counts, whichever are fewer. requires `n % x != 0`: the size search skips `x`
-# (`largest_divisor(8, 4) == 2`).
-function largest_divisor(n::Int, x::Int)
+# the largest multiple of `m` in `cld(x, 2):x` that divides `n`, or 0 if none exists. search
+# sizes or work-group counts, whichever are fewer. requires `n % x != 0`: the size search
+# skips `x` (`largest_divisor(8, 4, 1) == 2`).
+function largest_divisor(n::Int, x::Int, m::Int)
+    # (a multiple of `m` only divides multiples of `m`)
+    n % m == 0 || return 0
     lo = cld(x, 2)
-    if x - lo <= fld(n, lo) - cld(n, x)
-        for d in (x - 1):-1:lo
+    hi = (x - 1) ÷ m * m
+    if (hi - lo) ÷ m <= fld(n, lo) - cld(n, x)
+        for d in hi:-m:lo
             n % d == 0 && return d
         end
     else
         for g in cld(n, x):fld(n, lo)
-            n % g == 0 && return n ÷ g
+            n % g == 0 && (n ÷ g) % m == 0 && return n ÷ g
         end
     end
     return 0

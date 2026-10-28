@@ -1259,6 +1259,23 @@ end
     @test wgs((1024, 1001)) == (1024, 1)
     @test wgs((100003,)) == (1024,)
     @test wgs((0, 7)) == (1, 7)
+    # below 16 vectors, shrink the first dimension only to a vector-width multiple;
+    # otherwise keep its size
+    width = POCL.device_limits().preferred_work_group_size_multiple
+    small(threads, ndrange) = KernelAbstractions.launch_workgroupsize(
+        CPU(), KernelAbstractions.NDLaunch{Int}(), threads, ndrange
+    )
+    @test small(8width, (125width,)) == (5width,)
+    @test small(4width, (125width,)) == (4width,)
+    @test small(4width, (125width + 1,)) == (4width,)
+    # (one vector, which has no smaller multiple)
+    @test small(width, (3width + 1,)) == (width,)
+    # (just below 16 vectors, and at 16, where any divisor may be taken)
+    @test small(16width - 1, (15width * (16width - 2),)) == (15width,)
+    @test small(16width, (15width * (16width - 2),)) == (16width - 2,)
+    # (searching the work-group counts)
+    @test small(8width, (9width,)) == (8width,)
+    @test small(8width, (12width,)) == (6width,)
 
     # an explicit workgroup size is kept
     @kernel function groupsize!(A)
@@ -1384,6 +1401,55 @@ end
     @test all(==(A[1]), A)
     @test (A[1] < 0) == !iszero(length(A) % abs(A[1]))
     @test B == idx
+end
+
+# a dynamically indexed tuple lives on the stack: 1 KiB per work-item
+function stack_tuple_kernel!(B, idx)
+    i = KernelAbstractions.KernelInterface.get_global_id().x
+    i > length(B) && return
+    t = ntuple(j -> Float32(j), Val(256))
+    @inbounds B[i] = t[idx[i]]
+    return
+end
+
+# `stack_tuple_kernel!`'s argument layout, with no stack use
+function stack_free_kernel!(B, idx)
+    i = KernelAbstractions.KernelInterface.get_global_id().x
+    i > length(B) && return
+    @inbounds B[i] = -1
+    return
+end
+
+@testset "POCL tuned work-groups within the host-kernel stack limit" begin
+    n = 1 << 16
+    B, idx = zeros(Float32, n), rand(1:256, n)
+    backend = POCL.POCLBackend()
+    kernel = KernelAbstractions.KernelInterface.@launch backend launch = false stack_tuple_kernel!(B, idx)
+    fun = kernel.kern.kernel.fun
+    # the device's largest work-group needs more stack than a host kernel may use
+    @test fun.private_mem_size * fun.work_group_size > POCL.host_kernel_stack_limit
+    items = KernelAbstractions.KernelInterface.launch_configuration(kernel; nitems = n).workgroupsize
+    sizes = (; global_size = (n, 1, 1), local_size = (items, 1, 1))
+    @test POCL.host_kernel(kernel.kern.kernel, sizes, nothing) !== nothing
+    kernel(B, idx; workgroupsize = items, numgroups = cld(n, items))
+    @test B == idx
+
+    # explicit work-groups over the limit run on the queue
+    items = fun.work_group_size
+    sizes = (; global_size = (n, 1, 1), local_size = (items, 1, 1))
+    @test POCL.host_kernel(kernel.kern.kernel, sizes, nothing) === nothing
+    fill!(B, 0)
+    kernel(B, idx; workgroupsize = items, numgroups = cld(n, items))
+    @test B == idx
+
+    # a split launch whose unchecked variant is over the limit runs every work-group with
+    # the checked one, as a host kernel
+    checked = KernelAbstractions.KernelInterface.@launch backend launch = false stack_free_kernel!(B, idx)
+    @test POCL.host_kernel(checked.kern.kernel.fun, (items, 1, 1), false) !== nothing
+    fill!(B, 0)
+    m = n - items ÷ 2
+    KernelAbstractions.launch_split(kernel, checked, (m, 1, 1), (cld(m, items), 1, 1), (items, 1, 1), (B, idx))
+    @test all(==(-1), view(B, 1:m))
 end
 
 @kernel function muladd_kernel!(D, @Const(A), @Const(B), @Const(C))
