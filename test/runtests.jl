@@ -45,14 +45,15 @@ end
 @testset "POCL thread count" begin
     # in fresh processes, as PoCL only reads its configuration once
     julia = Cmd(filter(arg -> !startswith(arg, "--code-coverage"), Base.julia_cmd().exec))
-    script = "using KernelAbstractions: POCL; print(POCL.device().max_compute_units)"
     vars = ("JULIA_KA_CPU_THREADS", POCL.cl.pocl_thread_variables...)
-    function compute_units(env...; threads = 2)
+    function query(property, env...; threads = 2)
+        script = "using KernelAbstractions: POCL; print(POCL.$property)"
         cmd = `$julia --startup-file=no --threads=$threads
             --project=$(Base.active_project()) -e $script`
         cmd_env = filter(kv -> !(first(kv) in vars), copy(ENV))
         return parse(Int, readchomp(setenv(cmd, cmd_env..., env...)))
     end
+    compute_units(env...; kwargs...) = query("device().max_compute_units", env...; kwargs...)
 
     # as many threads as Julia has
     @test compute_units(threads = 2) == 2
@@ -63,6 +64,13 @@ end
     @test compute_units("JULIA_KA_CPU_THREADS" => "3", "POCL_MAX_PTHREAD_COUNT" => "5") == 3
     # up to the size of PoCL's device
     @test compute_units("JULIA_KA_CPU_THREADS" => "6", "POCL_MAX_PTHREAD_COUNT" => "5") == 5
+
+    # host launches cannot exceed Julia's default pool size
+    host_threads(env...) = query("device_limits().compute_units", env...)
+    @test host_threads() == 2
+    @test host_threads("JULIA_KA_CPU_THREADS" => "1") == 1
+    @test host_threads("JULIA_KA_CPU_THREADS" => "3") == 2
+    @test host_threads("POCL_CPU_MAX_CU_COUNT" => "5") == 2
 end
 
 @testset "POCL atomics descriptor" begin
@@ -499,6 +507,422 @@ end
     @test allocated(KernelAbstractions.supports_float64, CPU()) == 0
 end
 
+@testset "POCL long host launches" begin
+    mod = @eval module $(gensym())
+    using KernelAbstractions.POCL
+    function kernel(A, n)
+        i = POCL.get_global_id()
+        x = A[i]
+        for _ in 1:n
+            x = sin(x)
+        end
+        A[i] = x
+        return
+    end
+    end
+    A = ones(4)
+    kernel = POCL.clfunction(mod.kernel, POCL.argument_types((A, 1)))
+    sizes = (; global_size = (4, 1, 1), local_size = (4, 1, 1))
+    h = POCL.host_kernel(kernel, sizes, nothing)
+    @test h !== nothing
+    # force the long path even on fast machines
+    function launch_long(kernel, h, A, n, sizes)
+        Base.@atomic :monotonic h.last_duration = typemax(UInt64)
+        kernel(A, n; sizes...)
+    end
+    allocated(f::F, args...) where {F} = (f(args...); @allocated f(args...))
+    # shielding an active cancellation scope allocates on Julia 1.14+
+    bytes = @static if isdefined(Base, :CANCEL_TOKEN)
+        Base.ScopedValues.with(Base.CANCEL_TOKEN => nothing) do
+            allocated(launch_long, kernel, h, A, 1, sizes)
+        end
+    else
+        allocated(launch_long, kernel, h, A, 1, sizes)
+    end
+    @test bytes == 0 skip = VERSION < v"1.12"
+
+    # a long launch lets a queued task run afterwards; back-to-back launches let timers
+    # fire too
+    progressed = Ref(false)
+    task = @async (progressed[] = true)
+    launch_long(kernel, h, A, 1, sizes)
+    @test progressed[]
+    wait(task)
+    woke = Threads.Atomic{Bool}(false)
+    task = @async (sleep(0.01); woke[] = true)
+    t0 = time()
+    while !woke[] && time() - t0 < 10
+        launch_long(kernel, h, A, 1, sizes)
+    end
+    @test woke[]
+    wait(task)
+    # also with launches from tasks on all threads, of which only one runs timers
+    stop = Threads.Atomic{Bool}(false)
+    woke = Threads.Atomic{Bool}(false)
+    timer = Timer(_ -> (woke[] = true), 0.01)
+    tasks = map(2:Threads.nthreads()) do _
+        Threads.@spawn begin
+            B = ones(4)
+            while !stop[]
+                launch_long(kernel, h, B, 1, sizes)
+            end
+        end
+    end
+    t0 = time()
+    while !woke[] && time() - t0 < 10
+        launch_long(kernel, h, A, 1, sizes)
+    end
+    stop[] = true
+    foreach(wait, tasks)
+    close(timer)
+    @test woke[]
+
+    # concurrent callers need separate argument storage
+    @sync for _ in 1:4
+        Threads.@spawn begin
+            B = ones(4)
+            for _ in 1:3
+                launch_long(kernel, h, B, 1000, sizes)
+            end
+            expected = 1.0
+            for _ in 1:3000
+                expected = sin(expected)
+            end
+            @test all(x -> isapprox(x, expected), B)
+        end
+    end
+end
+
+@testset "POCL small host launches" begin
+    if POCL.device_limits().compute_units > 1
+        mod = @eval module $(gensym())
+        using KernelAbstractions.POCL
+        function kernel(A, n)
+            i = POCL.get_global_id()
+            x = A[i]
+            for _ in 1:n
+                x = sin(x)
+            end
+            A[i] = x
+            return
+        end
+        end
+        s = POCL.session()
+        nt = s.limits.compute_units
+        A = ones(nt)
+        kernel = POCL.clfunction(mod.kernel, POCL.argument_types((A, 1)))
+        sizes = (; global_size = (nt, 1, 1), local_size = (1, 1, 1))
+        h = POCL.host_kernel(kernel, sizes, nothing)
+        @test h !== nothing
+        Base.@atomic h.serial_groups_a = 0
+        Base.@atomic h.serial_groups_b = 0
+        # small launches stay serial unless both recent estimates are slow
+        @test POCL.host_schedule(h, s, nt, false) == (1, false)
+        kernel(A, 10^5; sizes...)
+        @test POCL.host_schedule(h, s, nt, false) == (1, false)
+        kernel(A, 10^5; sizes...)
+        @test POCL.host_schedule(h, s, nt, false)[1] == nt
+        # team runs also estimate serial duration; sleeping threads can delay the first runs
+        for _ in 1:5
+            kernel(A, 0; sizes...)
+        end
+        @test POCL.host_schedule(h, s, nt, false) == (1, false)
+        # large grids select the full team
+        @test POCL.host_schedule(h, s, 10^6, false)[1] == nt
+        # estimates are per grid: a short one-group launch must not make a heavy grid run
+        # serially
+        kernel(A, 10^5; sizes...)
+        kernel(A, 10^5; sizes...)
+        kernel(A, 0; global_size = (1, 1, 1), local_size = (1, 1, 1))
+        @test POCL.host_schedule(h, s, nt, false)[1] == nt
+
+        # test team and stealing limits without executing oversized grids
+        tmax, smax = POCL.host_team_max_groups, POCL.host_steal_max_groups
+        @test POCL.host_schedule(h, s, tmax, false) == (nt, tmax <= smax)
+        @test POCL.host_schedule(h, s, tmax + 1, false) == (1, false)
+        @test POCL.host_schedule(h, s, tmax + 1, true) == (1, false)
+        @test POCL.host_schedule(h, s, typemax(Int), true) == (1, false)
+        @test POCL.host_schedule(h, s, min(smax, tmax), true) == (nt, true)
+        if smax < tmax
+            @test POCL.host_schedule(h, s, smax + 1, true) == (nt, false)
+            @test POCL.host_schedule(h, s, tmax, true) == (nt, false)
+        end
+    end
+end
+
+@testset "POCL host launch schedule" begin
+    if POCL.device_limits().compute_units > 1
+        mod = @eval module $(gensym())
+        using KernelAbstractions.POCL
+        function kernel(A)
+            i = POCL.get_global_id()
+            A[i] += 1
+            return
+        end
+        end
+        s = POCL.session()
+        nt = s.limits.compute_units
+        A = zeros(nt)
+        kernel = POCL.clfunction(mod.kernel, POCL.argument_types((A,)))
+        sizes = (; global_size = (nt, 1, 1), local_size = (1, 1, 1))
+        h = POCL.host_kernel(kernel, sizes, nothing)
+        @test h !== nothing
+        function last!(groups, duration)
+            # (heavy enough to run on a team, with nt and nt + 1 work-groups)
+            for g in (nt + 1, nt)
+                POCL.record_serial_sample(h, g, typemax(UInt64))
+                POCL.record_serial_sample(h, g, typemax(UInt64))
+            end
+            Base.@atomic h.last_groups = groups
+            Base.@atomic h.last_duration = duration
+            return
+        end
+
+        # use static blocks after a short launch of the same grid; otherwise allow stealing
+        last!(nt, 0)
+        @test POCL.host_schedule(h, s, nt, false) == (nt, false)
+        @test POCL.host_schedule(h, s, nt + 1, false) == (nt, true)
+        @test POCL.host_schedule(h, s, nt, true) == (nt, true)
+        last!(0, 0)
+        @test POCL.host_schedule(h, s, nt, false) == (nt, true)
+
+        # launches remember how many work-groups they had, and how long they took
+        last!(0, 0)
+        kernel(A; sizes...)
+        @test (Base.@atomic h.last_groups) == nt
+        @test (Base.@atomic h.last_duration) < typemax(UInt64)
+        kernel(A; sizes...)
+        @test A == fill(2, nt)
+
+        # a short launch on a team lets a queued task run, and such launches back to back
+        # let a timer fire
+        function short_team!()
+            last!(nt, 0)
+            @assert POCL.host_schedule(h, s, nt, false) == (nt, false)
+            kernel(A; sizes...)
+        end
+        progressed = Ref(false)
+        task = @async (progressed[] = true)
+        short_team!()
+        @test progressed[]
+        wait(task)
+        woke = Threads.Atomic{Bool}(false)
+        task = @async (sleep(0.01); woke[] = true)
+        t0 = time()
+        while !woke[] && time() - t0 < 10
+            short_team!()
+        end
+        @test woke[]
+        wait(task)
+    end
+end
+
+@testset "POCL host launches on a team" begin
+    if POCL.device_limits().compute_units > 1
+        @kernel function team_axpy!(y, a, @Const(x))
+            i = @index(Global)
+            @inbounds y[i] = a * x[i] + y[i]
+        end
+        @kernel function team_spin!(A, n)
+            i = @index(Global)
+            v = A[i]
+            for _ in 1:n
+                v = sin(v)
+            end
+            A[i] = v
+        end
+        @kernel function team_exception!(A, i)
+            I = @index(Global, Linear)
+            if I == i
+                A[0] = 1
+            end
+        end
+        # serial execution must produce tickets in work-group order
+        @kernel function team_order!(T, counter)
+            if @index(Local, Linear) == 1
+                @inbounds T[@index(Group, Linear)] = last(KernelAbstractions.@atomic counter[1] += 1)
+            end
+        end
+        # hold the team in group 1 until `release` or `n` checks. `entered` marks its start;
+        # `after` marks group `later`, which cannot start during the hold in a serial
+        # launch.
+        @kernel function team_hold!(entered, after, release, timedout, n, later)
+            if @index(Local, Linear) == 1
+                g = @index(Group, Linear)
+                g == later && (KernelAbstractions.@atomic after[1] = 1)
+                if g == 1
+                    KernelAbstractions.@atomic entered[1] = 1
+                    i = 0
+                    while (KernelAbstractions.@atomic release[1]) == 0 && i < n
+                        i += 1
+                    end
+                    i == n && (KernelAbstractions.@atomic timedout[1] = 1)
+                end
+            end
+        end
+        # enough work-items to select a team
+        n = 64 * POCL.host_kernel_serial_items
+        x = rand(Float32, n)
+        launch!(y) = team_axpy!(CPU(), 256)(y, 2.0f0, x; ndrange = n)
+        launch!(zeros(Float32, n))
+        quietly(f) = redirect_stdout(f, devnull)
+
+        # nested parallel launches run serially (see `ThreadTeams.foreach_range`)
+        ngroups = n ÷ 64
+        function order!(T)
+            counter = [0]
+            team_order!(CPU(), 64)(T, counter; ndrange = n)
+            return T
+        end
+        order!(zeros(Int, ngroups))
+        Ts = [zeros(Int, ngroups) for _ in 1:4]
+        Threads.@threads :static for i in 1:4
+            order!(Ts[i])
+        end
+        @test all(==(1:ngroups), Ts)
+
+        # a busy team also forces serial execution. wait for both the held group and the
+        # last block to start. the hold may occupy any thread, so let the checking task
+        # migrate; always release the hold.
+        load(A) = Core.Intrinsics.atomic_pointerref(pointer(A), :acquire)
+        entered, after, release, timedout = [0], [0], [0], [0]
+        nt = min(ngroups, POCL.device_limits().compute_units)
+        later = (nt - 1) * (ngroups ÷ nt) + min(nt - 1, ngroups % nt) + 1
+        task = Threads.@spawn team_hold!(CPU(), 64)(entered, after, release, timedout, 10^10, later; ndrange = n)
+        check = Threads.@spawn try
+            t0 = time()
+            while !(load(entered) == 1 && load(after) == 1) && time() - t0 < 30
+                yield()
+            end
+            T = order!(zeros(Int, ngroups))
+            load(entered) == 1 && load(after) == 1 && load(timedout) == 0, T
+        finally
+            Core.Intrinsics.atomic_pointerset(pointer(release), 1, :release)
+        end
+        held, T = fetch(check)
+        wait(task)
+        @test held
+        @test timedout[1] == 0
+        @test T == 1:ngroups
+
+        A = ones(Float32, n)
+        team_spin!(CPU(), 256)(A, 1000; ndrange = n)
+        expected = foldl((x, _) -> sin(x), 1:1000; init = 1.0f0)
+        @test all(a -> isapprox(a, expected; rtol = 1.0e-4), A)
+
+        # report exceptions from any thread without breaking later launches
+        A = zeros(Float32, n)
+        for i in (1, n ÷ 2, n)
+            @test_throws POCL.KernelException quietly(() -> team_exception!(CPU(), 256)(A, i; ndrange = n))
+        end
+        team_exception!(CPU(), 256)(A, 0; ndrange = n)
+        y = zeros(Float32, n)
+        launch!(y)
+        @test y == 2 .* x
+    end
+end
+
+# static placement matches `Threads.@threads :static`, regardless of the launching task
+@testset "POCL host launch placement" begin
+    nt = POCL.device_limits().compute_units
+    if nt > 1
+        mod = @eval module $(gensym())
+        using KernelAbstractions.POCL
+        # a work-group's local memory lies in the scratch area of the thread that runs it
+        function where_kernel(T)
+            mem = POCL.emit_localmemory(UInt8, Val(1))
+            if POCL.get_local_id(1) == 1
+                @inbounds T[POCL.get_group_id(1)] = reinterpret(UInt, mem)
+            end
+            return
+        end
+        end
+        function thread_of(address)
+            for (tid, s) in enumerate(POCL.host_scratch.slots)
+                UInt(s.ptr) <= address < UInt(s.ptr) + s.size && return tid
+            end
+            return 0
+        end
+        # enough work-items to select a team
+        items = 64
+        groups = cld(4 * POCL.host_kernel_serial_items, items) * nt + 3
+        T = zeros(UInt, groups)
+        k = POCL.clfunction(mod.where_kernel, POCL.argument_types((T,)))
+        sizes = (; global_size = (groups * items, 1, 1), local_size = (items, 1, 1))
+        h = POCL.host_kernel(k, sizes, nothing)
+        @test h !== nothing
+
+        # expected static placement
+        tids = Threads.threadpooltids(:default)
+        q, r = divrem(groups, nt)
+        block(g) = g <= r * (q + 1) ? cld(g, q + 1) : r + cld(g - r * (q + 1), q)
+        if nt == Threads.nthreads(:default)
+            tt = zeros(Int, groups)
+            Threads.@threads :static for g in 1:groups
+                tt[g] = Threads.threadid()
+            end
+            @test tt == tids[block.(1:groups)]
+        end
+
+        # count misplaced blocks across `n` launches, excluding whole blocks taken over by
+        # the dispatcher when their assigned thread starts late. `stolen_chunks()` counts
+        # these takeovers; `dispatcher` identifies the thread when known.
+        function misplaced(launch!, dispatcher = nothing; n = 20)
+            count = 0
+            for _ in 1:n
+                fill!(T, 0)
+                rescued = POCL.ThreadTeams.stolen_chunks()
+                launch!()
+                rescued = POCL.ThreadTeams.stolen_chunks() - rescued
+                ran = thread_of.(T)
+                @test all(!=(0), ran)
+                moved = 0
+                for b in 1:nt
+                    on = unique(ran[filter(g -> block(g) == b, 1:groups)])
+                    on == [tids[b]] && continue
+                    moved += 1
+                    length(on) == 1 && something(dispatcher, on[1]) == on[1] || (count += 1)
+                end
+                count += max(0, moved - rescued)
+            end
+            return count
+        end
+        # force static team scheduling
+        function static!(h)
+            Base.@atomic :monotonic h.last_duration = 0
+            Base.@atomic :monotonic h.last_groups = groups
+            return
+        end
+        @test misplaced(() -> (static!(h); k(T; sizes...)), Threads.threadid()) == 0
+
+        # construct a launch as `host_dispatch` would (one argument, no RNG), with stealing
+        # disabled
+        function launch_directly(run)
+            info = Ref(POCL.ExceptionInfo_st())
+            num_groups = Ref(Csize_t.((groups, 1, 1)))
+            vals = Ref((POCL.kernel_state(false, C_NULL), POCL.clconvert(T)))
+            GC.@preserve T info num_groups vals begin
+                info_ptr = Base.unsafe_convert(Ptr{POCL.ExceptionInfo_st}, info)
+                vals[] = (POCL.kernel_state(false, info_ptr), vals[][2])
+                base = Ptr{Cvoid}(Base.unsafe_convert(Ptr{typeof(vals[])}, vals))
+                tt = typeof(vals[])
+                ptrs = Ref((base + fieldoffset(tt, 1), base + fieldoffset(tt, 2), C_NULL, C_NULL))
+                GC.@preserve ptrs begin
+                    launch = POCL.HostLaunch(
+                        h, Ptr{Ptr{Cvoid}}(Base.unsafe_convert(Ptr{typeof(ptrs[])}, ptrs)),
+                        Ptr{Csize_t}(Base.unsafe_convert(Ptr{NTuple{3, Csize_t}}, num_groups)),
+                        groups, nt, false, info_ptr
+                    )
+                    run(launch)
+                end
+            end
+            @test info[].status == 0
+            return
+        end
+        @test misplaced(() -> launch_directly(l -> l()), Threads.threadid()) == 0
+    end
+end
+
 @testset "POCL exceptions" begin
     @kernel function exception_kernel!(A)
         I = @index(Global, Linear)
@@ -654,7 +1078,10 @@ end
     # in a fresh process, to check initialization, and with threads, which the tests
     # usually don't have
     julia = Cmd(filter(arg -> !startswith(arg, "--code-coverage"), Base.julia_cmd().exec))
-    cmd = `$julia --startup-file=no --threads=4 --project=$(Base.active_project())
+    # disable Julia 1.12+'s interactive thread so thread 1 receives SIGINT during team
+    # launches
+    threads = VERSION >= v"1.12" ? "4,0" : "4"
+    cmd = `$julia --startup-file=no --threads=$threads --project=$(Base.active_project())
         $(joinpath(@__DIR__, "pocl_session.jl"))`
     @test success(pipeline(cmd; stdout, stderr))
 end

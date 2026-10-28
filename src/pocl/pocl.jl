@@ -22,6 +22,33 @@ struct Session
         compute_units::Int, preferred_work_group_size_multiple::Int,
         fp16::Bool, fp64::Bool,
     }
+    # duration threshold in cycle counter ticks for long launches (see `host_dispatch`)
+    host_kernel_long_ticks::UInt64
+    # serial-duration threshold in ticks for small launches (see `host_schedule`)
+    host_kernel_serial_ticks::UInt64
+end
+
+# a cheap monotonic counter: the TSC on x86, the virtual timer on AArch64 (where
+# `llvm.readcyclecounter` reads PMCCNTR_EL0, which user code usually may not access)
+@static if Sys.ARCH === :x86_64 || Sys.ARCH === :i686
+    @inline cycle_counter() = ccall("llvm.readcyclecounter", llvmcall, UInt64, ())
+elseif Sys.ARCH === :aarch64
+    @inline cycle_counter() = Base.llvmcall(
+        """
+        %t = call i64 asm sideeffect "mrs \$0, cntvct_el0", "=r"()
+        ret i64 %t
+        """, UInt64, Tuple{}
+    )
+else
+    @inline cycle_counter() = time_ns()
+end
+
+function ticks_per_ns()
+    t0, c0 = time_ns(), cycle_counter()
+    while time_ns() - t0 < 1_000_000
+    end
+    t1, c1 = time_ns(), cycle_counter()
+    return (c1 - c0) / (t1 - t0)
 end
 
 # the sub-group width kernels are compiled for, or `nothing` if the device has no sub-groups.
@@ -41,7 +68,7 @@ function Session()
     platform = cl.platforms()[idx]
     device = cl.default_device(platform)
     # PoCL's thread pool can only be sized with environment variables, so use a sub-device
-    # to run kernels on fewer threads. its other threads stay asleep.
+    # with the requested number of compute units. its other threads stay asleep.
     threads = cl.cpu_threads()
     if threads !== nothing && threads < device.max_compute_units && device.max_sub_devices > 0
         device = cl.sub_device(device, threads)
@@ -56,8 +83,8 @@ function Session()
         max_work_group_dims = ntuple(d -> d <= length(sizes) ? sizes[d] : 1, 3),
         # 0 if the device has no sub-groups
         sub_group_size = something(sub_group_size, 0),
-        # the threads PoCL runs work-groups on
-        compute_units = Int(device.max_compute_units),
+        # cap host-kernel threads at Julia's default pool size
+        compute_units = min(Int(device.max_compute_units), Threads.nthreads(:default)),
         # what kernels report, unless PoCL chose another for them
         preferred_work_group_size_multiple = Int(device.preferred_work_group_size_multiple),
         # collectives check these on every launch
@@ -65,7 +92,19 @@ function Session()
         fp64 = "cl_khr_fp64" in extensions,
     )
 
-    return Session(platform, device, context, limits)
+    "cl_pocl_host_kernel" in extensions ||
+        error("The CPU back-end needs a PoCL build with the cl_pocl_host_kernel extension")
+
+    rate = ticks_per_ns()
+    # 50 µs, which is long compared to the cost of letting other tasks run
+    host_kernel_long_ticks = round(UInt64, 50_000 * rate)
+    # 4 µs, several times what starting and joining a team costs, see `host_schedule`
+    host_kernel_serial_ticks = round(UInt64, 4_000 * rate)
+
+    return Session(
+        platform, device, context, limits, host_kernel_long_ticks,
+        host_kernel_serial_ticks
+    )
 end
 
 # created on first use, so that loading the package doesn't initialize PoCL
@@ -155,6 +194,8 @@ function __init__()
     initialization_world[] = Base.get_world_counter()
     # there shouldn't be any session from precompilation, see `reset_session_state!`
     Base.@atomic session_cache.session = nothing
+    # nor scratch areas, whose pointers don't survive serialization
+    Base.@atomic host_scratch.slots = HostScratch[]
     return
 end
 

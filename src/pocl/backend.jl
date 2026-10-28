@@ -109,9 +109,9 @@ KA.@kernel function fill_kernel(A, x)
     @inbounds A[I] = x
 end
 
-# Filling or copying into an array with a kernel first-touches its pages from PoCL's threads,
-# which spreads them over the threads' memory domains instead of placing all of them in the
-# calling thread's (see the NUMA example). Below 1 MiB, the launch overhead makes that up to
+# Filling or copying into an array with a kernel first-touches its pages from the kernel's
+# threads, which spreads them over the threads' memory domains instead of placing all of them
+# in the calling thread's (see the NUMA example). Below 1 MiB, the launch overhead makes that up to
 # several times slower than writing from the host, while there are too few pages for
 # placement to matter.
 const KERNEL_FILL_BYTES = 1 << 20
@@ -214,7 +214,7 @@ function KI.launch(obj::KI.Kernel{POCLBackend}, groups::Dims{3}, items::Dims{3},
     # until the kernel completes.
     f = obj.kern.f
     GC.@preserve f POCL.launch_and_wait(
-        obj.kern.kernel, args; local_size = items, global_size = groups .* items
+        obj.kern.kernel, args, groups; local_size = items, global_size = groups .* items
     )
     return nothing
 end
@@ -228,7 +228,7 @@ KI.max_num_groups(::POCLBackend)::NTuple{3, Int} = (typemax(Int), typemax(Int), 
 KI.sub_group_size(::POCLBackend)::Int = device_limits().sub_group_size
 KI.multiprocessor_count(::POCLBackend)::Int = device_limits().compute_units
 
-# PoCL runs each work-group on one of its threads, looping over (and vectorizing across) the
+# each work-group runs on one thread, which loops over (and vectorizes across) its
 # work-items. the largest work-group would run a launch of up to that many work-items on a
 # single thread, so split it into about as many work-groups as there are threads, as long as
 # the work-groups stay large enough to vectorize. this assumes that the work is balanced
@@ -307,7 +307,9 @@ function cpu_workgroupsize(nitems, threads, max_items, multiple)
     nitems === nothing && return max_items
     nitems = max(nitems, 1)
     min_items = min(4 * max(multiple, 1), max_items)
-    items = min(nextpow(2, min(nitems, max_items)), max_items)
+    items = min(nextpow2(min(nitems, max_items)), max_items)
+    # one work-group, which isn't split (without dividing, for small launches)
+    items >= nitems && items < 2 * min_items && return items
     groups = cld(nitems, items)
     while (splits = min(threads ÷ groups, items ÷ min_items)) > 1
         # PoCL splits by the largest factor of at most `splits` that divides the work-group
@@ -316,6 +318,9 @@ function cpu_workgroupsize(nitems, threads, max_items, multiple)
     end
     return items
 end
+
+# `nextpow(2, n)` for `n >= 1`, inlined
+@inline nextpow2(n::Integer) = n <= 1 ? one(n) : one(n) << (8 * sizeof(n) - leading_zeros(n - one(n)))
 
 KI.supports_subgroups(::POCLBackend) = device_limits().sub_group_size > 0
 # PoCL forms sub-groups from consecutive work-items, but executes sub-group operations as
