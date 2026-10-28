@@ -29,6 +29,17 @@ function pointer_value(out, p)
     return
 end
 
+# work-item i iterates n[i] times
+function busy(A, n)
+    i = POCL.get_global_id()
+    x = 1.0
+    for _ in 1:n[i]
+        x = sin(x) + 1.0
+    end
+    A[i] = x
+    return
+end
+
 @testset "POCL session" begin
     @test Threads.nthreads() > 1
 
@@ -70,7 +81,7 @@ end
 
     # the default workgroup size spreads a launch over the threads
     @testset "default workgroup size" begin
-        threads = POCL.device().max_compute_units
+        threads = KernelAbstractions.KernelInterface.multiprocessor_count(CPU())
         @test threads > 1
         N = 4096
         G = zeros(Int, N)
@@ -97,6 +108,154 @@ end
         # before Julia 1.12, a `Ptr` argument is an integer
         out[1] = 1
         @test launch(Ptr{Float32}(C_NULL)) == 0
+    end
+
+    # host kernel launches on several threads, one work-group per thread
+    if POCL.device_limits().compute_units > 1
+        nt = POCL.device_limits().compute_units
+        sizes = (; global_size = (nt, 1, 1), local_size = (1, 1, 1))
+        A = zeros(nt)
+        n = zeros(Int, nt)
+        k = POCL.clfunction(busy, POCL.argument_types((A, n)))
+        h = POCL.host_kernel(k, sizes, nothing)
+        @test h !== nothing
+        # iterations per second
+        k(A, n; sizes...)
+        n[1] = 10^7
+        rate = n[1] / @elapsed k(A, n; sizes...)
+
+        # keep arguments alive until all threads finish, despite SIGINT (from a POSIX shell)
+        # or cancellation on Julia 1.14+
+        cancellation = isdefined(Base, :CANCEL_TOKEN)
+        (cancellation || !Sys.iswindows()) &&
+            @testset "interrupted launches ($path)" for path in (:short, :long)
+            # one work-group takes 2 s, the others 0.5 s, and the interrupt comes after 0.25 s
+            fill!(n, round(Int, rate / 2))
+            n[end] = round(Int, 2rate)
+            fill!(A, 0)
+            # on a team of all threads
+            Base.@atomic :monotonic h.last_duration = path == :short ? 0 : typemax(UInt64)
+            POCL.record_serial_sample(h, nt, typemax(UInt64))
+            POCL.record_serial_sample(h, nt, typemax(UInt64))
+            @test POCL.host_schedule(h, POCL.session(), nt, path == :long)[1] == nt
+            launch() = k(A, n; sizes...)
+            t0 = time()
+            err = try
+                if cancellation
+                    src = Base.CancellationTokenSource()
+                    Threads.@spawn (sleep(0.25); Base.cancel!(src))
+                    Base.ScopedValues.with(launch, Base.CANCEL_TOKEN => Base.CancellationToken(src))
+                else
+                    Base.exit_on_sigint(false)
+                    run(`sh -c "sleep 0.25; kill -INT $(getpid())"`; wait = false)
+                    launch()
+                end
+                nothing
+            catch err
+                err
+            end
+            elapsed = time() - t0
+            # don't let a late interrupt hit later tests
+            err === nothing && try
+                sleep(5)
+            catch
+            end
+            # defer the interrupt until the launch finishes
+            @test elapsed > 0.5
+            @test err isa (cancellation ? Base.CancellationRequest : InterruptException)
+            @test all(!=(0), A)
+        end
+
+        # a single-threaded launch runs full and partial work-groups separately (here: two
+        # handles of the same kernel); interrupts must wait until both runs finish
+        (cancellation || !Sys.iswindows()) &&
+            @testset "interrupted launch on one thread ($path)" for path in (:short, :long)
+            s = POCL.session()
+            full = @lock k.fun.lock POCL.create_host_kernel(k.fun, (1, 1, 1), false)
+            B = zeros(2)
+            m = [round(Int, rate / 2), 1]
+            # one thread (short serial estimate), with either a short or long previous launch
+            Base.@atomic :monotonic h.last_duration = path == :short ? 0 : typemax(UInt64)
+            POCL.record_serial_sample(h, 2, UInt64(0))
+            POCL.record_serial_sample(h, 2, UInt64(0))
+            @test POCL.host_schedule(h, s, 2, path == :long) == (1, false)
+            # the full work-group takes 0.5 s, and the interrupt comes after 0.25 s
+            function launch()
+                info = Ref(POCL.ExceptionInfo_st())
+                GC.@preserve info begin
+                    ptr = Base.unsafe_convert(Ptr{POCL.ExceptionInfo_st}, info)
+                    POCL.host_launch_converted(k, (B, m), ptr, h, (2, 1, 1), full, (1, 1, 1))
+                end
+            end
+            err = try
+                if cancellation
+                    src = Base.CancellationTokenSource()
+                    Threads.@spawn (sleep(0.25); Base.cancel!(src))
+                    Base.ScopedValues.with(launch, Base.CANCEL_TOKEN => Base.CancellationToken(src))
+                else
+                    Base.exit_on_sigint(false)
+                    run(`sh -c "sleep 0.25; kill -INT $(getpid())"`; wait = false)
+                    launch()
+                end
+                nothing
+            catch err
+                err
+            end
+            err === nothing && try
+                sleep(5)
+            catch
+            end
+            @test err isa (cancellation ? Base.CancellationRequest : InterruptException)
+            # the partial work-group ran too
+            @test B[2] != 0
+        end
+
+        @testset "garbage collection during a launch" begin
+            # run one work-group for about a second while another thread collects garbage
+            fill!(n, 0)
+            n[1] = round(Int, rate)
+            Base.@atomic :monotonic h.last_duration = 0
+            t0 = time()
+            gc = Threads.@spawn begin
+                while time() - t0 < 0.2
+                end
+                @elapsed GC.gc()
+            end
+            k(A, n; global_size = (1, 1, 1), local_size = (1, 1, 1))
+            elapsed = time() - t0
+            # the collection doesn't wait for the kernel
+            @test fetch(gc) < elapsed / 2
+        end
+
+        @testset "launch from a finalizer" begin
+            # finalizers must run serially: waiting for a team may switch tasks
+            fill!(n, round(Int, rate / 20))
+            n[1] = 0
+            fill!(A, 0)
+            err = Ref{Any}(nothing)
+            launched = Ref(false)
+            # not inlined, so that nothing here keeps the object alive
+            @noinline function garbage()
+                finalizer(Ref(0)) do _
+                    try
+                        k(A, n; sizes...)
+                    catch e
+                        err[] = e
+                    end
+                    launched[] = true
+                end
+                return
+            end
+            garbage()
+            # leave a task ready to expose an illegal switch from the finalizer
+            k(zero(A), zero(n); sizes...)
+            t = @async nothing
+            GC.gc()
+            wait(t)
+            @test launched[]
+            @test err[] === nothing
+            @test all(!=(0), A)
+        end
     end
 
     @testset "reset" begin

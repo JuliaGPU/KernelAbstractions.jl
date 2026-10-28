@@ -206,9 +206,10 @@ Not part of the public interface; used by KernelInterface's and KernelAbstractio
 code.
 """
 @inline function check_work_group_size(kernel::Kernel, items::Dims{3})
-    check_work_group_dims(kernel.backend, items)
+    # check the total first: a linearized launch puts all work-items in the first dimension
     max_items = max_work_group_size(kernel)
     prod_exceeds(items, max_items) && throw_work_group_size_error(items, max_items)
+    check_work_group_dims(kernel.backend, items)
     return
 end
 

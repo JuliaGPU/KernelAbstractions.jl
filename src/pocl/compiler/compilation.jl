@@ -286,5 +286,9 @@ function link_kernel(@nospecialize(job::CompilerJob), obj::Vector{UInt8}, entry:
         error("Your device does not support SPIR-V, which is currently required for native execution.")
     end
     cl.build!(prog)
-    return cl.Kernel(prog, entry)
+    kernel = cl.Kernel(prog, entry)
+    # cap tuned work-groups to avoid the queue fallback for excessive stack use; fitting to
+    # the ndrange can only shrink them further
+    kernel.tuned_work_group_size = min(kernel.work_group_size, host_kernel_max_items(kernel))
+    return kernel
 end

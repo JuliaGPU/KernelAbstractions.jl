@@ -195,8 +195,11 @@ function exchange_and_compute!(backend, A, B)
 end
 ```
 
-Waiting on a backend, whether with [`synchronize`](@ref) or at the end of a spawned task,
-yields to the Julia scheduler, so other tasks keep making progress while a kernel runs.
+Waiting on a GPU backend, whether with [`synchronize`](@ref) or at the end of a spawned
+task, yields to the Julia scheduler, so other tasks keep making progress while a kernel runs.
+The `CPU` backend runs every launch to completion before it returns, without yielding;
+other tasks, timers and I/O run after launches on several threads and after long ones (see
+[`CPU`](@ref)).
 
 ### Which device a task runs on
 

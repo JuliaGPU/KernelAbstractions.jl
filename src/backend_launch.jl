@@ -180,10 +180,21 @@ function launch_kernel(
     end
     ctx, groups, items = launch_geometry(sizes_only(obj), launch, subgroups, ndrange, iterspace, ctx, threads)
 
-    # the kernel's limits aren't the device's, and the workgroups tuned for them don't cover
-    # the ndrange: launch the checked kernel instead
-    if unchecked && tuned && !covers(range, ctx)
-        return launch_kernel(obj, launch, subgroups, ndrange, _workgroupsize, iterspace, args, true)
+    # partial workgroups need bounds checks. if kernel-specific tuning introduced them
+    # unexpectedly, relaunch checked. otherwise, split-capable backends can run full
+    # workgroups unchecked.
+    if !checked && skip_bounds_check(b) && bounded(range, iterspace) && !covers(range, ctx)
+        unchecked &&
+            return launch_kernel(obj, launch, subgroups, ndrange, _workgroupsize, iterspace, args, true)
+        extent = split_extent(size(cartesian(range)), items)
+        if extent !== nothing && split_launch(b, launch, kernel)
+            full_tt = Base.compilerbarrier(:type, without_bounds_check(tt))::Type
+            full = kernel_function_as(b, obj.f, full_tt, tt; compiler_options(obj)...)
+            if prod(items) <= KI.max_work_group_size(full)
+                launch_split(full, kernel, extent, groups, items, prepend(ctx, kernel_args))
+                return nothing
+            end
+        end
     end
 
     KI.check_work_group_size(kernel, items)
@@ -205,6 +216,34 @@ the context. Backends for which `skip_bounds_check` holds implement it, without
 specializing on `compiled_tt`.
 """
 function kernel_function_as end
+
+"""
+    split_launch(backend, launch, checked)::Bool
+
+Whether to run full workgroups unchecked and partial ones with `checked`, using
+[`launch_split`](@ref). A backend may decline early launches to avoid compiling an unchecked
+variant for kernels used only once. Only called if `skip_bounds_check(backend)`.
+"""
+split_launch(backend, launch, checked) = false
+
+# map `dims` to the launch grid, or return `nothing` if partial workgroups aren't confined
+# to its edges. beyond 3 dimensions, `nd_grid` folds later dimensions into the third,
+# placing partial third-dimension workgroups inside the grid.
+function split_extent(dims::Dims{N}, items::Dims{3}) where {N}
+    N > 3 && dims[3] % items[3] != 0 && return nothing
+    return KI.pad3(nd_grid(dims))
+end
+
+"""
+    launch_split(kernel, checked, extent, groups, items, args)
+
+Run `groups` workgroups of `items` work-items as one launch. Workgroups entirely within
+`extent` (the ndrange mapped by `split_extent`) use the unchecked `kernel`; the rest use
+`checked`. Both take `args` with the same layout (see `kernel_function_as`). A backend may
+fall back to `checked` for every workgroup. Only called if [`split_launch`](@ref) returned
+`true`.
+"""
+function launch_split end
 
 """
     expected_workgroupsize(backend, nitems)

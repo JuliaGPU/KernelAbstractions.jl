@@ -61,6 +61,8 @@ const CL_DEVICE_NOT_FOUND = -1
 
 const CL_DEVICE_NOT_AVAILABLE = -2
 
+const CL_OUT_OF_HOST_MEMORY = -6
+
 const CL_INVALID_ARG_INDEX = -49
 
 const CL_INVALID_ARG_VALUE = -50
@@ -643,6 +645,49 @@ end
 
 @checked function clReleaseKernel(kernel)
     @gcsafe_ccall libopencl.POclReleaseKernel(kernel::cl_kernel)::cl_int
+end
+
+# `cl_pocl_host_kernel` runs work-groups on the calling thread (PoCL's
+# `include/CL/cl_ext_pocl.h`). all supported pocl_standalone_jll builds provide it;
+# `Session()` rejects devices without it.
+
+const cl_host_kernel_pocl = Ptr{Cvoid}
+
+const CL_HOST_KERNEL_SCRATCH_SIZE_POCL = 0x4511
+const CL_HOST_KERNEL_SCRATCH_ALIGNMENT_POCL = 0x4512
+
+function clCreateHostKernelPOCL(kernel, device, work_dim, local_work_size, errcode_ret)
+    return @gcsafe_ccall libopencl.POclCreateHostKernelPOCL(
+        kernel::cl_kernel, device::cl_device_id, work_dim::cl_uint,
+        local_work_size::Ptr{Csize_t}, errcode_ret::Ptr{cl_int}
+    )::cl_host_kernel_pocl
+end
+
+@checked function clGetHostKernelInfoPOCL(
+        host_kernel, param_name, param_value_size, param_value, param_value_size_ret
+    )
+    @gcsafe_ccall libopencl.POclGetHostKernelInfoPOCL(
+        host_kernel::cl_host_kernel_pocl, param_name::cl_uint, param_value_size::Csize_t,
+        param_value::Ptr{Cvoid}, param_value_size_ret::Ptr{Csize_t}
+    )::cl_int
+end
+
+@checked function clReleaseHostKernelPOCL(host_kernel)
+    @gcsafe_ccall libopencl.POclReleaseHostKernelPOCL(
+        host_kernel::cl_host_kernel_pocl
+    )::cl_int
+end
+
+# leave error handling to `host_run`. GC-safe calls let collection proceed during long runs
+# instead of waiting for the kernel's thread.
+@inline function clRunHostKernelPOCL(
+        host_kernel, arg_values, num_groups, first_group, group_count, scratch
+    )
+    return @gcsafe_ccall libopencl.POclRunHostKernelPOCL(
+        host_kernel::cl_host_kernel_pocl, arg_values::Ptr{Ptr{Cvoid}},
+        num_groups::Ptr{Csize_t}, C_NULL::Ptr{Csize_t}, first_group::Csize_t,
+        group_count::Csize_t, scratch::Ptr{Cvoid}
+    )::cl_int
 end
 
 @checked function clSetKernelArg(kernel, arg_index, arg_size, arg_value)
@@ -1235,26 +1280,64 @@ function Base.getproperty(p::Program, s::Symbol)
     end
 end
 
+# a host kernel prepared for one work-group size; a NULL `id` caches an unsupported size
+# (see `host_kernel`)
+mutable struct HostKernelHandle
+    const id::cl_host_kernel_pocl
+    const local_size::NTuple{3, Int}
+    const scratch_size::Int
+    const scratch_alignment::Int
+    # how long the last launch took, in cycle counter ticks, and how many work-groups it had
+    Base.@atomic last_duration::UInt64
+    Base.@atomic last_groups::Int
+    # serial estimates for the last two work-group counts (`a` is latest): work per item can
+    # vary with grid size. scale the first range's time to the whole grid, in cycle counter
+    # ticks. use the smaller of two samples (zero without a previous sample) to discount a
+    # delayed run.
+    Base.@atomic serial_groups_a::Int
+    Base.@atomic serial_sample_a::UInt64
+    Base.@atomic serial_duration_a::UInt64
+    Base.@atomic serial_groups_b::Int
+    Base.@atomic serial_sample_b::UInt64
+    Base.@atomic serial_duration_b::UInt64
+
+    function HostKernelHandle(id, local_size, scratch_size = 0, scratch_alignment = 1)
+        h = new(id, local_size, scratch_size, scratch_alignment, 0, 0, 0, 0, 0, 0, 0, 0)
+        id == C_NULL || finalizer(h -> clReleaseHostKernelPOCL(h.id), h)
+        return h
+    end
+end
+
 mutable struct Kernel
     const id::cl_kernel
     # kernel arguments are state of the kernel object, see `call`
     const lock::ReentrantLock
+    # the host-kernel handles of this kernel (under `lock`), and the one used last
+    const host_kernels::Vector{HostKernelHandle}
+    @atomic host_kernel::Union{Nothing, HostKernelHandle}
+    # whether a launch had partial work-groups (see `KA.split_launch`)
+    @atomic launched_partial::Bool
 
-    # the work-group limits for the session's device, which every launch needs. they don't
-    # change, so they are queried once (see `work_group_info` for the others)
+    # cache immutable device-specific work-group limits and the per-item stack estimate in
+    # bytes; see `work_group_info` for other properties
     const work_group_size::Int
     const preferred_work_group_size_multiple::Int
+    const private_mem_size::Int
+    # the largest work-group of tuned launches (see `POCL.link_kernel`)
+    tuned_work_group_size::Int
 
     function Kernel(k::cl_kernel)
-        function get(param)
-            result = Ref{Csize_t}()
-            clGetKernelWorkGroupInfo(k, device(), param, sizeof(Csize_t), result, C_NULL)
+        function get(param, T = Csize_t)
+            result = Ref{T}()
+            clGetKernelWorkGroupInfo(k, device(), param, sizeof(T), result, C_NULL)
             return Int(result[])
         end
         kernel = try
+            work_group_size = get(CL_KERNEL_WORK_GROUP_SIZE)
             new(
-                k, ReentrantLock(), get(CL_KERNEL_WORK_GROUP_SIZE),
-                get(CL_KERNEL_PREFERRED_WORK_GROUP_SIZE_MULTIPLE)
+                k, ReentrantLock(), HostKernelHandle[], nothing, false, work_group_size,
+                get(CL_KERNEL_PREFERRED_WORK_GROUP_SIZE_MULTIPLE),
+                get(CL_KERNEL_PRIVATE_MEM_SIZE, cl_ulong), work_group_size
             )
         catch
             clReleaseKernel(k)
