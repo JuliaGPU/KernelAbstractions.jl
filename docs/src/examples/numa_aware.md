@@ -15,24 +15,21 @@ $(read(path, String))
 
 **Important remarks:**
 
-The `CPU` backend runs kernels with [PoCL](https://portablecl.org) on PoCL's own threads, not on Julia's. That determines how to apply the usual advice for NUMA systems:
+The `CPU` backend runs kernels on Julia's threads (see [`CPU`](@ref)). For NUMA locality:
 
-1) Pin the threads that run the kernels. Set PoCL's `POCL_AFFINITY=1` environment variable before the backend is first used. It pins each of PoCL's threads to one of the CPUs the process may run on (respecting e.g. `taskset`), a core of its own first, spread over the NUMA domains, so that fewer threads than cores still use the memory bandwidth of every domain. Tools that pin Julia's threads, like [ThreadPinning.jl](https://github.com/carstenbauer/ThreadPinning.jl), don't affect the threads that run the kernels. Without pinning, the operating system moves the threads around, and where they touch the memory first says little about where they run later.
+1) Pin Julia's threads before the first launch with [ThreadPinning.jl](https://github.com/carstenbauer/ThreadPinning.jl). `pinthreads(:numa)` spreads threads across NUMA domains; `pinthreads(:cores)` follows the machine's topology. Both pin only the default pool. Start Julia with `-t N,0` or pass `threadpool = :all` to pin small launches on the launching thread too. Without pinning, threads can migrate away from the memory they first touched.
 2) Choose the number of threads with `julia -t N` or the `JULIA_KA_CPU_THREADS` environment variable; see [`CPU`](@ref).
-3) Initialize your data in parallel(!), with a kernel. Under the ["NUMA first-touch policy"](https://queue.acm.org/detail.cfm?id=2513149#:~:text=This%20is%20called%20the%20first,policy%20associated%20with%20a%20task.) a page of memory is placed in the memory domain of the thread that first writes to it. `fill!` writes from the calling thread, which places all the memory in that thread's domain. The example instead allocates with `KernelAbstractions.allocate` and writes the initial values with a kernel (`init = :parallel`). PoCL gives each thread a contiguous block of a kernel's workgroups, so a later kernel with as many workgroups mostly works on each part of the array from the thread that touched it first. `KernelAbstractions.zeros(backend, dtype, N)` and `KernelAbstractions.ones` initialize with a kernel too, for arrays of bits types of at least 1 MiB; smaller arrays, and arrays of other types, are filled from the calling thread.
-
-This needs KernelAbstractions 0.10.2 or later, which avoids the masked memory accesses that made kernels slow on some AMD CPUs, and the `pocl_standalone_jll` 7.2.3+1 or later that it installs, whose PoCL schedules workgroups and pins threads this way.
+3) Initialize data with a parallel kernel. Under the [NUMA first-touch policy](https://queue.acm.org/detail.cfm?id=2513149#:~:text=This%20is%20called%20the%20first,policy%20associated%20with%20a%20task.), a memory page belongs to the domain of the thread that first writes it. `fill!` places pages in the calling thread's domain. The example uses `KernelAbstractions.allocate` followed by an initialization kernel (`init = :parallel`). Launches with as many workgroups start each block of them on the same thread, as `Threads.@threads :static` does, so later kernels mostly work on the data their thread touched first. `KernelAbstractions.zeros(backend, dtype, N)` and `KernelAbstractions.ones` also use a kernel for arrays of bits types of at least 1 MiB; other arrays are filled on the calling thread.
 
 **Demonstration:**
 
-On a system with two AMD EPYC 7502 (2 × 32 cores, 2 NUMA domains), the example (`N = 512_000_000`, workgroups of 1024) gets the following memory bandwidth, in GB/s:
+On a system with two AMD EPYC 7502 (2 × 32 cores, 2 NUMA domains), the example (`N = 512_000_000`, workgroups of 1024), started with `-t T,0` for each thread count `T`, gets the following memory bandwidth, in GB/s:
 
-| threads | initialization | `POCL_AFFINITY=1` | `POCL_AFFINITY` unset |
+| threads | initialization | `pinthreads(:numa)` | `pinthreads(:cores)` |
 |--:|---|--:|--:|
-| 64 | `init = :parallel`, or `zeros` and `ones` | 242 | 130–155 |
-| 64 | `init = :serial` | 142 | 137 |
-| 32 | `init = :parallel`, or `zeros` and `ones` | 157 | 121–135 |
-| 32 | `init = :serial` | 124 | 121–139 |
+| 64 | `init = :parallel` | 243 | 243 |
+| 64 | `zeros` and `ones` | 241 | 242 |
+| 32 | `init = :parallel` | 158 | |
 
 A plain `Threads.@threads :static` loop with its threads pinned by ThreadPinning.jl gets 240 GB/s with 64 threads. Initializing serially puts all the memory in one domain. Without pinning, the threads that touch the memory first aren't reliably the ones that work on it later, and the numbers vary from run to run with where the operating system places the threads.
 
