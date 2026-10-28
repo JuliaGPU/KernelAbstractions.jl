@@ -260,18 +260,26 @@ end
 # a launch with a partial work-group runs the bounds-checked kernel, whose work-item loop
 # vectorizes poorly (AArch64, without masked loads and stores: ~3x slower for a stencil).
 # so shrink each dimension of the generic choice to the largest divisor of the ndrange that
-# keeps at least half its size, if there is one.
+# keeps at least half its size. without one, the launch stays checked, but runs faster in
+# work-groups a quarter of the size (axpy, 1000003 work-items on 4 threads of a Ryzen 9
+# 9950X: 71 vs 31 µs).
 # (only shrink, so padding stays within the bound `KA.select_launch` assumes.)
 function KA.launch_workgroupsize(::POCLBackend, ::KA.NDLaunch, threads, ndrange)
     extent = KA.extents(ndrange)
     limits = KA.nd_limits(device_limits().max_work_group_dims, extent)
     items = KI.threads_to_workgroupsize(threads, extent, limits)
-    return map((n, x) -> n % x == 0 ? x : largest_divisor(n, x), extent, items)
+    return map(fit_workgroup, extent, items)
 end
 
-# the largest divisor of `n` in `cld(x, 2):x`, or `x` if there is none. searches the sizes
+function fit_workgroup(n::Int, x::Int)
+    n % x == 0 && return x
+    d = largest_divisor(n, x)
+    return d == 0 ? cld(x, 4) : d
+end
+
+# the largest divisor of `n` in `cld(x, 2):x`, or 0 if there is none. searches the sizes
 # or the work-group counts, whichever are fewer. requires `n % x != 0`: the size search
-# skips `x`.
+# skips `x` (`largest_divisor(8, 4) == 2`).
 function largest_divisor(n::Int, x::Int)
     lo = cld(x, 2)
     if x - lo <= fld(n, lo) - cld(n, x)
@@ -283,7 +291,7 @@ function largest_divisor(n::Int, x::Int)
             n % g == 0 && return n ÷ g
         end
     end
-    return x
+    return 0
 end
 
 # PoCL's own choice when a launch doesn't give a local size (`pocl_default_local_size_optimizer`
