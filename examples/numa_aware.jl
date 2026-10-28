@@ -1,6 +1,6 @@
 # EXCLUDE FROM TESTING
-# Run with `POCL_AFFINITY=1` to pin the threads that run the kernels, e.g.
-#   POCL_AFFINITY=1 julia -t 128 examples/numa_aware.jl
+# pin Julia's threads before the first launch:
+#   julia -t 128,0 -e 'using ThreadPinning; pinthreads(:numa); include("examples/numa_aware.jl")'
 using BenchmarkTools
 using KernelAbstractions
 
