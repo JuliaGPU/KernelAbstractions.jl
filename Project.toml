@@ -1,6 +1,6 @@
 name = "KernelAbstractions"
 uuid = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
-version = "0.10.3"
+version = "0.10.4"
 authors = ["Valentin Churavy <v.churavy@gmail.com> and contributors"]
 
 [workspace]
