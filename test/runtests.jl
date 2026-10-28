@@ -909,9 +909,10 @@ end
                 ptrs = Ref((base + fieldoffset(tt, 1), base + fieldoffset(tt, 2), C_NULL, C_NULL))
                 GC.@preserve ptrs begin
                     launch = POCL.HostLaunch(
-                        h, Ptr{Ptr{Cvoid}}(Base.unsafe_convert(Ptr{typeof(ptrs[])}, ptrs)),
+                        h, h, Ptr{Ptr{Cvoid}}(Base.unsafe_convert(Ptr{typeof(ptrs[])}, ptrs)),
                         Ptr{Csize_t}(Base.unsafe_convert(Ptr{NTuple{3, Csize_t}}, num_groups)),
-                        groups, nt, false, info_ptr
+                        (groups, 1, 1), (false, false, false), groups, nt, false,
+                        h.scratch_size, h.scratch_alignment, info_ptr
                     )
                     run(launch)
                 end
@@ -956,6 +957,20 @@ end
     end
     @test all(failing)
     @test !any(succeeding)
+
+    # report exceptions from both full and partial workgroups
+    @kernel function exception_at!(A, i)
+        I = @index(Global, Linear)
+        if I == i
+            A[0] = 1
+        end
+    end
+    # warm up: the first partial launch is entirely checked
+    exception_at!(CPU(), 4)(A, 10; ndrange = 9)
+    for i in (1, 9)
+        @test_throws POCL.KernelException quietly(() -> exception_at!(CPU(), 4)(A, i; ndrange = 9))
+    end
+    exception_at!(CPU(), 4)(A, 10; ndrange = 9)
 end
 
 @testset "POCL exception output" begin
@@ -1305,35 +1320,62 @@ end
 end
 
 @testset "POCL bounds checks" begin
-    function checked(kernel, shape; workgroupsize = nothing)
+    # record bounds checks after the first launch
+    function checks(kernel, shape; workgroupsize = nothing)
         A = fill(-1, shape)
         kernel(A; ndrange = shape, workgroupsize)
-        all(==(A[1]), A) || error("inconsistent bounds checks")
-        return Bool(A[1])
+        fill!(A, -1)
+        kernel(A; ndrange = shape, workgroupsize)
+        return A
+    end
+    # the work-items that need it: those of partial workgroups
+    function expected(shape, workgroupsize)
+        shape, wgs = Tuple(shape), Tuple(workgroupsize)
+        wgs = ntuple(d -> d <= length(wgs) ? wgs[d] : 1, length(shape))
+        any(d -> shape[d] % wgs[d] != 0, eachindex(shape)) || return fill(false, shape)
+        # folding dimensions beyond the third puts partial third-dimension groups inside the
+        # grid
+        length(shape) > 3 && shape[3] % wgs[3] != 0 && return fill(true, shape)
+        return map(CartesianIndices(shape)) do I
+            any(eachindex(shape)) do d
+                shape[d] % wgs[d] != 0 && (I[d] - 1) ÷ wgs[d] == cld(shape[d], wgs[d]) - 1
+            end
+        end
     end
 
-    # a kernel without the bounds check runs launches without partial workgroups
-    @test !checked(bounds_checked!(CPU()), 64; workgroupsize = 16)
-    @test checked(bounds_checked!(CPU()), 60; workgroupsize = 16)
-    @test !checked(bounds_checked!(CPU()), (8, 6); workgroupsize = (4, 3))
-    @test checked(bounds_checked!(CPU()), (8, 6); workgroupsize = (4, 4))
-    @test !checked(bounds_checked!(CPU()), (4, 6, 8); workgroupsize = (2, 3, 4))
-    @test checked(bounds_checked!(CPU()), (4, 6, 9); workgroupsize = (2, 3, 4))
-    @test !checked(bounds_checked!(CPU(), 8), 16)
-    @test checked(bounds_checked!(CPU(), 8), 12)
+    @testset "$shape, workgroupsize=$wgs" for (shape, wgs) in (
+            (64, 16), (60, 16), ((8, 6), (4, 3)), ((8, 6), (4, 4)), ((7, 8), (4, 4)),
+            ((7, 7), (4, 4)), ((4, 6, 8), (2, 3, 4)), ((4, 6, 9), (2, 3, 4)),
+            ((5, 6, 7), (2, 3, 4)), ((5, 7, 7), (2, 3, 4)), ((1, 7, 1), (1, 4, 1)),
+            ((9, 7, 4, 5), (4, 2, 2)), ((9, 7, 3, 5), (4, 2, 2)), ((9, 7, 3, 5, 2), (4, 1, 2)),
+        )
+        @test checks(bounds_checked!(CPU()), shape; workgroupsize = wgs) == expected(shape, wgs)
+    end
+    @test checks(bounds_checked!(CPU(), 8), 16) == expected(16, 8)
+    @test checks(bounds_checked!(CPU(), 8), 12) == expected(12, 8)
     # also with a tuned workgroup size, which is a power of two on PoCL, unless a single
     # workgroup covers the ndrange (e.g. on a single thread). an odd ndrange larger than
     # the largest workgroup needs partial workgroups, however many threads PoCL uses.
-    @test !checked(bounds_checked!(CPU()), 1024)
-    @test checked(bounds_checked!(CPU()), POCL.device_limits().max_work_group_size + 1)
-    @test !checked(bounds_checked!(CPU()), (64, 32))
+    @test all(==(0), checks(bounds_checked!(CPU()), 1024))
+    A = checks(bounds_checked!(CPU()), POCL.device_limits().max_work_group_size + 1)
+    @test A[end] == 1
+    @test A[1] == 0
+    @test all(==(0), checks(bounds_checked!(CPU()), (64, 32)))
 
     # only the kernel that the launch needs is compiled
     compilations = POCL.compilations[]
-    @test !checked(tuned_bounds_checked!(CPU()), 4096)
+    @test all(==(0), checks(tuned_bounds_checked!(CPU()), 4096))
     @test POCL.compilations[] == compilations + 1
-    @test checked(partial_bounds_checked!(CPU()), 4097)
+    # check the whole first partial launch so kernels used once compile once. later launches
+    # compile an unchecked variant for full workgroups.
+    A = fill(-1, 4097)
+    partial_bounds_checked!(CPU())(A; ndrange = length(A))
+    @test all(==(1), A)
     @test POCL.compilations[] == compilations + 2
+    partial_bounds_checked!(CPU())(A; ndrange = length(A))
+    @test A[end] == 1
+    @test A[1] == 0
+    @test POCL.compilations[] == compilations + 3
 
     # the tuned workgroup size is predicted from the device's limits, which a kernel's can
     # be smaller than: then, its workgroups may not cover the ndrange, and need the check

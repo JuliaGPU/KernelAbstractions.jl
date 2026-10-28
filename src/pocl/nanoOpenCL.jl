@@ -1315,6 +1315,8 @@ mutable struct Kernel
     # the host-kernel handles of this kernel (under `lock`), and the one used last
     const host_kernels::Vector{HostKernelHandle}
     @atomic host_kernel::Union{Nothing, HostKernelHandle}
+    # whether a launch had partial work-groups (see `KA.split_launch`)
+    @atomic launched_partial::Bool
 
     # cache immutable device-specific work-group limits and the per-item stack estimate in
     # bytes; see `work_group_info` for other properties
@@ -1330,7 +1332,7 @@ mutable struct Kernel
         end
         kernel = try
             new(
-                k, ReentrantLock(), HostKernelHandle[], nothing,
+                k, ReentrantLock(), HostKernelHandle[], nothing, false,
                 get(CL_KERNEL_WORK_GROUP_SIZE), get(CL_KERNEL_PREFERRED_WORK_GROUP_SIZE_MULTIPLE),
                 get(CL_KERNEL_PRIVATE_MEM_SIZE, cl_ulong)
             )

@@ -166,6 +166,50 @@ end
             @test all(!=(0), A)
         end
 
+        # a single-threaded launch runs full and partial work-groups separately (here: two
+        # handles of the same kernel); interrupts must wait until both runs finish
+        (cancellation || !Sys.iswindows()) &&
+            @testset "interrupted launch on one thread ($path)" for path in (:short, :long)
+            s = POCL.session()
+            full = @lock k.fun.lock POCL.create_host_kernel(k.fun, (1, 1, 1), false)
+            B = zeros(2)
+            m = [round(Int, rate / 2), 1]
+            # one thread (short serial estimate), with either a short or long previous launch
+            Base.@atomic :monotonic h.last_duration = path == :short ? 0 : typemax(UInt64)
+            POCL.record_serial_sample(h, 2, UInt64(0))
+            POCL.record_serial_sample(h, 2, UInt64(0))
+            @test POCL.host_schedule(h, s, 2, path == :long) == (1, false)
+            # the full work-group takes 0.5 s, and the interrupt comes after 0.25 s
+            function launch()
+                info = Ref(POCL.ExceptionInfo_st())
+                GC.@preserve info begin
+                    ptr = Base.unsafe_convert(Ptr{POCL.ExceptionInfo_st}, info)
+                    POCL.host_launch_converted(k, (B, m), ptr, h, (2, 1, 1), full, (1, 1, 1))
+                end
+            end
+            err = try
+                if cancellation
+                    src = Base.CancellationTokenSource()
+                    Threads.@spawn (sleep(0.25); Base.cancel!(src))
+                    Base.ScopedValues.with(launch, Base.CANCEL_TOKEN => Base.CancellationToken(src))
+                else
+                    Base.exit_on_sigint(false)
+                    run(`sh -c "sleep 0.25; kill -INT $(getpid())"`; wait = false)
+                    launch()
+                end
+                nothing
+            catch err
+                err
+            end
+            err === nothing && try
+                sleep(5)
+            catch
+            end
+            @test err isa (cancellation ? Base.CancellationRequest : InterruptException)
+            # the partial work-group ran too
+            @test B[2] != 0
+        end
+
         @testset "garbage collection during a launch" begin
             # run one work-group for about a second while another thread collects garbage
             fill!(n, 0)
