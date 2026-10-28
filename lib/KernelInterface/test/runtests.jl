@@ -39,6 +39,8 @@ KI.supports_shuffle(::WordShuffleBackend, ::Type{UInt32}) = true
         KI.sub_group_size, KI.argconvert, KI.kernel_function, KI.launch,
         # Host-side stubs: required backend methods with no sensible fallback.
         KI.synchronize, KI.copyto!,
+        # Backends that support graphs implement this for their own handle type.
+        KI.launch_graph,
     ]
     for stub in stubs
         @test isempty(methods(stub))
@@ -225,6 +227,136 @@ KI.synchronize(b::SyncBackend) = (b.synchronizations[] += 1; nothing)
     @test_throws MethodError KI.record_event(StubBackend())
     # Only events a backend defines `wait_event` for are accepted.
     @test_throws MethodError KI.wait_event(b, :bogus)
+end
+
+# A backend with mock graphs: recording calls `f` with `recording[]` set, so that `f` can
+# tell recording from executing, and launching only logs a replay.
+struct GraphBackend <: KI.Backend
+    log::Vector{Symbol}
+    recording::Base.RefValue{Bool}
+    fail::Base.RefValue{Bool}
+end
+GraphBackend() = GraphBackend(Symbol[], Ref(false), Ref(false))
+mutable struct MockGraph
+    updates::Int
+end
+KI.supports_graphs(::GraphBackend) = true
+function KI.capture_graph(b::GraphBackend, f)
+    b.recording[] = true
+    try
+        f()
+    finally
+        b.recording[] = false
+    end
+    return b.fail[] ? nothing : MockGraph(0)
+end
+function KI.update_graph(b::GraphBackend, handle::MockGraph, f)
+    KI.capture_graph(b, f) === nothing && return nothing
+    handle.updates += 1
+    return handle
+end
+KI.launch_graph(b::GraphBackend, ::MockGraph) = (push!(b.log, :replay); nothing)
+
+# the work of a graph: log whether it is executed or recorded
+graph_work(b::GraphBackend) = () -> push!(b.log, b.recording[] ? :record : :run)
+
+@testset "graphs" begin
+    @testset "eager fallback" begin
+        b = StubBackend()
+        @test !KI.supports_graphs(b)
+        @test KI.capture_graph(b, () -> error("not called")) === nothing
+
+        runs = Ref(0)
+        f = () -> (runs[] += 1; nothing)
+        g = KI.capture(f, b; strict = true)  # nothing to fail without graph support
+        @test g isa KI.Graph{StubBackend}
+        @test !KI.is_captured(g)
+        @test runs[] == 1  # the warm-up
+        @test g() === nothing
+        @test runs[] == 2
+        @test occursin("eager", sprint(show, g))
+
+        @test KI.capture(f, b; warmup = false) isa KI.Graph
+        @test runs[] == 2
+
+        other = Ref(0)
+        @test KI.update!(g, () -> (other[] += 1; nothing)) === g
+        @test other[] == 0  # updating only records
+        g()
+        @test (runs[], other[]) == (2, 1)
+
+        for _ in 1:3
+            KI.@captured b (runs[] += 1)
+        end
+        @test runs[] == 5
+    end
+
+    @testset "recorded" begin
+        b = GraphBackend()
+        f = graph_work(b)
+        g = KI.capture(f, b)
+        @test KI.is_captured(g)
+        @test b.log == [:run, :record]
+        @test occursin("captured", sprint(show, g))
+
+        empty!(b.log)
+        g()
+        g()
+        @test b.log == [:replay, :replay]
+
+        empty!(b.log)
+        g = KI.capture(f, b; warmup = false)
+        @test b.log == [:record]
+
+        # updates go through `update_graph`, and don't execute anything
+        empty!(b.log)
+        @test KI.update!(g) === g
+        @test g.handle.updates == 1
+        @test b.log == [:record]
+    end
+
+    @testset "failed recording" begin
+        b = GraphBackend()
+        b.fail[] = true
+        f = graph_work(b)
+        g = KI.capture(f, b)
+        @test !KI.is_captured(g)
+        empty!(b.log)
+        g()
+        @test b.log == [:run]
+
+        @test_throws KI.GraphCaptureError KI.capture(f, b; strict = true)
+        @test_throws KI.GraphCaptureError KI.update!(g; strict = true)
+        @test occursin("GraphBackend", sprint(showerror, KI.GraphCaptureError("GraphBackend")))
+
+        # a graph that recorded once falls back to eager execution when an update fails
+        b.fail[] = false
+        g = KI.capture(f, b)
+        b.fail[] = true
+        KI.update!(g)
+        @test !KI.is_captured(g)
+        # the default `update_graph` records from scratch
+        @test KI.update_graph(StubBackend(), nothing, f) === nothing
+    end
+
+    @testset "@captured" begin
+        b = GraphBackend()
+        f = graph_work(b)
+        loop() = KI.@captured b f()
+
+        # the first call warms up and records, later ones update and replay
+        loop()
+        @test b.log == [:run, :record]
+        empty!(b.log)
+        loop()
+        loop()
+        @test b.log == [:record, :replay, :record, :replay]
+
+        # every task has a graph of its own
+        empty!(b.log)
+        wait(Threads.@spawn loop())
+        @test b.log == [:run, :record]
+    end
 end
 
 @testset "allocate / zeros / ones" begin
