@@ -126,12 +126,13 @@ end
     return p
 end
 
-# whether the product of positive `dims` exceeds `limit`, without overflowing
+# whether the product of positive `dims` exceeds `limit`, without overflow or division
+# (this runs on every launch, and a division costs tens of cycles on some CPUs)
 @inline function prod_exceeds(dims::Dims, limit::Int)
     p = 1
     for d in dims
-        d > limit ÷ p && return true
-        p *= d
+        p, overflow = Base.mul_with_overflow(p, d)
+        (overflow || p > limit) && return true
     end
     return false
 end
