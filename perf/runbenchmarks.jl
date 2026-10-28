@@ -6,8 +6,9 @@
 # Benchmark names are `category/backend/mode/group/...`, with the categories of
 # perf/benchmark-config.json. On the CPU backend, `serial` benchmarks run with one PoCL
 # worker and `parallel` ones with a worker per physical core that this process may use (or
-# `KA_BENCHMARK_THREADS`). Every group of benchmarks runs in a fresh process with one Julia
-# thread, as the number of workers can't change once the backend has been used.
+# `KA_BENCHMARK_THREADS`), with as many Julia threads, which the backend may run
+# work-groups on. Every group of benchmarks runs in a fresh process, as the number of
+# workers can't change once the backend has been used.
 #
 # Results that don't pass the checks below aren't written, so that they don't get published.
 
@@ -17,7 +18,7 @@ using KernelAbstractions
 
 const PERF = @__DIR__
 const OUTPUT = length(ARGS) >= 1 ? ARGS[1] : "benchmarks.json"
-const JULIA = `$(Base.julia_cmd()) --project=$(dirname(Base.active_project())) --startup-file=no --threads=1`
+const JULIA = `$(Base.julia_cmd()) --project=$(dirname(Base.active_project())) --startup-file=no`
 
 # The number of physical cores, but no more than the CPUs this process may run on
 function physical_cores()
@@ -42,11 +43,12 @@ end
 
 const PARALLEL_THREADS = parse(Int, get(ENV, "KA_BENCHMARK_THREADS", string(physical_cores())))
 
-# The environment of a benchmark process: `threads` PoCL workers, and a PoCL kernel cache
-# of its own, so that no kernel compiled by an earlier run is reused
+# The environment of a benchmark process: `threads` workers and Julia threads, and a PoCL
+# kernel cache of its own, so that no kernel compiled by an earlier run is reused
 function child_env(threads; cache = mktempdir())
     env = filter(((k, _),) -> !startswith(k, "POCL_") && k != "JULIA_KA_CPU_THREADS", ENV)
     env["JULIA_KA_CPU_THREADS"] = string(threads)
+    env["JULIA_NUM_THREADS"] = "$threads,0"
     env["POCL_CACHE_DIR"] = cache
     env["OPENBLAS_NUM_THREADS"] = "1"
     return env
