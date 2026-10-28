@@ -213,9 +213,33 @@ function KI.launch(obj::KI.Kernel{POCLBackend}, groups::Dims{3}, items::Dims{3},
     # compiled kernel only holds pointers to the arrays captured by `f`, so keep it alive
     # until the kernel completes.
     f = obj.kern.f
-    GC.@preserve f POCL.launch_and_wait(
-        obj.kern.kernel, args, groups; local_size = items, global_size = groups .* items
+    k = obj.kern.kernel
+    global_size = groups .* items
+    # (see `KA.launch_split`, which shares this specialization)
+    GC.@preserve f POCL.launch_and_wait(k, args, k.fun, global_size, groups; local_size = items, global_size)
+    return nothing
+end
+
+# split only N-d launches: linearized launches place partial work-groups where `host_run`
+# cannot identify them. keep the first partial launch checked so kernels used once compile
+# once. queue fallbacks also run every work-group checked.
+function KA.split_launch(::POCLBackend, ::KA.NDLaunch, checked::KI.Kernel{POCLBackend})
+    k = checked.kern.kernel.fun
+    (@atomic :monotonic k.launched_partial) && return true
+    @atomic :monotonic k.launched_partial = true
+    return false
+end
+
+function KA.launch_split(
+        kernel::KI.Kernel{POCLBackend}, checked::KI.Kernel{POCLBackend}, extent::Dims{3},
+        groups::Dims{3}, items::Dims{3}, args::Tuple
     )
+    # keep captured arrays alive for both kernel variants
+    f = kernel.kern.f
+    k = kernel.kern.kernel
+    partial = checked.kern.kernel.fun
+    global_size = groups .* items
+    GC.@preserve f POCL.launch_and_wait(k, args, partial, extent, groups; local_size = items, global_size)
     return nothing
 end
 

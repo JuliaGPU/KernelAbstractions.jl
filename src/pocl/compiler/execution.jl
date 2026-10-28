@@ -175,27 +175,39 @@ Core.kwcall(kwargs::NamedTuple, kernel::AbstractKernel, args::Vararg{Any, N}) wh
 
 # kernels operate on plain `Array`s, whose uses can't synchronize, so every launch waits for
 # completion, keeping arguments alive. queue waits yield; host launches yield only after
-# team or long launches (see `host_dispatch`). `groups` is the work-group count, if known.
-function launch_and_wait(kernel::AbstractKernel, args::Tuple, groups = nothing; kwargs...)
+# team or long launches (see `host_dispatch`).
+#
+# work-groups extending beyond `extent` run `partial`, a bounds-checked variant with the
+# same argument layout. both variants share arguments and exception status. queue launches
+# use `partial` for all work-groups: separate queued kernels cannot share group ids.
+# `groups` is the work-group count, if known.
+function launch_and_wait(
+        kernel::AbstractKernel, args::Tuple, partial = nothing, extent = nothing,
+        groups = nothing; kwargs...
+    )
     GC.@preserve args begin
-        h = host_kernel(kernel, values(kwargs), groups)
-        if h === nothing
+        # prepare both variants before running either; if the unchecked variant is
+        # unavailable, run every work-group checked.
+        hp = host_kernel(with_fun(kernel, partial), values(kwargs), groups)
+        h = hp === nothing ? nothing : full_host_kernel(kernel, partial, hp)
+        if hp === nothing
             info = exception_info()
             info[] = ExceptionInfo_st()
             GC.@preserve info begin
                 info_ptr = Base.unsafe_convert(Ptr{ExceptionInfo_st}, info)
-                event = launch_tuple(kernel, args, info_ptr; kwargs...)
+                event = launch_tuple(with_fun(kernel, partial), args, info_ptr; kwargs...)
                 wait_for_kernel(event)
             end
             check_exception(info)
         else
             global_size = values(kwargs).global_size
-            num_groups = something(groups, global_size .÷ h.local_size)
+            num_groups = something(groups, global_size .÷ hp.local_size)
+            extent = something(extent, global_size)
             # host launches finish before returning, even when interrupted
             info = Ref(ExceptionInfo_st())
             GC.@preserve info begin
                 info_ptr = Base.unsafe_convert(Ptr{ExceptionInfo_st}, info)
-                host_launch_converted(kernel, args, info_ptr, h, num_groups)
+                host_launch_converted(kernel, args, info_ptr, hp, num_groups, h, extent)
             end
             # passing the status avoids allocating `info`
             check_exception(info[].status)
@@ -293,6 +305,11 @@ struct HostKernel{F, TT} <: AbstractKernel{F, TT}
     fun::cl.Kernel
     rng_state::Bool
 end
+
+# `kernel`, with `fun`, a variant of its compiled kernel for arguments of the same layout
+@inline with_fun(kernel::AbstractKernel, ::Nothing) = kernel
+@inline with_fun(kernel::HostKernel{F, TT}, fun::cl.Kernel) where {F, TT} =
+    HostKernel{F, TT}(kernel.f, fun, kernel.rng_state)
 
 
 ## host-side API
@@ -424,6 +441,12 @@ const host_kernel_stack_limit = 1024 * 1024
     # host kernels only run whole work-groups
     groups === nothing && global_size .% local_size != (0, 0, 0) && return nothing
     return host_kernel(kernel.fun, local_size, kernel.rng_state)
+end
+
+# use the unchecked variant at `hp`'s work-group size, or keep `hp` if it is unavailable
+@inline function full_host_kernel(kernel::HostKernel, partial, hp::cl.HostKernelHandle)
+    (partial === nothing || partial === kernel.fun) && return hp
+    return something(host_kernel(kernel.fun, hp.local_size, kernel.rng_state), hp)
 end
 
 # kept out of `launch_and_wait`, which is compiled for every kernel
@@ -568,23 +591,64 @@ end
 
 # a callable struct keeps team code shared across kernels. up to `threads` threads run
 # ranges of work-groups, stealing if `steal` is set (see `run_team`).
+#
+# `full` runs work-groups entirely within the ndrange; `h` runs partial ones. both use the
+# same argument layout. `full === h` when no unchecked variant is needed or available.
 struct HostLaunch
     h::cl.HostKernelHandle
+    full::cl.HostKernelHandle
     arg_values::Ptr{Ptr{Cvoid}}
     num_groups::Ptr{Csize_t}
+    groups::Dims{3}
+    partial::NTuple{3, Bool}
     total::Int
     threads::Int
     steal::Bool
+    scratch_size::Int
+    scratch_alignment::Int
     exception_info::Ptr{ExceptionInfo_st}
 end
 
-host_run(l::HostLaunch, first::Int, last::Int, scratch::Ptr{Cvoid}) =
-    host_run(l.h, l.arg_values, l.num_groups, first, last - first, l.exception_info, scratch)
+# batch `first:last-1` into runs of full or partial work-groups. x varies fastest: a
+# partial x dimension affects each row's last group; partial y or z dimensions affect whole
+# rows.
+function host_run(l::HostLaunch, first::Int, last::Int, scratch::Ptr{Cvoid})
+    if l.full === l.h
+        host_run(l.h, l.arg_values, l.num_groups, first, last - first, l.exception_info, scratch)
+        return
+    end
+    gx, gy, gz = l.groups
+    px, py, pz = l.partial
+    g = first
+    while g < last
+        row = g ÷ gx
+        x = g - row * gx
+        y, z = row % gy, row ÷ gy
+        if pz && z == gz - 1
+            # the rest of the launch
+            h, stop = l.h, l.total
+        elseif py && y == gy - 1
+            h, stop = l.h, (row + 1) * gx
+        elseif px && x == gx - 1
+            h, stop = l.h, g + 1
+        else
+            # up to the next partial work-group
+            h = l.full
+            stop = px ? row * gx + gx - 1 :
+                py ? (z * gy + gy - 1) * gx :
+                pz ? (gz - 1) * gy * gx : l.total
+        end
+        stop = min(stop, last)
+        host_run(h, l.arg_values, l.num_groups, g, stop - g, l.exception_info, scratch)
+        g = stop
+    end
+    return
+end
 
 # `foreach_range` uses inclusive, 1-based ranges. time the range containing group 1 and
 # scale to all groups to estimate the launch's serial duration.
 function (l::HostLaunch)(first::Int, last::Int)
-    scratch = host_scratch_ptr(l.h.scratch_size, l.h.scratch_alignment)
+    scratch = host_scratch_ptr(l.scratch_size, l.scratch_alignment)
     if first != 1
         host_run(l, first - 1, last, scratch)
         return
@@ -628,7 +692,8 @@ end
     return UInt64(0)
 end
 
-# defer interrupts until all work-groups finish. otherwise a team skips unstarted ranges.
+# defer interrupts until all work-groups finish. otherwise a team skips unstarted ranges,
+# and a serial launch can stop between full and partial groups.
 function (l::HostLaunch)()
     if l.threads == 1
         uninterruptible(run_serial, l)
@@ -669,17 +734,25 @@ run_team(l::HostLaunch) = ThreadTeams.foreach_range(
     return
 end
 
-# shared across kernels: avoid inlining and specialization
+# shared across kernels: avoid inlining and specialization. `h` runs partial work-groups,
+# `full` the rest (see `launch_and_wait`).
 @noinline function host_dispatch(
         h::cl.HostKernelHandle, arg_values::Ptr{Ptr{Cvoid}}, num_groups::Dims{3},
-        exception_info::Ptr{ExceptionInfo_st}
+        exception_info::Ptr{ExceptionInfo_st}, full::cl.HostKernelHandle, extent::Dims{3}
     )
     total = prod(num_groups)
     total == 0 && return
+    partial = extent .< num_groups .* h.local_size
+    any(partial) || (full = h)
+    scratch_size = max(h.scratch_size, full.scratch_size)
+    scratch_alignment = max(h.scratch_alignment, full.scratch_alignment)
     groups_ref = Ref(Csize_t.(num_groups))
     GC.@preserve groups_ref begin
         groups_ptr = Ptr{Csize_t}(Base.unsafe_convert(Ptr{NTuple{3, Csize_t}}, groups_ref))
-        launch = HostLaunch(h, arg_values, groups_ptr, total, 1, false, exception_info)
+        launch = HostLaunch(
+            h, full, arg_values, groups_ptr, num_groups, partial, total, 1, false,
+            scratch_size, scratch_alignment, exception_info
+        )
         # finalizers can't switch tasks, which waiting for other threads and taking the
         # lock of the scratch slots may do
         if GC.in_finalizer()
@@ -690,11 +763,18 @@ end
         long = (Base.@atomic :monotonic h.last_duration) >= s.host_kernel_long_ticks
         threads, steal = host_schedule(h, s, total, long)
         if threads == 1 && !long
-            run_short(launch)
+            if full === h
+                run_short(launch)
+            else
+                uninterruptible(run_short, launch)
+            end
             return
         end
         start = cycle_counter()
-        launch = HostLaunch(h, arg_values, groups_ptr, total, threads, steal, exception_info)
+        launch = HostLaunch(
+            h, full, arg_values, groups_ptr, num_groups, partial, total, threads, steal,
+            scratch_size, scratch_alignment, exception_info
+        )
         launch()
         Base.@atomic :monotonic h.last_duration = cycle_counter() - start
         Base.@atomic :monotonic h.last_groups = total
@@ -758,7 +838,7 @@ end
 # a short launch on the launching task: one run covers the whole launch, so one timing
 # supplies both the serial estimate and the last-launch duration
 @inline function run_short(l::HostLaunch)
-    scratch = host_scratch_ptr(l.h.scratch_size, l.h.scratch_alignment)
+    scratch = host_scratch_ptr(l.scratch_size, l.scratch_alignment)
     start = cycle_counter()
     host_run(l, 0, l.total, scratch)
     duration = cycle_counter() - start
@@ -771,8 +851,8 @@ end
 # private scratch avoids locks and task switches, which finalizers cannot perform
 @noinline function host_dispatch_finalizer(l::HostLaunch)
     # alignment is a power of two, and at least that of malloc
-    align = l.h.scratch_alignment
-    raw = Libc.malloc(l.h.scratch_size + align)
+    align = l.scratch_alignment
+    raw = Libc.malloc(l.scratch_size + align)
     raw == C_NULL && throw(OutOfMemoryError())
     scratch = Ptr{Cvoid}((UInt(raw) + align - 1) & ~UInt(align - 1))
     try
@@ -785,7 +865,8 @@ end
 
 # like `launch_converted`, but passes a pointer to each converted argument
 @inline @generated function host_launch_converted(
-        kernel::AbstractKernel{F, TT}, args::Tuple, exception_info, h, num_groups
+        kernel::AbstractKernel{F, TT}, args::Tuple, exception_info, h, num_groups, full,
+        extent
     ) where {F, TT}
     sig = Tuple{F, TT.parameters...}
     args = (:(kernel.f), (:(clconvert(args[$i])) for i in 1:fieldcount(args))...)
@@ -814,7 +895,7 @@ end
             ptrs = Ref{NTuple{$(N + 2), Ptr{Cvoid}}}(($(arg_ptrs...), C_NULL, C_NULL))
             GC.@preserve ptrs begin
                 arg_values = Ptr{Ptr{Cvoid}}(Base.unsafe_convert(Ptr{NTuple{$(N + 2), Ptr{Cvoid}}}, ptrs))
-                host_dispatch(h, arg_values, num_groups, exception_info)
+                host_dispatch(h, arg_values, num_groups, exception_info, full, extent)
             end
         end
         nothing
