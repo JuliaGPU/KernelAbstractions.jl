@@ -788,14 +788,41 @@ synchronize(CPU())
 
 # Threads
 
-Kernels run on as many threads as Julia's default thread pool has (`julia -t N`), up to the
-number of hardware threads. These are POCL's own threads, so launching a kernel doesn't
-occupy Julia's. To use a different number, set the `JULIA_KA_CPU_THREADS` environment
-variable before the backend is first used, e.g., `JULIA_KA_CPU_THREADS=8 julia -t1`. POCL's
-own variables (e.g., `POCL_CPU_MAX_CU_COUNT`) are respected too, and can also raise the
-number above the number of hardware threads, but they also affect other users of POCL, like
-OpenCL.jl. The device reports the number as its compute units:
-`KernelAbstractions.POCL.device().max_compute_units`.
+Kernels run on Julia's default thread pool (`julia -t N`), up to the number of hardware
+threads. A launch splits its workgroups into blocks as `Threads.@threads :static` splits a
+loop: block `k` starts on the `k`-th thread of the pool, whichever thread launches, and the
+launching task runs the block of its own thread.
+
+Launches of up to 8192 work-items run on the launching task alone, unless the kernel's last
+two launches over as many workgroups would each have taken 4 µs or more on one thread. So
+do launches from finalizers, and launches while the threads are busy: from a
+`Threads.@threads` loop, from a kernel, or while another task's launch uses them. On Julia
+1.12 and later, such a launch from the interactive thread (`julia -t N,1`) runs there.
+
+A launch doesn't yield while its kernel runs, and delivers interrupts (`^C`) once it is
+done. Other tasks, timers and I/O run after launches on several threads, and after
+launches of a kernel whose last launch took 50 µs or more.
+
+Since launches with as many workgroups start each block on the same thread, data that a
+`Threads.@threads :static` loop or such a launch wrote first is usually in that thread's
+cache and NUMA node. Workgroups still move: a block whose thread starts late runs on the
+launching thread, and when the number of workgroups changed or the last launch took 50 µs
+or more, threads that are done take workgroups from the others, nearby threads first (on
+Linux, with pinned threads).
+
+Pin the threads before the first launch, e.g. with ThreadPinning.jl: `pinthreads(:numa)`
+or `pinthreads(:cores)`. It pins only the default pool, so start Julia with `julia -t N,0`,
+or pass `threadpool = :all`, to also pin launches on the launching task.
+
+Kernels with an explicit workgroup size that may need more than 1 MiB of stack, and
+kernels that PoCL can't run on Julia's threads, run on PoCL's own threads instead; pin
+those with `POCL_AFFINITY=1`.
+
+To use fewer threads, set `JULIA_KA_CPU_THREADS` before the backend is first used:
+launches then use the first threads of the default pool, with larger blocks. PoCL's
+variables (e.g. `POCL_CPU_MAX_CU_COUNT`) work too, but also affect other users of PoCL,
+like OpenCL.jl. None of them raises the count above the pool's size;
+`KernelAbstractions.KernelInterface.multiprocessor_count(CPU())` returns the count used.
 
 # Atomics
 
