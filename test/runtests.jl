@@ -255,6 +255,12 @@ end
     end
 end
 
+@testset "POCL show of device arrays" begin
+    ptr = reinterpret(Core.LLVMPtr{Float32, POCL.AS.CrossWorkgroup}, UInt(0x10))
+    @test sprint(show, POCL.CLDeviceArray((2, 3), ptr)) == "2×3 device array at $ptr"
+    @test sprint(show, POCL.CLDeviceArray((4,), ptr)) == "4-element device array at $ptr"
+end
+
 # `@Const` arguments are constified by the launch, using the mask of the kernel method
 # that is called
 @kernel function const_seen!(out, @Const(B::AbstractVector))
