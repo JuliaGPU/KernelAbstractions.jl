@@ -218,6 +218,22 @@ end
     @test A == ref
 end
 
+# Base compares `Rational`s by multiplying out their denominators in 128-bit integers, which
+# the SPIR-V back-end cannot lower
+@testset "POCL comparisons with Rationals" begin
+    @kernel function rational_compare!(out, a, b)
+        I = @index(Global, Linear)
+        @inbounds out[I] = a[I] < b[I]
+    end
+    a = [1 // 4, 1 // 2, 2 // 3, -1 // 3]
+    for b in ([1 // 3, 1 // 2, 1 // 2, -1 // 2], [3, 0, 1, 0], [0.3, 0.6, 0.5, -0.5])
+        out = zeros(Bool, length(a))
+        rational_compare!(CPU())(out, a, b; ndrange = length(a))
+        synchronize(CPU())
+        @test out == (a .< b)
+    end
+end
+
 @testset "POCL reinterpret" begin
     @kernel function reinterpret_copy!(out, a)
         I = @index(Global, Linear)

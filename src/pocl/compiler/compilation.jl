@@ -38,10 +38,12 @@ end
 
 GPUCompiler.runtime_module(::CompilerJob{<:Any, OpenCLCompilerParams}) = POCL
 
+# SPIR-V doesn't support 128-bit integers, so keep 64-bit integer math (e.g. `Rational`
+# comparisons) that Base computes with them out of Int128
 GPUCompiler.method_tables(job::OpenCLCompilerJob) =
     job.config.params.fuse_muladd ?
-    (muladd_method_table, method_table, SPIRVIntrinsics.method_table) :
-    (method_table, SPIRVIntrinsics.method_table)
+    (muladd_method_table, method_table, SPIRVIntrinsics.method_table, GPUToolbox.Overlays.int128_overrides) :
+    (method_table, SPIRVIntrinsics.method_table, GPUToolbox.Overlays.int128_overrides)
 
 # filter out OpenCL built-ins
 # TODO: eagerly lower these using the translator API
