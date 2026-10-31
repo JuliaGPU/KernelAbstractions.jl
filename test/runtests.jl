@@ -760,6 +760,99 @@ end
     end
 end
 
+# a struct with a union field is not isbits, but is stored inline with its own selector
+struct UnionField
+    x::Union{Int, Float32}
+end
+
+@kernel function bump_union!(x)
+    i = @index(Global)
+    val = x[i]
+    if val isa Int
+        x[i] = val + 1
+    end
+end
+
+@kernel function flip_union!(x)
+    i = @index(Global)
+    x[i] = x[i] === missing ? nothing : missing
+end
+
+@kernel function widen_union!(x)
+    i = @index(Global)
+    val = x[i]
+    if val isa NTuple{3, Int32}
+        x[i] = Int64(sum(val))
+    else
+        x[i] = (Int32(val), Int32(0), Int32(0))
+    end
+end
+
+@kernel function fill_union_field!(x)
+    i = @index(Global)
+    x[i] = i == 1 ? UnionField(1) : UnionField(2.0f0)
+end
+
+@kernel function reverse_union_local!(x)
+    i = @index(Local)
+    tmp = @localmem Union{Int64, NTuple{3, Int32}} (4,)
+    tmp[i] = x[i]
+    @synchronize
+    x[i] = tmp[5 - i]
+end
+
+# arrays of bits unions keep one selector byte per element past the data of their memory
+@testset "POCL kernels on bits-union arrays" begin
+    backend = POCLBackend()
+    bump!(x) = (bump_union!(backend)(x; ndrange = length(x)); synchronize(backend); x)
+
+    @test bump!(Union{Int, Nothing}[1, nothing, 3]) == [2, nothing, 4]
+    @test isequal(bump!(Union{Union{Missing, Nothing}, Int}[0, missing, nothing]), [1, missing, nothing])
+
+    # the memory of an array can be longer than it, or start before it
+    a = Union{Int, Nothing}[1, nothing, 3]
+    push!(a, 4)
+    sizehint!(a, 100)
+    @test bump!(a) == [2, nothing, 4, 5]
+    b = Union{Int, Nothing}[nothing, nothing, 1, nothing, 3]
+    popfirst!(b)
+    popfirst!(b)
+    @test bump!(b) == [2, nothing, 4]
+
+    # views index into their parent
+    c = Union{Int, Nothing}[nothing, nothing, 1, nothing, 3, 5]
+    bump!(view(c, 3:5))
+    @test c == [nothing, nothing, 2, nothing, 4, 5]
+    bump!(view(c, 1:2:5))
+    @test c == [nothing, nothing, 3, nothing, 5, 5]
+
+    # unions of singletons have no data, only selector bytes
+    h = Union{Nothing, Missing}[missing, nothing, nothing, missing]
+    popfirst!(h)
+    flip_union!(backend)(h; ndrange = 3)
+    synchronize(backend)
+    @test isequal(h, [missing, missing, nothing])
+
+    # the element size (12 bytes) is not a multiple of the alignment (8 bytes)
+    d = Union{Int64, NTuple{3, Int32}}[1, Int32.((2, 3, 4)), 5]
+    widen_union!(backend)(d; ndrange = 3)
+    synchronize(backend)
+    @test d == Union{Int64, NTuple{3, Int32}}[Int32.((1, 0, 0)), 9, Int32.((5, 0, 0))]
+
+    # a struct with a union field keeps its selector inside the element
+    e = UnionField[UnionField(0), UnionField(0)]
+    fill_union_field!(backend)(e; ndrange = 2)
+    synchronize(backend)
+    @test e == [UnionField(1), UnionField(2.0f0)]
+
+    # local memory is padded to the union's alignment, followed by the selector bytes
+    f = Union{Int64, NTuple{3, Int32}}[1, Int32.((2, 3, 4)), 5, Int32.((6, 7, 8))]
+    g = copy(f)
+    reverse_union_local!(backend, 4)(g; ndrange = 4)
+    synchronize(backend)
+    @test g == reverse(f)
+end
+
 # a mapping KernelAbstractions doesn't know, which the index functions have to go
 # through `expand`, `in` and `linear_index` for
 struct TransposedMapping end
