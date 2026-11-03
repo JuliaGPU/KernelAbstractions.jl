@@ -35,8 +35,8 @@ end
     @inbounds y[i] = convert(eltype(y), x[i])
 end
 
-# correctly rounded, unlike the host's conversions from `Float64` and wide integers on Julia
-# 1.11 and 1.12 (which round twice, see JuliaMath/BFloat16s.jl#78)
+# the correctly rounded value, computed without the host's `BFloat16` conversions (on Julia
+# 1.11, vectorized ones crash LLVM on AVX512-BF16 hosts)
 bf16_nearest(x) = BFloat16(Float32(BigFloat(x; precision = 8)))
 
 const bf16_supported = !isdefined(Core, :BFloat16) ||
