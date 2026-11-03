@@ -75,13 +75,13 @@ end
         fadd_f64_global = true, fadd_f64_local = true
     )
     @test POCL.compiler_config(dev).target.atomics == atomics
-    # explicitly requested extensions are kept, in addition to the default ones and the one
-    # for vector shuffles
-    @test POCL.compiler_config(dev).target.extensions ==
-        "+SPV_KHR_no_integer_wrap_decoration,+SPV_INTEL_subgroups"
+    # explicitly requested extensions are kept, in addition to the default ones and the ones
+    # for vector shuffles and (with a PoCL that supports it) bfloat16
+    device_extensions = "+SPV_KHR_no_integer_wrap_decoration,+SPV_INTEL_subgroups" *
+        ("SPV_KHR_bfloat16" in dev.spirv_extensions ? ",+SPV_KHR_bfloat16" : "")
+    @test POCL.compiler_config(dev).target.extensions == device_extensions
     config = POCL.compiler_config(dev; extensions = "+SPV_KHR_expect_assume")
-    @test config.target.extensions ==
-        "+SPV_KHR_no_integer_wrap_decoration,+SPV_INTEL_subgroups,+SPV_KHR_expect_assume"
+    @test config.target.extensions == device_extensions * ",+SPV_KHR_expect_assume"
     @test config.target.atomics == atomics
     @test POCL.compiler_config(dev; extensions = nothing).target ==
         POCL.compiler_config(dev).target
@@ -319,6 +319,8 @@ if "cl_khr_fp16" in POCL.device().extensions
         @test all(isfinite, b)
     end
 end
+
+include("bfloat16.jl")
 
 # the sub-group width kernels are compiled for is the one `KI.sub_group_size` reports
 # (PoCL folds `get_max_sub_group_size` to that constant itself, see pocl/pocl#2375)
