@@ -420,6 +420,8 @@ const CL_KERNEL_EXEC_INFO_SVM_FINE_GRAIN_SYSTEM = 0x11b7
 
 const CL_DEVICE_SUB_GROUP_SIZES_INTEL = 0x4108
 
+const CL_DEVICE_SPIRV_EXTENSIONS_KHR = 0x12ba
+
 struct CLError <: Exception
     code::Cint
 end
@@ -1007,6 +1009,16 @@ end
         clGetDeviceInfo(d, CL_DEVICE_EXTENSIONS, size[], result, C_NULL)
         bs = GC.@preserve result unsafe_string(pointer(result))
         return String[string(s) for s in split(bs)]
+    end
+
+    # cl_khr_spirv_queries: the SPIR-V extensions that modules may declare
+    if s == :spirv_extensions
+        "cl_khr_spirv_queries" in d.extensions::Vector{String} || return String[]
+        size = Ref{Csize_t}()
+        clGetDeviceInfo(d, CL_DEVICE_SPIRV_EXTENSIONS_KHR, 0, C_NULL, size)
+        result = Vector{Ptr{Cchar}}(undef, size[] ÷ sizeof(Ptr{Cchar}))
+        clGetDeviceInfo(d, CL_DEVICE_SPIRV_EXTENSIONS_KHR, sizeof(result), result, C_NULL)
+        return String[unsafe_string(ptr) for ptr in result]
     end
 
     # cl_ext_float_atomics: per-precision bitfields of natively supported floating-point

@@ -217,9 +217,16 @@ end
     )
     supports_fp16 = "cl_khr_fp16" in dev.extensions
     supports_fp64 = "cl_khr_fp64" in dev.extensions
+    # `BFloat16` loads, stores and conversions. GPUCompiler widens the arithmetic to `float`,
+    # because PoCL doesn't accept any SPIR-V extension for bfloat16 arithmetic.
+    supports_bfloat16 = "SPV_KHR_bfloat16" in dev.spirv_extensions
 
     if sub_group_size !== nothing && sub_group_size ∉ dev.sub_group_sizes
         error("$sub_group_size is not a valid sub-group size for this device.")
+    end
+
+    if supports_bfloat16
+        extensions = extensions === nothing ? "+SPV_KHR_bfloat16" : "+SPV_KHR_bfloat16,$extensions"
     end
 
     # the vector shuffles of `KI.shfl_word_tuple` (see `POCLKernels`); `SPV_INTEL_subgroups`
@@ -230,7 +237,7 @@ end
 
     # create GPUCompiler objects
     target = SPIRVCompilerTarget(;
-        supports_fp16, supports_fp64, atomics,
+        supports_fp16, supports_fp64, supports_bfloat16, atomics,
         extensions = join(filter(!isempty, [default_extensions, something(extensions, "")]), ","),
         validate = true, kwargs...
     )
