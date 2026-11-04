@@ -128,6 +128,14 @@ Base.Experimental.@MethodTable(method_table)
 import Core: LLVMPtr
 import UnsafeAtomics
 
+# the size of an element in an array, which for isbits unions includes padding to their
+# alignment. on Julia 1.10, `Base.aligned_sizeof` isn't constant-folded in device code.
+@static if VERSION < v"1.11"
+    @generated aligned_sizeof(::Type{T}) where {T} = :($(Base.aligned_sizeof(T)))
+else
+    import Base: aligned_sizeof
+end
+
 # the device code comes first: the compiler's generated functions use its types, and a
 # generator only sees the bindings that existed when it was defined
 include("device/array.jl")
@@ -140,8 +148,28 @@ include("compiler/compilation.jl")
 include("compiler/execution.jl")
 include("compiler/reflection.jl")
 
+# the selector byte of element `i` of an array of isbits unions, which `Array` stores past
+# the data of its memory. that memory can be longer than the array, which can also start
+# at an offset into it.
+@static if VERSION >= v"1.11.0-DEV.753"
+    function typetagdata(a::Array, i = 1)
+        # for memory of isbits unions, the reference holds the offset of the data in elements
+        ptr_or_offset = Int(a.ref.ptr_or_offset)
+        return @ccall(jl_genericmemory_typetagdata(a.ref.mem::Any)::Ptr{UInt8}) + ptr_or_offset + i - 1
+    end
+else
+    typetagdata(a::Array, i = 1) = ccall(:jl_array_typetagdata, Ptr{UInt8}, (Any,), a) + i - 1
+end
+
 function Adapt.adapt_storage(to::KernelAdaptor, xs::Array{T, N}) where {T, N}
-    return CLDeviceArray{T, N, AS.CrossWorkgroup}(size(xs), reinterpret(LLVMPtr{T, AS.CrossWorkgroup}, pointer(xs)))
+    ptr = pointer(xs)
+    # device arrays find their selector bytes `maxsize` bytes past their data
+    maxsize = if Base.isbitsunion(T)
+        Int(UInt(typetagdata(xs)) - UInt(ptr))
+    else
+        length(xs) * aligned_sizeof(T)
+    end
+    return CLDeviceArray{T, N, AS.CrossWorkgroup}(size(xs), reinterpret(LLVMPtr{T, AS.CrossWorkgroup}, ptr), maxsize)
 end
 
 import KernelInterface
