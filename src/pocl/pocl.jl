@@ -126,6 +126,7 @@ SPIRVIntrinsics.@reexport_public
 Base.Experimental.@MethodTable(method_table)
 
 import Core: LLVMPtr
+import GPUToolbox
 import UnsafeAtomics
 
 # the size of an element in an array, which for isbits unions includes padding to their
