@@ -105,14 +105,14 @@ jobs:
   threads:
     # the CPU backend gives PoCL as many threads as Julia has, so with the main job's single
     # thread, work-groups only run in parallel in the POCL session test's subprocess
-    name: CI with ${{ matrix.threads }} threads
+    name: Threads
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        threads: ['4']
         version: ['1.10', '1.13']
         os: [ubuntu-24.04, macOS-15]
-        threads: ['4']
     steps:
       - uses: actions/checkout@v7
       - uses: julia-actions/setup-julia@v3
