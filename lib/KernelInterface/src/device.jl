@@ -530,7 +530,8 @@ end
 # Shuffle the words a struct or tuple is packed into, with `op` shuffling a `UInt32`, one at a
 # time. Not public: a backend may exchange several words at once instead, e.g. with vector
 # shuffles from the lane `shuffle_source(op)`, as KernelAbstractions' POCL backend does.
-@inline shfl_word_tuple(op, words::NTuple{N, UInt32}) where {N} = map(op, words)
+# `map` would build an array for tuples of more than 32 words.
+@inline shfl_word_tuple(op, words::NTuple{N, UInt32}) where {N} = ntuple(i -> op(words[i]), Val(N))
 
 """
     shfl(val::T, lane::Integer, width::Integer)::T

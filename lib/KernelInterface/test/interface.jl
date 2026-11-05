@@ -844,6 +844,8 @@ function subgroup_communication_testsuite(backend::KI.Backend, AT, sg_size)
             # fields of less than 4 bytes share words
             Tuple{Bool, Int8, Float16, UInt16} => i -> (isodd(i), -i % Int8, Float16(i), UInt16(1000i % 65536)),
             FallbackStruct => i -> FallbackStruct(isodd(i), Char(64 + i), Bits64(-i), (i, -i, 2i, typemin(Int64) + i)),
+            # more than 32 words
+            NTuple{17, Int64} => i -> ntuple(j -> (Int64(i) << 32) - j, Val(17)),
         ]
         fp64 && push!(values, Float64 => i -> 1 / i)
         @testset "$T" for (T, f) in values
