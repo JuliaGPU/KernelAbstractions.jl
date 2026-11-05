@@ -35,9 +35,16 @@ end
     @inbounds y[i] = convert(eltype(y), x[i])
 end
 
-# the correctly rounded value, computed without the host's `BFloat16` conversions (on Julia
-# 1.11, vectorized ones crash LLVM on AVX512-BF16 hosts)
-bf16_nearest(x) = BFloat16(Float32(BigFloat(x; precision = 8)))
+# the correctly rounded value, without relying on the host's `BFloat16` rounding: on Julia
+# 1.11, vectorized ones crash LLVM on AVX512-BF16 hosts, and LLVM 19 to 22 (Julia 1.13) rounds
+# ties wrongly in vectorized ones for AArch64 targets without BF16 (#949)
+function bf16_nearest(x)
+    b = BigFloat(x; precision = 256)
+    # 8 significant bits, except for subnormals, which are multiples of 2^-133
+    r = abs(b) < floatmin(Float32) ? round(b * big(2.0)^133) / big(2.0)^133 :
+        BigFloat(b; precision = 8)
+    return BFloat16(Float32(r))
+end
 
 const bf16_supported = !isdefined(Core, :BFloat16) ||
     "SPV_KHR_bfloat16" in POCL.device().spirv_extensions
@@ -71,7 +78,7 @@ if bf16_supported
             a = BFloat16(1.5)
             bf16_axpy!(backend)(out, a, x; ndrange = n)
             # widened to `float`, multiplied and added separately (each rounded to bfloat)
-            @test isequal(Array(out), map((x, y) -> BFloat16(Float32(BFloat16(Float32(a) * Float32(x))) + Float32(y)), hx, hy))
+            @test isequal(Array(out), map((x, y) -> bf16_nearest(Float32(bf16_nearest(Float32(a) * Float32(x))) + Float32(y)), hx, hy))
         end
 
         @testset "arithmetic" begin
@@ -80,7 +87,7 @@ if bf16_supported
             o = Array(out)
             # (references in `Float32`: on Julia 1.11, the host miscompiles vectorized `BFloat16`
             # operations such as `copysign`)
-            f32(op) = (xs...) -> BFloat16(op(Float32.(xs)...))
+            f32(op) = (xs...) -> bf16_nearest(op(Float32.(xs)...))
             @test isequal(o[1, :], map(f32(/), hx, hy))
             @test isequal(o[2, :], map(f32(-), hx, hy))
             @test isequal(o[3, :], map(f32(min), hx, hy))
