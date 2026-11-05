@@ -718,8 +718,11 @@ run_serial(l::HostLaunch) = l(1, l.total)
 # preserve cache and NUMA locality across equal-sized grids. stealing prevents slow or
 # descheduled threads from holding up the launch. a busy team (including nested launches and
 # `Threads.@threads` loops) runs the launch on the calling task.
+#
+# `isolate`: waiting for the team would otherwise run other tasks, and on Julia 1.13 and
+# earlier a deferred interrupt then goes to the next task on thread 1, not the launch.
 run_team(l::HostLaunch) = ThreadTeams.foreach_range(
-    l, l.total; threads = l.threads, schedule = l.steal ? :steal : :static
+    l, l.total; threads = l.threads, schedule = l.steal ? :steal : :static, isolate = true
 )
 
 # `f(x)`, with interrupts and (on Julia 1.14+) cancellation delivered after it returns
@@ -779,6 +782,8 @@ end
             end
             return
         end
+        # create the slots of all threads now, so the work-groups' lookups never take the lock
+        host_scratch_slot()
         start = cycle_counter()
         launch = HostLaunch(
             h, full, arg_values, groups_ptr, num_groups, partial, total, threads, steal,

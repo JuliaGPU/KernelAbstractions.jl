@@ -800,7 +800,8 @@ do launches from finalizers, and launches while the threads are busy: from a
 1.12 and later, such a launch from the interactive thread (`julia -t N,1`) runs there.
 
 A launch doesn't yield while its kernel runs, and delivers interrupts (`^C`) once it is
-done. Other tasks, timers and I/O run after launches on several threads, and after
+done. Before Julia 1.14, `^C` goes to whatever runs on thread 1, so this only protects
+launches from there (e.g. the main task). Other tasks, timers and I/O run after launches on several threads, and after
 launches of a kernel whose last launch took 50 µs or more.
 
 Since launches with as many workgroups start each block on the same thread, data that a

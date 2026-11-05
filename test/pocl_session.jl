@@ -166,6 +166,63 @@ end
             @test all(!=(0), A)
         end
 
+        # a launch doesn't run other tasks on its thread while it waits for the team. before
+        # Julia 1.14, a task switch would hand the deferred interrupt to that task instead.
+        (cancellation || !Sys.iswindows()) &&
+            @testset "interrupted launch with a task waiting ($path)" for path in (:short, :long)
+            fill!(n, round(Int, rate / 2))
+            n[end] = round(Int, 2rate)
+            fill!(A, 0)
+            Base.@atomic :monotonic h.last_duration = path == :short ? 0 : typemax(UInt64)
+            POCL.record_serial_sample(h, nt, typemax(UInt64))
+            POCL.record_serial_sample(h, nt, typemax(UInt64))
+            @test POCL.host_schedule(h, POCL.session(), nt, path == :long)[1] == nt
+            # a task that is runnable on this thread throughout the launch
+            done = Threads.Atomic{Bool}(false)
+            caught = Ref{Any}(nothing)
+            helper = Task() do
+                try
+                    while !done[]
+                        yield()
+                    end
+                catch err
+                    caught[] = err
+                end
+            end
+            helper.sticky = true
+            ccall(:jl_set_task_tid, Cint, (Any, Cint), helper, Threads.threadid() - 1)
+            schedule(helper)
+            # (let it enter the loop)
+            yield()
+            launch() = k(A, n; sizes...)
+            err = try
+                if cancellation
+                    src = Base.CancellationTokenSource()
+                    Threads.@spawn (sleep(0.25); Base.cancel!(src))
+                    Base.ScopedValues.with(launch, Base.CANCEL_TOKEN => Base.CancellationToken(src))
+                else
+                    Base.exit_on_sigint(false)
+                    run(`sh -c "sleep 0.25; kill -INT $(getpid())"`; wait = false)
+                    launch()
+                end
+                nothing
+            catch err
+                err
+            end
+            done[] = true
+            timedwait(() -> istaskdone(helper), 10)
+            err === nothing && caught[] === nothing && try
+                sleep(5)
+            catch
+            end
+            @test err isa (cancellation ? Base.CancellationRequest : InterruptException)
+            @test all(!=(0), A)
+            @test istaskdone(helper) && !istaskfailed(helper)
+            @test caught[] === nothing
+            pool = POCL.ThreadTeams.POOL.pool
+            @test pool !== nothing && !any(istaskfailed, pool.tasks)
+        end
+
         # a single-threaded launch runs full and partial work-groups separately (here: two
         # handles of the same kernel); interrupts must wait until both runs finish
         (cancellation || !Sys.iswindows()) &&
