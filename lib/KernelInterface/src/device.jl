@@ -411,10 +411,6 @@ shuffle_as_words(T) = T !== UInt32 && sizeof(T) in (1, 2, 4, 8, 16)
 const word_types = (UInt8, UInt16, UInt32, UInt64, UInt128)
 word_type(T) = word_types[trailing_zeros(sizeof(T)) + 1]
 
-# The generated functions mark their bodies for inlining: `@inline` on a generated function
-# doesn't apply to a body that the generator returns with an explicit `return`.
-inline_body(ex) = Expr(:block, Expr(:meta, :inline), ex)
-
 # Shuffle a primitive value as unsigned words: values of up to 4 bytes are zero-extended to a
 # `UInt32`. Other 8-byte values are shuffled as a `UInt64`, which the backend may support
 # natively, and a `UInt64` it doesn't is split into two `UInt32` words. 16-byte values are
