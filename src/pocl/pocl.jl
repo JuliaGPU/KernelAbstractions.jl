@@ -128,6 +128,7 @@ Base.Experimental.@MethodTable(method_table)
 import Core: LLVMPtr
 import GPUToolbox
 import UnsafeAtomics
+using KernelInterface: inline_body
 
 # the size of an element in an array, which for isbits unions includes padding to their
 # alignment. on Julia 1.10, `Base.aligned_sizeof` isn't constant-folded in device code.

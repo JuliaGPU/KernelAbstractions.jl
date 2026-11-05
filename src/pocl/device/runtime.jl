@@ -17,7 +17,7 @@ end
 @inline @generated function exception_field(::Val{field}) where {field}
     T = fieldtype(ExceptionInfo_st, field)
     offset = fieldoffset(ExceptionInfo_st, Base.fieldindex(ExceptionInfo_st, field))
-    return :(reinterpret(LLVMPtr{$T, AS.CrossWorkgroup}, kernel_state().exception_info + $offset))
+    return inline_body(:(reinterpret(LLVMPtr{$T, AS.CrossWorkgroup}, kernel_state().exception_info + $offset)))
 end
 
 # the record is shared by all work-items on the device, so these need device scope, which
