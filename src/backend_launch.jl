@@ -281,13 +281,15 @@ end
     n = fieldcount(args)
     converted = [Symbol(:arg, i) for i in 1:n]
     conversions = (:($(converted[i]) = KI.argconvert(backend, args[$i])) for i in 1:n)
-    return quote
-        converted_ctx = KI.argconvert(backend, ctx)
-        $(conversions...)
-        mask = f(ConstArgs(), $(converted...))
-        return mark_constargs(mask, args),
-            argument_types(mask, converted_ctx, ($(converted...),))
-    end
+    return KI.inline_body(
+        quote
+            converted_ctx = KI.argconvert(backend, ctx)
+            $(conversions...)
+            mask = f(ConstArgs(), $(converted...))
+            return mark_constargs(mask, args),
+                argument_types(mask, converted_ctx, ($(converted...),))
+        end
+    )
 end
 
 # a kernel with varargs can have more arguments than its mask
@@ -298,7 +300,7 @@ is_constarg(mask, i) = i <= length(mask) && mask[i]
 mark_constargs(_, args::Tuple) = args
 @inline @generated function mark_constargs(::Val{mask}, args::Tuple) where {mask}
     marked = (is_constarg(mask, i) ? :(ConstArg(args[$i])) : :(args[$i]) for i in 1:fieldcount(args))
-    return :(($(marked...),))
+    return KI.inline_body(:(($(marked...),)))
 end
 
 # `Tuple{map(Core.Typeof, (ctx, args...))...}`, with the `@Const` arguments constified
@@ -308,11 +310,11 @@ end
         is_constarg(marked, i) ? :(Core.Typeof(constify(args[$i]))) : :(Core.Typeof(args[$i]))
             for i in 1:fieldcount(args)
     )
-    return :(Tuple{Core.Typeof(ctx), $(types...)})
+    return KI.inline_body(:(Tuple{Core.Typeof(ctx), $(types...)}))
 end
 
 # `(ctx, args...)`
 @inline @generated function prepend(ctx, args::Tuple)
     argexprs = (:(args[$i]) for i in 1:fieldcount(args))
-    return :((ctx, $(argexprs...)))
+    return KI.inline_body(:((ctx, $(argexprs...))))
 end

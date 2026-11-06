@@ -437,7 +437,7 @@ function kernel_function end
 # isn't type stable for 32 or more elements
 @inline @generated function argument_types(backend, args::Tuple)
     types = (:(Core.Typeof(argconvert(backend, args[$i]))) for i in 1:fieldcount(args))
-    return :(Tuple{$(types...)})
+    return inline_body(:(Tuple{$(types...)}))
 end
 
 const MACRO_KWARGS = [:launch]

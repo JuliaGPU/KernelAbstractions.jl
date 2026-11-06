@@ -156,7 +156,7 @@ end
 # stable for 32 or more elements
 @inline @generated function argument_types(args::Tuple)
     types = (:(Core.Typeof(clconvert(args[$i]))) for i in 1:fieldcount(args))
-    return :(Tuple{$(types...)})
+    return inline_body(:(Tuple{$(types...)}))
 end
 
 
@@ -228,11 +228,13 @@ end
     call_tt, call_args = kernel_call_arguments(F, TT, fieldcount(args))
 
     # the converted arguments only hold pointers to the arrays in `args`
-    return quote
-        GC.@preserve args begin
-            $cl.clcall(kernel.fun, $call_tt, ($(call_args...),); global_size, local_size, kernel.rng_state)
+    return inline_body(
+        quote
+            GC.@preserve args begin
+                $cl.clcall(kernel.fun, $call_tt, ($(call_args...),); global_size, local_size, kernel.rng_state)
+            end
         end
-    end
+    )
 end
 
 

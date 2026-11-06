@@ -84,6 +84,11 @@ end
     @inbounds A[I] = 2 * A[I]
 end
 
+@kernel function codegen_copy(A, B)
+    I = @index(Global, Linear)
+    @inbounds B[I] = A[I]
+end
+
 # a 64-bit primitive type that no backend shuffles natively
 primitive type CodegenBits64 64 end
 
@@ -293,6 +298,20 @@ end
             @device_code_llvm debuginfo = :none codegen_shfl_bits64(backend, 32)(A, ndrange = 32)
             KernelAbstractions.synchronize(backend)
         end
+    end
+
+    # Elements of an array of isbits unions are loaded and stored inline, rather than through
+    # calls that return the union and its type tag separately.
+    @testset "isbits unions" begin
+        A = Union{Missing, Float32}[1, missing, 3, 4]
+        B = similar(A)
+        @test @filecheck implicit_check_not = ["arrayref_union", "arrayset_union"] begin
+            @check "define spir_kernel void @{{.*}}gpu_codegen_copy"
+            @check "ret void"
+            @device_code_llvm debuginfo = :none codegen_copy(backend, 4)(A, B, ndrange = 4)
+            KernelAbstractions.synchronize(backend)
+        end
+        @test isequal(B, A)
     end
 
     # `@print` lowers to a single variadic printf call, not to one call per argument.

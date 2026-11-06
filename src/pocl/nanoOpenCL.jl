@@ -5,6 +5,7 @@ using ..POCL: platform, device, context, queue
 import pocl_standalone_jll
 
 using GPUToolbox: GPUToolbox, @gcsafe_ccall, cooperative_wait
+using KernelInterface: inline_body
 
 using Printf
 
@@ -1388,7 +1389,7 @@ end
 # one call per argument: a splat of more than 32 arguments isn't a direct call
 @inline @generated function set_args!(k::Kernel, args::Tuple)
     calls = (:(set_arg!(k, $i, args[$i])) for i in 1:fieldcount(args))
-    return :($(calls...); nothing)
+    return inline_body(:($(calls...); nothing))
 end
 
 # work sizes padded to the three dimensions OpenCL devices support
@@ -1529,7 +1530,7 @@ end
         ).args
     )
 
-    return ex
+    return inline_body(ex)
 end
 
 # the arguments are passed as a tuple, see `set_args!`

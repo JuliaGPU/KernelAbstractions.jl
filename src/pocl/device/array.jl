@@ -115,15 +115,17 @@ end
         end
     end
 
-    return quote
-        selector_ptr = typetagdata(A, index)
-        selector = unsafe_load(selector_ptr)
+    return inline_body(
+        quote
+            selector_ptr = typetagdata(A, index)
+            selector = unsafe_load(selector_ptr)
 
-        align = alignment(A)
-        data_ptr = pointer(A, index)
+            align = alignment(A)
+            data_ptr = pointer(A, index)
 
-        return $ex
-    end
+            return $ex
+        end
+    )
 end
 
 @device_function @inline function arrayset(A::CLDeviceArray{T}, x::T, index::Integer) where {T}
@@ -145,16 +147,18 @@ end
     typs = Base.uniontypes(T)
     sel = findfirst(isequal(x), typs)
 
-    return quote
-        selector_ptr = typetagdata(A, index)
-        unsafe_store!(selector_ptr, $(UInt8(sel - 1)))
+    return inline_body(
+        quote
+            selector_ptr = typetagdata(A, index)
+            unsafe_store!(selector_ptr, $(UInt8(sel - 1)))
 
-        align = alignment(A)
-        data_ptr = pointer(A, index)
+            align = alignment(A)
+            data_ptr = pointer(A, index)
 
-        unsafe_store!(reinterpret(LLVMPtr{$x, AS}, data_ptr), x, 1, Val(align))
-        return
-    end
+            unsafe_store!(reinterpret(LLVMPtr{$x, AS}, data_ptr), x, 1, Val(align))
+            return
+        end
+    )
 end
 
 # A load from memory that is known not to be written for the duration of the kernel.
