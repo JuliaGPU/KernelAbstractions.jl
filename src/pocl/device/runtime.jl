@@ -40,14 +40,18 @@ end
 # would be interleaved. it can do so over several calls (e.g., a quirk printing the exception,
 # and GPUCompiler printing a backtrace). returns 1 when the output was just claimed, 2 when
 # it was claimed by an earlier call of this work-item, and 0 when it belongs to another.
+#
+# nothing reachable from the throw overrides may throw, not even a checked conversion like
+# `Int32(0)`: the resulting inference cycle through `throw_inexacterror` taints Base's
+# conversions on Julia 1.12+, which then can't be constant-folded (e.g. in `reinterpret`)
 @noinline function claim_output()
     lock = exception_field(Val(:output_lock))
     me = (get_global_id(1), get_global_id(2), get_global_id(3), 0)
-    state = atomic_cas_device!(lock, Int32(0), Int32(1))
+    state = atomic_cas_device!(lock, 0 % Int32, 1 % Int32)
     if state == 0
         unsafe_store!(exception_field(Val(:owner)), me)
         # publish the owner before other work-items compare against it
-        atomic_store_device!(lock, Int32(2))
+        atomic_store_device!(lock, 2 % Int32)
         return 1
     end
     # don't wait for the owner to be published: it may be a work-item that only executes
@@ -90,7 +94,7 @@ end
 
 # the work-item that threw stops executing after this
 function signal_exception()
-    atomic_store_device!(exception_field(Val(:status)), Int32(1))
+    atomic_store_device!(exception_field(Val(:status)), 1 % Int32)
     return
 end
 

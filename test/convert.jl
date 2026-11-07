@@ -53,6 +53,21 @@ end
     @inbounds B[tid, 3] = ifelse(x < 2, Int32(0), Int32(-1))
 end
 
+# https://github.com/JuliaGPU/KernelAbstractions.jl/issues/955
+# `reinterpret` relies on Base's padding queries being constant-folded, which an inference
+# cycle through a back-end's exception runtime can prevent.
+struct ReinterpretedBits
+    a::Int16
+    b::Int16
+    c::UInt32
+end
+
+@kernel function reinterpret_struct_kernel!(B, A)
+    tid = @index(Global, Linear)
+    @inbounds s = reinterpret(ReinterpretedBits, A[tid])
+    @inbounds B[tid] = Int64(s.a) + Int64(s.b) + Int64(s.c)
+end
+
 function convert_testsuite(backend, ArrayT)
     ET = KernelAbstractions.supports_float64(backend()) ? Float64 : Float32
 
@@ -84,6 +99,19 @@ function convert_testsuite(backend, ArrayT)
         bool_to_signed_float_kernel!(backend())(d_B, d_A, ndrange = 2)
         synchronize(backend())
         @test Array(d_B) == ET[0 0 0; -1 -1 -1]
+    end
+
+    # Julia 1.10 never constant-folds code that can reach an overlay method, like the throw
+    # overrides of every GPU back end, so the padding queries end up in the kernel
+    if VERSION >= v"1.11"
+        @testset "reinterpret into a struct" begin
+            A = UInt64[0x0000_0003_0002_0001, 0x0000_0010_0020_0030]
+            d_A = ArrayT(A)
+            d_B = ArrayT(zeros(Int64, 2))
+            reinterpret_struct_kernel!(backend())(d_B, d_A, ndrange = 2)
+            synchronize(backend())
+            @test Array(d_B) == [s.a + s.b + s.c for s in reinterpret.(ReinterpretedBits, A)]
+        end
     end
     return
 end
