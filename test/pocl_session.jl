@@ -127,7 +127,15 @@ end
         # keep arguments alive until all threads finish, despite SIGINT (from a POSIX shell)
         # or cancellation on Julia 1.14+
         cancellation = isdefined(Base, :CANCEL_TOKEN)
-        (cancellation || !Sys.iswindows()) &&
+        # on macOS before Julia 1.13, a race at start-up can leave SIGINT ignored for the
+        # whole process (JuliaLang/julia#62471)
+        sigint_ignored = Sys.isapple() && let act = Ref{NTuple{2, UInt64}}()
+            ccall(:sigaction, Cint, (Cint, Ptr{Cvoid}, Ptr{Cvoid}), 2, C_NULL, act)
+            act[][1] == 1 # SIG_IGN
+        end
+        sigint_ignored && @warn "SIGINT is ignored in this process; skipping the interrupt tests"
+        interruptible = cancellation || !(Sys.iswindows() || sigint_ignored)
+        interruptible &&
             @testset "interrupted launches ($path)" for path in (:short, :long)
             # one work-group takes 2 s, the others 0.5 s, and the interrupt comes after 0.25 s
             fill!(n, round(Int, rate / 2))
@@ -168,7 +176,7 @@ end
 
         # a launch doesn't run other tasks on its thread while it waits for the team. before
         # Julia 1.14, a task switch would hand the deferred interrupt to that task instead.
-        (cancellation || !Sys.iswindows()) &&
+        interruptible &&
             @testset "interrupted launch with a task waiting ($path)" for path in (:short, :long)
             fill!(n, round(Int, rate / 2))
             n[end] = round(Int, 2rate)
@@ -225,7 +233,7 @@ end
 
         # a single-threaded launch runs full and partial work-groups separately (here: two
         # handles of the same kernel); interrupts must wait until both runs finish
-        (cancellation || !Sys.iswindows()) &&
+        interruptible &&
             @testset "interrupted launch on one thread ($path)" for path in (:short, :long)
             s = POCL.session()
             full = @lock k.fun.lock POCL.create_host_kernel(k.fun, (1, 1, 1), false)
