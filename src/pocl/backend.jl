@@ -169,6 +169,10 @@ KA.pagelock!(::POCLBackend, x) = nothing
 KA.fold_threshold(::POCLBackend) = 1
 
 KI.get_backend(::Array) = POCLBackend()
+# VERSION >= v"1.11"
+@static if isdefined(Core, :Memory)
+    KI.get_backend(::Memory) = POCLBackend()
+end
 
 ## Implementation note:
 ## The POCL backend uses `Base.Array` as it's array type, so the external operations

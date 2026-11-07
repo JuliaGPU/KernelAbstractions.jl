@@ -141,6 +141,13 @@ function unittest_testsuite(Backend, backend_str, backend_mod, BackendArrayT; sk
         @test @inferred(KernelAbstractions.get_backend(Diagonal(x))) isa backendT
         @test @inferred(KernelAbstractions.get_backend(Tridiagonal(A))) isa backendT
         @test_throws ArgumentError KernelAbstractions.get_backend(UnknownAbstractVector())  # issue #588
+
+        # VERSION >= v"1.11"
+        @static if isdefined(Core, :Memory)
+            M = Memory{Float32}(undef, 5)
+            @test @inferred(KernelAbstractions.get_backend(M)) isa CPU
+            @test @inferred(KernelAbstractions.get_backend(view(M, 2:4))) isa CPU
+        end
     end
 
     @conditional_testset "sparse" skip_tests begin
