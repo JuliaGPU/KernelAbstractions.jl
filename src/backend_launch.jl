@@ -102,10 +102,9 @@ Core.kwcall(kwargs::NamedTuple, obj::Kernel{<:KI.Backend}, args::Vararg{Any, N})
     Base.issingletontype(F) ? similar(obj, nothing) : obj
 
 function launch_tuple(obj::Kernel, args::Tuple; ndrange = nothing, workgroupsize = nothing)
-    setup = launch_setup(sizes_only(obj), ndrange, workgroupsize)
+    skip, ndrange, workgroupsize, iterspace = launch_setup(sizes_only(obj), ndrange, workgroupsize)
     # nothing to launch (or compile) for an empty ndrange
-    setup === nothing && return nothing
-    ndrange, workgroupsize, iterspace = setup
+    skip && return nothing
 
     # launch on an N-d grid, computing indices in a narrow type, if possible. this doesn't
     # depend on the tuned workgroup size, so the context (and thus the kernel) doesn't either.
@@ -127,11 +126,12 @@ end
 # The parts of the launch that don't depend on the arguments are kept out of
 # `launch_tuple` and `launch_kernel`, which are compiled for every kernel.
 
-# normalize the launch arguments, or return `nothing` if there is nothing to launch
+# normalize the launch arguments, and tell whether there is nothing to launch. (returning
+# `nothing` instead would box the result when the iteration space holds an array)
 @noinline function launch_setup(obj::Kernel, ndrange, workgroupsize)
     ndrange, workgroupsize, iterspace, dynamic = launch_config(obj, ndrange, workgroupsize)
-    any(iszero, size(blocks(iterspace))) && return nothing
-    return ndrange, workgroupsize, iterspace
+    skip = any(iszero, size(blocks(iterspace)))
+    return skip, ndrange, workgroupsize, iterspace
 end
 
 function launch_kernel(obj::Kernel, launch, ndrange, _workgroupsize, iterspace, args::Tuple)

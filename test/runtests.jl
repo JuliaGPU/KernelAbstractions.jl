@@ -484,6 +484,7 @@ end
         @inbounds A[I] = x
     end
     launch(kernel, A, n) = kernel(A, n; ndrange = length(A))
+    launch_list(kernel, visits, position, list) = kernel(visits, position; ndrange = list)
     end
     # with `args...`, Julia 1.11 and older box the result
     allocated(f::F, args::Vararg{Any, N}) where {F, N} = (f(args...); @allocated f(args...))
@@ -515,6 +516,15 @@ end
         mod.launch(kernel, B, n)
         @test allocated(mod.launch, kernel, B, n) == 0 skip = skip_wait
     end
+
+    # nor does launching over an iteration space that holds an array
+    visits = zeros(Int, 3, 3)
+    position = zeros(Int, 3, 3)
+    list = Testsuite.IndexList(vec(collect(CartesianIndices((3, 3)))))
+    listed = Testsuite.launch_listed!(CPU(), 4)
+    mod.launch_list(listed, visits, position, list)
+    @test all(==(1), visits)
+    @test allocated(mod.launch_list, listed, visits, position, list) == 0 skip = skip_wait
 
     # nor does checking what the device supports, which launches of collectives do
     for T in (Float16, Float32, Float64)
