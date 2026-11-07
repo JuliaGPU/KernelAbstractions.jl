@@ -656,9 +656,12 @@ end
         @test POCL.host_schedule(h, s, nt, false) == (1, false)
         kernel(A, 10^5; sizes...)
         @test POCL.host_schedule(h, s, nt, false)[1] == nt
-        # team runs also estimate serial duration; sleeping threads can delay the first runs
-        for _ in 1:5
+        # team runs also estimate serial duration. a run times a team thread, which may have
+        # just woken up or been descheduled (CI VMs have fewer cores than Julia threads), so
+        # allow many runs: the first fast one makes the kernel serial again.
+        for _ in 1:100
             kernel(A, 0; sizes...)
+            POCL.host_schedule(h, s, nt, false) == (1, false) && break
         end
         @test POCL.host_schedule(h, s, nt, false) == (1, false)
         # large grids select the full team
