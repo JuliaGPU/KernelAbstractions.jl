@@ -346,14 +346,22 @@ function largest_divisor(n::Int, x::Int, m::Int)
     return 0
 end
 
-# PoCL's own choice when a launch doesn't give a local size (`pocl_default_local_size_optimizer`
-# in `lib/CL/devices/pocl_local_size.c`), in one dimension: start from the largest work-group,
-# and split it while there are at most half as many work-groups as threads, but not below
-# 4 times the preferred work-group size multiple. two differences: PoCL only uses local sizes
-# that divide the global size; KernelAbstractions supports partial work-groups, so this uses
-# powers of two instead, which divide the extents of `ndrange`s that are powers of two. and
-# PoCL doesn't split at all if splitting over all threads would go below the minimum, which
-# leaves e.g. 1000 work-items on 64 threads in one work-group; this splits down to the
+# the number of work-groups per thread that the default work-group size aims to exceed
+const WORKGROUPS_PER_THREAD = 4
+
+# Based on PoCL's own choice when a launch doesn't give a local size
+# (`pocl_default_local_size_optimizer` in `lib/CL/devices/pocl_local_size.c`), in one
+# dimension: start from the largest work-group, and halve it while there are at most
+# `WORKGROUPS_PER_THREAD` work-groups per thread, but not below 4 times the preferred
+# work-group size multiple. three differences: PoCL stops splitting once there are more than
+# half as many work-groups as threads, which leaves threads idle when the work-groups don't
+# divide evenly among them (e.g. 132x132 work-items in 6 work-groups on 8 threads), and gives
+# threads that finish early nothing to pick up; several work-groups per thread keep the
+# threads busy at the cost of a few more, still vectorizable, work-groups. PoCL only uses local
+# sizes that divide the global size; KernelAbstractions supports partial work-groups, so this
+# uses powers of two instead, which divide the extents of `ndrange`s that are powers of two.
+# and PoCL doesn't split at all if splitting over all threads would go below the minimum,
+# which leaves e.g. 1000 work-items on 64 threads in one work-group; this splits down to the
 # minimum instead.
 function cpu_workgroupsize(nitems, threads, max_items, multiple)
     nitems === nothing && return max_items
@@ -363,10 +371,8 @@ function cpu_workgroupsize(nitems, threads, max_items, multiple)
     # one work-group, which isn't split (without dividing, for small launches)
     items >= nitems && items < 2 * min_items && return items
     groups = cld_extent(nitems, items)
-    while threads >= 2 * groups && items >= 2 * min_items
-        splits = min(threads ÷ groups, items ÷ min_items)
-        # PoCL splits by the largest factor of at most `splits` that divides the work-group
-        items >>= trailing_zeros(prevpow(2, splits))
+    while groups <= WORKGROUPS_PER_THREAD * threads && items >= 2 * min_items
+        items >>= 1
         groups = cld_extent(nitems, items)
     end
     return items
