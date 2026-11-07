@@ -218,6 +218,12 @@ function Adapt.adapt_storage(to::KernelAdaptor, xs::Array{T, N}) where {T, N}
     return CLDeviceArray{T, N, AS.CrossWorkgroup}(size(xs), reinterpret(LLVMPtr{T, AS.CrossWorkgroup}, ptr), maxsize)
 end
 
+# VERSION >= v"1.11"
+@static if isdefined(Core, :Memory)
+    # wrapping `Memory` in an `Array` doesn't copy it
+    Adapt.adapt_storage(to::KernelAdaptor, xs::Memory) = adapt(to, Base.wrap(Array, xs, length(xs)))
+end
+
 import KernelInterface
 include("backend.jl")
 import .POCLKernels: POCLBackend
