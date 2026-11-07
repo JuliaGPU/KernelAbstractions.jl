@@ -218,6 +218,25 @@ end
   workgroup, on every backend. `@groupreduce` uses sub-groups internally where the backend
   can shuffle the values. See [Reductions and scans](@ref group_collectives).
 
+#### Unreleased
+- The `CPU` backend runs kernels on Julia's threads instead of PoCL's, through PoCL's
+  `cl_pocl_host_kernel` extension (`pocl_standalone_jll` 7.2.3 or later). On a 4-core x86
+  machine, a launch costs about 0.15 µs on the launching task and 1 µs on several threads,
+  down from 5 µs. Small launches, and launches while the threads are busy (e.g. from a
+  `Threads.@threads` loop), run on the launching task alone. A launch doesn't yield while
+  its kernel runs. See [`CPU`](@ref).
+- Launches with as many workgroups start each block of them on the thread on which a
+  `Threads.@threads :static` loop over as many iterations runs it, so data stays in that
+  thread's cache and NUMA node. Pin Julia's threads before the first launch, e.g. with
+  ThreadPinning.jl; `POCL_AFFINITY` only applies to the few kernels that still run on
+  PoCL's threads.
+- On the `CPU` backend, work-items no longer check whether they are inside the range when
+  the workgroups cover it exactly, and otherwise only those of partial workgroups do (from
+  a kernel's second launch with partial workgroups on, so that a kernel launched once is
+  compiled once). This lets PoCL vectorize kernels better: an axpy over 10⁵ elements on one
+  thread took about 15% longer than a serial loop, rather than 3× (x86) to 7× (Apple M1) as
+  long. `muladd` is computed with fused multiply-adds on CPUs that have them.
+
 ## Semantic differences
 
 ### To CUDA.jl/AMDGPU.jl
