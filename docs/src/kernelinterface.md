@@ -229,6 +229,10 @@ get_sub_group_local_id
 
 ```@docs
 barrier
+barrier(::MemFenceFlags)
+MemFenceFlags
+LOCAL_MEM_FENCE
+GLOBAL_MEM_FENCE
 sub_group_barrier
 sub_group_barrier(::Integer)
 ```

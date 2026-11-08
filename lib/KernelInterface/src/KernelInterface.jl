@@ -35,6 +35,7 @@ include("host.jl")
             :sub_group_any, :sub_group_all, :sub_group_ballot,
             :sub_group_reduce, :sub_group_scan, :sub_group_exclusive_scan,
             :barrier, :sub_group_barrier, :_print,
+            :MemFenceFlags, :LOCAL_MEM_FENCE, :GLOBAL_MEM_FENCE,
             # compilation and launch
             :Kernel, :kernel_function, :argconvert, :launch, Symbol("@launch"),
             :launch_configuration, :max_work_group_size, :max_work_group_dims,

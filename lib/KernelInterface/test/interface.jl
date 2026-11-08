@@ -39,9 +39,13 @@ function test_interface_kernel(results)
     end
     return
 end
+# `barrier()`, or `barrier(flags)` for a `Val(flags)`
+sync(::Nothing) = KI.barrier()
+sync(::Val{flags}) where {flags} = KI.barrier(flags)
+
 # Local arrays, written by one work-item and read back by another one after a barrier.
 # `c` has the same type and size as `a`, but is a different call site, so different memory.
-function localmem_kernel(out, ::Val{N}) where {N}
+function localmem_kernel(out, ::Val{N}, flags = nothing) where {N}
     i = KI.get_local_id().x
     a = KI.localmemory(Int32, N)
     b = KI.localmemory(Int32, (2, N))
@@ -52,7 +56,7 @@ function localmem_kernel(out, ::Val{N}) where {N}
         b[2, i] = 2i
         c[i] = 3i
     end
-    KI.barrier()
+    sync(flags)
     j = N - i + 1
     gid = KI.get_global_id().x
     @inbounds begin
@@ -65,12 +69,12 @@ function localmem_kernel(out, ::Val{N}) where {N}
 end
 
 # Every work-item writes global memory, and reads another work-item's write after a barrier.
-function global_barrier_kernel(scratch, out)
+function global_barrier_kernel(scratch, out, flags = nothing)
     n = KI.get_local_size().x
     base = (KI.get_group_id().x - 1) * n
     i = KI.get_local_id().x
     @inbounds scratch[base + i] = base + i
-    KI.barrier()
+    sync(flags)
     @inbounds out[base + i] = scratch[base + n - i + 1]
     return
 end
@@ -1297,22 +1301,28 @@ function interface_testsuite(backend::KI.Backend, AT)
     @testset "Local memory and barriers" begin
         N = 32
         groups = 3
-        out = KI.zeros(backend, Int32, N * groups, 4)
-        KI.@launch backend numgroups = groups workgroupsize = N localmem_kernel(out, Val(N))
-        KI.synchronize(backend)
-        out = Array(out)
-        # each work-item sees what its mirror image wrote before the barrier, in both arrays
-        expected = repeat(N:-1:1, groups)
-        @test out[:, 1] == expected
-        @test out[:, 2] == -expected
-        @test out[:, 3] == 2 .* expected
-        @test out[:, 4] == 3 .* expected
+        local_flags = (nothing, Val(KI.LOCAL_MEM_FENCE), Val(KI.LOCAL_MEM_FENCE | KI.GLOBAL_MEM_FENCE))
+        @testset "barrier($(something(flags, Val(:default))))" for flags in local_flags
+            out = KI.zeros(backend, Int32, N * groups, 4)
+            KI.@launch backend numgroups = groups workgroupsize = N localmem_kernel(out, Val(N), flags)
+            KI.synchronize(backend)
+            out = Array(out)
+            # each work-item sees what its mirror image wrote before the barrier, in both arrays
+            expected = repeat(N:-1:1, groups)
+            @test out[:, 1] == expected
+            @test out[:, 2] == -expected
+            @test out[:, 3] == 2 .* expected
+            @test out[:, 4] == 3 .* expected
+        end
 
-        scratch = KI.zeros(backend, Int, N * groups)
-        out = KI.zeros(backend, Int, N * groups)
-        KI.@launch backend numgroups = groups workgroupsize = N global_barrier_kernel(scratch, out)
-        KI.synchronize(backend)
-        @test Array(out) == vcat([(g * N) .+ (N:-1:1) for g in 0:(groups - 1)]...)
+        global_flags = (nothing, Val(KI.GLOBAL_MEM_FENCE), Val(KI.LOCAL_MEM_FENCE | KI.GLOBAL_MEM_FENCE))
+        @testset "barrier($(something(flags, Val(:default))))" for flags in global_flags
+            scratch = KI.zeros(backend, Int, N * groups)
+            out = KI.zeros(backend, Int, N * groups)
+            KI.@launch backend numgroups = groups workgroupsize = N global_barrier_kernel(scratch, out, flags)
+            KI.synchronize(backend)
+            @test Array(out) == vcat([(g * N) .+ (N:-1:1) for g in 0:(groups - 1)]...)
+        end
     end
 
     if KI.supports_subgroups(backend)

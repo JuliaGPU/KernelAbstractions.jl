@@ -135,7 +135,9 @@ end
 @testset "host fallbacks" begin
     # Barriers are meaningless off-device and must say so rather than no-op.
     @test_throws "used outside kernel" KI.barrier()
+    @test_throws "used outside kernel" KI.barrier(KI.LOCAL_MEM_FENCE)
     @test_throws "used outside kernel" KI.sub_group_barrier()
+    @test (KI.LOCAL_MEM_FENCE | KI.GLOBAL_MEM_FENCE).bits == 0x00000003
 
     # Conservative defaults: a backend only implements these if it can do better.
     @test KI.multiprocessor_count(StubBackend()) == 0
