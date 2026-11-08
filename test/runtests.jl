@@ -1555,10 +1555,15 @@ end
     @test checks(bounds_checked!(CPU(), 8), 16) == expected(16, 8)
     @test checks(bounds_checked!(CPU(), 8), 12) == expected(12, 8)
     # also with a tuned workgroup size, which is a power of two on PoCL, unless a single
-    # workgroup covers the ndrange (e.g. on a single thread). an odd ndrange larger than
-    # the largest workgroup needs partial workgroups, however many threads PoCL uses.
+    # workgroup covers the ndrange (e.g. on a single thread). a prime ndrange larger than
+    # the largest workgroup needs partial workgroups, however many threads PoCL uses: fitting
+    # can't find a divisor (4097 = 17 * 241 would fit 241 work-items on 4 threads).
     @test all(==(0), checks(bounds_checked!(CPU()), 1024))
-    A = checks(bounds_checked!(CPU()), POCL.device_limits().max_work_group_size + 1)
+    n = POCL.device_limits().max_work_group_size + 1
+    while any(d -> n % d == 0, 2:isqrt(n))
+        n += 1
+    end
+    A = checks(bounds_checked!(CPU()), n)
     @test A[end] == 1
     @test A[1] == 0
     @test all(==(0), checks(bounds_checked!(CPU()), (64, 32)))
@@ -1569,7 +1574,7 @@ end
     @test POCL.compilations[] == compilations + 1
     # check the whole first partial launch so kernels used once compile once. later launches
     # compile an unchecked variant for full workgroups.
-    A = fill(-1, 4097)
+    A = fill(-1, n)
     partial_bounds_checked!(CPU())(A; ndrange = length(A))
     @test all(==(1), A)
     @test POCL.compilations[] == compilations + 2
@@ -1665,19 +1670,20 @@ end
         @test 1 <= items <= max_items
         # a power of two, unless limited by `max_items`
         ispow2(max_items) && @test ispow2(items)
-        # splitting stops with more than half as many workgroups as threads, or at the
-        # minimum of 4 times the preferred multiple
+        # splitting stops with more than 4 workgroups per thread, or at the minimum of 4 times
+        # the preferred multiple
         if nitems !== nothing
-            @test 2 * cld(max(nitems, 1), items) > threads || items < 2 * min(32, max_items)
+            @test cld(max(nitems, 1), items) > 4 * threads || items < 2 * min(32, max_items)
         end
     end
-    # PoCL's choice for the same launches (`pocl_default_local_size_optimizer`)
     for (nitems, threads, items) in (
-            (1024, 1, 1024), (1024, 4, 256), (1024, 8, 128), (4096, 4, 1024), (4096, 8, 512),
-            (16384, 4, 4096), (16384, 8, 2048), (65536, 8, 4096), (4096, 64, 64),
+            (1024, 1, 128), (1024, 4, 32), (1024, 8, 32), (4096, 4, 128), (4096, 8, 64),
+            (16384, 4, 512), (16384, 8, 256), (65536, 8, 1024), (4096, 64, 32), (2^20, 8, 4096),
         )
         @test workgroupsize(nitems, threads, 4096, 8) == items
     end
+    # a 132x132 launch on 8 threads isn't left in 5 workgroups, which leave threads idle
+    @test cld(132 * 132, workgroupsize(132 * 132, 8, 4096, 8)) > 32
     # the floor follows the preferred multiple
     @test workgroupsize(1024, 32, 4096, 8) == 32
     @test workgroupsize(1024, 32, 4096, 16) == 64
