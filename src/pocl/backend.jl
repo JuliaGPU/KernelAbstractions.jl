@@ -109,9 +109,9 @@ KA.@kernel function fill_kernel(A, x)
     @inbounds A[I] = x
 end
 
-# Filling or copying into an array with a kernel first-touches its pages from PoCL's threads,
-# which spreads them over the threads' memory domains instead of placing all of them in the
-# calling thread's (see the NUMA example). Below 1 MiB, the launch overhead makes that up to
+# Filling or copying into an array with a kernel first-touches its pages from the kernel's
+# threads, which spreads them over the threads' memory domains instead of placing all of them
+# in the calling thread's (see the NUMA example). Below 1 MiB, the launch overhead makes that up to
 # several times slower than writing from the host, while there are too few pages for
 # placement to matter.
 const KERNEL_FILL_BYTES = 1 << 20
@@ -217,9 +217,33 @@ function KI.launch(obj::KI.Kernel{POCLBackend}, groups::Dims{3}, items::Dims{3},
     # compiled kernel only holds pointers to the arrays captured by `f`, so keep it alive
     # until the kernel completes.
     f = obj.kern.f
-    GC.@preserve f POCL.launch_and_wait(
-        obj.kern.kernel, args; local_size = items, global_size = groups .* items
+    k = obj.kern.kernel
+    global_size = groups .* items
+    # (see `KA.launch_split`, which shares this specialization)
+    GC.@preserve f POCL.launch_and_wait(k, args, k.fun, global_size, groups; local_size = items, global_size)
+    return nothing
+end
+
+# split only N-d launches: linearized launches place partial work-groups where `host_run`
+# cannot identify them. keep the first partial launch checked so kernels used once compile
+# once. queue fallbacks also run every work-group checked.
+function KA.split_launch(::POCLBackend, ::KA.NDLaunch, checked::KI.Kernel{POCLBackend})
+    k = checked.kern.kernel.fun
+    (@atomic :monotonic k.launched_partial) && return true
+    @atomic :monotonic k.launched_partial = true
+    return false
+end
+
+function KA.launch_split(
+        kernel::KI.Kernel{POCLBackend}, checked::KI.Kernel{POCLBackend}, extent::Dims{3},
+        groups::Dims{3}, items::Dims{3}, args::Tuple
     )
+    # keep captured arrays alive for both kernel variants
+    f = kernel.kern.f
+    k = kernel.kern.kernel
+    partial = checked.kern.kernel.fun
+    global_size = groups .* items
+    GC.@preserve f POCL.launch_and_wait(k, args, partial, extent, groups; local_size = items, global_size)
     return nothing
 end
 
@@ -232,7 +256,7 @@ KI.max_num_groups(::POCLBackend)::NTuple{3, Int} = (typemax(Int), typemax(Int), 
 KI.sub_group_size(::POCLBackend)::Int = device_limits().sub_group_size
 KI.multiprocessor_count(::POCLBackend)::Int = device_limits().compute_units
 
-# PoCL runs each work-group on one of its threads, looping over (and vectorizing across) the
+# each work-group runs on one thread, which loops over (and vectorizes across) its
 # work-items. the largest work-group would run a launch of up to that many work-items on a
 # single thread, so split it into about as many work-groups as there are threads, as long as
 # the work-groups stay large enough to vectorize. this assumes that the work is balanced
@@ -244,7 +268,7 @@ KI.launch_configuration(
 
 # kept out of `KI.launch_configuration`, which is compiled for every kernel
 @noinline function launch_workgroupsize(kernel::cl.Kernel, nitems, max_work_group_size)
-    max_items = min(kernel.work_group_size, max_work_group_size)
+    max_items = min(kernel.tuned_work_group_size, max_work_group_size)
     items = cpu_workgroupsize(
         nitems, device_limits().compute_units, max_items, kernel.preferred_work_group_size_multiple
     )
@@ -267,32 +291,50 @@ end
 # keeps at least half its size. without one, the launch stays checked, but runs faster in
 # work-groups a quarter of the size (axpy, 1000003 work-items on 4 threads of a Ryzen 9
 # 9950X: 71 vs 31 µs).
+# vectorization is across the first dimension. below 16 vectors (of the preferred multiple),
+# shrink it only to a vector-width multiple, never to a quarter: a scalar remainder costs
+# more than a partial work-group (axpy, 1000 work-items on 32 threads: 146 ns in work-groups
+# of 32, 162 ns of 25, 209 ns of 8).
 # (only shrink, so padding stays within the bound `KA.select_launch` assumes.)
 function KA.launch_workgroupsize(::POCLBackend, ::KA.NDLaunch, threads, ndrange)
     extent = KA.extents(ndrange)
-    limits = KA.nd_limits(device_limits().max_work_group_dims, extent)
-    items = KI.threads_to_workgroupsize(threads, extent, limits)
-    return map(fit_workgroup, extent, items)
+    limits = device_limits()
+    items = KI.threads_to_workgroupsize(threads, extent, KA.nd_limits(limits.max_work_group_dims, extent))
+    width = limits.preferred_work_group_size_multiple
+    return ntuple(Val(length(extent))) do d
+        Base.@_inline_meta
+        n, x = extent[d], items[d]
+        small = d == 1 && width <= x < 16 * width
+        fit_workgroup(n, x, small ? width : 1, !small)
+    end
 end
 
-function fit_workgroup(n::Int, x::Int)
+# keep `x` if it divides `n`; otherwise use the largest multiple of `m` in `cld(x, 2):x`
+# that divides `n`. if none exists, use a quarter of `x` (a multiple of `m`) when `shrink`,
+# or keep `x` otherwise
+function fit_workgroup(n::Int, x::Int, m::Int, shrink::Bool)
     n % x == 0 && return x
-    d = largest_divisor(n, x)
-    return d == 0 ? cld(x, 4) : d
+    d = largest_divisor(n, x, m)
+    d == 0 || return d
+    shrink || return x
+    return max(m, cld(x, 4) ÷ m * m)
 end
 
-# the largest divisor of `n` in `cld(x, 2):x`, or 0 if there is none. searches the sizes
-# or the work-group counts, whichever are fewer. requires `n % x != 0`: the size search
-# skips `x` (`largest_divisor(8, 4) == 2`).
-function largest_divisor(n::Int, x::Int)
+# the largest multiple of `m` in `cld(x, 2):x` that divides `n`, or 0 if none exists. search
+# sizes or work-group counts, whichever are fewer. requires `n % x != 0`: the size search
+# skips `x` (`largest_divisor(8, 4, 1) == 2`).
+function largest_divisor(n::Int, x::Int, m::Int)
+    # (a multiple of `m` only divides multiples of `m`)
+    n % m == 0 || return 0
     lo = cld(x, 2)
-    if x - lo <= fld(n, lo) - cld(n, x)
-        for d in (x - 1):-1:lo
+    hi = (x - 1) ÷ m * m
+    if (hi - lo) ÷ m <= fld(n, lo) - cld(n, x)
+        for d in hi:-m:lo
             n % d == 0 && return d
         end
     else
         for g in cld(n, x):fld(n, lo)
-            n % g == 0 && return n ÷ g
+            n % g == 0 && (n ÷ g) % m == 0 && return n ÷ g
         end
     end
     return 0
@@ -311,7 +353,9 @@ function cpu_workgroupsize(nitems, threads, max_items, multiple)
     nitems === nothing && return max_items
     nitems = max(nitems, 1)
     min_items = min(4 * max(multiple, 1), max_items)
-    items = min(nextpow(2, min(nitems, max_items)), max_items)
+    items = min(nextpow2(min(nitems, max_items)), max_items)
+    # one work-group, which isn't split (without dividing, for small launches)
+    items >= nitems && items < 2 * min_items && return items
     groups = cld(nitems, items)
     while (splits = min(threads ÷ groups, items ÷ min_items)) > 1
         # PoCL splits by the largest factor of at most `splits` that divides the work-group
@@ -320,6 +364,9 @@ function cpu_workgroupsize(nitems, threads, max_items, multiple)
     end
     return items
 end
+
+# `nextpow(2, n)` for `n >= 1`, inlined
+@inline nextpow2(n::Integer) = n <= 1 ? one(n) : one(n) << (8 * sizeof(n) - leading_zeros(n - one(n)))
 
 KI.supports_subgroups(::POCLBackend) = device_limits().sub_group_size > 0
 # PoCL forms sub-groups from consecutive work-items, but executes sub-group operations as
