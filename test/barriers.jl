@@ -45,6 +45,21 @@ end
     end
 end
 
+# An inner loop around a `@synchronize` that exits straight into the header of the outer
+# loop. The SPIR-V back-end of LLVM 23 emitted a block before its dominator (#894).
+@kernel function nested_sync_loops!(A, go)
+    i = @index(Global)
+    @uniform n = length(A)
+    @uniform j = 0
+    while go && j < n
+        @uniform j += 1
+        for _ in 1:n
+            @synchronize()
+        end
+    end
+    A[i] = j
+end
+
 function barrier_testsuite(backend, ArrayT)
     @testset "recognized barriers" begin
         @test KernelAbstractions.is_sync(:(@synchronize()))
@@ -73,6 +88,12 @@ function barrier_testsuite(backend, ArrayT)
         A = KernelAbstractions.zeros(backend(), Int, 16)
         qualified!(backend(), 8)(A; ndrange = 13)
         @test Array(A) == [2 .* (1:13); zeros(Int, 3)]
+    end
+
+    @testset "nested loops around @synchronize" begin
+        A = KernelAbstractions.zeros(backend(), Int, 16)
+        nested_sync_loops!(backend(), 8)(A, true; ndrange = 13)
+        @test Array(A) == [fill(16, 13); zeros(Int, 3)]
     end
     return
 end
