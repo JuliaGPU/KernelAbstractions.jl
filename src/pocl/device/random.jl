@@ -4,24 +4,26 @@ using Random
 import RandomNumbers
 
 # local memory with the actual seed, per subgroup, set by `initialize_rng_state`` or overridden by calling `seed!`
-@inline function global_random_keys()
+@device_function @inline function global_random_keys()
     n = get_num_sub_groups()
     ptr = random_keys()::LLVMPtr{UInt32, AS.Workgroup}
     return CLDeviceArray{UInt32, 1, AS.Workgroup}((n,), ptr)
 end
 
 # local memory with per-subgroup counters, incremented when generating numbers
-@inline function global_random_counters()
+@device_function @inline function global_random_counters()
     n = get_num_sub_groups()
     ptr = random_counters()::LLVMPtr{UInt32, AS.Workgroup}
     return CLDeviceArray{UInt32, 1, AS.Workgroup}((n,), ptr)
 end
 
-# initialization function, called automatically at the start of each kernel
-function initialize_rng_state()
+# initialization function, called automatically at the start of each kernel.
+# it must return nothing, as the kernel calls it as a void function.
+@device_function function initialize_rng_state()
     subgroup_id = get_sub_group_id()
     @inbounds global_random_keys()[subgroup_id] = kernel_state().random_seed
-    return @inbounds global_random_counters()[subgroup_id] = 0
+    @inbounds global_random_counters()[subgroup_id] = 0
+    return
 end
 
 # generators

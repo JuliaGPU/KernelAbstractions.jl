@@ -20,15 +20,19 @@ end
     return inline_body(:(reinterpret(LLVMPtr{$T, AS.CrossWorkgroup}, kernel_state().exception_info + $offset)))
 end
 
+# device-only functions are overlays, with a host method that throws. sysimage builds compile
+# host methods, and a sysimage that references device intrinsics fails to load
+# (JuliaGPU/GPUCompiler.jl#611).
+
 # the record is shared by all work-items on the device, so these need device scope, which
 # UnsafeAtomics' primitives emit as given (SPIRVIntrinsics' atomics are relaxed)
-@inline function atomic_store_device!(ptr::LLVMPtr{Int32, AS.CrossWorkgroup}, val::Int32)
+@device_function @inline function atomic_store_device!(ptr::LLVMPtr{Int32, AS.CrossWorkgroup}, val::Int32)
     UnsafeAtomics.Internal.llvm_store!(
         ptr, val, Val(:release), Val(:device), Val(false), Val(sizeof(Int32)), Val(())
     )
     return
 end
-@inline function atomic_cas_device!(ptr::LLVMPtr{Int32, AS.CrossWorkgroup}, cmp::Int32, val::Int32)
+@device_function @inline function atomic_cas_device!(ptr::LLVMPtr{Int32, AS.CrossWorkgroup}, cmp::Int32, val::Int32)
     (; old) = UnsafeAtomics.Internal.llvm_cmpxchg!(
         ptr, cmp, val, Val(:acq_rel), Val(:acquire), Val(:device),
         Val(false), Val(false), Val(sizeof(Int32)), Val(())
@@ -44,7 +48,7 @@ end
 # nothing reachable from the throw overrides may throw, not even a checked conversion like
 # `Int32(0)`: the resulting inference cycle through `throw_inexacterror` taints Base's
 # conversions on Julia 1.12+, which then can't be constant-folded (e.g. in `reinterpret`)
-@noinline function claim_output()
+@device_function @noinline function claim_output()
     lock = exception_field(Val(:output_lock))
     me = (get_global_id(1), get_global_id(2), get_global_id(3), 0)
     state = atomic_cas_device!(lock, 0 % Int32, 1 % Int32)
@@ -59,7 +63,7 @@ end
     return state == 2 && unsafe_load(exception_field(Val(:owner))) == me ? 2 : 0
 end
 
-function report_exception(ex)
+@device_function function report_exception(ex)
     claim = claim_output()
     if claim == 1
         SPIRVIntrinsics.@printf(
@@ -72,7 +76,7 @@ function report_exception(ex)
     return
 end
 
-function report_exception_name(ex)
+@device_function function report_exception_name(ex)
     claim = claim_output()
     if claim == 1
         SPIRVIntrinsics.@printf(
@@ -85,7 +89,7 @@ function report_exception_name(ex)
     return
 end
 
-function report_exception_frame(idx, func, file, line)
+@device_function function report_exception_frame(idx, func, file, line)
     if claim_output() != 0
         SPIRVIntrinsics.@printf(" [%d] %s at %s:%d\n", idx, func, file, line)
     end
@@ -93,11 +97,13 @@ function report_exception_frame(idx, func, file, line)
 end
 
 # the work-item that threw stops executing after this
-function signal_exception()
+@device_function function signal_exception()
     atomic_store_device!(exception_field(Val(:status)), 1 % Int32)
     return
 end
 
+# these use no device intrinsics, so they can stay host methods. as overlays, inference could
+# constant-fold calls to them by running the host method, which throws.
 malloc(sz) = C_NULL
 
 report_oom(sz) = return
@@ -111,7 +117,7 @@ struct KernelState
     exception_info::UInt64
 end
 
-@inline @generated kernel_state() = GPUCompiler.kernel_state_value(KernelState)
+@device_function @inline @generated kernel_state() = GPUCompiler.kernel_state_value(KernelState)
 
 ## intrinsics for adding and accessing additional kernel arguments
 
@@ -136,5 +142,5 @@ end
 end
 
 for name in [:random_keys, :random_counters]
-    @eval @inline $name() = additional_arg_value(LLVMPtr{UInt32, AS.Workgroup}, Val($(QuoteNode(name))))
+    @eval @device_function @inline $name() = additional_arg_value(LLVMPtr{UInt32, AS.Workgroup}, Val($(QuoteNode(name))))
 end
