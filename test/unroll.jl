@@ -36,6 +36,18 @@ end
     end
 end
 
+# A partial `@unroll` of a loop with a run-time trip count, whose header ends in
+# the switch over `x^n`'s small-`n` fast paths. The SPIR-V back-end used to emit
+# the loop's OpLoopMerge after that OpSwitch (KernelAbstractions.jl#959).
+@kernel function kernel_unroll_switch!(a, @Const(x), n)
+    I = @index(Global)
+    s = zero(eltype(a))
+    @unroll 2 for j in 1:n
+        @inbounds s += x[I]^(j - 2)
+    end
+    @inbounds a[I] = s
+end
+
 # `generated=true` makes the kernel a generated function, so that the `where`
 # parameter `N` can be interpolated into `@unroll $N`, which requires a literal.
 @kernel generated = true function kernel_unroll_generated!(a, ::Val{N}) where {N}
@@ -77,6 +89,12 @@ function unroll_testsuite(backend, ArrayT)
     kernel2! = kernel_unroll2!(backend(), 1, 1)
     kernel2!(a)
     synchronize(backend())
+
+    a = ArrayT(zeros(Float32, 4))
+    x = ArrayT(Float32[1, 2, 3, 4])
+    kernel_unroll_switch!(backend(), 4)(a, x, 7; ndrange = 4)
+    synchronize(backend())
+    @test Array(a) ≈ [sum(x^(j - 2) for j in 1:7) for x in Float32[1, 2, 3, 4]]
 
     a = ArrayT(zeros(Float32, 5))
     kernel3! = kernel_unroll_generated!(backend(), 1, 1)
