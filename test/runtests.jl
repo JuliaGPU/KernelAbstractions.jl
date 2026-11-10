@@ -430,6 +430,20 @@ end
     @test occursin("sub_group_reduce_add", ir)
 end
 
+# bytes allocated by `f(args...)`, after a call to compile it. `@allocated` also counts
+# other threads, and tasks that run when a launch yields; which launches yield depends on
+# timing. an allocation in `f` itself shows up in every measurement, so keep the least of a
+# few. (with `args...`, Julia 1.11 and older box the result)
+function allocated(f::F, args::Vararg{Any, N}) where {F, N}
+    f(args...)
+    bytes = typemax(Int)
+    for _ in 1:3
+        bytes = min(bytes, @allocated f(args...))
+        bytes == 0 && break
+    end
+    return bytes
+end
+
 # Julia doesn't turn a splat of more than 32 elements into a direct call, so a launch with
 # many arguments allocates unless every layer passes them on as a tuple
 @testset "POCL launch with many arguments" begin
@@ -457,10 +471,8 @@ end
     @test all(==(sum(1:40)), A)
     # waiting for a kernel allocates when it involves a completion callback, which depends
     # on how long the kernel takes, so measure launches that wait by blocking instead
-    allocated(launch, k, A) = @allocated launch(k, A)
     POCL.cl.blocking_waits[] = true
     try
-        allocated(mod.launch_many, many, A)
         @test allocated(mod.launch_many, many, A) <= allocated(mod.launch_few, few, A)
     finally
         POCL.cl.blocking_waits[] = false
@@ -494,8 +506,6 @@ end
     launch(kernel, A, n) = kernel(A, n; ndrange = length(A))
     launch_list(kernel, visits, position, list) = kernel(visits, position; ndrange = list)
     end
-    # with `args...`, Julia 1.11 and older box the result
-    allocated(f::F, args::Vararg{Any, N}) where {F, N} = (f(args...); @allocated f(args...))
 
     # these allocate on Julia 1.10, and those that look up compiled code in GPUCompiler on 1.11
     skip = VERSION < v"1.11"
@@ -564,7 +574,6 @@ end
         Base.@atomic :monotonic h.last_duration = typemax(UInt64)
         kernel(A, n; sizes...)
     end
-    allocated(f::F, args...) where {F} = (f(args...); @allocated f(args...))
     # shielding an active cancellation scope allocates on Julia 1.14+
     bytes = @static if isdefined(Base, :CANCEL_TOKEN)
         Base.ScopedValues.with(Base.CANCEL_TOKEN => nothing) do
