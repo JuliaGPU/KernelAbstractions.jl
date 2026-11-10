@@ -74,5 +74,60 @@ function barrier_testsuite(backend, ArrayT)
         qualified!(backend(), 8)(A; ndrange = 13)
         @test Array(A) == [2 .* (1:13); zeros(Int, 3)]
     end
+
+    # padding work-items skip the code between `@synchronize`s, so they would read these
+    # variables undefined (or never update them) in conditions that they do evaluate
+    @testset "conditions reading masked variables" begin
+        @test_throws "reads `n`" @macroexpand @kernel function f(A)
+            n = length(A)
+            for _ in 1:n
+                @synchronize()
+            end
+        end
+        @test_throws "reads `j`" @macroexpand @kernel function f(A)
+            @uniform j = 0
+            while j < 4
+                @synchronize()
+                j += 1
+            end
+        end
+        @test_throws "reads `n`" @macroexpand @kernel function f(A)
+            @inbounds n = A[1]
+            while n > 0
+                @synchronize()
+                @uniform n -= 1
+            end
+        end
+        @test_throws "reads `flag`" @macroexpand @kernel function f(A)
+            flag = A[1] > 0
+            if flag
+                @synchronize()
+            end
+        end
+        # without the implicit bounds check, there are no padding work-items
+        @test @macroexpand(
+            @kernel unsafe_indices = true function f(A)
+                n = length(A)
+                for _ in 1:n
+                    @synchronize()
+                end
+            end
+        ) isa Expr
+        # neither keyword arguments, named tuples, closures nor loop variables assign `n`
+        @test @macroexpand(
+            @kernel function f(A, n)
+                x = sum(A; init = 0)
+                t = (n = 1,)
+                g = n -> n + 1
+                for n in 1:2
+                end
+                @uniform k = 0
+                while k < n
+                    @synchronize()
+                    @uniform k += 1
+                end
+            end
+        ) isa Expr
+    end
     return
 end

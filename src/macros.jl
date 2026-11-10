@@ -252,7 +252,9 @@ function transform_gpu!(def, constargs, force_inbounds, unsafe_indices)
         push!(new_stmts, Expr(:inbounds, true))
     end
     if !unsafe_indices
-        append!(new_stmts, split(body.args))
+        lowered = split(body.args)
+        check_masked_conditions(body, lowered)
+        append!(new_stmts, lowered)
     else
         push!(new_stmts, body)
     end
@@ -453,3 +455,139 @@ function emit(loop)
 
     return Expr(:block, stmts...)
 end
+
+# Control flow that contains a `@synchronize` runs on all work-items, including the padding
+# ones, which skip the code that `emit` guards with `__active_lane__`. A condition that reads
+# a variable assigned in guarded code therefore reads it undefined (or stale) on the padding
+# work-items, which then diverge from the others at the `@synchronize`. Reject such kernels.
+function check_masked_conditions(body, lowered)
+    conditions = Tuple{Expr, Any, Union{Nothing, LineNumberNode}}[]
+    collect_conditions!(conditions, body, nothing)
+    isempty(conditions) && return
+    masked = Set{Symbol}()
+    foreach(stmt -> collect_masked!(masked, stmt), lowered)
+    isempty(masked) && return
+    for (construct, cond, line) in conditions
+        reads = Set{Symbol}()
+        collect_reads!(reads, cond)
+        vars = intersect(reads, masked)
+        isempty(vars) && continue
+        var = minimum(vars)
+        kind = construct.head === :elseif ? :if : construct.head
+        location = line === nothing ? "" : " at $(line.file):$(line.line)"
+        error(
+            "`@kernel`: the `$kind`$location contains a `@synchronize`, so its condition " *
+                "runs on all work-items, including those outside the ndrange. It reads `$var`, " *
+                "which is assigned in code those work-items skip: compute `$var` with " *
+                "`@uniform` wherever it is assigned or updated."
+        )
+    end
+    return
+end
+
+# The conditions of the `while`, `for` and `if` constructs in `expr` that contain a
+# `@synchronize` or a collective, as `(construct, condition, line)`.
+function collect_conditions!(conditions, expr, line)
+    expr isa Expr || return
+    if expr.head === :block
+        for arg in expr.args
+            if arg isa LineNumberNode
+                line = arg
+            else
+                collect_conditions!(conditions, arg, line)
+            end
+        end
+        return
+    elseif expr.head === :while && find_sync(expr.args[2])
+        push!(conditions, (expr, expr.args[1], line))
+    elseif expr.head === :for && find_sync(expr.args[2])
+        specs = isexpr(expr.args[1], :block) ? expr.args[1].args : Any[expr.args[1]]
+        for spec in specs
+            spec isa LineNumberNode && continue
+            push!(conditions, (expr, spec.args[2], line))
+        end
+    elseif expr.head in (:if, :elseif) && any(find_sync, expr.args[2:end])
+        push!(conditions, (expr, expr.args[1], line))
+    end
+    for arg in expr.args
+        collect_conditions!(conditions, arg, line)
+    end
+    return
+end
+
+# The variables assigned in the code of `lowered` that `emit` guards with `__active_lane__`.
+function collect_masked!(masked, expr)
+    expr isa Expr || return
+    if expr.head === :if && expr.args[1] === :__active_lane__
+        collect_assigned!(masked, expr.args[2])
+    else
+        foreach(arg -> collect_masked!(masked, arg), expr.args)
+    end
+    return
+end
+
+# Heads whose `=` arguments are not assignments: keyword arguments and named tuple fields.
+# (Those of macro calls are, e.g. `@inbounds x = A[i]`.)
+const NON_ASSIGNMENT_HEADS = (:call, :tuple, :parameters, :ref, :curly)
+# Heads that introduce a scope of their own, whose assignments are local to it.
+const SCOPE_HEADS = (:->, :function, :let, :generator, :comprehension, :typed_comprehension)
+
+function collect_assigned!(assigned, expr)
+    expr isa Expr || return
+    expr.head in SCOPE_HEADS && return
+    if expr.head === :for
+        # the iteration variables are local to the loop
+        collect_assigned!(assigned, expr.args[2])
+        return
+    end
+    if expr.head === :(=) || (expr.head isa Symbol && is_update_head(expr.head))
+        collect_lhs!(assigned, expr.args[1])
+        collect_assigned!(assigned, expr.args[2])
+        return
+    end
+    for arg in expr.args
+        if expr.head in NON_ASSIGNMENT_HEADS && isexpr(arg, :(=))
+            collect_assigned!(assigned, arg.args[2])
+        else
+            collect_assigned!(assigned, arg)
+        end
+    end
+    return
+end
+
+# `+=`, `|=`, etc. (but not comparisons like `<=`, nor `.=` and `.+=`, which mutate)
+function is_update_head(head::Symbol)
+    s = String(head)
+    startswith(s, ".") && return false
+    return endswith(s, "=") && !(head in (:(==), :(!=), :(<=), :(>=), :(===), :(!==))) &&
+        length(s) > 1 && Base.isoperator(Symbol(chop(s)))
+end
+
+collect_lhs!(assigned, lhs::Symbol) = push!(assigned, lhs)
+function collect_lhs!(assigned, lhs::Expr)
+    if lhs.head in (:tuple, :parameters)
+        foreach(arg -> collect_lhs!(assigned, arg), lhs.args)
+    elseif lhs.head === :(::)
+        collect_lhs!(assigned, lhs.args[1])
+    end
+    # `A[i] = ...` and `x.f = ...` mutate rather than assign
+    return
+end
+collect_lhs!(assigned, lhs) = nothing
+
+# The variables that `expr` reads.
+collect_reads!(reads, expr::Symbol) = push!(reads, expr)
+function collect_reads!(reads, expr::Expr)
+    expr.head in SCOPE_HEADS && return
+    if expr.head === :.
+        # `x.f` reads `x`, not `f`
+        collect_reads!(reads, expr.args[1])
+        return
+    elseif expr.head === :macrocall
+        foreach(arg -> collect_reads!(reads, arg), expr.args[2:end])
+        return
+    end
+    foreach(arg -> collect_reads!(reads, arg), expr.args)
+    return
+end
+collect_reads!(reads, expr) = nothing

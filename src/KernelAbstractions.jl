@@ -274,7 +274,9 @@ When the `ndrange` is not a multiple of the workgroup size, `@kernel` only runs 
 kernel body on work-items inside the `ndrange`. Padding work-items do still need to
 reach every [`@synchronize`](@ref), so control flow that contains a `@synchronize`
 runs on all work-items. Values used by such control flow, like the bounds of a loop,
-must therefore be computed with `@uniform`:
+must therefore be computed with `@uniform`, and so must every update of them (e.g.
+`@uniform j += 1`). `@kernel` rejects a condition of such control flow that reads a variable
+assigned without `@uniform`:
 
 ```julia
 @kernel function f(A, n)
