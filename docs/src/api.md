@@ -70,6 +70,18 @@ KernelAbstractions.device!
 KernelAbstractions.priority!
 ```
 
+### [Graphs](@id api_graphs)
+
+```@docs
+KernelAbstractions.capture
+KernelAbstractions.Graph
+KernelAbstractions.update!
+KernelAbstractions.is_captured
+KernelAbstractions.@captured
+KernelAbstractions.supports_graphs
+KernelInterface.GraphCaptureError
+```
+
 ### Kernel handles
 
 ```@docs
