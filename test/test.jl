@@ -604,5 +604,60 @@ function unittest_testsuite(Backend, backend_str, backend_mod, BackendArrayT; sk
         @test adapt(Array, B) == [2, 3, 4, 5, 3, 4, 5, 6]
     end
 
+    # https://github.com/JuliaGPU/KernelAbstractions.jl/issues/916
+    @kernel function mul_with_overflow!(prod, overflow, @Const(a), @Const(b))
+        i = @index(Global, Linear)
+        @inbounds prod[i], overflow[i] = Base.mul_with_overflow(a[i], b[i])
+    end
+
+    @kernel function checked_mul!(c, @Const(a), @Const(b))
+        i = @index(Global, Linear)
+        @inbounds c[i] = Base.checked_mul(a[i], b[i])
+    end
+
+    @kernel function rational_muladd!(c, @Const(a), @Const(b))
+        i = @index(Global, Linear)
+        @inbounds c[i] = a[i] * b[i] + a[i]
+    end
+
+    @conditional_testset "multiplication with overflow" skip_tests begin
+        backend = Backend()
+        @testset "$T" for T in (Int32, Int64, UInt32, UInt64)
+            m = typemax(T)
+            half = m ÷ T(2) + one(T)
+            pairs = Tuple{T, T}[(0, m), (2, 3), (half, 2), (m, m)]
+            if T <: Signed
+                append!(pairs, [(-1, 1), (-2, 3), (-half, 2), (-half, -2), (typemin(T), -1)])
+            end
+            a, b = first.(pairs), last.(pairs)
+            expected = Base.mul_with_overflow.(a, b)
+
+            prod = KernelAbstractions.zeros(backend, T, length(pairs))
+            overflow = KernelAbstractions.zeros(backend, Bool, length(pairs))
+            mul_with_overflow!(backend)(prod, overflow, adapt(backend, a), adapt(backend, b); ndrange = length(pairs))
+            synchronize(backend)
+            @test adapt(Array, prod) == first.(expected)
+            @test adapt(Array, overflow) == last.(expected)
+
+            fits = .!last.(expected)
+            c = KernelAbstractions.zeros(backend, T, count(fits))
+            checked_mul!(backend)(c, adapt(backend, a[fits]), adapt(backend, b[fits]); ndrange = count(fits))
+            synchronize(backend)
+            @test adapt(Array, c) == a[fits] .* b[fits]
+        end
+
+        # On Julia 1.10, `Rational` arithmetic only compiles on back ends that override
+        # `Base.__throw_rational_argerror_typemin`, e.g. by stacking GPUToolbox's
+        # `throw_overrides` like the CPU back end does.
+        if VERSION >= v"1.11" || backend isa CPU
+            a = [1 // 2, -3 // 4, 5 // 6]
+            b = [2 // 3, 4 // 5, -6 // 7]
+            c = KernelAbstractions.zeros(backend, Rational{Int}, length(a))
+            rational_muladd!(backend)(c, adapt(backend, a), adapt(backend, b); ndrange = length(a))
+            synchronize(backend)
+            @test adapt(Array, c) == a .* b .+ a
+        end
+    end
+
     return
 end
