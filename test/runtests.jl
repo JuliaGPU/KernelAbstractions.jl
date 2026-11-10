@@ -1088,6 +1088,62 @@ end
     @test occursin("throw_boundserror", out)
 end
 
+# Julia 1.10 and 1.11 format the messages of some `Rational` errors at run time, which
+# GPUToolbox's overrides replace with constant messages
+@testset "POCL Rational errors" begin
+    @kernel function rational_muladd!(out, a, b)
+        I = @index(Global, Linear)
+        @inbounds out[I] = a[I] * b[I] + a[I]
+    end
+    @kernel function rational_neg!(out, a)
+        I = @index(Global, Linear)
+        @inbounds out[I] = -a[I]
+    end
+    a = [1 // 2, -3 // 4, 5 // 6]
+    b = [2 // 3, 4 // 5, -6 // 7]
+    out = zeros(Rational{Int}, length(a))
+    rational_muladd!(CPU())(out, a, b; ndrange = length(a))
+    synchronize(CPU())
+    @test out == a .* b .+ a
+    rational_neg!(CPU())(out, a; ndrange = length(a))
+    synchronize(CPU())
+    @test out == -a
+
+    # the exceptions report their type and message like the back-end's own
+    function output(f, args...)
+        return mktemp() do path, io
+            redirect_stdout(io) do
+                @test_throws POCL.KernelException @opencl global_size = 1 debug_level = 1 f(args...)
+                Libc.flush_cstdio()
+            end
+            close(io)
+            read(path, String)
+        end
+    end
+    rational!(A, n, d) = (A[1] = Rational(n, d); return)
+    out = output(rational!, zeros(Rational{Int}, 1), 1, typemin(Int))
+    if isdefined(Base, :__throw_rational_argerror_typemin)
+        @test occursin("ERROR: ArgumentError during kernel execution", out)
+        @test occursin("denominator can't be typemin", out)
+    else
+        @test occursin("ERROR: ", out)
+    end
+    neg!(A, x) = (A[1] = -x; return)
+    out = output(neg!, zeros(Rational{Int}, 1), typemin(Int) // 1)
+    if VERSION < v"1.12-"
+        @test occursin("ERROR: OverflowError during kernel execution", out)
+        @test occursin("rational numerator is typemin", out)
+    else
+        @test occursin("ERROR: ", out)
+    end
+
+    # also on Julia versions where no shared override throws
+    throwing() = (GPUToolbox.Overlays.device_throw(ArgumentError, Val(:var"100% shared reason")); return)
+    out = output(throwing)
+    @test occursin("ERROR: ArgumentError during kernel execution", out)
+    @test occursin("100% shared reason", out)
+end
+
 # sysimage builds compile methods for the host, which must not reach device-only code, or
 # the sysimage references device intrinsics and fails to load (JuliaGPU/GPUCompiler.jl#611)
 @testset "host leaks" begin
