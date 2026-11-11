@@ -172,6 +172,32 @@ function launch_testsuite(backend, AT; launcher = default_launcher, skip_tests =
             @test_throws ErrorException check_indices(launcher, backend(), AT, kernel, (n, 2))
         end
 
+        @testset "static sizes as keyword arguments" begin
+            KA = KernelAbstractions
+            kernel = launch_indices!(backend(); workgroupsize = (4, 2), ndrange = (9, 5))
+            @test KA.workgroupsize(kernel) == KA.StaticSize{(4, 2)}
+            @test KA.ndrange(kernel) == KA.StaticSize{(9, 5)}
+            @test check_indices(launcher, backend(), AT, kernel, (9, 5))
+
+            kernel = launch_indices!(backend(); workgroupsize = 8)
+            @test KA.workgroupsize(kernel) <: KA.StaticSize
+            @test KA.ndrange(kernel) == KA.DynamicSize
+            @test check_indices(launcher, backend(), AT, kernel, (16, 5, 3))
+
+            # a static ndrange alone, with a tuned workgroup size
+            n = KI.max_work_group_size(backend()) + 1
+            kernel = launch_indices!(backend(); ndrange = (n, 3))
+            @test KA.workgroupsize(kernel) == KA.DynamicSize
+            @test KA.ndrange(kernel) == KA.StaticSize{(n, 3)}
+            @test check_indices(launcher, backend(), AT, kernel, (n, 3))
+
+            # the same kernels as with positional sizes, and without any the same as before
+            @test typeof(launch_indices!(backend(); workgroupsize = (4, 2), ndrange = (9, 5))) ==
+                typeof(launch_indices!(backend(), (4, 2), (9, 5)))
+            @test typeof(launch_indices!(backend(); workgroupsize = 8)) == typeof(launch_indices!(backend(), 8))
+            @test typeof(launch_indices!(backend(); ndrange = KA.DynamicSize())) == typeof(launch_indices!(backend()))
+        end
+
         @testset "offsets" begin
             @test check_indices(launcher, backend(), AT, launch_indices!(backend()), (-3:4,))
             @test check_indices(launcher, backend(), AT, launch_indices!(backend()), (-3:4, 2:11); workgroupsize = (3, 3))

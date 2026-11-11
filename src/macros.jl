@@ -1,5 +1,11 @@
 import MacroTools: splitdef, combinedef, isexpr, postwalk
 
+# The size a kernel is constructed with for a `workgroupsize` or `ndrange` keyword argument,
+# where `nothing` leaves it dynamic.
+static_size(::Nothing) = DynamicSize()
+static_size(size::_Size) = size
+static_size(size) = StaticSize(size)
+
 function find_return(stmt)
     result = Ref(false)
     postwalk(stmt) do expr
@@ -96,7 +102,8 @@ function __kernel(expr, __source__::LineNumberNode, __module__::Module, force_in
             function $_name(dev::Dev, sz::S, range::NDRange) where {Dev, S <: $_Size, NDRange <: $_Size}
                 return $construct(dev, sz, range, $gpu_name)
             end
-            Core.@__doc__ $name(dev) = $_name(dev, $DynamicSize(), $DynamicSize())
+            Core.@__doc__ $name(dev; workgroupsize = nothing, ndrange = nothing) =
+                $_name(dev, $static_size(workgroupsize), $static_size(ndrange))
             $name(dev, size) = $_name(dev, $StaticSize(size), $DynamicSize())
             $name(dev, size, range) = $_name(dev, $StaticSize(size), $StaticSize(range))
             $name(dev, size::$_Size, range::$_Size) = $_name(dev, size, range)
