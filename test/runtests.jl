@@ -1734,6 +1734,49 @@ end
     end
 end
 
+@kernel function fastmath_kernel!(S, C, T, SC, @Const(X))
+    i = @index(Global)
+    @inbounds begin
+        x = X[i]
+        S[i] = @fastmath sin(x)
+        C[i] = @fastmath cos(x)
+        T[i] = @fastmath tan(x)
+        s, c = @fastmath sincos(x)
+        SC[i] = s - c
+    end
+end
+
+@testset "POCL @fastmath ($FT)" for FT in (Float16, Float32, Float64)
+    FT == Float16 && !("cl_khr_fp16" in POCL.device().extensions) && continue
+    # PoCL's single-precision `native_*` builtins are only accurate for arguments up to
+    # about 10^4 in magnitude
+    X = FT[range(-100, 100; length = 1000); 0; -0.0; floatmin(FT); 1.0e-3; 1.0e3]
+    S, C, T, SC = (similar(X) for _ in 1:4)
+    ir = sprint() do io
+        @device_code_llvm io = io debuginfo = :none fastmath_kernel!(CPU())(S, C, T, SC, X; ndrange = length(X))
+    end
+    KernelAbstractions.synchronize(CPU())
+
+    # within a few ulp of the exact results, or (near zeros) a few ulp of one
+    within(Y, f, n) = all(zip(Y, X)) do (y, x)
+        ref = f(big(x))
+        abs(y - ref) <= n * eps(FT(ref)) || abs(y - ref) <= n * eps(FT)
+    end
+    @test within(S, sin, 4)
+    @test within(C, cos, 4)
+    @test within(T, tan, 4)
+    @test within(SC, x -> sin(x) - cos(x), 4)
+    @test isequal(S[(end - 4):(end - 2)], FT[0, -0.0, floatmin(FT)])
+
+    # the single-precision functions are PoCL's faster `native_*` builtins (also for
+    # half precision, whose `sincos_fast` computes in single precision); the others are
+    # the accurate ones
+    @test occursin("native_sin", ir) == (FT != Float64)
+    @test occursin("native_cos", ir) == (FT != Float64)
+    @test occursin("native_tan", ir) == (FT == Float32)
+    @test !occursin("sincos", ir)
+end
+
 @testset "POCL workgroup size" begin
     workgroupsize = POCL.POCLKernels.cpu_workgroupsize
     for threads in (1, 3, 4, 7, 64), max_items in (1, 7, 64, 4096), nitems in (nothing, 0, 1, 1000, 4096, 2^20, typemax(Int))

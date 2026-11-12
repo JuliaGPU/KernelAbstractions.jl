@@ -56,6 +56,7 @@ GPUCompiler.isintrinsic(job::OpenCLCompilerJob, fn::String) =
     job, fn
 ) ||
     in(fn, known_intrinsics) ||
+    in(fn, fastmath_builtins) ||
     contains(fn, "__spirv_")
 
 GPUCompiler.kernel_state_type(::OpenCLCompilerJob) = KernelState
