@@ -1363,6 +1363,34 @@ end
     end
 end
 
+# `Memory` belongs to the POCL back-end too, so kernels take it like an `Array`
+@kernel function add_one_memory!(B, @Const(A))
+    i = @index(Global)
+    @inbounds B[i] = coalesce(A[i], 0) + 1
+end
+# VERSION >= v"1.11"
+@static if isdefined(Core, :Memory)
+    @testset "POCL Memory arguments" begin
+        A = Memory{Int32}(undef, 5)
+        A .= 1:5
+        B = Memory{Float32}(undef, 5)
+        add_one_memory!(POCLBackend())(B, A; ndrange = 5)
+        synchronize(POCLBackend())
+        @test B == 2:6
+
+        C = zeros(Int32, 3)
+        add_one_memory!(POCLBackend())(C, view(A, 2:4); ndrange = 3)
+        synchronize(POCLBackend())
+        @test C == 3:5
+
+        U = Memory{Union{Missing, Int32}}(undef, 4)
+        U .= [1, missing, 3, missing]
+        add_one_memory!(POCLBackend())(C, U; ndrange = 3)
+        synchronize(POCLBackend())
+        @test C == [2, 1, 4]
+    end
+end
+
 # a struct with a union field is not isbits, but is stored inline with its own selector
 struct UnionField
     x::Union{Int, Float32}
