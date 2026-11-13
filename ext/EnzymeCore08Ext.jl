@@ -1,6 +1,11 @@
 # Forward mode of the kernel body, with the runtime activity and strong zero settings of `config`.
 _fwd_mode(config) = EnzymeCore.set_strong_zero(EnzymeCore.set_runtime_activity(Forward, config), config)
 
+# Split reverse mode of the kernel body, with the runtime activity and strong zero settings of `config`.
+_rev_mode(config, ModifiedBetween) = EnzymeCore.set_strong_zero(
+    EnzymeCore.set_runtime_activity(ReverseSplitModified(ReverseSplitWithPrimal, ModifiedBetween), config), config
+)
+
 # https://github.com/EnzymeAD/Enzyme.jl/issues/1516
 # On the CPU `autodiff_deferred` can deadlock.
 # Hence a specialized CPU version
@@ -263,7 +268,7 @@ function EnzymeRules.augmented_primal(
             args[i]
         end
     end
-    Mode = EnzymeCore.set_runtime_activity(ReverseSplitModified(ReverseSplitWithPrimal, ModifiedBetween), config)
+    Mode = _rev_mode(config, ModifiedBetween)
     TapeType, subtape, aug_kernel = _create_tape_kernel(
         kernel,
         Mode,
@@ -305,7 +310,7 @@ function EnzymeRules.reverse(
     f = kernel.f
 
     ModifiedBetween = Val((overwritten(config)[1], false, overwritten(config)[2:end]...))
-    Mode = EnzymeCore.set_runtime_activity(ReverseSplitModified(ReverseSplitWithPrimal, ModifiedBetween), config)
+    Mode = _rev_mode(config, ModifiedBetween)
     rev_kernel = _create_rev_kernel(kernel)
     rev_kernel(
         f,
