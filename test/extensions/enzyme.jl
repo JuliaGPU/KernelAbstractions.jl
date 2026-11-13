@@ -14,6 +14,13 @@ function square_caller(A, backend)
     return
 end
 
+# The ndrange is fixed when the kernel is constructed, so the launch does not pass one
+function square_static_caller(A, backend)
+    kernel = square!(backend, 32, size(A))
+    kernel(A)
+    KernelAbstractions.synchronize(backend)
+    return
+end
 
 @kernel function mul!(A, B)
     I = @index(Global, Linear)
@@ -50,6 +57,12 @@ function enzyme_testsuite(backend, ArrayT, supports_reverse = true)
             dA .= 1
 
             Enzyme.autodiff(Reverse, square_caller, Duplicated(A, dA), Const(backend()))
+            @test all(dA .≈ (2:2:128))
+
+            A .= (1:1:64)
+            dA .= 1
+
+            Enzyme.autodiff(Reverse, square_static_caller, Duplicated(A, dA), Const(backend()))
             @test all(dA .≈ (2:2:128))
 
             # active arguments not support for GPU kernels

@@ -13,6 +13,7 @@ import KernelAbstractions:
     launch_config,
     allocate,
     blocks,
+    workitems,
     mkcontext,
     CompilerMetadata,
     CPU,
@@ -40,6 +41,15 @@ function EnzymeCore.compiler_job_from_backend(
 end
 
 EnzymeRules.inactive(::Type{StaticSize}, x...) = nothing
+
+# Number of threads a GPU launch runs, for sizing the per-thread tape. `ndrange` is `nothing`
+# when the kernel was constructed with a static ndrange and launched without one, so recover
+# the thread count from the resolved iteration space instead.
+@inline function _ka_nthreads(ndrange, iterspace)
+    return ndrange === nothing ?
+        length(blocks(iterspace)) * length(workitems(iterspace)) :
+        prod(ndrange)
+end
 
 @static if isdefined(EnzymeCore, :set_runtime_activity)
     include("EnzymeCore08Ext.jl")
