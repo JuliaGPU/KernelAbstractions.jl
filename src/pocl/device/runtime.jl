@@ -32,12 +32,16 @@ end
     )
     return
 end
-@device_function @inline function atomic_cas_device!(ptr::LLVMPtr{Int32, AS.CrossWorkgroup}, cmp::Int32, val::Int32)
-    (; old) = UnsafeAtomics.Internal.llvm_cmpxchg!(
-        ptr, cmp, val, Val(:acq_rel), Val(:acquire), Val(:device),
-        Val(false), Val(false), Val(sizeof(Int32)), Val(())
+# not a compare-and-swap: PoCL's builtin for it returns the old value through a stack slot.
+# `claim_output` reads work-item ids, so PoCL inlines it into every throw site before forming
+# the work-item loops, which give each copy of the slot an array over the work-group. LLVM 22
+# can't forward stores across the cmpxchg, so these arrays stay: megabytes of stack for a
+# kernel with many bounds checks (JuliaGPU/KernelAbstractions.jl#974). LLVM 23 removes them
+# (llvm/llvm-project#193939).
+@device_function @inline function atomic_max_device!(ptr::LLVMPtr{Int32, AS.CrossWorkgroup}, val::Int32)
+    return UnsafeAtomics.Internal.llvm_rmw!(
+        ptr, Val(:max), val, Val(:acq_rel), Val(:device), Val(false), Val(sizeof(Int32)), Val(())
     )
-    return old
 end
 
 # only one work-item reports the exception, or the output of all work-items that throw
@@ -51,7 +55,8 @@ end
 @device_function @noinline function claim_output()
     lock = exception_field(Val(:output_lock))
     me = (get_global_id(1), get_global_id(2), get_global_id(3), 0)
-    state = atomic_cas_device!(lock, 0 % Int32, 1 % Int32)
+    # 0 → 1 claims the output; 1 and 2 stay
+    state = atomic_max_device!(lock, 1 % Int32)
     if state == 0
         unsafe_store!(exception_field(Val(:owner)), me)
         # publish the owner before other work-items compare against it
