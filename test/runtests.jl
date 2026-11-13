@@ -1097,6 +1097,26 @@ end
     @test occursin("throw_boundserror", out)
 end
 
+# throw sites cost little or no stack per work-item. this kernel's largest work-group used to
+# need 8 MiB of stack, which its launches would get by default on a few threads
+# (JuliaGPU/KernelAbstractions.jl#974).
+@generated function bounds_checked_sum(a, i, ::Val{N}) where {N}
+    reads = [:(s += a[i + $n]) for n in 1:N]
+    return :(s = zero(eltype(a)); $(reads...); s)
+end
+@testset "POCL many throw sites" begin
+    @kernel function many_throw_sites!(out, a)
+        i = @index(Global, Linear)
+        out[i] = bounds_checked_sum(a, i, Val(256))
+    end
+    n = POCL.device_limits().max_work_group_size
+    a = rand(n + 256)
+    out = zeros(n)
+    many_throw_sites!(CPU(), n)(out, a; ndrange = n)
+    synchronize(CPU())
+    @test out ≈ [sum(@view a[(i + 1):(i + 256)]) for i in 1:n]
+end
+
 # Julia 1.10 and 1.11 format the messages of some `Rational` errors at run time, which
 # GPUToolbox's overrides replace with constant messages
 @testset "POCL Rational errors" begin
