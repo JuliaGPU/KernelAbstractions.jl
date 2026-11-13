@@ -62,6 +62,23 @@ function enzyme_testsuite(backend, ArrayT, supports_reverse = true)
                 @test all(dA .≈ 1.2)
                 @test dB ≈ sum(1:1:64)
             end
+
+            # The strong zero setting is passed on to the kernel: the adjoint of `A[I] * B`
+            # with `B = Inf` and a zero adjoint of the result is `0 * Inf = NaN` without it
+            # and zero with it
+            A .= 1
+            dA .= 0
+
+            Enzyme.autodiff(Reverse, mul_caller, Duplicated(A, dA), Const(Inf), Const(backend()))
+            @test all(isnan, dA)
+
+            if isdefined(Enzyme, :set_strong_zero)
+                A .= 1
+                dA .= 0
+
+                Enzyme.autodiff(Enzyme.set_strong_zero(Reverse), mul_caller, Duplicated(A, dA), Const(Inf), Const(backend()))
+                @test all(iszero, dA)
+            end
         end
 
         A .= (1:1:64)

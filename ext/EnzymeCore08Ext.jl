@@ -1,5 +1,6 @@
-# Forward mode of the kernel body, with the runtime activity and strong zero settings of `config`.
-_fwd_mode(config) = EnzymeCore.set_strong_zero(EnzymeCore.set_runtime_activity(Forward, config), config)
+# Split reverse mode of the kernel body, with the settings of `config` (runtime activity, strong zero).
+split_mode(config, ModifiedBetween) =
+    EnzymeRules.set_config(ReverseSplitModified(ReverseSplitWithPrimal, ModifiedBetween), config)
 
 _unwrap_const_type(arg) = arg
 _unwrap_const_type(arg::Const{<:Type}) = arg.val
@@ -8,7 +9,7 @@ _rewrap_const_type(::Type{T}) where {T} = Const{Type{T}}(T)
 
 function fwd(ctx, config, f, args...)
     args = map(_rewrap_const_type, args)
-    EnzymeCore.autodiff_deferred(_fwd_mode(config), Const(f), Const{Nothing}, Const(ctx), args...)
+    EnzymeCore.autodiff_deferred(EnzymeRules.set_config(Forward, config), Const(f), Const{Nothing}, Const(ctx), args...)
     return nothing
 end
 
@@ -165,7 +166,7 @@ function EnzymeRules.augmented_primal(
             args[i]
         end
     end
-    Mode = EnzymeCore.set_runtime_activity(ReverseSplitModified(ReverseSplitWithPrimal, ModifiedBetween), config)
+    Mode = split_mode(config, ModifiedBetween)
     TapeType, subtape, aug_kernel = _create_tape_kernel(
         kernel,
         Mode,
@@ -207,7 +208,7 @@ function EnzymeRules.reverse(
     f = kernel.f
 
     ModifiedBetween = Val((overwritten(config)[1], false, overwritten(config)[2:end]...))
-    Mode = EnzymeCore.set_runtime_activity(ReverseSplitModified(ReverseSplitWithPrimal, ModifiedBetween), config)
+    Mode = split_mode(config, ModifiedBetween)
     rev_kernel = similar(kernel, rev)
     rev_kernel(
         f,
