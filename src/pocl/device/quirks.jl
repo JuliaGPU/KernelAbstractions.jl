@@ -11,7 +11,7 @@ macro gputhrow(name::String, reason::String)
 end
 
 # GPUToolbox's shared overrides throw through this function
-@device_override @generated function GPUToolbox.Overlays.device_throw(::Type{E}, ::Val{reason}) where {E<:Exception, reason}
+@device_override @generated function GPUToolbox.Overlays.device_throw(::Type{E}, ::Val{reason}) where {E <: Exception, reason}
     return quote
         $(Expr(:meta, :noinline))
         @gputhrow $(String(nameof(E))) $(String(reason))
