@@ -220,8 +220,16 @@ end
 
 # VERSION >= v"1.11"
 @static if isdefined(Core, :Memory)
-    # wrapping `Memory` in an `Array` doesn't copy it
-    Adapt.adapt_storage(to::KernelAdaptor, xs::Memory) = adapt(to, Base.wrap(Array, xs, length(xs)))
+    function Adapt.adapt_storage(to::KernelAdaptor, xs::Memory{T}) where {T}
+        ptr = pointer(xs)
+        # memory of isbits unions stores its selector bytes past its data
+        maxsize = if Base.isbitsunion(T)
+            Int(UInt(@ccall(jl_genericmemory_typetagdata(xs::Any)::Ptr{UInt8})) - UInt(ptr))
+        else
+            length(xs) * aligned_sizeof(T)
+        end
+        return CLDeviceArray{T, 1, AS.CrossWorkgroup}((length(xs),), reinterpret(LLVMPtr{T, AS.CrossWorkgroup}, ptr), maxsize)
+    end
 end
 
 import KernelInterface
