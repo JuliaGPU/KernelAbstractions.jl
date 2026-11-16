@@ -9,6 +9,7 @@ it is usually a multiple of the natural vector-width. An *ndrange* is
 called a grid in NVIDIA CUDA and designates the total number of work items. If
 using a workgroup of size 1 (non-parallel execution), the ndrange is the
 number of items to iterate over in a loop.
+[Coming from CUDA.jl](@ref) maps the rest of the kernel language to CUDA.jl.
 
 Like other GPU programming models, KernelAbstractions assumes that the work is roughly balanced
 across the work-items. A launch without a workgroup size gets one chosen under that
