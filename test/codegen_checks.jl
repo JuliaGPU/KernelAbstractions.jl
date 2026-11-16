@@ -16,6 +16,8 @@
 using FileCheck
 using KernelAbstractions
 using KernelAbstractions: @atomic
+using StaticArrays
+import KernelAbstractions.KernelInterface as KI
 using Test
 
 import KernelAbstractions.POCL: @device_code_llvm
@@ -52,9 +54,47 @@ end
     @print("index ", I, "\n")
 end
 
+@kernel function codegen_private_reduce(A)
+    I = @index(Global, Linear)
+    priv = @private Float32 (8,)
+    for j in 1:8
+        @inbounds priv[j] = A[I] * j
+    end
+    @inbounds A[I] = sum(priv) + maximum(priv) + foldl(-, priv)
+end
+
+@noinline private_consume(priv) = @inbounds priv[1] + priv[8]
+
+@kernel function codegen_private_escape(A)
+    I = @index(Global, Linear)
+    priv = @private Float32 (8,)
+    for j in 1:8
+        @inbounds priv[j] = A[I] * j
+    end
+    @inbounds A[I] = private_consume(priv)
+end
+
 @kernel function codegen_global_linear(A)
     I = @index(Global, Linear)
     @inbounds A[I] = I
+end
+
+@kernel function codegen_scale_cartesian(A)
+    I = @index(Global, Cartesian)
+    @inbounds A[I] = 2 * A[I]
+end
+
+@kernel function codegen_copy(A, B)
+    I = @index(Global, Linear)
+    @inbounds B[I] = A[I]
+end
+
+# a 64-bit primitive type that no backend shuffles natively
+primitive type CodegenBits64 64 end
+
+@kernel function codegen_shfl_bits64(A)
+    I = @index(Global, Linear)
+    @inbounds A[I] = reinterpret(UInt64, KI.shfl(reinterpret(CodegenBits64, A[I]), 1))
 end
 
 # `@inbounds` is only honoured under `--check-bounds=auto`; several checks below assert
@@ -113,11 +153,12 @@ end
             KernelAbstractions.synchronize(backend)
         end
 
-        # a dynamic ndrange keeps the check, so the test above is not vacuous
+        # a dynamic ndrange with a partial workgroup keeps the check, so the test above is
+        # not vacuous (without one, the launch uses a kernel without the check)
         @test @filecheck begin
             @check "define spir_kernel void @{{.*}}gpu_codegen_mul2_inbounds"
             @check "br i1"
-            @device_code_llvm debuginfo = :none codegen_mul2_inbounds(backend, 16)(A, ndrange = 64)
+            @device_code_llvm debuginfo = :none codegen_mul2_inbounds(backend, 16)(A, ndrange = 60)
             KernelAbstractions.synchronize(backend)
         end
     end
@@ -146,12 +187,12 @@ end
         end
     end
 
-    # `@atomic` lowers to a native atomicrmw on global memory rather than to a lock or a
-    # compare-and-swap loop.
+    # `@atomic` lowers to a native floating-point addition on global memory, which PoCL
+    # supports, rather than to a lock or a compare-and-swap loop.
     @testset "atomics" begin
-        @test @filecheck implicit_check_not = "cmpxchg" begin
+        @test @filecheck implicit_check_not = "{{cmpxchg|AtomicCompareExchange}}" begin
             @check "define spir_kernel void @{{.*}}gpu_codegen_atomic_sum"
-            @check "atomicrmw fadd"
+            @check "call float @{{.*}}__spirv_AtomicFAddEXT"
             @device_code_llvm debuginfo = :none codegen_atomic_sum(backend, 16)(A, out, ndrange = 64)
             KernelAbstractions.synchronize(backend)
         end
@@ -179,6 +220,98 @@ end
             )
             KernelAbstractions.synchronize(backend)
         end
+    end
+
+    # PoCL computes indices in 64 bits, like its work-item ids, and the index arithmetic
+    # can't wrap. Narrowing the ids to 32 bits and widening the indices again keeps PoCL from
+    # vectorizing its loops over the work-items when they are short (#868).
+    @testset "index type" begin
+        # (with a partial workgroup: without the bounds check, LLVM turns the addition into an `or`)
+        B = KernelAbstractions.zeros(backend, Float32, 4, 60)
+        @test @filecheck implicit_check_not = "trunc i64" begin
+            @check "define spir_kernel void @{{.*}}gpu_codegen_scale_cartesian"
+            @check "shl nuw nsw i64"
+            @check "add nuw {{(nsw )?}}i64"
+            @check "ret void"
+            @device_code_llvm debuginfo = :none codegen_scale_cartesian(backend, (4, 16))(B, ndrange = size(B))
+            KernelAbstractions.synchronize(backend)
+        end
+    end
+
+    # With StaticArrays loaded, whole-array reductions over `@private` storage are unrolled,
+    # so the stack slot is promoted to registers rather than read through memory.
+    @testset "private" begin
+        @test @filecheck implicit_check_not = "alloca" begin
+            @check "define spir_kernel void @{{.*}}gpu_codegen_private_reduce"
+            @check "ret void"
+            @device_code_llvm debuginfo = :none codegen_private_reduce(backend, 16)(A, ndrange = 64)
+            KernelAbstractions.synchronize(backend)
+        end
+
+        # storage passed to a function that isn't inlined stays on the stack, so the test
+        # above is not vacuous
+        @test @filecheck begin
+            @check "define spir_kernel void @{{.*}}gpu_codegen_private_escape"
+            @check "alloca"
+            @device_code_llvm debuginfo = :none codegen_private_escape(backend, 16)(A, ndrange = 64)
+            KernelAbstractions.synchronize(backend)
+        end
+    end
+
+    # The bounds check of a partial workgroup compares every dimension and branches once.
+    # Branching per dimension (as `all` does on Julia 1.10–1.12) keeps PoCL from
+    # hoisting the index computation out of its loop over the work-items, which made
+    # kernels with a linear launch several times slower.
+    @testset "bounds check branches once" begin
+        B = KernelAbstractions.zeros(backend, Float32, 5, 6, 7, 3)
+        kernel = codegen_scale_cartesian(backend, 16)
+        @test @filecheck begin
+            @check "define spir_kernel void @{{.*}}gpu_codegen_scale_cartesian"
+            @check "br i1"
+            @check_not "br i1"
+            @check "ret void"
+            @device_code_llvm debuginfo = :none kernel(B, ndrange = size(B))
+            KernelAbstractions.synchronize(backend)
+        end
+
+        C = KernelAbstractions.zeros(backend, Float32, 5, 6, 7)
+        @test @filecheck begin
+            @check "define spir_kernel void @{{.*}}gpu_codegen_scale_cartesian"
+            @check "br i1"
+            @check_not "br i1"
+            @check "ret void"
+            @device_code_llvm debuginfo = :none kernel(C, ndrange = size(C))
+            KernelAbstractions.synchronize(backend)
+        end
+    end
+
+    # A 64-bit primitive type that the backend doesn't shuffle natively uses its native 64-bit
+    # shuffle (`__spirv_GroupNonUniformShuffle` mangled for an `i64` value is `...jmj`, for an
+    # `i32` value `...jjj`), rather than being split into two 32-bit words.
+    @testset "shuffles of other primitive types" begin
+        A = KernelAbstractions.zeros(backend, UInt64, 32)
+        @test @filecheck implicit_check_not = "GroupNonUniformShufflejjj" begin
+            @check "define spir_kernel void @{{.*}}gpu_codegen_shfl_bits64"
+            @check "GroupNonUniformShufflejmj"
+            @check_not "GroupNonUniformShuffle"
+            @check "ret void"
+            @device_code_llvm debuginfo = :none codegen_shfl_bits64(backend, 32)(A, ndrange = 32)
+            KernelAbstractions.synchronize(backend)
+        end
+    end
+
+    # Elements of an array of isbits unions are loaded and stored inline, rather than through
+    # calls that return the union and its type tag separately.
+    @testset "isbits unions" begin
+        A = Union{Missing, Float32}[1, missing, 3, 4]
+        B = similar(A)
+        @test @filecheck implicit_check_not = ["arrayref_union", "arrayset_union"] begin
+            @check "define spir_kernel void @{{.*}}gpu_codegen_copy"
+            @check "ret void"
+            @device_code_llvm debuginfo = :none codegen_copy(backend, 4)(A, B, ndrange = 4)
+            KernelAbstractions.synchronize(backend)
+        end
+        @test isequal(B, A)
     end
 
     # `@print` lowers to a single variadic printf call, not to one call per argument.

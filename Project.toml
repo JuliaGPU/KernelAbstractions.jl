@@ -1,6 +1,6 @@
 name = "KernelAbstractions"
 uuid = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
-version = "0.10.0-dev"
+version = "0.10.7"
 authors = ["Valentin Churavy <v.churavy@gmail.com> and contributors"]
 
 [workspace]
@@ -22,45 +22,61 @@ RandomNumbers = "e6cf234a-135c-5ec9-84dd-332b85af5143"
 SPIRVIntrinsics = "71d1d633-e7e8-4a92-83a1-de8814b09ba8"
 SPIRV_LLVM_Backend_jll = "4376b9bf-cff8-51b6-bb48-39421dff0d0c"
 SPIRV_Tools_jll = "6ac6d60f-d740-5983-97d7-a4482c0689f4"
+StaticArraysCore = "1e83bf80-4336-4d27-bf5d-d5a4f845583c"
+ThreadTeams = "100744f9-5cbb-42a9-938e-f15a20f71997"
+UnsafeAtomics = "013be700-e6cd-48c3-b4a1-df204f14c38f"
 pocl_standalone_jll = "54f56a70-6062-5590-a942-1226658f6c83"
 
 [weakdeps]
+AMDGPU = "21141c5a-9bdb-4563-92ae-f87d6854732e"
 EnzymeCore = "f151be2c-9106-41f4-ab19-57ee4f262869"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+Metal = "dde4c033-4e86-420c-a63e-0dd931031962"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
+oneAPI = "8f75cd03-7ff8-4ecb-9b8f-daf728133b1b"
 
 [sources]
 KernelInterface = {path = "lib/KernelInterface"}
 
 [extensions]
+AMDGPUExt = "AMDGPU"
 EnzymeExt = "EnzymeCore"
 LinearAlgebraExt = "LinearAlgebra"
+MetalExt = "Metal"
 SparseArraysExt = "SparseArrays"
 StaticArraysExt = "StaticArrays"
+oneAPIExt = "oneAPI"
 
 [compat]
+AMDGPU = "2"
 Adapt = "0.4, 1.0, 2.0, 3.0, 4"
-Atomix = "1.2.1"
+Atomix = "1.5"
 EnzymeCore = "0.7, 0.8.1"
-GPUCompiler = "2.10"
-GPUToolbox = "3.3.2"
+GPUCompiler = "2.20"
+GPUToolbox = "3.6"
 KernelInterface = "0.4"
 LLVM = "10"
 LinearAlgebra = "1.6"
 MacroTools = "0.5"
+Metal = "1"
 PrecompileTools = "1"
 Printf = "<0.0.1, 1"
 Random = "1"
 Random123 = "1.7.1"
 RandomNumbers = "1.6.0"
-SPIRVIntrinsics = "1.1.3"
+SPIRVIntrinsics = "1.6"
 SPIRV_LLVM_Backend_jll = "23"
 SPIRV_Tools_jll = "2024.4, 2025.1"
 SparseArrays = "<0.0.1, 1.6"
-StaticArrays = "0.12, 1.0"
+StaticArrays = "1.5"
+StaticArraysCore = "1"
+# 1.3: `foreach_range` steals from nearby threads first
+ThreadTeams = "1.4"
+UnsafeAtomics = "0.4"
 julia = "1.10"
-pocl_standalone_jll = "7.2.1"
+oneAPI = "2"
+pocl_standalone_jll = "7.2.3"
 
 [extras]
 EnzymeCore = "f151be2c-9106-41f4-ab19-57ee4f262869"

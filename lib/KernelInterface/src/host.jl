@@ -36,9 +36,10 @@ Block the calling task until all work it has queued on the active device of `bac
 completed.
 
 !!! note
-    Backend implementations **must** implement this function, and it **must** be
-    cooperative: it may not block inside a driver call, but has to yield to the Julia
-    scheduler while waiting. See the
+    Backend implementations **must** implement this function cooperatively, yielding to
+    the Julia scheduler while waiting rather than blocking inside a driver call. It
+    **must not** wait for work on other queues that the current queue is not ordered
+    after, e.g., by [`wait_event`](@ref). See the
     [notes for backend implementations](@ref implementations_notes) for why.
 """
 function synchronize end
@@ -46,12 +47,9 @@ function synchronize end
 """
     record_event(backend::Backend)
 
-Capture the work the calling task has queued on `backend`'s currently active device so
-far, and return a handle that [`wait_event`](@ref) can use to order later work after it,
-either from another task or from the same task after switching devices.
-
-The handle is only meaningful for the pair `record_event`/`wait_event`; do not use it for
-anything else.
+Capture the work the calling task has queued on `backend`'s active device before this
+call, and return a handle for [`wait_event`](@ref). Recording need not wait for that work to
+complete. The handle is only meant for `wait_event`.
 
 !!! note
     The default implementation calls [`synchronize`](@ref) and returns `nothing`.
@@ -68,28 +66,29 @@ end
 """
     wait_event(backend::Backend, event)
 
-Order the work the calling task subsequently queues on `backend`'s currently active device
-after the work captured by `event`, which was returned by [`record_event`](@ref).
+Order the work the calling task subsequently queues on `backend`'s active device after the
+work captured by `event`, which was returned by [`record_event`](@ref). Returning does not
+mean that the captured work has completed.
 
-The dependency is queue-ordered rather than task-ordered: it applies to the device that is
-active when `wait_event` is called, and a later [`device!`](@ref) leaves the newly selected
-device unordered with respect to `event`. Select the device first and wait afterwards:
+The wait applies to the queue of the device that is active when `wait_event` is called;
+switching devices adds no ordering. To order work across a device switch, select the device
+first and wait afterwards:
 
 ```julia
 event = record_event(backend)   # captures work on the current device
 device!(backend, 2)
-wait_event(backend, event)      # device 2 now waits for that work
+wait_event(backend, event)      # orders this task's work on device 2 after it
 ```
 
 !!! note
     `wait_event(::Backend, ::Nothing)` is a no-op, matching the default `record_event`.
-    A backend that implements [`record_event`](@ref) **must** implement this for the event
-    type it returns, either by enqueuing a dependency on the current task's queue, or by
-    waiting cooperatively as [`synchronize`](@ref) does. A backend with more than one
-    device **must** also accept an `event` that was recorded on a different device, by
-    enqueuing the cross-device dependency if the driver supports one (CUDA's
-    `cuStreamWaitEvent` does) and by waiting cooperatively otherwise. See the
-    [notes for backend implementations](@ref implementations_notes).
+    A backend that returns another event type **must** implement `wait_event` for it,
+    either by adding a dependency to the current task's queue or by waiting cooperatively
+    as [`synchronize`](@ref) does. A backend with more than one device **must** accept an
+    event recorded on another device, waiting cooperatively if the driver cannot add a
+    cross-device dependency. See the
+    [notes for backend implementations](@ref implementations_notes) for how this ordering
+    should interact with implicit synchronization.
 """
 wait_event(::Backend, ::Nothing) = nothing
 
@@ -161,6 +160,10 @@ end
 Select the active device for `backend`. `id` is a 1-based device index; an `id` outside
 `1:ndevices(backend)` throws an `ArgumentError`.
 
+The selection applies to the calling task only. Which device a new task starts on is up to
+the backend, and is not changed by `device!`. To run a task on a given device, use
+[`KernelAbstractions.@spawn`](@ref) with `device=id`.
+
 `device!` is not a synchronization point: work queued before the switch is not ordered
 with respect to work queued after it. To order across a switch, either [`synchronize`](@ref)
 beforehand, or bracket the switch with [`record_event`](@ref) and [`wait_event`](@ref).
@@ -174,7 +177,8 @@ device!(CUDABackend(), 2)  # use the second CUDA device
 !!! note
     Backends supporting multiple devices **must** implement `device!(backend::Backend, id::Int)`,
     along with [`ndevices`](@ref) and [`device`](@ref). The fallback only works for a single
-    device, and throws if [`ndevices`](@ref) reports more.
+    device, and throws if [`ndevices`](@ref) reports more. `device!` **must not** change
+    the device of other tasks, nor the one that tasks created afterwards start on.
 """
 function device!(backend::Backend, id::Int)
     n = ndevices(backend)
@@ -261,13 +265,17 @@ supports_float64(::Backend) = false
 """
     supports_subgroups(::Backend)::Bool
 
-Whether kernels on the active device support sub-groups: the sub-group queries
-([`get_sub_group_size`](@ref) etc.), [`sub_group_barrier`](@ref), and a fixed sub-group
-width [`sub_group_size`](@ref). See the manual for what KernelInterface guarantees about
-how work-groups are divided into sub-groups; a backend that can't ensure that reports
-`false`.
+Whether kernels on the active device support sub-groups with a fixed width
+[`sub_group_size`](@ref): the sub-group queries ([`get_sub_group_size`](@ref) etc.),
+[`sub_group_barrier`](@ref), and the votes [`sub_group_any`](@ref), [`sub_group_all`](@ref)
+and, for widths of at most 64, [`sub_group_ballot`](@ref). Which types the shuffles support
+is queried separately with [`supports_shuffle`](@ref).
 
-Which types [`shfl_down`](@ref) supports is queried separately with [`supports_shuffle`](@ref).
+Which work-items form a sub-group is unspecified, unless
+[`supports_linear_subgroups`](@ref) returns `true`, and the communication functions have to
+be executed in control flow that is uniform over the work-group, unless
+[`supports_independent_subgroups`](@ref) returns `true`. See [Sub-groups](@ref ki_subgroups)
+for the layout and participation guarantees.
 
 !!! note
     Backend implementations **must** implement this function if they support sub-groups.
@@ -276,15 +284,102 @@ Which types [`shfl_down`](@ref) supports is queried separately with [`supports_s
 supports_subgroups(::Backend) = false
 
 """
-    supports_shuffle(::Backend, ::Type{T})::Bool
+    supports_linear_subgroups(::Backend)::Bool
 
-Whether kernels on the active device support [`shfl_down`](@ref) for values of type `T`.
+Whether the active device forms sub-groups from consecutive work-items, for every kernel and
+launch with a 1-D work-group or one whose x extent is a multiple of the sub-group width `W`
+([`sub_group_size`](@ref)): then the work-item with the linear local index `lin` (x
+fastest, see [`get_local_id`](@ref)) is in sub-group `fld(lin - 1, W) + 1`, at lane
+`mod(lin - 1, W) + 1`, the sub-group ids are `1:cld(n, W)` for a work-group of `n`
+work-items, and only the last sub-group can be partial. In particular, a 1-D work-group of at
+most `W` work-items is a single sub-group. It promises nothing about other work-group shapes.
+Implies [`supports_subgroups`](@ref).
+
+Code needs this when it relates local ids to lanes: e.g. stencils that shuffle values between
+neighbouring work-items, transposes through shuffles, or work-group scans built from
+sub-group scans. Code that doesn't can index storage by the sub-group slot
+`(get_sub_group_id() - 1) * W + get_sub_group_local_id()`, which is unique within the
+work-group, but not dense: it can exceed the work-group size, so storage has to have room for
+`get_num_sub_groups() * W` values.
+
+`false` means that the layout isn't guaranteed, not that it is different: OpenCL, Vulkan and
+other APIs leave it to the implementation.
 
 !!! note
-    Backend implementations **must** implement this function for the types they support.
+    Backend implementations **should** implement this function if they guarantee the layout.
     The fallback returns `false`.
 """
-supports_shuffle(::Backend, ::Type) = false
+supports_linear_subgroups(::Backend) = false
+
+"""
+    supports_independent_subgroups(::Backend)::Bool
+
+Whether the sub-group communication functions (shuffles, votes, collectives and
+[`sub_group_barrier`](@ref)) can be executed in control flow that is uniform over the
+sub-group, but not over the work-group: e.g. a loop whose trip count differs between
+sub-groups, or after an early `return` of whole sub-groups. Otherwise, all sub-groups of a
+work-group have to execute the same communication functions, in the same order.
+
+This covers whole sub-groups, not the segments of the functions with a `width` (see
+[`supports_partitionable_subgroups`](@ref)), and doesn't promise forward progress: a sub-group
+spin-waiting for another one can still hang. Implies [`supports_subgroups`](@ref).
+
+!!! note
+    Backend implementations **should** implement this function if sub-groups are
+    independent. The fallback returns `false`.
+"""
+supports_independent_subgroups(::Backend) = false
+
+"""
+    supports_partitionable_subgroups(::Backend)::Bool
+
+Whether a sub-group can be partitioned into segments of `width` consecutive lanes that diverge
+independently, for the sub-group communication functions with a `width` (the shuffles,
+votes, collectives and [`sub_group_barrier`](@ref) with a `width`, e.g.
+[`shfl`](@ref shfl(::Any, ::Integer, ::Integer))): those only have to be executed by the
+work-items of the caller's segment, rather than by the whole sub-group, so the segments of a
+sub-group can take different branches, loop a different number of times, or skip the
+functions altogether.
+
+This extends [`supports_independent_subgroups`](@ref) to segments, and implies it. Like that
+query, it doesn't promise forward progress between segments.
+
+!!! note
+    Backend implementations **should** return `true` only if every function with a
+    `width`, including the barrier, works when only one segment executes it. That can rest
+    on the API, or on an execution model of the hardware that the backend relies on and
+    validates, such as the lock-step execution of SIMD-groups on Apple GPUs; seeing
+    lock-step execution in a test isn't enough. The fallback returns `false`.
+"""
+supports_partitionable_subgroups(::Backend) = false
+
+"""
+    supports_shuffle(::Backend, ::Type{T})::Bool
+
+Whether kernels on the active device support the shuffles [`shfl`](@ref),
+[`shfl_down`](@ref), [`shfl_up`](@ref) and [`shfl_xor`](@ref) for values of type `T`.
+
+Other primitive types of 1, 2, 4, 8 or 16 bytes are supported if `UInt32` is, and so are
+`isbits` structs and tuples of such types (nested ones included). The fallbacks shuffle
+these as words; see [`shfl`](@ref) for how.
+
+This reports whether values of type `T` can be moved between work-items, not whether the
+device can compute with them: e.g. `Float64` values can be shuffled (as words) on a device
+without [`supports_float64`](@ref), as long as they are only stored and loaded, e.g. through
+an array of `UInt64`.
+
+!!! note
+    Backends that support shuffles **must** implement this function for the primitive types
+    they support natively, which have to include `UInt32`, with a signature that only matches
+    those, e.g. `supports_shuffle(::NewBackend, ::Type{<:Union{UInt32, Float32}})`. The
+    fallback handles other types.
+"""
+function supports_shuffle(backend::Backend, ::Type{T}) where {T}
+    isprimitivetype(T) && return shuffle_as_words(T) && supports_shuffle(backend, UInt32)
+    (isbitstype(T) && !isprimitivetype(T)) || return false
+    fields = primitive_fields!(Any[], T, :val)
+    return all(((S, _),) -> sizeof(S) in (1, 2, 4, 8, 16), fields) && supports_shuffle(backend, UInt32)
+end
 
 """
     allocate(::Backend, Type, dims...; unified=false)::AbstractArray

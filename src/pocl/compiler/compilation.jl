@@ -3,6 +3,8 @@
 Base.@kwdef struct OpenCLCompilerParams <: AbstractCompilerParams
     # request a fixed sub-group width via `intel_reqd_sub_group_size`
     sub_group_size::Union{Nothing, Int} = nothing
+    # lower `muladd` to `fma` (see `muladd_method_table`)
+    fuse_muladd::Bool = false
 end
 
 const OpenCLCompilerConfig = CompilerConfig{SPIRVCompilerTarget, OpenCLCompilerParams}
@@ -36,7 +38,14 @@ end
 
 GPUCompiler.runtime_module(::CompilerJob{<:Any, OpenCLCompilerParams}) = POCL
 
-GPUCompiler.method_table_view(job::OpenCLCompilerJob) = GPUCompiler.StackedMethodTable(job.world, method_table, SPIRVIntrinsics.method_table)
+# SPIR-V doesn't support 128-bit integers, so keep 64-bit integer math (e.g. `Rational`
+# comparisons) that Base computes with them out of Int128. Some of Base's error paths format
+# their message at run time, which doesn't compile; GPUToolbox's overrides throw with a
+# constant message instead.
+GPUCompiler.method_tables(job::OpenCLCompilerJob) =
+    job.config.params.fuse_muladd ?
+    (muladd_method_table, method_table, SPIRVIntrinsics.method_table, GPUToolbox.Overlays.int128_overrides, GPUToolbox.Overlays.throw_overrides) :
+    (method_table, SPIRVIntrinsics.method_table, GPUToolbox.Overlays.int128_overrides, GPUToolbox.Overlays.throw_overrides)
 
 # filter out OpenCL built-ins
 # TODO: eagerly lower these using the translator API
@@ -74,8 +83,11 @@ function GPUCompiler.finish_module!(
         ft = typeof(f)
         tt = Tuple{}
 
-        # create a deferred compilation job for `initialize_rng_state`
-        src = methodinstance(ft, tt, job.world)
+        # create a deferred compilation job for `initialize_rng_state`. it is an overlay, so
+        # look it up in the job's method tables.
+        src = GPUCompiler.generic_methodinstance(
+            ft, tt, job.world; method_table_view = GPUCompiler.method_table_view(job)
+        )
         cfg = CompilerConfig(job.config; kernel = false, name = nothing)
         job = CompilerJob(src, cfg, job.world)
         id = length(GPUCompiler.deferred_codegen_jobs) + 1
@@ -102,10 +114,9 @@ function GPUCompiler.finish_module!(
             end
             fptr = call!(builder, deferred_codegen_ft, deferred_codegen, [ConstantInt(id)])
 
-            # call the `initialize_rng_state` function
-            rt = Core.Compiler.return_type(f, tt)
-            llvm_rt = convert(LLVMType, rt)
-            llvm_ft = LLVM.FunctionType(llvm_rt)
+            # call the `initialize_rng_state` function, which returns nothing. inferring its
+            # return type natively would leave host code for it in sysimages.
+            llvm_ft = LLVM.FunctionType(LLVM.VoidType())
             fptr = inttoptr!(builder, fptr, LLVM.PointerType(llvm_ft))
             call!(builder, llvm_ft, fptr)
             br!(builder, top_bb)
@@ -135,54 +146,64 @@ end
 ## compiler implementation (configure, compile, and link)
 
 """
-    supports_fp_atomics(caps::UInt64, ops::UInt64)
+    spirv_atomics(dev)
 
-Whether the `cl_ext_float_atomics` capability bitfield `caps` (see
-`dev.single_fp_atomic_capabilities` and friends) natively supports all of `ops`.
-Kernels perform atomics on both global and local memory, so callers should
-require both the `GLOBAL` and `LOCAL` bit of an operation.
+The atomic operations `dev` supports, for which `SPIRVCompilerTarget` selects SPIR-V
+instructions instead of compare-and-swap loops.
+
+Floating-point addition is supported per precision and address space as `dev` reports it
+through `cl_ext_float_atomics`, for half and double precision only if `dev` supports those
+types. 64-bit integer atomics need both `cl_khr_int64_base_atomics` and
+`cl_khr_int64_extended_atomics`.
 """
-supports_fp_atomics(caps::UInt64, ops::UInt64) = caps & ops == ops
-
-const fp_atomic_add = cl.CL_DEVICE_GLOBAL_FP_ATOMIC_ADD_EXT | cl.CL_DEVICE_LOCAL_FP_ATOMIC_ADD_EXT
-const fp_atomic_min_max = cl.CL_DEVICE_GLOBAL_FP_ATOMIC_MIN_MAX_EXT | cl.CL_DEVICE_LOCAL_FP_ATOMIC_MIN_MAX_EXT
-
-"""
-    default_spirv_extensions(dev)
-
-SPIR-V extensions to permit for `dev`, as the `+`-prefixed, comma-separated string
-`SPIRVCompilerTarget` passes on to the backend via `-spirv-ext`.
-
-Listing an extension only *permits* it: nothing is emitted unless a module actually
-needs the instructions it guards, so this costs nothing for kernels that don't.
-"""
-function default_spirv_extensions(dev)
-    exts = String[]
-
-    # Floating-point atomics. Atomix/UnsafeAtomics lower `@atomic A[i] += x` and
-    # `@atomic max(A[i], x)` on floats to LLVM `atomicrmw fadd`/`fmin`/`fmax`, which the
-    # SPIR-V backend only translates when the corresponding extension is permitted:
-    #   LLVM ERROR: The atomic float instruction requires the following SPIR-V
-    #   extension: SPV_EXT_shader_atomic_float_add
-    # Enzyme's reverse mode hits this too, as it accumulates gradients with atomic fadd.
-    # The device reports native support per precision through cl_ext_float_atomics.
-    fp32 = dev.single_fp_atomic_capabilities
-    fp64 = dev.double_fp_atomic_capabilities
-    if supports_fp_atomics(fp32, fp_atomic_add) || supports_fp_atomics(fp64, fp_atomic_add)
-        push!(exts, "+SPV_EXT_shader_atomic_float_add")
-    end
-    if supports_fp_atomics(fp32, fp_atomic_min_max) || supports_fp_atomics(fp64, fp_atomic_min_max)
-        push!(exts, "+SPV_EXT_shader_atomic_float_min_max")
-    end
-
-    return join(exts, ",")
+function spirv_atomics(dev)
+    exts = dev.extensions
+    f16 = "cl_khr_fp16" in exts ? dev.half_fp_atomic_capabilities : zero(UInt64)
+    f32 = dev.single_fp_atomic_capabilities
+    f64 = "cl_khr_fp64" in exts ? dev.double_fp_atomic_capabilities : zero(UInt64)
+    global_add(caps) = caps & cl.CL_DEVICE_GLOBAL_FP_ATOMIC_ADD_EXT != 0
+    local_add(caps) = caps & cl.CL_DEVICE_LOCAL_FP_ATOMIC_ADD_EXT != 0
+    return SPIRVAtomics(;
+        int64 = "cl_khr_int64_base_atomics" in exts && "cl_khr_int64_extended_atomics" in exts,
+        fadd_f16_global = global_add(f16), fadd_f16_local = local_add(f16),
+        fadd_f32_global = global_add(f32), fadd_f32_local = local_add(f32),
+        fadd_f64_global = global_add(f64), fadd_f64_local = local_add(f64),
+    )
 end
+
+"""
+    compiler_config(dev; kwargs...)
+
+The GPUCompiler configuration for compiling kernels for `dev`, cached per device and
+keyword arguments. Besides those of `CompilerConfig` (`kernel`, `name`, `always_inline`,
+`debug_level`) and `sub_group_size` (the sub-group width to require, or `nothing` for none,
+defaulting to the width `KI.sub_group_size` reports), it takes:
+
+- `atomics`: override the atomic capabilities GPUCompiler may select directly. This
+  replaces the whole device-derived `SPIRVAtomics` (see `spirv_atomics`), and defaults to
+  the device's capabilities. Enabling capabilities the device doesn't support can make
+  compilation fail or crash the driver's compiler, while disabling them relies on integer
+  compare-and-swap for the fallback.
+- `extensions`: SPIR-V extensions to enable, as a `--spirv-ext` specifier (e.g.
+  `"+SPV_KHR_expect_assume"`), in addition to those the atomics need, to
+  `SPV_KHR_no_integer_wrap_decoration`, and to `SPV_INTEL_subgroups` on devices with
+  `cl_intel_subgroups` (for the vector shuffles of packed structs). `nothing`, the default,
+  enables no others.
+
+Other keyword arguments are passed on to `SPIRVCompilerTarget`.
+"""
+function compiler_config end
+
+# `SPV_KHR_no_integer_wrap_decoration` carries the `nuw`/`nsw` flags of integer arithmetic,
+# e.g. of the index computations, over to PoCL (#868)
+const default_extensions = "+SPV_KHR_no_integer_wrap_decoration"
 
 # cache of compiler configurations, per device (but additionally configurable via kwargs)
 const _toolchain = Ref{Any}()
 const _compiler_configs = Dict{UInt, OpenCLCompilerConfig}()
 function compiler_config(dev::cl.Device; kwargs...)
-    h = hash(dev, hash(kwargs))
+    # (as a `NamedTuple`: hashing the `Pairs` boxes each value, on every launch)
+    h = hash(dev, hash(values(kwargs)))
     # launches already hold this (reentrant) lock, but reflection doesn't
     return @lock clfunction_lock begin
         config = get(_compiler_configs, h, nothing)
@@ -196,24 +217,49 @@ end
 @noinline function _compiler_config(
         dev; kernel = true, name = nothing, always_inline = false,
         debug_level = Base.JLOptions().debug_level,
-        sub_group_size::Union{Nothing, Int} = 32,
+        sub_group_size::Union{Nothing, Int} = default_sub_group_size(dev),
+        atomics::SPIRVAtomics = spirv_atomics(dev),
         extensions::Union{Nothing, String} = nothing, kwargs...
     )
     supports_fp16 = "cl_khr_fp16" in dev.extensions
     supports_fp64 = "cl_khr_fp64" in dev.extensions
+    # `BFloat16` loads, stores and conversions. GPUCompiler widens the arithmetic to `float`,
+    # because PoCL doesn't accept any SPIR-V extension for bfloat16 arithmetic.
+    supports_bfloat16 = "SPV_KHR_bfloat16" in dev.spirv_extensions
 
     if sub_group_size !== nothing && sub_group_size ∉ dev.sub_group_sizes
         error("$sub_group_size is not a valid sub-group size for this device.")
     end
 
-    if extensions === nothing
-        extensions = default_spirv_extensions(dev)
+    if supports_bfloat16
+        extensions = extensions === nothing ? "+SPV_KHR_bfloat16" : "+SPV_KHR_bfloat16,$extensions"
+    end
+
+    # the vector shuffles of `KI.shfl_word_tuple` (see `POCLKernels`); `SPV_INTEL_subgroups`
+    # is only declared by modules that use it
+    if "cl_intel_subgroups" in dev.extensions
+        extensions = extensions === nothing ? "+SPV_INTEL_subgroups" : "+SPV_INTEL_subgroups,$extensions"
     end
 
     # create GPUCompiler objects
-    target = SPIRVCompilerTarget(; supports_fp16, supports_fp64, extensions, validate = true, kwargs...)
-    params = OpenCLCompilerParams(; sub_group_size)
+    target = SPIRVCompilerTarget(;
+        supports_fp16, supports_fp64, supports_bfloat16, atomics,
+        extensions = join(filter(!isempty, [default_extensions, something(extensions, "")]), ","),
+        validate = true, kwargs...
+    )
+    params = OpenCLCompilerParams(; sub_group_size, fuse_muladd = fast_fma())
     return CompilerConfig(target, params; kernel, name, always_inline, debug_level)
+end
+
+# whether the CPU that PoCL runs kernels on, i.e., the host, executes `fma` in hardware, as
+# fast as a multiplication or addition. GPUCompiler's `have_fma` doesn't tell: on SPIR-V, it
+# holds whenever OpenCL's (correctly rounded) `fma` is available, possibly in software.
+function fast_fma()
+    Sys.ARCH === :aarch64 && return true
+    Sys.ARCH in (:x86_64, :i686) || return false
+    # LLVM's features of the host CPU, which PoCL compiles for
+    features = ccall(:jl_get_cpu_features, String, ())
+    return "+fma" in split(features, ',')
 end
 
 # The world in which this package was loaded. Running the compiler in that world reuses the
@@ -253,5 +299,9 @@ function link_kernel(@nospecialize(job::CompilerJob), obj::Vector{UInt8}, entry:
         error("Your device does not support SPIR-V, which is currently required for native execution.")
     end
     cl.build!(prog)
-    return cl.Kernel(prog, entry)
+    kernel = cl.Kernel(prog, entry)
+    # cap tuned work-groups to avoid the queue fallback for excessive stack use; fitting to
+    # the ndrange can only shrink them further
+    kernel.tuned_work_group_size = min(kernel.work_group_size, host_kernel_max_items(kernel))
+    return kernel
 end

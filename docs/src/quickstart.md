@@ -10,6 +10,14 @@ called a grid in NVIDIA CUDA and designates the total number of work items. If
 using a workgroup of size 1 (non-parallel execution), the ndrange is the
 number of items to iterate over in a loop.
 
+Like other GPU programming models, KernelAbstractions assumes that the work is roughly balanced
+across the work-items. A launch without a workgroup size gets one chosen under that
+assumption: on the CPU, each workgroup runs on one thread and is vectorized across its
+work-items, so the default splits a launch into a few workgroups per thread, as long as the
+workgroups stay large enough to vectorize. Threads that finish early then pick up more. If
+the cost of a work-item varies a lot, e.g., with a triangular loop bound, pass a smaller
+workgroup size, so that there are more workgroups to pick up.
+
 ## Writing your first kernel
 
 Kernel functions are marked with the [`@kernel`](@ref). Inside the `@kernel` macro
@@ -60,6 +68,36 @@ synchronize(dev)
 ```
 
 See also [Memcopy with static NDRange](@ref memcopy_static).
+
+### [Opting out of the bounds check](@id unsafe_indices)
+
+The `ndrange` is padded to a multiple of the workgroup size, so a kernel checks for every
+work-item whether it is inside the `ndrange` before running the body, and the body only
+runs for the work-items that are. A kernel can opt out of the check with `unsafe_indices = true`.
+Its body then also runs for the padded work-items, so it has to test the index itself before touching memory:
+
+```@example mul2_kernel
+@kernel unsafe_indices = true function mul2_unsafe_kernel(A)
+    g = @index(Group, Linear)
+    l = @index(Local, Linear)
+    I = (g - 1) * prod(@groupsize()) + l
+    if I <= length(A)
+        A[I] = 2 * A[I]
+    end
+end
+
+mul2_unsafe_kernel(dev, 64)(A, ndrange = length(A))
+synchronize(dev)
+@assert all(A .== 8)
+```
+
+Don't use `@index(Global)` in any form in such a kernel. Compute the global index from
+`@index(Group)`, `@index(Local)` and [`@groupsize`](@ref) instead, as above, and compare it
+with the size of the range.
+
+!!! note
+    The padded work-items also take part in [`@synchronize`](@ref),
+    so they must reach every barrier that the other work-items of their workgroup reach.
 
 ## Launching kernel on the backend
 
@@ -157,8 +195,11 @@ function exchange_and_compute!(backend, A, B)
 end
 ```
 
-Waiting on a backend, whether with [`synchronize`](@ref) or at the end of a spawned task,
-yields to the Julia scheduler, so other tasks keep making progress while a kernel runs.
+Waiting on a GPU backend, whether with [`synchronize`](@ref) or at the end of a spawned
+task, yields to the Julia scheduler, so other tasks keep making progress while a kernel runs.
+The `CPU` backend runs every launch to completion before it returns, without yielding;
+other tasks, timers and I/O run after launches on several threads and after long ones (see
+[`CPU`](@ref)).
 
 ### Which device a task runs on
 

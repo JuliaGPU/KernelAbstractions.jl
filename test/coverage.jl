@@ -59,6 +59,8 @@ function tracked_lines(tracefile)
 end
 
 function run_covered(dir)
+    # Julia canonicalizes the coverage filter, so use the same path for source locations.
+    dir = realpath(dir)
     script = joinpath(dir, SCRIPT_NAME)
     write(script, SCRIPT)
     log = joinpath(dir, "log.txt")
@@ -68,14 +70,12 @@ function run_covered(dir)
     # coverage report when the suite itself runs under `Pkg.test(coverage=true)`.
     tracefile = joinpath(dir, "lcov.info")
 
-    # `Base.julia_cmd()` forwards the parent's `--code-coverage` flags. Under
-    # `Pkg.test(coverage=true)` that is `--code-coverage=@<pkgroot>`, which would
-    # keep the subprocess in path-tracking mode: the script lives outside the
-    # package root and, more importantly, GPUCompiler only records device
-    # coverage in `user` and `all` mode. Drop the inherited flags so the
-    # subprocess tracks in `user` mode regardless of how the suite is run.
+    # `Base.julia_cmd()` forwards the parent's `--code-coverage` flags, which under
+    # `Pkg.test(coverage=true)` track the package root rather than the script. Drop them and
+    # track the script's directory instead: path-based tracking is what downstream packages
+    # use, and it only covers methods whose location is inside the tracked path.
     julia = Cmd(filter(arg -> !startswith(arg, "--code-coverage"), Base.julia_cmd().exec))
-    cmd = `$julia --startup-file=no --code-coverage=user --code-coverage=$tracefile
+    cmd = `$julia --startup-file=no --code-coverage=@$dir --code-coverage=$tracefile
         --project=$(Base.active_project()) $script`
     proc = run(pipeline(ignorestatus(cmd); stdout = log, stderr = log))
     if !success(proc)

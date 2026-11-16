@@ -213,6 +213,46 @@ statements, and [`@uniform`](@ref) evaluates an expression outside the work-item
 can be reused across `@synchronize` statements. For scratch storage that does not need to
 survive across `@synchronize`, an `MArray` can be used instead.
 
+## [Reductions and scans](@id group_collectives)
+
+[`@groupreduce`](@ref) combines a value from every work-item of the workgroup and returns the
+result to all of them. [`@groupscan`](@ref) gives each work-item the result up to itself, in
+the order of `@index(Local, Linear)`; it is inclusive by default, and exclusive with
+`inclusive = false`. Both take an associative operator and its neutral element, and
+`@groupreduce` also needs the operator to be commutative.
+
+```julia
+@kernel function group_sums!(out, @Const(x))
+    i = @index(Global, Linear)
+    s = @groupreduce(+, x[i], zero(eltype(out)); groupsize = 256)
+    if @index(Local, Linear) == 1
+        out[@index(Group, Linear)] = s
+    end
+end
+```
+
+Like [`@synchronize`](@ref), they are collectives: every work-item of the workgroup has to
+reach them, not in a branch or loop that only some of them take, or after an early `return`.
+Use them as a statement of their own, optionally assigning the result, as in
+`res = @groupreduce(+, val, zero(T))`. Work-items that pad a partial workgroup take part as
+well: they contribute the neutral element, without evaluating `val`.
+
+Both go through local memory, whose size has to be known when the kernel is compiled: a
+kernel without a static workgroup size passes `groupsize`, a constant upper bound on the
+number of work-items per workgroup.
+
+They work on every backend. Where the backend can shuffle the values, `@groupreduce` first
+reduces each sub-group, and then combines those results through local memory.
+KernelAbstractions picks this automatically. The order in which values are combined can
+differ, so floating-point results may vary between backends and launch configurations.
+
+A kernel is either a `@kernel` or a kernel written against
+[KernelInterface](@ref kernelinterface), never a mix: don't call KernelInterface's device
+functions, such as its sub-group shuffles and votes, in a `@kernel`. They have to be executed
+by all work-items of a sub-group, but in a `@kernel` with the default bounds checking, every
+statement other than the collectives above only runs on the work-items that are part of the
+`ndrange`. Host code can use KernelInterface's queries, e.g. to pick a kernel.
+
 ## Launching kernels
 
 Construct a kernel by calling the kernel function on a backend and optional static sizes, then
@@ -255,3 +295,44 @@ and `@ndrange()` returns the extents.
 
 Obtain the backend from an array with [`get_backend`](@ref) and always call [`synchronize`](@ref) before reading results on the host.
 See the [Quickstart](@ref) for a full walkthrough and the Examples section of the manual for larger patterns.
+
+## Loops without a kernel
+
+A kernel whose body is a loop over the indices of an array needs none of the kernel language
+beyond the index itself. [`foreach_index`](@ref) launches such a loop directly, with one work item
+per index of `eachindex(y, x)`:
+
+```julia
+function scale!(y, x)
+    foreach_index(y, x) do i
+        @inbounds y[i] = 2 * x[i] + 1
+    end
+    return y
+end
+```
+
+The body is an ordinary Julia function, and it receives the index a `for i in eachindex(y, x)`
+loop would: a linear index if the arrays have `IndexLinear` style, a `CartesianIndex` otherwise.
+Passing every array the body indexes makes sure the index is valid for each, and that they all
+live on the same backend. The launch is asynchronous like any other, and bounds checks are not
+elided.
+
+To loop over other indices than those of an array, give the backend and the index space, a range
+or a `CartesianIndices` like an `ndrange`. The body then receives these indices as they are,
+e.g. those of the interior of a matrix:
+
+```julia
+function smooth!(B, A)
+    interior = CartesianIndices((2:size(A, 1)-1, 2:size(A, 2)-1))
+    foreach_index(get_backend(A), interior) do I
+        i, j = Tuple(I)
+        @inbounds B[I] = (A[i-1, j] + A[i+1, j] + A[i, j-1] + A[i, j+1]) / 4
+    end
+    return B
+end
+```
+
+Because the body becomes a kernel, every value it captures must have a known type — which is why
+the examples wrap the loop in a function, and why the body must not assign to a captured variable.
+Write the kernel out with [`@kernel`](@ref) when it needs more than an index: workgroup-level
+indices, local memory, or synchronization.

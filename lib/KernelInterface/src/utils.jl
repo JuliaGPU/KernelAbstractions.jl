@@ -62,3 +62,9 @@ function assign_args!(code, _args)
 
     return vars, var_exprs
 end
+
+## generated functions
+
+# Mark the body a generator returns for inlining. `@inline` on a generated function doesn't
+# apply to a body that the generator returns with an explicit `return`, which Runic inserts.
+inline_body(ex) = Expr(:block, Expr(:meta, :inline), ex)

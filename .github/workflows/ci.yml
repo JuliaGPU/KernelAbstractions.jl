@@ -25,10 +25,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        version: ['1.10', '1.11', '1.12', '1.13', 'nightly']
+        # pull requests only test the oldest and newest supported release
+        version: ${{ fromJSON(github.event_name == 'pull_request' && '["1.10", "1.13"]' ||
+                              '["1.10", "1.11", "1.12", "1.13", "nightly"]') }}
         os: [ubuntu-24.04, ubuntu-24.04-arm, macOS-15-intel, macOS-15, windows-2022]
         arch: [x64, arm64]
         exclude:
+          # the Intel macOS runners are slow and scarce, so pull requests only use them for
+          # the newest release (on other events, this matches the excluded arm64 variant)
+          - os: macOS-15-intel
+            version: '1.10'
+            arch: ${{ github.event_name == 'pull_request' && 'x64' || 'arm64' }}
           - os: ubuntu-24.04
             arch: arm64
           - os: windows-2022
@@ -95,14 +102,46 @@ jobs:
         with:
           files: lcov.info
 
+  threads:
+    # the CPU backend gives PoCL as many threads as Julia has, so with the main job's single
+    # thread, work-groups only run in parallel in the POCL session test's subprocess
+    name: Threads
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        threads: ['4']
+        version: ['1.10', '1.13']
+        os: [ubuntu-24.04, macOS-15]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: julia-actions/setup-julia@v3
+        with:
+          version: ${{ matrix.version }}
+      - uses: julia-actions/cache@v3
+      # see the CI job
+      - name: Dev KernelInterface
+        shell: bash
+        run: julia -e 'using Pkg; Pkg.activate("."); Pkg.develop(; path="lib/KernelInterface")'
+      - uses: julia-actions/julia-buildpkg@v1
+      - uses: julia-actions/julia-runtest@v1
+        env:
+          JULIA_NUM_THREADS: ${{ matrix.threads }}
+        with:
+          annotate: true
+
   KernelInterface:
     name: KernelInterface
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        version: ['1.10', '1.11', '1.12', '1.13', 'nightly']
-        os: [ubuntu-24.04, macOS-15, windows-2022]
+        # KernelAbstractions' tests also run the KernelInterface testsuite on every platform,
+        # so pull requests only check here that the package works on its own
+        version: ${{ fromJSON(github.event_name == 'pull_request' && '["1.10", "1.13"]' ||
+                              '["1.10", "1.11", "1.12", "1.13", "nightly"]') }}
+        os: ${{ fromJSON(github.event_name == 'pull_request' && '["ubuntu-24.04"]' ||
+                         '["ubuntu-24.04", "macOS-15", "windows-2022"]') }}
     steps:
       - uses: actions/checkout@v7
       - uses: julia-actions/setup-julia@v3
@@ -124,6 +163,12 @@ jobs:
   docs:
     name: Documentation
     runs-on: ubuntu-latest
+    # Documenter deploys with the DOCUMENTER_KEY deploy key
+    permissions:
+      contents: read
+      statuses: write   # report the deployed preview on pull requests
+      pull-requests: write  # link the preview from pull requests that change the docs
+      actions: write    # needed for julia-actions/cache to delete old caches
     steps:
       - uses: actions/checkout@v7
       - uses: julia-actions/setup-julia@v3
@@ -146,6 +191,33 @@ jobs:
         with:
           path: docs/build
           name: docs-build
+
+      # Documenter only reports the preview as a commit status, which is easy to miss, so
+      # link it from pull requests that change the documentation. Pull requests from forks
+      # don't get a preview.
+      - name: Link the preview
+        if: |
+          github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name == github.repository
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const {owner, repo} = context.repo;
+            const issue_number = context.issue.number;
+            const files = await github.paginate(github.rest.pulls.listFiles,
+                                                {owner, repo, pull_number: issue_number, per_page: 100});
+            if (!files.some(file => file.filename.startsWith('docs/'))) {
+              return;
+            }
+            const marker = '<!-- documentation-preview -->';
+            const comments = await github.paginate(github.rest.issues.listComments,
+                                                   {owner, repo, issue_number, per_page: 100});
+            if (comments.some(comment => comment.body?.startsWith(marker))) {
+              return;
+            }
+            const url = `https://juliagpu.github.io/KernelAbstractions.jl/previews/PR${issue_number}/`;
+            await github.rest.issues.createComment({owner, repo, issue_number,
+                                                   body: `${marker}\nDocumentation preview: ${url}`});
 
   doctests:
     name: Doctests

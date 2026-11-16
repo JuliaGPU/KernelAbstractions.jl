@@ -10,6 +10,14 @@ macro gputhrow(name::String, reason::String)
     end
 end
 
+# GPUToolbox's shared overrides throw through this function
+@device_override @generated function GPUToolbox.Overlays.device_throw(::Type{E}, ::Val{reason}) where {E <: Exception, reason}
+    return quote
+        $(Expr(:meta, :noinline))
+        @gputhrow $(String(nameof(E))) $(String(reason))
+    end
+end
+
 # math.jl
 @device_override @noinline Base.Math.throw_complex_domainerror(f::Symbol, x) =
     @gputhrow "DomainError" "This operation requires a complex input to return a complex result"
@@ -46,6 +54,18 @@ end
         @gputhrow "BoundsError" "Out-of-bounds array access"
 end
 
+# range.jl
+# From Metal.jl to avoid widemul and Int128, which the SPIR-V back-end cannot lower.
+# Unlike Metal.jl, this covers all the types Base's method does: `widemul` of a range of
+# `Int32` and an `Int64` index widens to `Int128` as well.
+@static if VERSION >= v"1.12.0-DEV.1736" # Partially reverts JuliaLang/julia PR #56750
+    const BitInteger64 = Union{Int8, Int16, Int32, Int64, UInt8, UInt16, UInt32, UInt64}
+    @device_override function Base.checkbounds(::Type{Bool}, v::StepRange{<:BitInteger64, <:BitInteger64}, i::BitInteger64)
+        @inline
+        return checkindex(Bool, eachindex(IndexLinear(), v), i)
+    end
+end
+
 # trig.jl
 @device_override @noinline Base.Math.sincos_domain_error(x) =
     @gputhrow "DomainError" "sincos(x) is only defined for finite x"
@@ -69,4 +89,19 @@ end
     @boundscheck all(isone, I) ||
         @gputhrow "BoundsError" "Out-of-bounds access of scalar value"
     x
+end
+
+# float.jl
+# `muladd` allows contracting the multiplication and addition, but SPIR-V can only express
+# that with `SPV_KHR_float_controls2`, which we don't emit and the PoCL JLL can't read, so
+# PoCL computes it as a separate multiplication and addition. on CPUs with hardware FMA,
+# fuse them explicitly. these overlays are only used for jobs that set `fuse_muladd` (see
+# `fast_fma`). they are not consistent with Base's `muladd`, which may or may not fuse.
+# XXX: a stopgap (#865). remove it, and `fuse_muladd`, once the PoCL JLL is built with
+#      LLVM 23, whose SPIR-V translator reads the extension (pocl/pocl#2393), and we enable
+#      the extension for devices that report it (JuliaGPU/GPUCompiler.jl#1007).
+Base.Experimental.@MethodTable(muladd_method_table)
+for T in (Float32, Float64)
+    @eval Base.Experimental.@overlay muladd_method_table Base.muladd(x::$T, y::$T, z::$T) =
+        Base.fma(x, y, z)
 end

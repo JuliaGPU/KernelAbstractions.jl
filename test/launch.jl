@@ -1,3 +1,4 @@
+using Adapt
 using KernelAbstractions
 using KernelAbstractions.NDIteration
 import KernelAbstractions.KernelInterface as KI
@@ -45,6 +46,64 @@ const MANY_ARGS = [Symbol(:x, i) for i in 1:40]
     @inbounds A[I] = $(foldl((a, b) -> :($a + $b), MANY_ARGS))
 end
 
+# A custom iteration space: one work-item per index in a list, whose linear index is its
+# position in the list (as Oceananigans launches kernels over the active cells of a grid)
+struct IndexList{V <: AbstractVector}
+    indices::V
+end
+Adapt.@adapt_structure IndexList
+
+# the `ndrange` of the context: every index but `UNLISTED` is part of the space
+struct ListedIndices
+    length::Int
+end
+const UNLISTED = CartesianIndex(typemin(Int), typemin(Int))
+Base.in(I::CartesianIndex{2}, ::ListedIndices) = I != UNLISTED
+
+const ListNDRange = NDRange{1, <:Any, <:Any, <:Any, <:Any, <:IndexList}
+
+function KernelAbstractions.partition(kernel::KernelAbstractions.Kernel, list::IndexList, workgroupsize)
+    static_workgroupsize = KernelAbstractions.workgroupsize(kernel)
+    items = NDIteration.get(static_workgroupsize)
+    blocks, _, dynamic = NDIteration.partition((length(list.indices),), items)
+    return NDRange{1, DynamicSize, static_workgroupsize}(CartesianIndices(blocks), nothing, list), dynamic
+end
+KernelAbstractions.cartesian(list::IndexList) = ListedIndices(length(list.indices))
+KernelAbstractions.cartesian(r::ListedIndices) = r
+
+@inline list_position(r::ListNDRange, g::CartesianIndex{1}, i::CartesianIndex{1}) =
+    (g[1] - 1) * length(workitems(r)) + i[1]
+@inline function NDIteration.expand(r::ListNDRange, g::CartesianIndex{1}, i::CartesianIndex{1})
+    p = list_position(r, g, i)
+    return p <= length(r.mapping.indices) ? (@inbounds r.mapping.indices[p]) : UNLISTED
+end
+@inline NDIteration.linear_index(r::ListNDRange, ::ListedIndices, g::CartesianIndex{1}, i::CartesianIndex{1}) =
+    list_position(r, g, i)
+
+@kernel function launch_listed!(visits, position)
+    I = @index(Global, Cartesian)
+    @inbounds begin
+        visits[I] += 1
+        position[I] = @index(Global, Linear)
+    end
+end
+
+# a kernel function with state, whose `partition` hook fixes the workgroup size
+# (laid out like a closure, as AMDGPU only compiles functions, and adapts them as closures)
+struct FixedGroups{F, I} <: Function
+    f::F
+    items::I
+end
+(g::FixedGroups)(args...) = g.f(args...)
+KernelAbstractions.partition(
+    kernel::KernelAbstractions.Kernel{<:Any, <:Any, <:Any, <:FixedGroups}, ndrange::Tuple, workgroupsize
+) = invoke(KernelAbstractions.partition, Tuple{Any, Any, Any}, kernel, ndrange, (kernel.f.items,))
+
+@kernel function launch_groupsize!(A)
+    I = @index(Global, Linear)
+    @inbounds A[I] = @groupsize()[1]
+end
+
 default_launcher(kernel, args...; ndrange, workgroupsize = nothing) =
     kernel(args...; ndrange, workgroupsize)
 
@@ -80,7 +139,11 @@ end
 
 function launch_testsuite(backend, AT; launcher = default_launcher, skip_tests = Set{String}())
     @testset "index layout" begin
-        shapes = Tuple[(), (7,), (37,), (5, 7), (33, 3), (3, 5, 7), (2, 3, 4, 5)]
+        # with partial workgroups, and (for some workgroup sizes) without
+        shapes = Tuple[
+            (), (7,), (37,), (8,), (5, 7), (33, 3), (4, 6), (3, 5, 7), (8, 6, 2), (2, 3, 4, 5),
+            (2, 3, 2, 3, 2), (9, 7, 3, 5, 2),
+        ]
         @testset "$shape, workgroupsize=$wgs" for shape in shapes,
                 wgs in (nothing, 4, (2, 3), (4, 1, 2))
             wgs !== nothing && length(wgs) > length(shape) && continue
@@ -93,6 +156,8 @@ function launch_testsuite(backend, AT; launcher = default_launcher, skip_tests =
         @testset "static workgroupsize" begin
             @test check_indices(launcher, backend(), AT, launch_indices!(backend(), (4, 2)), (9, 5))
             @test check_indices(launcher, backend(), AT, launch_indices!(backend(), 8), (9, 5, 3))
+            @test check_indices(launcher, backend(), AT, launch_indices!(backend(), (4, 2)), (8, 6))
+            @test check_indices(launcher, backend(), AT, launch_indices!(backend(), 8), (16, 5, 3))
         end
 
         @testset "static ndrange" begin
@@ -140,8 +205,29 @@ function launch_testsuite(backend, AT; launcher = default_launcher, skip_tests =
         @test all(==(sum(1:40)), Array(A))
     end
 
+    @testset "custom iteration space" begin
+        shape = (7, 5)
+        # 18 indices: the last workgroup of 4 work-items is partial
+        listed = [I for I in CartesianIndices(shape) if isodd(sum(Tuple(I)))]
+        visits = AT(zeros(Int, shape))
+        position = AT(zeros(Int, shape))
+        launcher(launch_listed!(backend(), 4), visits, position; ndrange = IndexList(AT(listed)))
+        synchronize(backend())
+        visits, position = Array(visits), Array(position)
+        @test all(I -> visits[I] == (I in listed), CartesianIndices(shape))
+        @test all(p -> position[listed[p]] == p, eachindex(listed))
+    end
+
+    @testset "partition for the kernel function" begin
+        kernel = launch_groupsize!(backend())
+        A = AT(zeros(Int, 10))
+        launcher(similar(kernel, FixedGroups(kernel.f, 3)), A; ndrange = length(A))
+        synchronize(backend())
+        @test all(==(3), Array(A))
+    end
+
     @testset "synchronize with padding lanes" begin
-        for (shape, wgs) in (((37,), (8,)), ((7, 6), (4, 4)), ((5, 3, 3), (2, 2, 2)))
+        for (shape, wgs) in (((37,), (8,)), ((7, 6), (4, 4)), ((5, 3, 3), (2, 2, 2)), ((8, 6), (4, 3)))
             A = AT(zeros(Int, shape))
             launcher(launch_sync!(backend(), wgs), A; ndrange = shape)
             synchronize(backend())
@@ -156,8 +242,8 @@ function select_launch_testsuite()
     max_items = 1024
     max_dims = (1024, 1024, 64)
     max_groups = (Int(typemax(Int32)), 65535, 65535)
-    select(extent, groupsize = nothing; max_dims = max_dims, max_groups = max_groups) =
-        KernelAbstractions.select_launch(extent, groupsize, max_items, max_dims, max_groups)
+    select(extent, groupsize = nothing; max_dims = max_dims, max_groups = max_groups, fold_items = 64) =
+        KernelAbstractions.select_launch(extent, groupsize, max_items, max_dims, max_groups; fold_items)
     LinearLaunch = KernelAbstractions.LinearLaunch
     NDLaunch = KernelAbstractions.NDLaunch
 
@@ -181,6 +267,18 @@ function select_launch_testsuite()
         # tuning respects the per-dimension limits
         @test select((1, 1, 5000)) === NDLaunch{Int32}()
 
+        # and more if the workgroups have one work-item past the third
+        @test select((8, 8, 8, 1536)) === NDLaunch{Int32}()
+        @test select((9, 7, 3, 5, 2)) === NDLaunch{Int32}()
+        @test select((4, 4, 2, 1536)) === LinearLaunch{Int32}()
+        @test select((4, 4, 1, 1536); fold_items = 16) === NDLaunch{Int32}()
+        @test select((5, 3, 1, 1536); fold_items = 16) === LinearLaunch{Int32}()
+        @test select((2, 3, 4, 5), (2, 3)) === NDLaunch{Int32}()
+        @test select((2, 3, 4, 5), (1, 1, 1, 5)) === LinearLaunch{Int32}()
+        @test select((1024, 1, 300, 300), (1024,)) === LinearLaunch{Int32}()
+        @test select((10, 10, 10, 10); max_dims = (1024, 1024), max_groups = (65535, 65535)) ===
+            LinearLaunch{Int32}()
+
         # indices are computed in Int32 if the padded iteration space fits
         @test select((1024, 1024, 1024)) === NDLaunch{Int32}()
         @test select((1025, 1024, 1024)) === NDLaunch{Int}()
@@ -196,6 +294,14 @@ function select_launch_testsuite()
         # including when empty
         @test select((2^40, 2^40, 0)) === LinearLaunch{Int32}()
         @test select((2^20, 2^12, 0), (1024,)) === NDLaunch{Int32}()
+
+        # a backend can prefer `Int`
+        selectint(extent, groupsize = nothing) =
+            KernelAbstractions.select_launch(extent, groupsize, max_items, max_dims, max_groups, Int)
+        @test selectint((1000,)) === NDLaunch{Int}()
+        @test selectint((2, 3, 4, 5)) === LinearLaunch{Int}()
+        @test selectint((1025, 1024, 1024)) === NDLaunch{Int}()
+        @test_throws ArgumentError selectint((2^40, 2^40))
     end
 
     # The index type is chosen before the workgroup size is tuned, so the padding that the
@@ -205,7 +311,7 @@ function select_launch_testsuite()
                 (5,), (1000,), (3, 7), (33, 1000), (1, 1, 5000), (7, 9, 11),
                 (1500, 3, 2), (2, 3, 4, 5), (1, 1, 1, 3000), (0, 7),
             )
-            for limits in ((), max_dims)
+            for limits in ((), max_dims, KernelAbstractions.nd_limits(max_dims, extent))
                 bound = KernelAbstractions.tuned_padded(extent, max_items, limits)
                 @test all(1:max_items) do threads
                     wgs = KI.threads_to_workgroupsize(threads, extent, limits)

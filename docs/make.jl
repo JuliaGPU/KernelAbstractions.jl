@@ -2,6 +2,7 @@ using KernelAbstractions
 using KernelInterface
 using Adapt
 using Documenter
+using DocumenterCodeBlocks: CodeBlocks
 
 function main()
     ci = get(ENV, "CI", "") == "true"
@@ -11,6 +12,9 @@ function main()
         authors = "JuliaGPU and contributors",
         repo = "https://github.com/JuliaGPU/KernelAbstractions.jl/blob/{commit}{path}#L{line}",
         sitename = "KernelAbstractions.jl",
+        plugins = [
+            CodeBlocks(; line_counter = :named),
+        ],
         format = Documenter.HTML(;
             prettyurls = ci,
             canonical = "https://juliagpu.github.io/KernelAbstractions.jl",

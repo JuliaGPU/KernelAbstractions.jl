@@ -156,7 +156,7 @@ end
 # stable for 32 or more elements
 @inline @generated function argument_types(args::Tuple)
     types = (:(Core.Typeof(clconvert(args[$i]))) for i in 1:fieldcount(args))
-    return :(Tuple{$(types...)})
+    return inline_body(:(Tuple{$(types...)}))
 end
 
 
@@ -174,62 +174,126 @@ Core.kwcall(kwargs::NamedTuple, kernel::AbstractKernel, args::Vararg{Any, N}) wh
     launch_and_wait(kernel, args; kwargs...)
 
 # kernels operate on plain `Array`s, whose uses can't synchronize, so every launch waits for
-# its kernel. this also keeps the arguments alive while the kernel runs. waiting yields to
-# other tasks, as `synchronize` should (see the documentation on its semantics).
-function launch_and_wait(kernel::AbstractKernel, args::Tuple; kwargs...)
-    info = exception_info()
-    info[] = ExceptionInfo_st()
-    GC.@preserve args info begin
-        event = launch_tuple(kernel, args, Base.unsafe_convert(Ptr{ExceptionInfo_st}, info); kwargs...)
-        try
-            wait(event)
-        finally
-            cl.clReleaseEvent(event)
+# completion, keeping arguments alive. queue waits yield; host launches yield only after
+# team or long launches (see `host_dispatch`).
+#
+# work-groups extending beyond `extent` run `partial`, a bounds-checked variant with the
+# same argument layout. both variants share arguments and exception status. queue launches
+# use `partial` for all work-groups: separate queued kernels cannot share group ids.
+# `groups` is the work-group count, if known.
+function launch_and_wait(
+        kernel::AbstractKernel, args::Tuple, partial = nothing, extent = nothing,
+        groups = nothing; kwargs...
+    )
+    GC.@preserve args begin
+        # prepare both variants before running either; if the unchecked variant is
+        # unavailable, run every work-group checked.
+        hp = host_kernel(with_fun(kernel, partial), values(kwargs), groups)
+        h = hp === nothing ? nothing : full_host_kernel(kernel, partial, hp)
+        # share conversion, the bulk of each path's per-kernel code
+        converted = converted_arguments(kernel, args)
+        if hp === nothing
+            info = exception_info()
+            info[] = ExceptionInfo_st()
+            GC.@preserve info begin
+                info_ptr = Base.unsafe_convert(Ptr{ExceptionInfo_st}, info)
+                event = launch_queued(with_fun(kernel, partial), converted, info_ptr; kwargs...)
+                wait_for_kernel(event)
+            end
+            check_exception(info)
+        else
+            global_size = values(kwargs).global_size
+            num_groups = something(groups, global_size .÷ hp.local_size)
+            extent = something(extent, global_size)
+            # host launches finish before returning, even when interrupted
+            info = Ref(ExceptionInfo_st())
+            GC.@preserve info begin
+                info_ptr = Base.unsafe_convert(Ptr{ExceptionInfo_st}, info)
+                host_launch_converted(kernel, converted, info_ptr, hp, num_groups, h, extent)
+            end
+            # passing the status avoids allocating `info`
+            check_exception(info[].status)
         end
     end
-    info[].status == 0 || throw(KernelException(device()))
     return nothing
 end
+
+# kept out of `launch_and_wait`, which is compiled for every kernel
+@noinline function wait_for_kernel(event::cl.Event)
+    try
+        wait(event)
+    finally
+        cl.clReleaseEvent(event)
+    end
+    return
+end
+
+check_exception(info::Base.RefValue{ExceptionInfo_st}) = check_exception(info[].status)
+@inline function check_exception(status::Int32)
+    status == 0 || throw_kernel_exception()
+    return
+end
+@noinline throw_kernel_exception() = throw(KernelException(device()))
 
 @inline launch_tuple(
     kernel::AbstractKernel, args::Tuple, exception_info::Ptr;
     global_size = (1,), local_size = nothing
-) = launch_converted(kernel, args, exception_info, global_size, local_size)
+) = GC.@preserve args launch_converted(
+    kernel, converted_arguments(kernel, args), exception_info, global_size, local_size
+)
+
+# `launch_tuple` for preconverted arguments
+@inline launch_queued(
+    kernel::AbstractKernel, converted::Tuple, exception_info::Ptr;
+    global_size = (1,), local_size = nothing
+) = launch_converted(kernel, converted, exception_info, global_size, local_size)
+
+# kept out of the launches, which are compiled for every kernel: inlining `rand` makes them
+# several times as expensive to compile
+@inline kernel_state(rng_state::Bool, exception_info::Ptr) =
+    KernelState(rng_state ? rng_seed() : UInt32(0), UInt64(UInt(exception_info)))
+@noinline rng_seed() = Base.rand(UInt32)
+
+# argument expressions for a kernel compiled for `F` and `TT`.
+# vectors let this helper compile once for all argument counts.
+function converted_argument_exprs(@nospecialize(F), @nospecialize(TT), nargs::Int)
+    params = Any[F, TT.parameters...]   # Base.signature_type with a function type
+    exprs = Any[:(kernel.f); Any[:(clconvert(args[$i])) for i in 1:nargs]]
+    converted = Any[]
+    for (dt, ex) in zip(params, exprs)
+        # filter out ghost arguments that shouldn't be passed
+        pass_arg(dt) || continue
+        # replace non-isbits arguments (they should be unused, or compilation would have
+        # failed)
+        push!(converted, isbitstype(dt) ? ex : :(Ptr{Any}(C_NULL)))
+    end
+    return converted
+end
+
+# arguments for `kernel(args...)`, excluding kernel state.
+# array arguments become pointers; the caller must keep `args` alive.
+@inline @generated function converted_arguments(
+        kernel::AbstractKernel{F, TT}, args::Tuple
+    ) where {F, TT}
+    exprs = converted_argument_exprs(F, TT, fieldcount(args))
+    return inline_body(:(($(exprs...),)))
+end
+
+kernel_argument_types(@nospecialize(converted::Type)) = Tuple{KernelState, converted.parameters...}
 
 @inline @generated function launch_converted(
-        kernel::AbstractKernel{F, TT}, args::Tuple, exception_info, global_size, local_size
-    ) where {F, TT}
-    sig = Tuple{F, TT.parameters...}    # Base.signature_type with a function type
-    args = (:(kernel.f), (:(clconvert(args[$i])) for i in 1:fieldcount(args))...)
-
-    # filter out ghost arguments that shouldn't be passed
-    to_pass = map(pass_arg, sig.parameters)
-    call_t = Type[x[1] for x in zip(sig.parameters, to_pass) if x[2]]
-    call_args = Union{Expr, Symbol}[x[1] for x in zip(args, to_pass)            if x[2]]
-
-    # replace non-isbits arguments (they should be unused, or compilation would have failed)
-    for (i, dt) in enumerate(call_t)
-        if !isbitstype(dt)
-            call_t[i] = Ptr{Any}
-            call_args[i] = :C_NULL
-        end
-    end
-
-    pushfirst!(call_t, KernelState)
-    pushfirst!(
-        call_args,
-        :(KernelState(kernel.rng_state ? Base.rand(UInt32) : UInt32(0), UInt64(UInt(exception_info))))
+        kernel::AbstractKernel, converted::Tuple, exception_info, global_size, local_size
     )
-
-    # finalize types
-    call_tt = Base.to_tuple_type(call_t)
-
-    # the converted arguments only hold pointers to the arrays in `args`
-    return quote
-        GC.@preserve args begin
-            $cl.clcall(kernel.fun, $call_tt, ($(call_args...),); global_size, local_size, kernel.rng_state)
+    call_tt = kernel_argument_types(converted)
+    vals = Expr[:(converted[$i]) for i in 1:fieldcount(converted)]
+    return inline_body(
+        quote
+            $cl.clcall(
+                kernel.fun, $call_tt, (kernel_state(kernel.rng_state, exception_info), $(vals...));
+                global_size, local_size, kernel.rng_state
+            )
         end
-    end
+    )
 end
 
 
@@ -248,8 +312,9 @@ end
 Base.showerror(io::IO, err::KernelException) =
     print(io, "KernelException: exception thrown during kernel execution on device ", err.dev.name)
 
-# where kernels report exceptions: per task, as a task waits for every kernel it launches
-exception_info() = get!(task_local_storage(), :POCLExceptionInfo) do
+# queue-fallback exception storage is per task, since each task waits for its launches. it
+# must outlive the stack frame, as an interrupted wait leaves the kernel running.
+@noinline exception_info() = get!(task_local_storage(), :POCLExceptionInfo) do
     Ref(ExceptionInfo_st())
 end::Base.RefValue{ExceptionInfo_st}
 
@@ -262,12 +327,48 @@ struct HostKernel{F, TT} <: AbstractKernel{F, TT}
     rng_state::Bool
 end
 
+# `kernel`, with `fun`, a variant of its compiled kernel for arguments of the same layout
+@inline with_fun(kernel::AbstractKernel, ::Nothing) = kernel
+@inline with_fun(kernel::HostKernel{F, TT}, fun::cl.Kernel) where {F, TT} =
+    HostKernel{F, TT}(kernel.f, fun, kernel.rng_state)
+
 
 ## host-side API
 
 const clfunction_lock = ReentrantLock()
 
-function clfunction(f::F, tt::TT = Tuple{}; kwargs...) where {F, TT}
+# `compiled_tt` are the argument types to compile the kernel for, if they aren't `tt`. they
+# may only differ in ways that don't change how the arguments are passed (e.g. in the type
+# parameters of a struct). it isn't specialized on, so that looking up either kernel is the
+# same code.
+Base.@nospecializeinfer function clfunction(
+        f::F, tt::TT = Tuple{}, @nospecialize(compiled_tt::Type) = tt; kwargs...
+    ) where {F, TT}
+    kw = values(kwargs)
+    # besides the signature, the kernel only depends on the session and the compiler options.
+    # the kernel compiled for other types has a key of another type, and thus a cache of its
+    # own: launches alternating between both kernels then find either on the fast path.
+    kernel, rng_state = if compiled_tt === tt
+        GPUCompiler.cached_lookup(Tuple{cl.Kernel, Bool}, F, tt, (context(), kw)) do
+            lookup_kernel(F, tt, kw)
+        end
+    else
+        # (wrapped, so that the types of the key and the lookup don't depend on it)
+        compiled = Some{Type}(compiled_tt)
+        GPUCompiler.cached_lookup(Tuple{cl.Kernel, Bool}, F, tt, (context(), kw, compiled)) do
+            lookup_kernel(F, something(compiled), kw)
+        end
+    end
+    # not cached: that would keep every callable that was ever launched alive
+    return HostKernel{F, tt}(f, kernel, rng_state)
+end
+
+# Returns the `cl.Kernel` for `F` and `tt` on the session's context, and whether it uses
+# the device-side RNG. Nothing in here depends on the types of the kernel or its arguments,
+# so it is inferred and compiled once, rather than for every new kernel.
+@noinline Base.@nospecializeinfer function lookup_kernel(
+        @nospecialize(F::Type), @nospecialize(tt::Type), @nospecialize(kwargs::NamedTuple)
+    )
     Base.@lock clfunction_lock begin
         config = compiler_config(device(); kwargs...)::OpenCLCompilerConfig
         source = methodinstance(F, tt)
@@ -300,8 +401,7 @@ function clfunction(f::F, tt::TT = Tuple{}; kwargs...) where {F, TT}
             cached
         end
 
-        # not cached: that would keep every callable that was ever launched alive
-        return HostKernel{F, tt}(f, kernel, res.device_rng)
+        return kernel::cl.Kernel, res.device_rng
     end
 end
 
@@ -312,14 +412,15 @@ end
 # `cached_results` returns `nothing` until code exists for the job; `obj === nothing`
 # then identifies an `OpenCLResults` that hasn't been compiled yet. Compiling populates
 # Julia's code cache, so the post-compile `cached_results` re-fetch is guaranteed to
-# succeed. The `compile_hook` check additionally forces the compile path so
-# reflection-style consumers (`@device_code_*`) observe the compilation even on a hit.
+# succeed. Every lookup is reported to the `@device_code_*` hook, so reflection
+# observes cached kernels without recompiling them.
 # Keep this specialized so the caller can avoid boxing `CompilerJob`. Its type parameters
 # only identify the target and compiler parameters, so this is bounded per back-end rather
-# than specialized for every kernel; `@noinline` keeps the body out of each `clfunction`.
+# than specialized for every kernel.
 @noinline function compile_or_lookup(job::CompilerJob)::OpenCLResults
+    GPUCompiler.run_compile_hook(job)
     res = GPUCompiler.cached_results(OpenCLResults, job)
-    if res === nothing || res.obj === nothing || GPUCompiler.compile_hook[] !== nothing
+    if res === nothing || res.obj === nothing
         compiled = compile_to_obj(job)
         if res === nothing
             res = GPUCompiler.cached_results(OpenCLResults, job)::OpenCLResults
@@ -329,4 +430,527 @@ end
         res.device_rng = compiled.device_rng
     end
     return res
+end
+
+
+## host kernels
+#
+# `cl_pocl_host_kernel` runs work-groups on the calling thread without queues or events.
+# small launches stay on the launching task; larger ones use a persistent Julia task team
+# (see `ThreadTeams.foreach_range`).
+
+import ThreadTeams
+
+# `foreach_range` limits for team launches and stealing, respectively. above these, run on
+# the launching task or disable stealing (see `host_schedule`).
+const host_team_max_groups = typemax(Int) >> 2
+const host_steal_max_groups = Int(typemax(Int32))
+
+# a team costs about 1 µs to start and join. a trivial kernel (store or axpy) needs about
+# 8192 work-items to recover that cost on 4 or 8 threads (see `host_schedule`).
+const host_kernel_serial_items = 8192
+
+# untimed launches after a short sample in `run_short`; resampling detects longer work
+const host_untimed_launches = 15
+
+# host kernels use the calling thread's stack; Julia task stacks are at least 4 MiB. cap
+# estimated use at 1 MiB, using PoCL's upper bound per work-item. tuning shrinks work-groups
+# to fit (see `link_kernel`); sizes that still exceed the limit use the queue.
+const host_kernel_stack_limit = 1024 * 1024
+
+# the largest power-of-two work-group of `k` within `host_kernel_stack_limit` (1 if a single
+# work-item exceeds it)
+function host_kernel_max_items(k::cl.Kernel)
+    k.private_mem_size == 0 && return typemax(Int)
+    return prevpow(2, max(host_kernel_stack_limit ÷ k.private_mem_size, 1))
+end
+
+@inline function host_kernel(kernel::HostKernel, kwargs::NamedTuple, groups)
+    haskey(kwargs, :local_size) && haskey(kwargs, :global_size) || return nothing
+    local_size, global_size = kwargs.local_size, kwargs.global_size
+    local_size isa Dims{3} && global_size isa Dims{3} || return nothing
+    # host kernels only run whole work-groups
+    groups === nothing && global_size .% local_size != (0, 0, 0) && return nothing
+    return host_kernel(kernel.fun, local_size, kernel.rng_state)
+end
+
+# use the unchecked variant at `hp`'s work-group size, or keep `hp` if it is unavailable
+@inline function full_host_kernel(kernel::HostKernel, partial, hp::cl.HostKernelHandle)
+    (partial === nothing || partial === kernel.fun) && return hp
+    return something(host_kernel(kernel.fun, hp.local_size, kernel.rng_state), hp)
+end
+
+# kept out of `launch_and_wait`, which is compiled for every kernel
+@noinline function host_kernel(k::cl.Kernel, local_size::Dims{3}, rng_state::Bool)
+    h = Base.@atomic :acquire k.host_kernel
+    if h === nothing || h.local_size != local_size
+        h = host_kernel_slow(k, local_size, rng_state)
+    end
+    return h.id == C_NULL ? nothing : h
+end
+
+@noinline function host_kernel_slow(k::cl.Kernel, local_size::Dims{3}, rng_state::Bool)
+    h = @lock k.lock begin
+        i = findfirst(h -> h.local_size == local_size, k.host_kernels)
+        if i === nothing
+            h = create_host_kernel(k, local_size, rng_state)
+            push!(k.host_kernels, h)
+            h
+        else
+            k.host_kernels[i]
+        end
+    end
+    Base.@atomic :release k.host_kernel = h
+    return h
+end
+
+# with `k.lock` held
+function create_host_kernel(k::cl.Kernel, local_size::Dims{3}, rng_state::Bool)
+    dev = device()
+    stack = k.private_mem_size * prod(local_size)
+    stack > host_kernel_stack_limit && return cl.HostKernelHandle(C_NULL, local_size)
+
+    # the host kernel takes the sizes of local memory arguments from the kernel
+    lsize = Csize_t[local_size...]
+    if rng_state
+        num_sub_groups = cl.KernelSubGroupInfo(k, dev, lsize).sub_group_count
+        nargs = cl.num_args(k) - 2
+        # one UInt32 per sub-group
+        cl.set_arg!(k, nargs + 1, cl.LocalMem(UInt32, num_sub_groups))
+        cl.set_arg!(k, nargs + 2, cl.LocalMem(UInt32, num_sub_groups))
+    end
+
+    err = Ref{Int32}()
+    id = cl.clCreateHostKernelPOCL(k, dev, 3, lsize, err)
+    # don't remember transient failures
+    err[] == cl.CL_OUT_OF_HOST_MEMORY && throw(OutOfMemoryError())
+    if err[] != cl.CL_SUCCESS
+        # e.g. the kernel needs more local memory than a host kernel can have
+        @debug "Kernel can't run on Julia's threads, using PoCL's" exception = cl.CLError(err[])
+        return cl.HostKernelHandle(C_NULL, local_size)
+    end
+    scratch_size, scratch_alignment = Ref{Csize_t}(), Ref{Csize_t}()
+    cl.clGetHostKernelInfoPOCL(
+        id, cl.CL_HOST_KERNEL_SCRATCH_SIZE_POCL, sizeof(Csize_t), scratch_size, C_NULL
+    )
+    cl.clGetHostKernelInfoPOCL(
+        id, cl.CL_HOST_KERNEL_SCRATCH_ALIGNMENT_POCL, sizeof(Csize_t), scratch_alignment, C_NULL
+    )
+    return cl.HostKernelHandle(id, local_size, Int(scratch_size[]), Int(scratch_alignment[]))
+end
+
+# per-thread local memory and printf buffer. runs must not yield: they share scratch storage
+# and must not overlap. look up the thread after the last possible yield, which may migrate
+# the task. only the owning thread mutates its `HostScratch`; adding threads replaces the
+# slots vector.
+mutable struct HostScratch
+    ptr::Ptr{Cvoid}     # aligned
+    raw::Ptr{Cvoid}
+    size::Int
+    events_run::UInt64  # see `run_other_tasks`
+end
+
+mutable struct HostScratchSlots
+    Base.@atomic slots::Vector{HostScratch}
+    const lock::ReentrantLock
+end
+
+const host_scratch = HostScratchSlots(HostScratch[], ReentrantLock())
+
+@inline function host_scratch_ptr(size::Int, alignment::Int)
+    s = host_scratch_slot()
+    # (the alignment is a power of two)
+    if s.size < size || UInt(s.ptr) & (alignment - 1) != 0
+        grow_host_scratch!(s, size, alignment)
+    end
+    return s.ptr
+end
+
+@inline function host_scratch_slot()
+    while true
+        tid = Threads.threadid()
+        slots = Base.@atomic :acquire host_scratch.slots
+        tid <= length(slots) && return @inbounds slots[tid]
+        # may yield, so look the thread up again afterwards
+        add_host_scratch_slots()
+    end
+    return
+end
+
+# doesn't yield
+@noinline function grow_host_scratch!(s::HostScratch, size::Int, alignment::Int)
+    # alignment is a power of two, and at least that of malloc
+    size = max(size, s.size, 64 * 1024)
+    align = max(alignment, 64)
+    raw = Libc.malloc(size + align)
+    raw == C_NULL && throw(OutOfMemoryError())
+    Libc.free(s.raw)
+    s.raw = raw
+    s.ptr = Ptr{Cvoid}((UInt(raw) + align - 1) & ~UInt(align - 1))
+    s.size = size
+    return
+end
+
+@noinline function add_host_scratch_slots()
+    @lock host_scratch.lock begin
+        slots = Base.@atomic :acquire host_scratch.slots
+        n = Threads.maxthreadid()
+        if n > length(slots)
+            new = [slots; [HostScratch(C_NULL, C_NULL, 0, 0) for _ in (length(slots) + 1):n]]
+            Base.@atomic :release host_scratch.slots = new
+        end
+    end
+    return
+end
+
+# run `first_group:first_group + group_count - 1`; report PoCL traps through the launch's
+# exception status
+@inline function host_run(
+        h::cl.HostKernelHandle, arg_values::Ptr{Ptr{Cvoid}}, num_groups::Ptr{Csize_t},
+        first_group::Int, group_count::Int, exception_info::Ptr{ExceptionInfo_st},
+        scratch::Ptr{Cvoid}
+    )
+    err = cl.clRunHostKernelPOCL(
+        h.id, arg_values, num_groups, first_group, group_count, scratch
+    )
+    if err != cl.CL_SUCCESS
+        status = reinterpret(Ptr{Int32}, exception_info)
+        UnsafeAtomics.store!(status, Int32(err), UnsafeAtomics.release)
+    end
+    return
+end
+
+# a callable struct keeps team code shared across kernels. up to `threads` threads run
+# ranges of work-groups, stealing if `steal` is set (see `run_team`).
+#
+# `full` runs work-groups entirely within the ndrange; `h` runs partial ones. both use the
+# same argument layout. `full === h` when no unchecked variant is needed or available.
+struct HostLaunch
+    h::cl.HostKernelHandle
+    full::cl.HostKernelHandle
+    arg_values::Ptr{Ptr{Cvoid}}
+    num_groups::Ptr{Csize_t}
+    groups::Dims{3}
+    partial::NTuple{3, Bool}
+    total::Int
+    threads::Int
+    steal::Bool
+    scratch_size::Int
+    scratch_alignment::Int
+    exception_info::Ptr{ExceptionInfo_st}
+end
+
+# batch `first:last-1` into runs of full or partial work-groups. x varies fastest: a
+# partial x dimension affects each row's last group; partial y or z dimensions affect whole
+# rows.
+function host_run(l::HostLaunch, first::Int, last::Int, scratch::Ptr{Cvoid})
+    if l.full === l.h
+        host_run(l.h, l.arg_values, l.num_groups, first, last - first, l.exception_info, scratch)
+        return
+    end
+    gx, gy, gz = l.groups
+    px, py, pz = l.partial
+    g = first
+    while g < last
+        row = g ÷ gx
+        x = g - row * gx
+        y, z = row % gy, row ÷ gy
+        if pz && z == gz - 1
+            # the rest of the launch
+            h, stop = l.h, l.total
+        elseif py && y == gy - 1
+            h, stop = l.h, (row + 1) * gx
+        elseif px && x == gx - 1
+            h, stop = l.h, g + 1
+        else
+            # up to the next partial work-group
+            h = l.full
+            stop = px ? row * gx + gx - 1 :
+                py ? (z * gy + gy - 1) * gx :
+                pz ? (gz - 1) * gy * gx : l.total
+        end
+        stop = min(stop, last)
+        host_run(h, l.arg_values, l.num_groups, g, stop - g, l.exception_info, scratch)
+        g = stop
+    end
+    return
+end
+
+# `foreach_range` uses inclusive, 1-based ranges. time the range containing group 1 and
+# scale to all groups to estimate the launch's serial duration.
+function (l::HostLaunch)(first::Int, last::Int)
+    scratch = host_scratch_ptr(l.scratch_size, l.scratch_alignment)
+    if first != 1
+        host_run(l, first - 1, last, scratch)
+        return
+    end
+    start = cycle_counter()
+    host_run(l, 0, last, scratch)
+    duration = cycle_counter() - start
+    # (in floating point: the product may not fit)
+    sample = unsafe_trunc(UInt64, min(Float64(duration) * (l.total / last), 0x1p63))
+    record_serial_sample(l.h, l.total, sample)
+    return
+end
+
+# racy by design: these statistics affect scheduling policy only
+@inline function record_serial_sample(h::cl.HostKernelHandle, groups::Int, sample::UInt64)
+    # a coarse counter (24 MHz on Apple silicon) can measure 0 ticks, which would read as no
+    # estimate and make `run_short` time every launch
+    sample = max(sample, one(UInt64))
+    if (Base.@atomic :monotonic h.serial_groups_a) == groups
+        previous = Base.@atomic :monotonic h.serial_sample_a
+    else
+        previous = (Base.@atomic :monotonic h.serial_groups_b) == groups ?
+            (Base.@atomic :monotonic h.serial_sample_b) : UInt64(0)
+        # move the previous grid to slot b
+        g = Base.@atomic :monotonic h.serial_groups_a
+        sample_a = Base.@atomic :monotonic h.serial_sample_a
+        duration_a = Base.@atomic :monotonic h.serial_duration_a
+        Base.@atomic :monotonic h.serial_groups_b = g
+        Base.@atomic :monotonic h.serial_sample_b = sample_a
+        Base.@atomic :monotonic h.serial_duration_b = duration_a
+        Base.@atomic :monotonic h.serial_groups_a = groups
+    end
+    Base.@atomic :monotonic h.serial_sample_a = sample
+    Base.@atomic :monotonic h.serial_duration_a = min(sample, previous)
+    return
+end
+
+# the lesser of the last two estimates for a grid of `groups` work-groups, zero if unknown
+@inline function serial_duration(h::cl.HostKernelHandle, groups::Int)
+    (Base.@atomic :monotonic h.serial_groups_a) == groups &&
+        return Base.@atomic :monotonic h.serial_duration_a
+    (Base.@atomic :monotonic h.serial_groups_b) == groups &&
+        return Base.@atomic :monotonic h.serial_duration_b
+    return UInt64(0)
+end
+
+# defer interrupts until all work-groups finish. otherwise a team skips unstarted ranges,
+# and a serial launch can stop between full and partial groups.
+function (l::HostLaunch)()
+    if l.threads == 1
+        uninterruptible(run_serial, l)
+    else
+        uninterruptible(run_team, l)
+    end
+    return
+end
+
+run_serial(l::HostLaunch) = l(1, l.total)
+
+# assign blocks as in `Threads.@threads :static`, independent of the launching thread, to
+# preserve cache and NUMA locality across equal-sized grids. stealing prevents slow or
+# descheduled threads from holding up the launch. a busy team (including nested launches and
+# `Threads.@threads` loops) runs the launch on the calling task.
+#
+# `isolate`: waiting for the team would otherwise run other tasks, and on Julia 1.13 and
+# earlier a deferred interrupt then goes to the next task on thread 1, not the launch.
+run_team(l::HostLaunch) = ThreadTeams.foreach_range(
+    l, l.total; threads = l.threads, schedule = l.steal ? :steal : :static, isolate = true
+)
+
+# `f(x)`, with interrupts and (on Julia 1.14+) cancellation delivered after it returns
+@inline function uninterruptible(f::F, x) where {F}
+    @static if isdefined(Base, :CANCEL_TOKEN)
+        if Base.CANCEL_TOKEN[] === nothing
+            f(x)
+        else
+            Base.ScopedValues.with(() -> f(x), Base.CANCEL_TOKEN => nothing)
+            Base.checkcancel(Base.CANCEL_TOKEN[])
+        end
+    else
+        # `disable_sigint`, without a closure
+        Base.sigatomic_begin()
+        try
+            f(x)
+        finally
+            Base.sigatomic_end()
+        end
+    end
+    return
+end
+
+# shared across kernels: avoid inlining and specialization. `h` runs partial work-groups,
+# `full` the rest (see `launch_and_wait`).
+@noinline function host_dispatch(
+        h::cl.HostKernelHandle, arg_values::Ptr{Ptr{Cvoid}}, num_groups::Dims{3},
+        exception_info::Ptr{ExceptionInfo_st}, full::cl.HostKernelHandle, extent::Dims{3}
+    )
+    total = prod(num_groups)
+    total == 0 && return
+    partial = extent .< num_groups .* h.local_size
+    any(partial) || (full = h)
+    scratch_size = max(h.scratch_size, full.scratch_size)
+    scratch_alignment = max(h.scratch_alignment, full.scratch_alignment)
+    groups_ref = Ref(Csize_t.(num_groups))
+    GC.@preserve groups_ref begin
+        groups_ptr = Ptr{Csize_t}(Base.unsafe_convert(Ptr{NTuple{3, Csize_t}}, groups_ref))
+        launch = HostLaunch(
+            h, full, arg_values, groups_ptr, num_groups, partial, total, 1, false,
+            scratch_size, scratch_alignment, exception_info
+        )
+        # finalizers can't switch tasks, which waiting for other threads and taking the
+        # lock of the scratch slots may do
+        if GC.in_finalizer()
+            host_dispatch_finalizer(launch)
+            return
+        end
+        s = session()
+        long = (Base.@atomic :monotonic h.last_duration) >= s.host_kernel_long_ticks
+        threads, steal = host_schedule(h, s, total, long)
+        if threads == 1 && !long
+            if full === h
+                run_short(launch)
+            else
+                uninterruptible(run_short, launch)
+            end
+            return
+        end
+        # create the slots of all threads now, so the work-groups' lookups never take the lock
+        host_scratch_slot()
+        start = cycle_counter()
+        launch = HostLaunch(
+            h, full, arg_values, groups_ptr, num_groups, partial, total, threads, steal,
+            scratch_size, scratch_alignment, exception_info
+        )
+        launch()
+        Base.@atomic :monotonic h.last_duration = cycle_counter() - start
+        Base.@atomic :monotonic h.last_groups = total
+        # resample on the launching task: team timings may not apply
+        Base.@atomic :monotonic h.untimed = 0
+    end
+    # yield after team or long launches so repeated launches don't starve tasks, timers or
+    # I/O
+    run_other_tasks()
+    return
+end
+
+# service waiting tasks; otherwise poll timers and I/O at most once per millisecond (the
+# timer resolution). polling and yielding each cost 12 µs on macOS. track polls per thread:
+# only one thread services events, outside `Threads.@threads`.
+@noinline function run_other_tasks()
+    if !other_tasks()
+        s = host_scratch_slot()
+        now = time_ns()
+        now - s.events_run < 1_000_000 && return
+        s.events_run = now
+        Base.process_events()
+        other_tasks() || return
+    end
+    yield()
+    return
+end
+
+@inline function other_tasks()
+    @static if isdefined(Base, :workqueue_for) && isdefined(Base, :Partr) &&
+            isdefined(Base.Partr, :multiq_check_empty)
+        return !isempty(Base.workqueue_for(Threads.threadid())) ||
+            !Base.Partr.multiq_check_empty()
+    else
+        return true
+    end
+end
+
+# choose the thread count and stealing policy. only the `foreach_range` limits constrain
+# correctness.
+#
+# small grids stay on one thread unless both recent serial estimates reach the threshold.
+# estimates are per grid because work per item can vary with grid size. timing the first
+# range also gives an estimate for team launches. switching between serial and team launches
+# moves data between caches; keep the threshold well above trivial-kernel times to avoid
+# repeated switching.
+#
+# use static blocks after a short launch of the same grid. first or long launches allow
+# stealing so slow or descheduled threads don't hold up the team. both policies start blocks
+# on the same threads, preserving locality.
+function host_schedule(h::cl.HostKernelHandle, s::Session, total::Int, long::Bool)
+    threads = min(total, s.limits.compute_units)
+    (threads > 1 && total <= host_team_max_groups) || return 1, false
+    # (dividing: the number of work-items may not fit)
+    if total <= host_kernel_serial_items ÷ prod(h.local_size) &&
+            serial_duration(h, total) < s.host_kernel_serial_ticks
+        return 1, false
+    end
+    steal = long || (Base.@atomic :monotonic h.last_groups) != total
+    return threads, steal && total <= host_steal_max_groups
+end
+
+# a short launch on the launching task: one run covers the whole launch, so one timing
+# supplies both the serial estimate and the last-launch duration
+@inline function run_short(l::HostLaunch)
+    scratch = host_scratch_ptr(l.scratch_size, l.scratch_alignment)
+    h = l.h
+    # counter reads can cost tens of cycles. sample every `host_untimed_launches + 1` launches
+    # after a short sample; detecting longer work can lag that long or miss work varying
+    # with that period entirely. always time grids with no estimate or a changed work-group
+    # count: estimates are per grid, the countdown per kernel; no estimate means one thread.
+    untimed = Base.@atomic :monotonic h.untimed
+    if untimed == 0 ||
+            (Base.@atomic :monotonic h.last_duration) >= session().host_kernel_short_ticks ||
+            (Base.@atomic :monotonic h.last_groups) != l.total ||
+            serial_duration(h, l.total) == 0
+        start = cycle_counter()
+        host_run_all(l, scratch)
+        duration = cycle_counter() - start
+        record_serial_sample(h, l.total, duration)
+        Base.@atomic :monotonic h.last_duration = duration
+        Base.@atomic :monotonic h.untimed = host_untimed_launches
+    else
+        host_run_all(l, scratch)
+        Base.@atomic :monotonic h.untimed = untimed - 1
+    end
+    Base.@atomic :monotonic h.last_groups = l.total
+    return
+end
+
+# unsplit launches call PoCL directly to avoid materializing `HostLaunch` in memory
+@inline function host_run_all(l::HostLaunch, scratch::Ptr{Cvoid})
+    if l.full === l.h
+        host_run(l.h, l.arg_values, l.num_groups, 0, l.total, l.exception_info, scratch)
+    else
+        host_run(l, 0, l.total, scratch)
+    end
+    return
+end
+
+# private scratch avoids locks and task switches, which finalizers cannot perform
+@noinline function host_dispatch_finalizer(l::HostLaunch)
+    # alignment is a power of two, and at least that of malloc
+    align = l.scratch_alignment
+    raw = Libc.malloc(l.scratch_size + align)
+    raw == C_NULL && throw(OutOfMemoryError())
+    scratch = Ptr{Cvoid}((UInt(raw) + align - 1) & ~UInt(align - 1))
+    try
+        host_run(l, 0, l.total, scratch)
+    finally
+        Libc.free(raw)
+    end
+    return
+end
+
+# like `launch_converted`, but passes a pointer to each converted argument
+@inline @generated function host_launch_converted(
+        kernel::AbstractKernel, converted::Tuple, exception_info, h, num_groups, full, extent
+    )
+    call_tt = kernel_argument_types(converted)
+    N = fieldcount(call_tt)
+    vals = Expr[:(converted[$i]) for i in 1:fieldcount(converted)]
+    arg_ptrs = Expr[:(base + $(fieldoffset(call_tt, i))) for i in 1:N]
+
+    # RNG local memory arguments are set on the host kernel; pass no values here
+    return inline_body(
+        quote
+            vals = Ref{$call_tt}((kernel_state(kernel.rng_state, exception_info), $(vals...)))
+            GC.@preserve vals begin
+                base = Ptr{Cvoid}(Base.unsafe_convert(Ptr{$call_tt}, vals))
+                ptrs = Ref{NTuple{$(N + 2), Ptr{Cvoid}}}(($(arg_ptrs...), C_NULL, C_NULL))
+                GC.@preserve ptrs begin
+                    arg_values = Ptr{Ptr{Cvoid}}(Base.unsafe_convert(Ptr{NTuple{$(N + 2), Ptr{Cvoid}}}, ptrs))
+                    host_dispatch(h, arg_values, num_groups, exception_info, full, extent)
+                end
+            end
+            nothing
+        end
+    )
 end

@@ -141,6 +141,13 @@ function unittest_testsuite(Backend, backend_str, backend_mod, BackendArrayT; sk
         @test @inferred(KernelAbstractions.get_backend(Diagonal(x))) isa backendT
         @test @inferred(KernelAbstractions.get_backend(Tridiagonal(A))) isa backendT
         @test_throws ArgumentError KernelAbstractions.get_backend(UnknownAbstractVector())  # issue #588
+
+        # VERSION >= v"1.11"
+        @static if isdefined(Core, :Memory)
+            M = Memory{Float32}(undef, 5)
+            @test @inferred(KernelAbstractions.get_backend(M)) isa CPU
+            @test @inferred(KernelAbstractions.get_backend(view(M, 2:4))) isa CPU
+        end
     end
 
     @conditional_testset "sparse" skip_tests begin
@@ -276,9 +283,11 @@ function unittest_testsuite(Backend, backend_str, backend_mod, BackendArrayT; sk
             iterspace = NDRange{1, StaticSize{(128,)}, StaticSize{(8,)}}()
             ctx = KernelAbstractions.mkcontext(kernel, nothing, iterspace)
             AT = BackendArrayT{Float32, 2, 1} # AS 1
+            # the launch constifies `@Const` arguments before passing them to the kernel
+            CT = Base.promote_op(KernelAbstractions.constify, AT)
             IR = sprint() do io
                 backend_mod.code_llvm(
-                    io, kernel.f, (typeof(ctx), AT, AT),
+                    io, kernel.f, (typeof(ctx), AT, CT),
                     kernel = true, optimize = true,
                     # the annotation we look for on POCL is metadata, which is only
                     # printed in raw mode
@@ -288,11 +297,12 @@ function unittest_testsuite(Backend, backend_str, backend_mod, BackendArrayT; sk
             if backend_str == "CPU"
                 @test occursin("!invariant.load", IR)
             elseif backend_str == "CUDA"
-                if Base.libllvm_version >= v"20"
-                    @test occursin("addrspace(1)", IR)
-                else
-                    @test occursin("@llvm.nvvm.ldg", IR)
+                # how the load is expressed in LLVM IR depends on the CUDA.jl and LLVM
+                # versions, so check that it goes through the read-only cache in PTX
+                PTX = sprint() do io
+                    backend_mod.code_ptx(io, kernel.f, (typeof(ctx), AT, CT), kernel = true)
                 end
+                @test occursin("ld.global.nc", PTX)
             elseif backend_str == "ROCM"
                 @test occursin("addrspace(4)", IR)
             else
@@ -314,15 +324,23 @@ function unittest_testsuite(Backend, backend_str, backend_mod, BackendArrayT; sk
         synchronize(Backend())
         @test all(Array(A) .== 1.0f0)
 
-        # wrapped arrays are rebuilt around the constified array inside the kernel
+        # wrapped arrays are rebuilt around the constified array, and objects whose
+        # constructors validate their arguments can be passed too
         host = Float32.(reshape(1:25, 5, 5))
         dev = adapt(Backend(), host)
-        for (B, ref) in (
-                (vec(view(dev, 1:4, 1:4)), vec(view(host, 1:4, 1:4))),
-                (reshape(view(dev, 1:4, 1:4), 2, 8), reshape(view(host, 1:4, 1:4), 2, 8)),
-                (reshape(view(dev, :, 2:3), 2, 5), reshape(view(host, :, 2:3), 2, 5)),
-                (PermutedDimsArray(dev, (2, 1)), PermutedDimsArray(host, (2, 1))),
-            )
+        args = Any[
+            (vec(view(dev, 1:4, 1:4)), vec(view(host, 1:4, 1:4))),
+            (reshape(view(dev, 1:4, 1:4), 2, 8), reshape(view(host, 1:4, 1:4), 2, 8)),
+            (reshape(view(dev, :, 2:3), 2, 5), reshape(view(host, :, 2:3), 2, 5)),
+            (PermutedDimsArray(dev, (2, 1)), PermutedDimsArray(host, (2, 1))),
+            (StepRangeLen(0.0f0, 0.5f0, 16), collect(StepRangeLen(0.0f0, 0.5f0, 16))),
+        ]
+        if KernelAbstractions.supports_float64(Backend())
+            # indexing these computes in Float64
+            push!(args, (LinRange(0.0f0, 7.5f0, 16), collect(LinRange(0.0f0, 7.5f0, 16))))
+            push!(args, (range(0.0f0, step = 0.1f0, length = 16), collect(range(0.0f0, step = 0.1f0, length = 16))))
+        end
+        for (B, ref) in args
             A = KernelAbstractions.zeros(Backend(), Float32, size(B))
             if ndims(B) == 1
                 constarg(Backend(), 8)(A, B, ndrange = size(A))
@@ -532,6 +550,112 @@ function unittest_testsuite(Backend, backend_str, backend_mod, BackendArrayT; sk
             ifelse_pick!(backend, 4)(out, dx, dy, dflag; ndrange = n)
             synchronize(backend)
             @test Array(out) == ifelse.(flag, x, y)
+        end
+    end
+
+    # https://github.com/JuliaGPU/KernelAbstractions.jl/issues/855
+    @kernel function index_only!(A)
+        i = @index(Global, Linear)
+        A[i] = @index(Group, Linear)
+    end
+
+    @kernel function index_reordered!(A)
+        i = @index(Global, Linear)
+        A[i] = -1
+        A[i] = @index(Group, Linear)
+    end
+
+    @kernel function index_nested!(A)
+        i = @index(Global, Linear)
+        A[i] = 2 * @index(Group, Linear)
+    end
+
+    @kernel function index_sync!(A, B)
+        i = @index(Global, Linear)
+        A[i] = @index(Local, Linear)
+        @synchronize
+        B[i] = A[i] + @index(Group, Linear)
+    end
+
+    @testset "`@index` on the right-hand side of a non-variable assignment (#855)" begin
+        backend = Backend()
+        expected = [1, 1, 1, 1, 2, 2, 2, 2]
+
+        A = KernelAbstractions.zeros(backend, Int, 8)
+        index_only!(backend, 4)(A; ndrange = 8)
+        synchronize(backend)
+        @test adapt(Array, A) == expected
+
+        A = KernelAbstractions.zeros(backend, Int, 8)
+        index_reordered!(backend, 4)(A; ndrange = 8)
+        synchronize(backend)
+        @test adapt(Array, A) == expected
+
+        A = KernelAbstractions.zeros(backend, Int, 8)
+        index_nested!(backend, 4)(A; ndrange = 8)
+        synchronize(backend)
+        @test adapt(Array, A) == 2 .* expected
+
+        A = KernelAbstractions.zeros(backend, Int, 8)
+        B = KernelAbstractions.zeros(backend, Int, 8)
+        index_sync!(backend, 4)(A, B; ndrange = 8)
+        synchronize(backend)
+        @test adapt(Array, A) == [1, 2, 3, 4, 1, 2, 3, 4]
+        @test adapt(Array, B) == [2, 3, 4, 5, 3, 4, 5, 6]
+    end
+
+    # https://github.com/JuliaGPU/KernelAbstractions.jl/issues/916
+    @kernel function mul_with_overflow!(prod, overflow, @Const(a), @Const(b))
+        i = @index(Global, Linear)
+        @inbounds prod[i], overflow[i] = Base.mul_with_overflow(a[i], b[i])
+    end
+
+    @kernel function checked_mul!(c, @Const(a), @Const(b))
+        i = @index(Global, Linear)
+        @inbounds c[i] = Base.checked_mul(a[i], b[i])
+    end
+
+    @kernel function rational_muladd!(c, @Const(a), @Const(b))
+        i = @index(Global, Linear)
+        @inbounds c[i] = a[i] * b[i] + a[i]
+    end
+
+    @conditional_testset "multiplication with overflow" skip_tests begin
+        backend = Backend()
+        @testset "$T" for T in (Int32, Int64, UInt32, UInt64)
+            m = typemax(T)
+            half = m ÷ T(2) + one(T)
+            pairs = Tuple{T, T}[(0, m), (2, 3), (half, 2), (m, m)]
+            if T <: Signed
+                append!(pairs, [(-1, 1), (-2, 3), (-half, 2), (-half, -2), (typemin(T), -1)])
+            end
+            a, b = first.(pairs), last.(pairs)
+            expected = Base.mul_with_overflow.(a, b)
+
+            prod = KernelAbstractions.zeros(backend, T, length(pairs))
+            overflow = KernelAbstractions.zeros(backend, Bool, length(pairs))
+            mul_with_overflow!(backend)(prod, overflow, adapt(backend, a), adapt(backend, b); ndrange = length(pairs))
+            synchronize(backend)
+            @test adapt(Array, prod) == first.(expected)
+            @test adapt(Array, overflow) == last.(expected)
+
+            fits = .!last.(expected)
+            c = KernelAbstractions.zeros(backend, T, count(fits))
+            checked_mul!(backend)(c, adapt(backend, a[fits]), adapt(backend, b[fits]); ndrange = count(fits))
+            synchronize(backend)
+            @test adapt(Array, c) == a[fits] .* b[fits]
+        end
+
+        # On Julia 1.10, `Rational` arithmetic only compiles on back ends that override
+        # `Base.__throw_rational_argerror_typemin`, e.g. by stacking GPUToolbox's
+        # `throw_overrides` like the CPU back end does.
+        if VERSION >= v"1.11" || backend isa CPU
+            a = [1 // 2, -3 // 4, 5 // 6]
+            b = [2 // 3, 4 // 5, -6 // 7]
+            c = KernelAbstractions.zeros(backend, Rational{Int}, length(a))
+            rational_muladd!(backend)(c, adapt(backend, a), adapt(backend, b); ndrange = length(a))
+            synchronize(backend)
+            @test adapt(Array, c) == a .* b .+ a
         end
     end
 

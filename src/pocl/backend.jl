@@ -2,12 +2,13 @@ module POCLKernels
 
 using ..POCL
 using ..POCL: @device_override, cl, method_table
-using ..POCL: device, device_limits, clconvert, clfunction
+using ..POCL: device_limits, clconvert, clfunction
 
 using SPIRV_LLVM_Backend_jll, SPIRV_Tools_jll
 
 import KernelAbstractions as KA
 import KernelInterface as KI
+using KernelAbstractions.NDIteration: fldmod_extent, cld_extent, nextpow2
 
 import SPIRVIntrinsics
 
@@ -40,6 +41,10 @@ function KI.versioninfo(io::IO, ::POCLBackend)
     end
     println(io)
 
+    if !cl.pocl_standalone_jll.is_available()
+        println(io, "POCL is not available for this platform.")
+        return
+    end
     println(io, "POCL Version: ")
     for platform in cl.platforms()
         print(io, "  OpenCL $(platform.opencl_version.major).$(platform.opencl_version.minor)")
@@ -75,7 +80,57 @@ end
 
 ## Memory Operations
 
+# GPUCompiler performs 8- and 16-bit atomics on the aligned 32-bit word containing the value,
+# which must not overlap another allocation or storage that is modified independently. That
+# includes adjacent elements of the same array: while an 8- or 16-bit element is updated
+# atomically, the others in its word must not be modified by plain stores concurrently. For
+# arrays of a bits type backed by Julia-owned storage (from here, but also from `resize!`,
+# `copy`, `similar`, ...), that word stays within the same allocation by how Julia's
+# allocator is implemented, not by anything it documents:
+# - Julia 1.11+ (v1.13.1 `src/genericmemory.c`, `jl_alloc_genericmemory_unchecked`): small
+#   `Memory` data starts 16 bytes into an object from a GC pool, whose size classes
+#   (`jl_gc_sizeclasses` in `src/julia_internal.h`) are multiples of 8 bytes, with objects
+#   16-byte aligned (`GC_PAGE_OFFSET` in `src/gc-stock.h`); larger data comes from
+#   `jl_gc_managed_malloc` (`src/gc-stock.c`), which rounds the size up to, and aligns to,
+#   `JL_CACHE_BYTE_ALIGNMENT` (64 or 128 bytes). With MMTk (`src/gc-mmtk.c`), objects are
+#   rounded up to their 16-byte alignment (`jl_mmtk_gc_alloc_default`) and
+#   `jl_gc_managed_malloc` rounds the same way.
+# - Julia 1.10 (v1.10.10 `src/array.c`, `_new_array_`): small arrays store their data at
+#   least 8-byte aligned after the header, in a pool object of the same size classes; larger
+#   ones use `jl_gc_managed_malloc` and `gc_managed_realloc_` (`src/gc.c`), which round and
+#   align as above.
+# Revisit this when Julia's allocator changes. Arrays wrapping foreign memory (e.g., with
+# `unsafe_wrap`) are the user's responsibility, as documented for `CPU`.
 KI.allocate(::POCLBackend, ::Type{T}, dims::Tuple; unified::Bool = false) where {T} = Array{T}(undef, dims)
+
+# Initialized
+
+KA.@kernel function fill_kernel(A, x)
+    I = KA.@index(Global)
+    @inbounds A[I] = x
+end
+
+# Filling or copying into an array with a kernel first-touches its pages from the kernel's
+# threads, which spreads them over the threads' memory domains instead of placing all of them
+# in the calling thread's (see the NUMA example). Below 1 MiB, the launch overhead makes that up to
+# several times slower than writing from the host, while there are too few pages for
+# placement to matter.
+const KERNEL_FILL_BYTES = 1 << 20
+
+# arrays of bits unions, whose element type isn't `isbitstype`, are filled from the host
+function fill_initialized!(backend::POCLBackend, A::Array{T}, x) where {T}
+    if isbitstype(T) && sizeof(A) >= KERNEL_FILL_BYTES
+        fill_kernel(backend)(A, x; ndrange = length(A))
+    else
+        fill!(A, x)
+    end
+    return A
+end
+
+KI.zeros(backend::POCLBackend, ::Type{T}, dims::Tuple; kwargs...) where {T} =
+    fill_initialized!(backend, KI.allocate(backend, T, dims; kwargs...), zero(T))
+KI.ones(backend::POCLBackend, ::Type{T}, dims::Tuple; kwargs...) where {T} =
+    fill_initialized!(backend, KI.allocate(backend, T, dims; kwargs...), one(T))
 
 #  Adapt.jl's `Array` rule converts every `AbstractArray` leaf; `isbits` arrays (ranges, view indices)
 # which we want to keep as they are.
@@ -95,26 +150,30 @@ KA.@kernel function copy_kernel(A, @Const(B))
 end
 
 
+# small copies, copies of bits unions and overlapping copies are done from the host
 function KI.copyto!(backend::POCLBackend, A, B)
     length(A) == length(B) ||
         throw(ArgumentError("Arrays must match in length, got $(length(A)) and $(length(B))"))
-    if KI.get_backend(A) == KI.get_backend(B) && KI.get_backend(A) isa POCLBackend
-        if Base.mightalias(A, B)
-            error("Arrays may not alias")
-        end
-        kernel = copy_kernel(backend)
-        kernel(A, B, ndrange = length(A))
-        return A
+    T = eltype(A)
+    if KI.get_backend(A) == KI.get_backend(B) && KI.get_backend(A) isa POCLBackend &&
+            isbitstype(T) && length(A) * sizeof(T) >= KERNEL_FILL_BYTES && !Base.mightalias(A, B)
+        copy_kernel(backend)(A, B, ndrange = length(A))
     else
         Base.copyto!(A, B)
-        return A
     end
+    return A
 end
 
 KI.functional(::POCLBackend) = true
 KA.pagelock!(::POCLBackend, x) = nothing
+# its work-items are iterations of a loop, which is faster than dividing for any group size
+KA.fold_threshold(::POCLBackend) = 1
 
 KI.get_backend(::Array) = POCLBackend()
+# VERSION >= v"1.11"
+@static if isdefined(Core, :Memory)
+    KI.get_backend(::Memory) = POCLBackend()
+end
 
 ## Implementation note:
 ## The POCL backend uses `Base.Array` as it's array type, so the external operations
@@ -123,7 +182,7 @@ KI.get_backend(::Array) = POCLBackend()
 ## must synchronize upon kernel launch and can't rely on synchronization upon
 ## array access. Therefore, `synchronize` is a no-op.
 KI.synchronize(::POCLBackend) = nothing
-KI.supports_float64(::POCLBackend) = "cl_khr_fp64" in device().extensions
+KI.supports_float64(::POCLBackend) = device_limits().fp64
 KI.supports_unified(::POCLBackend) = true
 KI.supports_atomics(::POCLBackend) = true
 
@@ -139,12 +198,17 @@ struct POCLKernel{K, F}
     f::F
 end
 
-function KI.kernel_function(backend::POCLBackend, f::F, tt::TT = Tuple{}; name = nothing, kwargs...) where {F, TT}
-    # fix the sub-group width, as `KI.sub_group_size` promises. pass it even if the device
-    # has no sub-groups, so that `clfunction` is only compiled for one set of keywords.
-    sub_group_size = device_limits().sub_group_size
-    sub_group_size = sub_group_size > 0 ? sub_group_size : nothing
-    kernel = clfunction(clconvert(f), tt; name, sub_group_size, kwargs...)
+function KI.kernel_function(backend::POCLBackend, f::F, tt::TT = Tuple{}; kwargs...) where {F, TT}
+    return KA.kernel_function_as(backend, f, tt, tt; kwargs...)
+end
+
+Base.@nospecializeinfer function KA.kernel_function_as(
+        backend::POCLBackend, f::F, @nospecialize(compiled_tt::Type), tt::TT; name = nothing, kwargs...
+    ) where {F, TT}
+    # the sub-group width defaults to the one `KI.sub_group_size` reports. it is determined
+    # when creating the compiler configuration, since passing it here would make the keyword
+    # arguments' type depend on the device, and the call to `clfunction` dynamic.
+    kernel = clfunction(clconvert(f), tt, compiled_tt; name, kwargs...)
     kern = POCLKernel(kernel, f)
     return KI.Kernel{POCLBackend, typeof(kern)}(backend, kern)
 end
@@ -154,31 +218,184 @@ function KI.launch(obj::KI.Kernel{POCLBackend}, groups::Dims{3}, items::Dims{3},
     # compiled kernel only holds pointers to the arrays captured by `f`, so keep it alive
     # until the kernel completes.
     f = obj.kern.f
-    GC.@preserve f POCL.launch_and_wait(
-        obj.kern.kernel, args; local_size = items, global_size = groups .* items
-    )
+    k = obj.kern.kernel
+    global_size = groups .* items
+    # (see `KA.launch_split`, which shares this specialization)
+    GC.@preserve f POCL.launch_and_wait(k, args, k.fun, global_size, groups; local_size = items, global_size)
     return nothing
 end
 
-function KI.max_work_group_size(kernel::KI.Kernel{<:POCLBackend})::Int
-    wginfo = cl.work_group_info(kernel.kern.kernel.fun, device())
-    return Int(wginfo.size)
+# split only N-d launches: linearized launches place partial work-groups where `host_run`
+# cannot identify them. keep the first partial launch checked so kernels used once compile
+# once. queue fallbacks also run every work-group checked.
+function KA.split_launch(::POCLBackend, ::KA.NDLaunch, checked::KI.Kernel{POCLBackend})
+    k = checked.kern.kernel.fun
+    (@atomic :monotonic k.launched_partial) && return true
+    @atomic :monotonic k.launched_partial = true
+    return false
 end
+
+function KA.launch_split(
+        kernel::KI.Kernel{POCLBackend}, checked::KI.Kernel{POCLBackend}, extent::Dims{3},
+        groups::Dims{3}, items::Dims{3}, args::Tuple
+    )
+    # keep captured arrays alive for both kernel variants
+    f = kernel.kern.f
+    k = kernel.kern.kernel
+    partial = checked.kern.kernel.fun
+    global_size = groups .* items
+    GC.@preserve f POCL.launch_and_wait(k, args, partial, extent, groups; local_size = items, global_size)
+    return nothing
+end
+
+KI.max_work_group_size(kernel::KI.Kernel{<:POCLBackend})::Int =
+    kernel.kern.kernel.fun.work_group_size
 KI.max_work_group_size(::POCLBackend)::Int = device_limits().max_work_group_size
 KI.max_work_group_dims(::POCLBackend)::NTuple{3, Int} = device_limits().max_work_group_dims
 # the grid is only limited by the size of `size_t`
 KI.max_num_groups(::POCLBackend)::NTuple{3, Int} = (typemax(Int), typemax(Int), typemax(Int))
 KI.sub_group_size(::POCLBackend)::Int = device_limits().sub_group_size
-function KI.multiprocessor_count(::POCLBackend)::Int
-    return Int(device().max_compute_units)
+KI.multiprocessor_count(::POCLBackend)::Int = device_limits().compute_units
+
+# each work-group runs on one thread, which loops over (and vectorizes across) its
+# work-items. the largest work-group would run a launch of up to that many work-items on a
+# single thread, so split it into about as many work-groups as there are threads, as long as
+# the work-groups stay large enough to vectorize. this assumes that the work is balanced
+# across the work-items.
+KI.launch_configuration(
+    kernel::KI.Kernel{<:POCLBackend}; nitems::Union{Integer, Nothing} = nothing,
+    max_work_group_size::Integer = typemax(Int)
+) = (; workgroupsize = launch_workgroupsize(kernel.kern.kernel.fun, nitems, max_work_group_size))
+
+# kept out of `KI.launch_configuration`, which is compiled for every kernel
+@noinline function launch_workgroupsize(kernel::cl.Kernel, nitems, max_work_group_size)
+    max_items = min(kernel.tuned_work_group_size, max_work_group_size)
+    items = cpu_workgroupsize(
+        nitems, device_limits().compute_units, max_items, kernel.preferred_work_group_size_multiple
+    )
+    return Int(items)
+end
+
+# the workgroup size `KI.launch_configuration` tunes for kernels with the device's limits,
+# which is what PoCL kernels report, unless their estimated stack use limits their size
+function KA.tunes_as_expected(kernel::KI.Kernel{POCLBackend})
+    k, limits = kernel.kern.kernel.fun, device_limits()
+    return k.tuned_work_group_size == limits.max_work_group_size &&
+        k.preferred_work_group_size_multiple == limits.preferred_work_group_size_multiple
+end
+function KA.expected_workgroupsize(::POCLBackend, nitems)
+    limits = device_limits()
+    return cpu_workgroupsize(
+        nitems, limits.compute_units, limits.max_work_group_size,
+        limits.preferred_work_group_size_multiple
+    )
+end
+
+# a launch with a partial work-group runs the bounds-checked kernel, whose work-item loop
+# vectorizes poorly (AArch64, without masked loads and stores: ~3x slower for a stencil).
+# so shrink each dimension of the generic choice to the largest divisor of the ndrange that
+# keeps at least half its size. without one, the launch stays checked, but runs faster in
+# work-groups a quarter of the size (axpy, 1000003 work-items on 4 threads of a Ryzen 9
+# 9950X: 71 vs 31 µs).
+# vectorization is across the first dimension. below 16 vectors (of the preferred multiple),
+# shrink it only to a vector-width multiple, never to a quarter: a scalar remainder costs
+# more than a partial work-group (axpy, 1000 work-items on 32 threads: 146 ns in work-groups
+# of 32, 162 ns of 25, 209 ns of 8).
+# (only shrink, so padding stays within the bound `KA.select_launch` assumes.)
+function KA.launch_workgroupsize(::POCLBackend, ::KA.NDLaunch, threads, ndrange)
+    extent = KA.extents(ndrange)
+    limits = device_limits()
+    items = KI.threads_to_workgroupsize(threads, extent, KA.nd_limits(limits.max_work_group_dims, extent))
+    width = limits.preferred_work_group_size_multiple
+    return ntuple(Val(length(extent))) do d
+        Base.@_inline_meta
+        n, x = extent[d], items[d]
+        small = d == 1 && width <= x < 16 * width
+        fit_workgroup(n, x, small ? width : 1, !small)
+    end
+end
+
+# keep `x` if it divides `n`; otherwise use the largest multiple of `m` in `cld(x, 2):x`
+# that divides `n`. if none exists, use a quarter of `x` (a multiple of `m`) when `shrink`,
+# or keep `x` otherwise
+function fit_workgroup(n::Int, x::Int, m::Int, shrink::Bool)
+    iszero(fldmod_extent(n, x)[2]) && return x
+    d = largest_divisor(n, x, m)
+    d == 0 || return d
+    shrink || return x
+    return max(m, cld(x, 4) ÷ m * m)
+end
+
+# the largest multiple of `m` in `cld(x, 2):x` that divides `n`, or 0 if none exists. search
+# sizes or work-group counts, whichever are fewer. requires `n % x != 0`: the size search
+# skips `x` (`largest_divisor(8, 4, 1) == 2`).
+function largest_divisor(n::Int, x::Int, m::Int)
+    # (a multiple of `m` only divides multiples of `m`)
+    iszero(fldmod_extent(n, m)[2]) || return 0
+    lo = cld(x, 2)
+    hi = (x - 1) ÷ m * m
+    if (hi - lo) ÷ m <= fld(n, lo) - cld(n, x)
+        for d in hi:-m:lo
+            n % d == 0 && return d
+        end
+    else
+        for g in cld(n, x):fld(n, lo)
+            n % g == 0 && (n ÷ g) % m == 0 && return n ÷ g
+        end
+    end
+    return 0
+end
+
+# the number of work-groups per thread that the default work-group size aims to exceed
+const WORKGROUPS_PER_THREAD = 4
+
+# Based on PoCL's own choice when a launch doesn't give a local size
+# (`pocl_default_local_size_optimizer` in `lib/CL/devices/pocl_local_size.c`), in one
+# dimension: start from the largest work-group, and halve it while there are at most
+# `WORKGROUPS_PER_THREAD` work-groups per thread, but not below 4 times the preferred
+# work-group size multiple. three differences: PoCL stops splitting once there are more than
+# half as many work-groups as threads, which leaves threads idle when the work-groups don't
+# divide evenly among them (e.g. 132x132 work-items in 6 work-groups on 8 threads), and gives
+# threads that finish early nothing to pick up; several work-groups per thread keep the
+# threads busy at the cost of a few more, still vectorizable, work-groups. PoCL only uses local
+# sizes that divide the global size; KernelAbstractions supports partial work-groups, so this
+# uses powers of two instead, which divide the extents of `ndrange`s that are powers of two.
+# and PoCL doesn't split at all if splitting over all threads would go below the minimum,
+# which leaves e.g. 1000 work-items on 64 threads in one work-group; this splits down to the
+# minimum instead.
+function cpu_workgroupsize(nitems, threads, max_items, multiple)
+    nitems === nothing && return max_items
+    nitems = max(nitems, 1)
+    min_items = min(4 * max(multiple, 1), max_items)
+    items = min(nextpow2(min(nitems, max_items)), max_items)
+    # one work-group, which isn't split (without dividing, for small launches)
+    items >= nitems && items < 2 * min_items && return items
+    groups = cld_extent(nitems, items)
+    while groups <= WORKGROUPS_PER_THREAD * threads && items >= 2 * min_items
+        items >>= 1
+        groups = cld_extent(nitems, items)
+    end
+    return items
 end
 
 KI.supports_subgroups(::POCLBackend) = device_limits().sub_group_size > 0
-function KI.supports_shuffle(backend::POCLBackend, ::Type{T}) where {T}
+# PoCL forms sub-groups from consecutive work-items, but executes sub-group operations as
+# work-group barriers, so they need work-group-uniform control flow (see `POCLBackend`)
+KI.supports_linear_subgroups(backend::POCLBackend) = KI.supports_subgroups(backend)
+KI.supports_independent_subgroups(::POCLBackend) = false
+# PoCL limitation: for the same reason, sub-groups can't be partitioned into segments that
+# diverge
+KI.supports_partitionable_subgroups(::POCLBackend) = false
+
+# The types `sub_group_shuffle` supports; other types are shuffled as words. `Float16` and
+# `Float64` are reported as unsupported on devices without `cl_khr_fp16` or `cl_khr_fp64`,
+# rather than shuffled as words: the overrides below are selected by type, not by device.
+const ShuffleTypes = Union{SPIRVIntrinsics.gentypes...}
+
+function KI.supports_shuffle(backend::POCLBackend, ::Type{T}) where {T <: ShuffleTypes}
     KI.supports_subgroups(backend) || return false
-    T in SPIRVIntrinsics.gentypes || return false
-    T === Float64 && return "cl_khr_fp64" in device().extensions
-    T === Float16 && return "cl_khr_fp16" in device().extensions
+    T === Float64 && return device_limits().fp64
+    T === Float16 && return device_limits().fp16
     return true
 end
 
@@ -221,18 +438,10 @@ end
 
 @device_override KI.get_sub_group_local_id(::Type{T}) where {T} = get_sub_group_local_id() % T
 
-## Shared and Scratch Memory
+## Shared Memory
 
 @device_override @inline function KI.localmemory(::Type{T}, ::Val{Dims}) where {T, Dims}
     ptr = POCL.emit_localmemory(T, Val(prod(Dims)))
-    CLDeviceArray(Dims, ptr)
-end
-
-@device_override @inline function KA.Scratchpad(ctx, ::Type{T}, ::Val{Dims}) where {T, Dims}
-    # private per-workitem scratch: a stack `alloca` (lowered by GPUCompiler) wrapped in a
-    # device array. the slot lives in OpenCL "Function" storage (LLVM addrspace 0), which is
-    # where the SPIR-V target places allocas.
-    ptr = POCL.GPUCompiler.alloca(T, Val(prod(Dims)), Val(POCL.AS.Function))
     CLDeviceArray(Dims, ptr)
 end
 
@@ -247,8 +456,85 @@ end
     sub_group_barrier(POCL.LOCAL_MEM_FENCE | POCL.GLOBAL_MEM_FENCE)
 end
 
-@device_override function KI.shfl_down(val::T, offset::Integer) where {T}
-    sub_group_shuffle(val, get_sub_group_local_id() + offset)
+@device_override KI.shfl(val::T, lane::Integer) where {T <: ShuffleTypes} =
+    SPIRVIntrinsics.sub_group_shuffle(val, lane)
+
+# past the sub-group width, `shfl_down` and `shfl_up` return the work-item's own value, which
+# `sub_group_shuffle` (like SPIR-V's `OpGroupNonUniformShuffleDown`) leaves undefined
+@device_override function KI.shfl_down(val::T, offset::Integer) where {T <: ShuffleTypes}
+    lane = get_sub_group_local_id()
+    # compared before adding, so that large offsets don't overflow
+    inside = offset <= get_max_sub_group_size() - lane
+    return SPIRVIntrinsics.sub_group_shuffle(val, ifelse(inside, lane + offset, lane))
+end
+
+@device_override function KI.shfl_up(val::T, offset::Integer) where {T <: ShuffleTypes}
+    lane = get_sub_group_local_id()
+    return SPIRVIntrinsics.sub_group_shuffle(val, ifelse(lane > offset, lane - offset, lane))
+end
+
+@device_override KI.shfl_xor(val::T, mask::Integer) where {T <: ShuffleTypes} =
+    SPIRVIntrinsics.sub_group_shuffle_xor(val, mask)
+
+# Every shuffle is a work-group barrier, so the words of a packed struct are exchanged with
+# vector shuffles (`POCL.vector_shuffle`), a barrier per up to 16 words rather than per word.
+# The last vector is padded to a size that exists (2, 3, 4, 8 or 16 words).
+@generated function shuffle_word_vectors(words::NTuple{N, UInt32}, lane::Int32) where {N}
+    body = Any[Expr(:meta, :inline)]
+    results = Any[]
+    for first in 1:16:N
+        k = min(N - first + 1, 16)
+        if k == 1
+            push!(results, :(KI.shfl(words[$first], lane)))
+            continue
+        end
+        n = k <= 4 ? k : k <= 8 ? 8 : 16
+        elements = ((j < k ? :(VecElement(words[$(first + j)])) : :(VecElement(UInt32(0)))) for j in 0:(n - 1))
+        v = Symbol(:v, first)
+        push!(body, :($v = POCL.vector_shuffle(($(elements...),), lane)))
+        append!(results, (:($v[$j].value) for j in 1:k))
+    end
+    push!(body, :(($(results...),)))
+    return Expr(:block, body...)
+end
+
+@device_override @inline KI.shfl_word_tuple(op::KI.ShuffleOp, words::NTuple{N, UInt32}) where {N} =
+    shuffle_word_vectors(words, KI.shuffle_source(op))
+
+@device_override KI.sub_group_any(pred::Bool) = SPIRVIntrinsics.sub_group_any(pred)
+
+@device_override KI.sub_group_all(pred::Bool) = SPIRVIntrinsics.sub_group_all(pred)
+
+@device_override function KI.sub_group_ballot(pred::Bool)
+    mask = SPIRVIntrinsics.sub_group_ballot(pred)
+    return UInt64(mask[1].value) | (UInt64(mask[2].value) << 32)
+end
+
+# Native reductions and scans of `cl_khr_subgroups`, for `+` on 32- and 64-bit integers and
+# floats, and `min`/`max` on integers (OpenCL's `min` and `max` treat NaN and the sign of zero
+# differently from Julia's). They need the fix of PoCL 7.2's peeling of the first work-item
+# (pocl/pocl#2239), which `pocl_standalone_jll` includes since 7.2.1+1.
+const CollectiveIntTypes = Union{Int32, UInt32, Int64, UInt64}
+const CollectiveTypes = Union{CollectiveIntTypes, Float16, Float32, Float64}
+
+@device_override KI.sub_group_reduce(::typeof(+), val::CollectiveTypes) =
+    SPIRVIntrinsics.sub_group_reduce_add(val)
+@device_override KI.sub_group_reduce(::typeof(min), val::CollectiveIntTypes) =
+    SPIRVIntrinsics.sub_group_reduce_min(val)
+@device_override KI.sub_group_reduce(::typeof(max), val::CollectiveIntTypes) =
+    SPIRVIntrinsics.sub_group_reduce_max(val)
+
+@device_override KI.sub_group_scan(::typeof(+), val::CollectiveTypes) =
+    SPIRVIntrinsics.sub_group_scan_inclusive_add(val)
+@device_override KI.sub_group_scan(::typeof(min), val::CollectiveIntTypes) =
+    SPIRVIntrinsics.sub_group_scan_inclusive_min(val)
+@device_override KI.sub_group_scan(::typeof(max), val::CollectiveIntTypes) =
+    SPIRVIntrinsics.sub_group_scan_inclusive_max(val)
+
+# the exclusive scans of `cl_khr_subgroups` start from the identity, not from `init`
+@device_override function KI.sub_group_exclusive_scan(::typeof(+), val::T, init::T) where {T <: CollectiveTypes}
+    prefix = SPIRVIntrinsics.sub_group_scan_exclusive_add(val)
+    return ifelse(get_sub_group_local_id() == 1, init, init + prefix)
 end
 
 @device_override @inline function KI._print(args...)

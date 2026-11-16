@@ -96,7 +96,7 @@ function scan_method!(lines, m::Method, modules)
 end
 
 function check_no_boxes()
-    modules = Set(["Breeze"])
+    modules = Set(["KernelAbstractions", "KernelInterface"])
     format = "markdown"
     lines = Vector{NamedTuple}()
     Base.visit(Core.methodtable) do m
@@ -147,7 +147,6 @@ function quality_assurance_testsuite()
             KernelAbstractions;
             stale_deps = (; ignore = [:Enzyme, :EnzymeCore]),
             deps_compat = (; ignore = [:Enzyme, :EnzymeCore]),
-            persistent_tasks = (; broken = Sys.islinux()),
         )
     end
 

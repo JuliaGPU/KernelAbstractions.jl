@@ -9,6 +9,12 @@ end
 end
 
 function spawn_testsuite(Backend, AT)
+    @testset "expansion can be copied" begin
+        # tools that generate code copy expressions with `deepcopy`, which fails for modules
+        ex = macroexpand(@__MODULE__, :(KernelAbstractions.@spawn backend nothing))
+        @test deepcopy(ex) isa Expr
+    end
+
     backend = Backend()
 
     @testset "ordered after the spawning task" begin

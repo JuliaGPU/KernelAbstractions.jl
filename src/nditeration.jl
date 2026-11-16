@@ -18,7 +18,7 @@ axis(r::Base.OneTo) = Int(length(r))
 axis(r::AbstractUnitRange) = UnitRange{Int}(r)
 
 extent(n::Integer) = Int(n)
-extent(r::AbstractUnitRange) = length(r)
+extent(r::AbstractUnitRange) = Int(length(r))
 
 axis_offset(::Integer) = 0
 axis_offset(r::AbstractUnitRange) = first(r) - 1
@@ -31,7 +31,7 @@ a `CartesianIndices`, a single range, or an integer.
 """
 extents(t::Tuple) = map(extent, t)
 extents(ci::CartesianIndices) = size(ci)
-extents(r::AbstractUnitRange) = (length(r),)
+extents(r::AbstractUnitRange) = (extent(r),)
 extents(n::Integer) = (Int(n),)
 
 """
@@ -205,6 +205,16 @@ Base.length(range::NDRange) = length(blocks(range))
     return CartesianIndex(nI)
 end
 
+"""
+    linear_index(iterspace::NDRange, ndrange, groupidx::CartesianIndex, idx::CartesianIndex)
+
+Linear index of work item `idx` of workgroup `groupidx`, as returned by `@index(Global, Linear)`.
+Defaults to the position of `expand(iterspace, groupidx, idx)` within `ndrange`. A custom mapping
+whose linear index is not a function of the expanded index alone, e.g. a list of indices whose
+linear index is the position in the list, can specialize this on its `NDRange` type.
+"""
+@inline linear_index(iterspace::NDRange, ndrange, groupidx::CartesianIndex, idx::CartesianIndex) =
+    linear_index(ndrange, @inbounds expand(iterspace, groupidx, idx))
 
 """
     assume(cond::Bool)
@@ -243,6 +253,30 @@ Base.@propagate_inbounds function expand(ndrange::NDRange{N}, groupidx::Integer,
     return expand(ndrange, blocks(ndrange)[groupidx], idx)
 end
 
+## integer arithmetic for launch geometry
+
+# launches compute their geometry every time, and a 64-bit division costs tens of cycles on
+# some CPUs. these avoid dividing in the common cases: tuned work-group sizes are powers of
+# two unless the range or kernel limits intervene, and preliminary partitions divide an
+# extent by itself. (Base's `fldmod` and `cld` always divide unless the divisor is a
+# constant, and `nextpow` keeps a `DomainError` path even when inlined.)
+
+# `fldmod(n, d)` for `n >= 0` and `d > 0`
+@inline function fldmod_extent(n::Int, d::Int)
+    n == d && return 1, 0
+    ispow2(d) && return n >> trailing_zeros(d), n & (d - 1)
+    return fldmod(n, d)
+end
+
+# `cld(n, d)` for `n >= 0` and `d > 0`
+@inline function cld_extent(n::Int, d::Int)
+    q, r = fldmod_extent(n, d)
+    return q + !iszero(r)
+end
+
+# `nextpow(2, n)` for `n >= 1`
+@inline nextpow2(n::Int) = n <= 1 ? 1 : 1 << (8 * sizeof(n) - leading_zeros(n - 1))
+
 """
     partition(ndrange, workgroupsize)
 
@@ -267,8 +301,9 @@ needs to perform dynamic bounds-checking.
         dynamic = Ref(false)
         blocks = ntuple(Val(length(ndrange))) do I
             Base.@_inline_meta
-            dynamic[] |= mod(ndrange[I], workgroupsize[I]) != 0
-            return fld1(ndrange[I], workgroupsize[I])
+            q, r = fldmod_extent(ndrange[I], workgroupsize[I])
+            dynamic[] |= r != 0
+            return q + (r != 0)
         end
 
         return blocks, workgroupsize, dynamic[] ? DynamicCheck() : NoDynamicCheck()

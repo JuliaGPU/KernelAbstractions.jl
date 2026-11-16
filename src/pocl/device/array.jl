@@ -19,7 +19,7 @@ struct CLDeviceArray{T, N, A} <: DenseArray{T, N}
     # TODO: deprecate; put `ptr` first like oneArray
     CLDeviceArray{T, N, A}(
         dims::Dims{N}, ptr::LLVMPtr{T, A},
-        maxsize::Int = prod(dims) * sizeof(T)
+        maxsize::Int = prod(dims) * aligned_sizeof(T)
     ) where {T, A, N} =
         new(ptr, maxsize, dims, prod(dims))
 end
@@ -44,7 +44,7 @@ CLDeviceVector{T, A}(len::Integer, p::LLVMPtr{T, A}) where {T, A} = CLDeviceVect
 
 ## array interface
 
-Base.elsize(::Type{<:CLDeviceArray{T}}) where {T} = sizeof(T)
+Base.elsize(::Type{<:CLDeviceArray{T}}) where {T} = aligned_sizeof(T)
 
 Base.size(g::CLDeviceArray) = g.dims
 Base.sizeof(x::CLDeviceArray) = Base.elsize(x) * length(x)
@@ -84,10 +84,12 @@ end
 
 @device_function @inline function arrayref(A::CLDeviceArray{T}, index::Integer) where {T}
     @boundscheck checkbounds(A, index)
-    if isbitstype(T)
-        arrayref_bits(A, index)
-    else #if isbitsunion(T)
+    # only isbits unions have their selector stored separately; other inline types, like
+    # structs with a union field, carry it within the element
+    if Base.isbitsunion(T)
         arrayref_union(A, index)
+    else
+        arrayref_bits(A, index)
     end
 end
 
@@ -113,23 +115,25 @@ end
         end
     end
 
-    return quote
-        selector_ptr = typetagdata(A, index)
-        selector = unsafe_load(selector_ptr)
+    return inline_body(
+        quote
+            selector_ptr = typetagdata(A, index)
+            selector = unsafe_load(selector_ptr)
 
-        align = alignment(A)
-        data_ptr = pointer(A, index)
+            align = alignment(A)
+            data_ptr = pointer(A, index)
 
-        return $ex
-    end
+            return $ex
+        end
+    )
 end
 
 @device_function @inline function arrayset(A::CLDeviceArray{T}, x::T, index::Integer) where {T}
     @boundscheck checkbounds(A, index)
-    if isbitstype(T)
-        arrayset_bits(A, x, index)
-    else #if isbitsunion(T)
+    if Base.isbitsunion(T)
         arrayset_union(A, x, index)
+    else
+        arrayset_bits(A, x, index)
     end
     return A
 end
@@ -143,16 +147,18 @@ end
     typs = Base.uniontypes(T)
     sel = findfirst(isequal(x), typs)
 
-    return quote
-        selector_ptr = typetagdata(A, index)
-        unsafe_store!(selector_ptr, $(UInt8(sel - 1)))
+    return inline_body(
+        quote
+            selector_ptr = typetagdata(A, index)
+            unsafe_store!(selector_ptr, $(UInt8(sel - 1)))
 
-        align = alignment(A)
-        data_ptr = pointer(A, index)
+            align = alignment(A)
+            data_ptr = pointer(A, index)
 
-        unsafe_store!(reinterpret(LLVMPtr{$x, AS}, data_ptr), x, 1, Val(align))
-        return
-    end
+            unsafe_store!(reinterpret(LLVMPtr{$x, AS}, data_ptr), x, 1, Val(align))
+            return
+        end
+    )
 end
 
 # A load from memory that is known not to be written for the duration of the kernel.
@@ -183,12 +189,12 @@ end
 
 @device_function @inline function const_arrayref(A::CLDeviceArray{T}, index::Integer) where {T}
     @boundscheck checkbounds(A, index)
-    return if isbitstype(T)
-        align = alignment(A)
-        unsafe_invariant_load(pointer(A), index, Val(align))
-    else #if isbitsunion(T)
+    if Base.isbitsunion(T)
         # the type tag is stored separately, and is not part of the invariant payload
         arrayref_union(A, index)
+    else
+        align = alignment(A)
+        unsafe_invariant_load(pointer(A), index, Val(align))
     end
 end
 
@@ -257,7 +263,7 @@ Base.@propagate_inbounds Base.getindex(
 Base.show(io::IO, a::CLDeviceVector) =
     print(io, "$(length(a))-element device array at $(pointer(a))")
 Base.show(io::IO, a::CLDeviceArray) =
-    print(io, "$(join(a.shape, '×')) device array at $(pointer(a))")
+    print(io, "$(join(size(a), '×')) device array at $(pointer(a))")
 
 Base.show(io::IO, mime::MIME"text/plain", a::CLDeviceArray) = show(io, a)
 
@@ -269,15 +275,20 @@ Base.show(io::IO, mime::MIME"text/plain", a::CLDeviceArray) = show(io, a)
     end
 end
 
+# the checks of GPUArrays' `reinterpret`; the thrown value is dropped on the device, so
+# these don't need the exception types it uses to report the details
 function Base.reinterpret(::Type{T}, a::CLDeviceArray{S, N, A}) where {T, S, N, A}
-    err = _reinterpret_exception(T, a)
-    err === nothing || throw(err)
+    isbitstype(T) && isbitstype(S) ||
+        throw(ArgumentError("cannot reinterpret an array when not all types are bitstypes"))
 
     if sizeof(T) == sizeof(S) # fast case
         return CLDeviceArray{T, N, A}(size(a), reinterpret(LLVMPtr{T, A}, a.ptr), a.maxsize)
     end
 
+    N == 0 && throw(ArgumentError("cannot reinterpret a zero-dimensional array to a type of a different size"))
     isize = size(a)
+    rem(isize[1] * sizeof(S), sizeof(T)) == 0 ||
+        throw(ArgumentError("cannot reinterpret an array whose first dimension is not divisible by the new element size"))
     size1 = div(isize[1] * sizeof(S), sizeof(T))
     osize = tuple(size1, Base.tail(isize)...)
     return CLDeviceArray{T, N, A}(osize, reinterpret(LLVMPtr{T, A}, a.ptr), a.maxsize)

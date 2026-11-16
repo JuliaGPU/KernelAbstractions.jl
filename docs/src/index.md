@@ -133,6 +133,22 @@ end
 ```
 
 ### 0.10
+- KernelAbstractions requires Julia 1.10 or later.
+- The `CPU` backend is an OpenCL backend: `CPU` is an alias of `POCLBackend`, which compiles
+  kernels like the GPU backends do and runs them with [PoCL](https://portablecl.org) on
+  PoCL's own threads, and no longer on Julia tasks. `CPU(; static=true)` has been removed,
+  as there is no dynamic task scheduling to opt out of anymore.
+- KernelAbstractions is built on [KernelInterface](@ref kernelinterface), which defines
+  `Backend` and the host-side functions (`allocate`, `synchronize`, …) that
+  KernelAbstractions re-exports. User code is unaffected, but backends have to implement
+  KernelInterface; see the [notes for backend implementations](@ref implementations_notes).
+- The Enzyme extension has been removed temporarily, and is planned to return in a later
+  0.10 release.
+- [`KernelAbstractions.@spawn`](@ref) launches kernels from a task like `Threads.@spawn`
+  does, and additionally orders them after the work the spawning task has queued, and can
+  select the device the task uses; see the [Quickstart](@ref).
+- `KernelAbstractions.isgpu` has been removed. Like for `GPU` below, query a capability
+  instead.
 - `ndrange` entries may be index ranges, given statically (`kernel(backend, workgroupsize, (-2:N+3, 0:M+1))`)
   or at launch (`ndrange=(-2:N+3, 0:M+1)`, a single range, or a `CartesianIndices`).
   `@index(Global, Cartesian)` and `@index(Global, NTuple)` return the shifted indices.
@@ -141,10 +157,10 @@ end
   the CPU backend became an OpenCL backend meant every backend. Use
   `KernelAbstractions.@device_code_llvm` and `KernelAbstractions.@device_code_typed` instead,
   which report on the code a backend actually generates; see [Reflection](@ref).
-- `KernelAbstractions.GPU` has been removed: it didn't mean GPU hardware (the `CPU` backend
-  was a subtype), and backends now subtype `KernelAbstractions.Backend` directly. Code
-  dispatching on `::GPU` should dispatch on `::Backend`, on concrete backend types, or on a
-  capability such as `KernelAbstractions.supports_float64`.
+- `KernelAbstractions.GPU` is deprecated, and backends should subtype
+  `KernelAbstractions.Backend` directly. `GPU` is now an alias of `Backend` and will be
+  removed in a future release. Code dispatching on `::GPU` should dispatch on `::Backend`, on
+  concrete backend types, or on a capability such as `KernelAbstractions.supports_float64`.
 - An exception thrown in a kernel on the `CPU` backend is reported as a
   `KernelAbstractions.POCL.KernelException` when the kernel has completed, like on GPU
   backends, and no longer as the original exception (e.g., a `BoundsError`). Depending on
@@ -153,6 +169,72 @@ end
 - The `CPU` backend runs kernels on as many threads as Julia was started with (`julia -t`),
   like the thread-based `CPU` backend of 0.9 did, and no longer on one thread per hardware
   thread. Set `JULIA_KA_CPU_THREADS` to use a different number of threads; see [`CPU`](@ref).
+- A `CPU` launch without a workgroup size is split into more than four workgroups per thread,
+  with workgroups of up to 4096 work-items, instead of into workgroups of 1024 work-items.
+  Small launches therefore use more threads, and large ones larger workgroups. The default
+  assumes that the work is balanced across the work-items; see [Quickstart](@ref).
+- `@private` arrays are a `KernelAbstractions.PrivateArray` in stack storage on every backend,
+  instead of a `StaticArrays.MArray` on most GPU backends, which was heap-allocated when passed
+  to a function that isn't inlined. It is still a `StaticArray`, but static-array arithmetic,
+  slicing and fast whole-array reductions now need StaticArrays to be loaded, and `copy` is
+  not supported: write `SVector(Tuple(p))` for an immutable copy. See [`@private`](@ref).
+  Backends no longer need to implement `KernelAbstractions.Scratchpad`: it is an overlay in
+  `GPUCompiler.SHARED_METHOD_TABLE`, which backends that override
+  `GPUCompiler.method_table_view` have to include, e.g., by implementing
+  `GPUCompiler.method_tables` instead.
+- [`@Const`](@ref) arguments are constified on the host when the kernel is launched, instead
+  of at the start of the kernel. Arguments whose Adapt.jl rules don't compile for GPUs, e.g.
+  a `StepRangeLen` or `LinRange`, can now be passed as `@Const`.
+  Backends have to convert kernel arguments with Adapt.jl, both in `KI.argconvert` and in `KI.launch`,
+  since that conversion now constifies them; see the [notes for backend implementations](@ref implementations_notes).
+- Launching a kernel on the `CPU` backend costs more than in 0.9: the kernel is handed to
+  PoCL's threads and the launching task waits for them, which takes about 5 µs per launch
+  even for an empty kernel. Code that launches many small kernels suffers the most. For
+  example, a 7-point stencil over a 4×4×4 range took about 3.5 µs per launch, against 0.2 µs
+  with 0.9. Over a 16×16×16 range, which 0.9 also ran on all threads, both took about 7 µs.
+- On the `CPU` backend, don't pass a fixed workgroup size such as `64`. Omit it
+  (`kernel(CPU())` instead of `kernel(CPU(), 64)`), so that it is automatically chosen for every launch. A
+  one-dimensional workgroup size pads a multidimensional range: with a workgroup size of 64
+  and a range of `(16, 16, 16)`, each of the 256 workgroups has 64 work-items, of which 16
+  are inside the range. A 7-point stencil over that range took about 13 µs per launch with a
+  workgroup size of 64, and 7 µs with the chosen one. Over a 128×128×128 range the chosen
+  size was still 5 to 15% faster.
+- On the `CPU` backend, every work-item checks whether it is inside the range, even when the
+  workgroups cover the range exactly. This can make kernels with a cheap body slightly slower
+  than with 0.9.
+- `foreach_index(f, A)` runs `f` once per index of the array `A` without writing a kernel out,
+  and `foreach_index(f, backend, indices)` once per index in a range or `CartesianIndices`.
+- KernelInterface 0.4 extends its sub-groups beyond the ids, `sub_group_barrier` and
+  `shfl_down` of 0.3: `shfl`, `shfl_up` and `shfl_xor` of any `isbits` value, the votes
+  `sub_group_any`, `sub_group_all` and `sub_group_ballot`, and reductions and scans, also
+  within segments of a sub-group. They are the low-level API for backends, for kernels
+  written against KernelInterface and for kernel languages built on it. KernelInterface no
+  longer promises how work-items form sub-groups: `supports_linear_subgroups` says whether
+  they are consecutive work-items, and `supports_independent_subgroups` and
+  `supports_partitionable_subgroups` whether sub-groups and their segments may diverge. See
+  [Sub-groups](@ref ki_subgroups).
+- [`@groupreduce`](@ref) and [`@groupscan`](@ref) reduce and scan a value over the
+  workgroup, on every backend. `@groupreduce` uses sub-groups internally where the backend
+  can shuffle the values. See [Reductions and scans](@ref group_collectives).
+
+#### Unreleased
+- The `CPU` backend runs kernels on Julia's threads instead of PoCL's, through PoCL's
+  `cl_pocl_host_kernel` extension (`pocl_standalone_jll` 7.2.3 or later). On a 4-core x86
+  machine, a launch costs about 0.15 µs on the launching task and 1 µs on several threads,
+  down from 5 µs. Small launches, and launches while the threads are busy (e.g. from a
+  `Threads.@threads` loop), run on the launching task alone. A launch doesn't yield while
+  its kernel runs. See [`CPU`](@ref).
+- Launches with as many workgroups start each block of them on the thread on which a
+  `Threads.@threads :static` loop over as many iterations runs it, so data stays in that
+  thread's cache and NUMA node. Pin Julia's threads before the first launch, e.g. with
+  ThreadPinning.jl; `POCL_AFFINITY` only applies to the few kernels that still run on
+  PoCL's threads.
+- On the `CPU` backend, work-items no longer check whether they are inside the range when
+  the workgroups cover it exactly, and otherwise only those of partial workgroups do (from
+  a kernel's second launch with partial workgroups on, so that a kernel launched once is
+  compiled once). This lets PoCL vectorize kernels better: an axpy over 10⁵ elements on one
+  thread took about 15% longer than a serial loop, rather than 3× (x86) to 7× (Apple M1) as
+  long. `muladd` is computed with fused multiply-adds on CPUs that have them.
 
 ## Semantic differences
 
@@ -160,7 +242,7 @@ end
 
 1. The kernels are automatically bounds-checked against either the dynamic or statically
    provided `ndrange`.
-2. Kernels implictly return `nothing`
+2. Kernels implicitly return `nothing`
 
 ## Contributing
 Please file any bug reports through Github issues or fixes through a pull

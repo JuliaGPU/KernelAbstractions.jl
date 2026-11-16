@@ -5,10 +5,13 @@ using ..POCL: platform, device, context, queue
 import pocl_standalone_jll
 
 using GPUToolbox: GPUToolbox, @gcsafe_ccall, cooperative_wait
+using KernelInterface: inline_body
 
 using Printf
 
-const libopencl = pocl_standalone_jll.libpocl
+# PoCL isn't built for every platform Julia runs on (e.g., 32-bit Windows). the package has
+# to load there anyway; `Session` reports the missing library when the back-end is used.
+const libopencl = pocl_standalone_jll.is_available() ? pocl_standalone_jll.libpocl : ""
 
 """
     @checked function foo(...)
@@ -58,6 +61,8 @@ const CL_SUCCESS = 0
 const CL_DEVICE_NOT_FOUND = -1
 
 const CL_DEVICE_NOT_AVAILABLE = -2
+
+const CL_OUT_OF_HOST_MEMORY = -6
 
 const CL_INVALID_ARG_INDEX = -49
 
@@ -239,6 +244,10 @@ const CL_DEVICE_PARTITION_AFFINITY_DOMAIN = 0x1045
 
 const CL_DEVICE_PARTITION_TYPE = 0x1046
 
+const CL_DEVICE_PARTITION_BY_COUNTS = 0x1087
+
+const CL_DEVICE_PARTITION_BY_COUNTS_LIST_END = 0x00
+
 const CL_DEVICE_REFERENCE_COUNT = 0x1047
 
 const CL_DEVICE_PREFERRED_INTEROP_USER_SYNC = 0x1048
@@ -384,6 +393,8 @@ const CL_BUILD_ERROR = -2
 
 const CL_BUILD_IN_PROGRESS = -3
 
+const CL_KERNEL_NUM_ARGS = 0x1191
+
 const CL_KERNEL_WORK_GROUP_SIZE = 0x11b0
 
 const CL_KERNEL_COMPILE_WORK_GROUP_SIZE = 0x11b1
@@ -412,6 +423,8 @@ const CL_KERNEL_EXEC_INFO_SVM_FINE_GRAIN_SYSTEM = 0x11b7
 
 const CL_DEVICE_SUB_GROUP_SIZES_INTEL = 0x4108
 
+const CL_DEVICE_SPIRV_EXTENSIONS_KHR = 0x12ba
+
 struct CLError <: Exception
     code::Cint
 end
@@ -420,7 +433,8 @@ end
     throw(CLError(res))
 end
 
-function check(f)
+# inlined, so that `Ref`s passed to API calls in `f` can be allocated on the stack
+@inline function check(f)
     res = f()
 
     if res != CL_SUCCESS
@@ -484,6 +498,8 @@ const cl_device_info = cl_uint
 
 const cl_context_properties = intptr_t
 
+const cl_device_partition_property = intptr_t
+
 const cl_context_info = cl_uint
 
 const cl_build_status = cl_int
@@ -536,6 +552,16 @@ end
         platform::cl_platform_id, device_type::cl_device_type,
         num_entries::cl_uint, devices::Ptr{cl_device_id},
         num_devices::Ptr{cl_uint}
+    )::cl_int
+end
+
+@checked function clCreateSubDevices(
+        in_device, properties, num_devices, out_devices, num_devices_ret
+    )
+    @gcsafe_ccall libopencl.POclCreateSubDevices(
+        in_device::cl_device_id, properties::Ptr{cl_device_partition_property},
+        num_devices::cl_uint, out_devices::Ptr{cl_device_id},
+        num_devices_ret::Ptr{cl_uint}
     )::cl_int
 end
 
@@ -624,6 +650,49 @@ end
     @gcsafe_ccall libopencl.POclReleaseKernel(kernel::cl_kernel)::cl_int
 end
 
+# `cl_pocl_host_kernel` runs work-groups on the calling thread (PoCL's
+# `include/CL/cl_ext_pocl.h`). all supported pocl_standalone_jll builds provide it;
+# `Session()` rejects devices without it.
+
+const cl_host_kernel_pocl = Ptr{Cvoid}
+
+const CL_HOST_KERNEL_SCRATCH_SIZE_POCL = 0x4511
+const CL_HOST_KERNEL_SCRATCH_ALIGNMENT_POCL = 0x4512
+
+function clCreateHostKernelPOCL(kernel, device, work_dim, local_work_size, errcode_ret)
+    return @gcsafe_ccall libopencl.POclCreateHostKernelPOCL(
+        kernel::cl_kernel, device::cl_device_id, work_dim::cl_uint,
+        local_work_size::Ptr{Csize_t}, errcode_ret::Ptr{cl_int}
+    )::cl_host_kernel_pocl
+end
+
+@checked function clGetHostKernelInfoPOCL(
+        host_kernel, param_name, param_value_size, param_value, param_value_size_ret
+    )
+    @gcsafe_ccall libopencl.POclGetHostKernelInfoPOCL(
+        host_kernel::cl_host_kernel_pocl, param_name::cl_uint, param_value_size::Csize_t,
+        param_value::Ptr{Cvoid}, param_value_size_ret::Ptr{Csize_t}
+    )::cl_int
+end
+
+@checked function clReleaseHostKernelPOCL(host_kernel)
+    @gcsafe_ccall libopencl.POclReleaseHostKernelPOCL(
+        host_kernel::cl_host_kernel_pocl
+    )::cl_int
+end
+
+# leave error handling to `host_run`. GC-safe calls let collection proceed during long runs
+# instead of waiting for the kernel's thread.
+@inline function clRunHostKernelPOCL(
+        host_kernel, arg_values, num_groups, first_group, group_count, scratch
+    )
+    return @gcsafe_ccall libopencl.POclRunHostKernelPOCL(
+        host_kernel::cl_host_kernel_pocl, arg_values::Ptr{Ptr{Cvoid}},
+        num_groups::Ptr{Csize_t}, C_NULL::Ptr{Csize_t}, first_group::Csize_t,
+        group_count::Csize_t, scratch::Ptr{Cvoid}
+    )::cl_int
+end
+
 @checked function clSetKernelArg(kernel, arg_index, arg_size, arg_value)
     @gcsafe_ccall libopencl.POclSetKernelArg(
         kernel::cl_kernel, arg_index::cl_uint,
@@ -635,6 +704,15 @@ end
     @gcsafe_ccall libopencl.POclSetKernelArgSVMPointer(
         kernel::cl_kernel, arg_index::cl_uint,
         arg_value::Ptr{Cvoid}
+    )::cl_int
+end
+
+@checked function clGetKernelInfo(
+        kernel, param_name, param_value_size, param_value, param_value_size_ret
+    )
+    @gcsafe_ccall libopencl.POclGetKernelInfo(
+        kernel::cl_kernel, param_name::cl_uint, param_value_size::Csize_t,
+        param_value::Ptr{Cvoid}, param_value_size_ret::Ptr{Csize_t}
     )::cl_int
 end
 
@@ -750,35 +828,17 @@ end
 
 # Init
 
-# lazy initialization, before the first API call
-const initialized = Threads.Atomic{Bool}(false)
-const initialization_lock = ReentrantLock()
+# lazy initialization
+const initialized = Ref{Bool}(false)
 @noinline function initialize()
-    @lock initialization_lock begin
-        initialized[] && return
-        # PoCL sizes its thread pool when it initializes its devices, which the first call
-        # querying them does. don't use the wrappers here, as they'd call `initialize()`.
-        threads = cpu_threads()
-        if threads !== nothing
-            platform = Ref{cl_platform_id}()
-            @gcsafe_ccall libopencl.POclGetPlatformIDs(
-                1::cl_uint, platform::Ptr{cl_platform_id}, C_NULL::Ptr{cl_uint}
-            )::cl_int
-            err = @gcsafe_ccall libopencl.POclSetCPUMaxComputeUnitsPOCL(
-                platform[]::cl_platform_id, threads::cl_uint
-            )::cl_int
-            err == CL_SUCCESS || throw(CLError(err))
-        end
-        initialized[] = true
-    end
+    initialized[] = true
     return
 end
 
-# by default, PoCL starts a worker thread for every hardware thread, which oversubscribes
-# the CPU when Julia uses several processes (e.g., with MPI), and makes small kernels pay
-# for waking up all of them. so default to as many workers as Julia has threads, unless
-# PoCL has been configured with its own environment variables. returns `nothing` to leave
-# the choice to PoCL.
+# by default, PoCL's CPU device runs kernels on every hardware thread. that oversubscribes
+# the CPU when Julia uses several processes (e.g., with MPI), so default to as many threads
+# as Julia has, unless PoCL has been configured with its own environment variables.
+# returns `nothing` to use the whole device.
 const pocl_thread_variables =
     ("POCL_MAX_PTHREAD_COUNT", "POCL_CPU_MAX_CU_COUNT", "POCL_MAX_COMPUTE_UNITS")
 function cpu_threads()
@@ -887,6 +947,17 @@ end
 
 devices(p::Platform) = devices(p, CL_DEVICE_TYPE_ALL)
 
+# a sub-device that runs commands on `compute_units` of the device's compute units
+function sub_device(d::Device, compute_units::Integer)
+    properties = cl_device_partition_property[
+        CL_DEVICE_PARTITION_BY_COUNTS, compute_units,
+        CL_DEVICE_PARTITION_BY_COUNTS_LIST_END, 0,
+    ]
+    sub = Ref{cl_device_id}()
+    clCreateSubDevices(d, properties, 1, sub, C_NULL)
+    return Device(sub[])
+end
+
 @inline function Base.getproperty(d::Device, s::Symbol)
     # simple string properties
     version_re = r"OpenCL (?<major>\d+)\.(?<minor>\d+)(?<vendor>.+)"
@@ -920,15 +991,17 @@ devices(p::Platform) = devices(p, CL_DEVICE_TYPE_ALL)
     end
 
     # scalar values
-    @inline function get_scalar(prop, typ)
-        scalar = Ref{typ}()
-        clGetDeviceInfo(d, prop, sizeof(typ), scalar, C_NULL)
+    @inline function get_scalar(prop, ::Type{T}) where {T}
+        scalar = Ref{T}()
+        clGetDeviceInfo(d, prop, sizeof(T), scalar, C_NULL)
         return Int(scalar[])
     end
     if s === :vendor_id
         return get_scalar(CL_DEVICE_VENDOR_ID, cl_uint)
     elseif s === :max_compute_units
         return get_scalar(CL_DEVICE_MAX_COMPUTE_UNITS, cl_uint)
+    elseif s === :max_sub_devices
+        return get_scalar(CL_DEVICE_PARTITION_MAX_SUB_DEVICES, cl_uint)
     elseif s === :max_work_item_dims
         return get_scalar(CL_DEVICE_MAX_WORK_ITEM_DIMENSIONS, cl_uint)
     elseif s === :max_clock_frequency
@@ -949,6 +1022,8 @@ devices(p::Platform) = devices(p, CL_DEVICE_TYPE_ALL)
         return get_scalar(CL_DEVICE_LOCAL_MEM_SIZE, cl_ulong)
     elseif s === :max_work_group_size
         return get_scalar(CL_DEVICE_MAX_WORK_GROUP_SIZE, Csize_t)
+    elseif s === :preferred_work_group_size_multiple
+        return get_scalar(CL_DEVICE_PREFERRED_WORK_GROUP_SIZE_MULTIPLE, Csize_t)
     elseif s === :max_parameter_size
         return get_scalar(CL_DEVICE_MAX_PARAMETER_SIZE, Csize_t)
     elseif s === :profiling_timer_resolution
@@ -982,10 +1057,20 @@ devices(p::Platform) = devices(p, CL_DEVICE_TYPE_ALL)
         return String[string(s) for s in split(bs)]
     end
 
+    # cl_khr_spirv_queries: the SPIR-V extensions that modules may declare
+    if s == :spirv_extensions
+        "cl_khr_spirv_queries" in d.extensions::Vector{String} || return String[]
+        size = Ref{Csize_t}()
+        clGetDeviceInfo(d, CL_DEVICE_SPIRV_EXTENSIONS_KHR, 0, C_NULL, size)
+        result = Vector{Ptr{Cchar}}(undef, size[] ÷ sizeof(Ptr{Cchar}))
+        clGetDeviceInfo(d, CL_DEVICE_SPIRV_EXTENSIONS_KHR, sizeof(result), result, C_NULL)
+        return String[unsafe_string(ptr) for ptr in result]
+    end
+
     # cl_ext_float_atomics: per-precision bitfields of natively supported floating-point
     # atomic operations (zero when the device does not expose the extension)
     if s == :single_fp_atomic_capabilities || s == :double_fp_atomic_capabilities || s == :half_fp_atomic_capabilities
-        "cl_ext_float_atomics" in d.extensions || return zero(UInt64)
+        "cl_ext_float_atomics" in d.extensions::Vector{String} || return zero(UInt64)
         prop = s == :single_fp_atomic_capabilities ? CL_DEVICE_SINGLE_FP_ATOMIC_CAPABILITIES_EXT :
             s == :double_fp_atomic_capabilities ? CL_DEVICE_DOUBLE_FP_ATOMIC_CAPABILITIES_EXT :
             CL_DEVICE_HALF_FP_ATOMIC_CAPABILITIES_EXT
@@ -1018,7 +1103,7 @@ devices(p::Platform) = devices(p, CL_DEVICE_TYPE_ALL)
     end
 
     if s == :max_work_item_size
-        result = Vector{Csize_t}(undef, d.max_work_item_dims)
+        result = Vector{Csize_t}(undef, d.max_work_item_dims::Int)
         clGetDeviceInfo(d, CL_DEVICE_MAX_WORK_ITEM_SIZES, sizeof(result), result, C_NULL)
         return tuple([Int(r) for r in result]...)
     end
@@ -1139,7 +1224,7 @@ function Base.getproperty(p::Program, s::Symbol)
         clGetProgramInfo(p, CL_PROGRAM_NUM_DEVICES, sizeof(Cuint), count, C_NULL)
         return Int(count[])
     elseif s == :devices
-        device_ids = Vector{cl_device_id}(undef, p.num_devices)
+        device_ids = Vector{cl_device_id}(undef, p.num_devices::Int)
         clGetProgramInfo(p, CL_PROGRAM_DEVICES, sizeof(device_ids), device_ids, C_NULL)
         return [Device(id) for id in device_ids]
     elseif s == :source
@@ -1150,11 +1235,11 @@ function Base.getproperty(p::Program, s::Symbol)
         clGetProgramInfo(p, CL_PROGRAM_SOURCE, src_len[], src, C_NULL)
         return GC.@preserve src unsafe_string(pointer(src))
     elseif s == :binary_sizes
-        sizes = Vector{Csize_t}(undef, p.num_devices)
+        sizes = Vector{Csize_t}(undef, p.num_devices::Int)
         clGetProgramInfo(p, CL_PROGRAM_BINARY_SIZES, sizeof(sizes), sizes, C_NULL)
         return sizes
     elseif s == :binaries
-        sizes = p.binary_sizes
+        sizes = p.binary_sizes::Vector{Csize_t}
 
         bins = Vector{Ptr{UInt8}}(undef, length(sizes))
         # keep a reference to the underlying binary arrays
@@ -1174,7 +1259,7 @@ function Base.getproperty(p::Program, s::Symbol)
 
         binary_dict = Dict{Device, Array{UInt8}}()
         bidx = 1
-        for (i, d) in enumerate(p.devices)
+        for (i, d) in enumerate(p.devices::Vector{Device})
             if sizes[i] > 0
                 binary_dict[d] = bin_arrays[bidx]
                 bidx += 1
@@ -1187,7 +1272,7 @@ function Base.getproperty(p::Program, s::Symbol)
         return Context(ctx[], retain = true)
     elseif s == :build_status
         status_dict = Dict{Device, cl_build_status}()
-        for device in p.devices
+        for device in p.devices::Vector{Device}
             status = Ref{cl_build_status}()
             clGetProgramBuildInfo(p, device, CL_PROGRAM_BUILD_STATUS, sizeof(cl_build_status), status, C_NULL)
             status_dict[device] = status[]
@@ -1195,7 +1280,7 @@ function Base.getproperty(p::Program, s::Symbol)
         return status_dict
     elseif s == :build_log
         log_dict = Dict{Device, String}()
-        for device in p.devices
+        for device in p.devices::Vector{Device}
             size = Ref{Csize_t}()
             clGetProgramBuildInfo(p, device, CL_PROGRAM_BUILD_LOG, 0, C_NULL, size)
             log = Vector{Cchar}(undef, size[])
@@ -1208,19 +1293,83 @@ function Base.getproperty(p::Program, s::Symbol)
     end
 end
 
+# a host kernel prepared for one work-group size; a NULL `id` caches an unsupported size
+# (see `host_kernel`)
+mutable struct HostKernelHandle
+    const id::cl_host_kernel_pocl
+    const local_size::NTuple{3, Int}
+    const scratch_size::Int
+    const scratch_alignment::Int
+    # last sampled duration (counter ticks) and last launch's work-group count
+    Base.@atomic last_duration::UInt64
+    Base.@atomic last_groups::Int
+    # untimed launches remaining on the launching task
+    Base.@atomic untimed::Int
+    # serial estimates for the last two work-group counts (`a` is latest): work per item can
+    # vary with grid size. scale the first range's time to the whole grid, in cycle counter
+    # ticks. use the smaller of two samples (zero without a previous sample) to discount a
+    # delayed run.
+    Base.@atomic serial_groups_a::Int
+    Base.@atomic serial_sample_a::UInt64
+    Base.@atomic serial_duration_a::UInt64
+    Base.@atomic serial_groups_b::Int
+    Base.@atomic serial_sample_b::UInt64
+    Base.@atomic serial_duration_b::UInt64
+
+    function HostKernelHandle(id, local_size, scratch_size = 0, scratch_alignment = 1)
+        h = new(id, local_size, scratch_size, scratch_alignment, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+        id == C_NULL || finalizer(h -> clReleaseHostKernelPOCL(h.id), h)
+        return h
+    end
+end
+
 mutable struct Kernel
     const id::cl_kernel
     # kernel arguments are state of the kernel object, see `call`
     const lock::ReentrantLock
+    # the host-kernel handles of this kernel (under `lock`), and the one used last
+    const host_kernels::Vector{HostKernelHandle}
+    @atomic host_kernel::Union{Nothing, HostKernelHandle}
+    # whether a launch had partial work-groups (see `KA.split_launch`)
+    @atomic launched_partial::Bool
+
+    # cache immutable device-specific work-group limits and the per-item stack estimate in
+    # bytes; see `work_group_info` for other properties
+    const work_group_size::Int
+    const preferred_work_group_size_multiple::Int
+    const private_mem_size::Int
+    # the largest work-group of tuned launches (see `POCL.link_kernel`)
+    tuned_work_group_size::Int
 
     function Kernel(k::cl_kernel)
-        kernel = new(k, ReentrantLock())
+        function get(param, T = Csize_t)
+            result = Ref{T}()
+            clGetKernelWorkGroupInfo(k, device(), param, sizeof(T), result, C_NULL)
+            return Int(result[])
+        end
+        kernel = try
+            work_group_size = get(CL_KERNEL_WORK_GROUP_SIZE)
+            new(
+                k, ReentrantLock(), HostKernelHandle[], nothing, false, work_group_size,
+                get(CL_KERNEL_PREFERRED_WORK_GROUP_SIZE_MULTIPLE),
+                get(CL_KERNEL_PRIVATE_MEM_SIZE, cl_ulong), work_group_size
+            )
+        catch
+            clReleaseKernel(k)
+            rethrow()
+        end
         finalizer(clReleaseKernel, kernel)
         return kernel
     end
 end
 
 Base.unsafe_convert(::Type{cl_kernel}, k::Kernel) = k.id
+
+function num_args(k::Kernel)
+    n = Ref{cl_uint}()
+    clGetKernelInfo(k, CL_KERNEL_NUM_ARGS, sizeof(cl_uint), n, C_NULL)
+    return Int(n[])
+end
 
 function Kernel(p::Program, kernel_name::String)
     for (dev, status) in p.build_status
@@ -1325,7 +1474,7 @@ end
 # one call per argument: a splat of more than 32 arguments isn't a direct call
 @inline @generated function set_args!(k::Kernel, args::Tuple)
     calls = (:(set_arg!(k, $i, args[$i])) for i in 1:fieldcount(args))
-    return :($(calls...); nothing)
+    return inline_body(:($(calls...); nothing))
 end
 
 # work sizes padded to the three dimensions OpenCL devices support
@@ -1342,8 +1491,9 @@ function enqueue_kernel(
         if length(local_work_size) != work_dim
             throw(ArgumentError("global_work_size and local_work_size have differing dims"))
         end
+        # inlined, so that `ret_event` can be allocated on the stack
         ret_event = Ref{cl_event}()
-        clEnqueueNDRangeKernel(
+        @inline clEnqueueNDRangeKernel(
             queue(), k, cl_uint(work_dim),
             work_size(global_work_size), work_size(local_work_size), ret_event
         )
@@ -1398,11 +1548,11 @@ function enqueue_kernel(
             num_sub_groups = KernelSubGroupInfo(k, device(), Csize_t[]).max_num_sub_groups
         end
         if nargs === nothing
-            nargs = k.num_args - 2
+            nargs = num_args(k) - 2
         end
-        rng_state_size = sizeof(UInt32) * num_sub_groups
-        set_arg!(k, nargs + 1, LocalMem(UInt32, rng_state_size))
-        set_arg!(k, nargs + 2, LocalMem(UInt32, rng_state_size))
+        # one UInt32 per sub-group
+        set_arg!(k, nargs + 1, LocalMem(UInt32, num_sub_groups))
+        set_arg!(k, nargs + 2, LocalMem(UInt32, num_sub_groups))
     end
 
     n_events = cl_uint(0)
@@ -1465,7 +1615,7 @@ end
         ).args
     )
 
-    return ex
+    return inline_body(ex)
 end
 
 # the arguments are passed as a tuple, see `set_args!`
@@ -1487,9 +1637,9 @@ function Base.getproperty(ki::KernelWorkGroupInfo, s::Symbol)
     k = getfield(ki, :kernel)
     d = getfield(ki, :device)
 
-    function get(val, typ)
-        result = Ref{typ}()
-        clGetKernelWorkGroupInfo(k, d, val, sizeof(typ), result, C_NULL)
+    function get(val, ::Type{T}) where {T}
+        result = Ref{T}()
+        clGetKernelWorkGroupInfo(k, d, val, sizeof(T), result, C_NULL)
         return result[]
     end
 
@@ -1521,9 +1671,9 @@ function Base.getproperty(ki::KernelSubGroupInfo, s::Symbol)
     d = getfield(ki, :device)
     lsize = getfield(ki, :local_work_size)
 
-    function get(val, typ)
-        result = Ref{typ}()
-        clGetKernelSubGroupInfo(k, d, val, sizeof(lsize), lsize, sizeof(typ), result, C_NULL)
+    function get(val, ::Type{T}) where {T}
+        result = Ref{T}()
+        clGetKernelSubGroupInfo(k, d, val, sizeof(lsize), lsize, sizeof(T), result, C_NULL)
         return result[]
     end
 
@@ -1617,9 +1767,14 @@ const blocking_waits = Ref(false)
 
 function Base.wait(evt::Event)
     # wait without blocking the thread, so that other tasks can run in the meantime. after
-    # polling briefly, PoCL notifies us when the command completes: waking a worker thread
-    # to wait for it, or polling for longer, would compete with the command for the CPU
-    # cores it executes on.
+    # polling for a while, PoCL notifies us when the command completes: waking a worker
+    # thread to wait for it, or polling for longer, would compete with the command for the
+    # CPU cores it executes on.
+    #
+    # being notified costs ~7 µs more than polling: PoCL calls back a few µs after the
+    # command completes, and then has to wake up this task. polling for up to 50 µs avoids
+    # that for small kernels, which take 2-50 µs from the flush to completing, and only
+    # occupies one CPU thread for a small fraction of a longer command.
     #
     # this cannot be interrupted, as kernels may be using memory that callers would release:
     # an interrupt is only thrown once the kernel has completed (or waiting failed, in which
@@ -1633,7 +1788,7 @@ function Base.wait(evt::Event)
 
             cooperative_wait(
                 blocking_wait, evt; subscribe = subscribe_completion, isdone = iscomplete,
-                spin = 10.0e-6
+                spin = 50.0e-6
             )
         catch
             blocking_wait(evt)
