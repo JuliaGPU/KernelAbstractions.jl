@@ -70,6 +70,15 @@ function GPUCompiler.finish_module!(
         job, mod, entry
     )
 
+    # the built-ins of SPIRVIntrinsics don't free memory. Enzyme needs to know that to
+    # differentiate callers in reverse mode, and cannot tell from a declaration.
+    # XXX: SPIRVIntrinsics should declare them `nofree`
+    for f in mod.functions
+        if isempty(f.blocks) && contains(f.name, "__spirv_BuiltIn")
+            push!(f.function_attributes, EnumAttribute(:nofree))
+        end
+    end
+
     sg_size = job.config.params.sub_group_size
     if sg_size !== nothing
         entry.metadata["intel_reqd_sub_group_size"] = MDNode([ConstantInt(Int32(sg_size))])
