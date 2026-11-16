@@ -54,11 +54,7 @@ end
 
 EnzymeRules.inactive(::Type{StaticSize}, x...) = nothing
 
-@static if isdefined(EnzymeCore, :set_runtime_activity)
-    include("EnzymeCore08Ext.jl")
-else
-    include("EnzymeCore07Ext.jl")
-end
+include("EnzymeCore08Ext.jl")
 
 # Synchronize rules
 # TODO: Right now we do the synchronization as part of the kernel launch in the augmented primal
