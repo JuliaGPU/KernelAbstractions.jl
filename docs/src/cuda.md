@@ -37,7 +37,7 @@ CUDA's local memory is private to a thread, while KernelAbstractions' local memo
 
 The first, second and third dimension correspond to `x`, `y` and `z`.
 Linear indices of multi-dimensional workgroups and groups count `x` fastest, like CUDA numbers the threads of a block.
-For an `ndrange` of [index ranges](@ref "Index ranges"), `@index(Global, Cartesian)` is shifted by the first index of each range.
+For an `ndrange` of [index ranges](@ref "Index ranges"), `@index(Global, Cartesian)` returns the indices of the ranges, e.g. 3 for the first work-item of `3:10`.
 There is no equivalent of `CuDynamicSharedArray`: the size of [`@localmem`](@ref) has to be known when the kernel is compiled.
 
 ## Launching
@@ -67,11 +67,11 @@ end
 axpy!(get_backend(y), 256)(y, a, x; ndrange = length(y))
 ```
 
-A kernel is constructed for a backend and an optional workgroup size, and launched with its `ndrange`, the number of work-items.
-KernelAbstractions computes the number of workgroups from it, and only runs the kernel body on the work-items inside the `ndrange`, so the kernel needs no bounds check.
+A KernelAbstractions kernel is given the number of work-items, its `ndrange`, rather than the number of blocks.
+KernelAbstractions computes the number of workgroups from it, and only runs the kernel body on the work-items inside the `ndrange`, so the kernel needs no bounds check, unless it is declared with `@kernel unsafe_indices=true`.
 The padding work-items of a partial workgroup still reach every [`@synchronize`](@ref).
 A value that control flow around a `@synchronize` depends on must therefore be computed with [`@uniform`](@ref), which also evaluates it on the padding work-items.
-CUDA needs no equivalent, because every thread runs every statement.
+CUDA needs no equivalent, because it runs the whole kernel on every thread, and the kernel checks the bounds itself.
 
 Launches are asynchronous on both.
 Call [`synchronize`](@ref), which calls `CUDA.synchronize()` on `CUDABackend()`, before reading the results on the host.
