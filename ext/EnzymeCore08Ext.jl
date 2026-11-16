@@ -64,7 +64,7 @@ function _create_tape_kernel(
     # So we convert the arguments here, this is a bit wasteful since the `aug_kernel` call
     # will later do the same.
     dev_args2 = ((argconvert(kernel, a) for a in args2)...,)
-    dev_TT = map(Core.Typeof, dev_args2)
+    dev_TT = map(a -> Core.Typeof(_device_arg(a)), dev_args2)
 
     job =
         EnzymeCore.compiler_job_from_backend(backend(kernel), typeof(() -> return), Tuple{})
@@ -94,6 +94,7 @@ function aug_fwd(
     ) where {Mode, FT, TapeType}
     ctx isa ConstArgs && return nothing
     checked = checked_context(ctx)
+    args = _device_args(args)
     # A2 = Const{Nothing} -- since f->Nothing
     forward, _ = EnzymeCore.autodiff_deferred_thunk(
         mode,
@@ -123,6 +124,7 @@ function rev(
     ) where {Mode, FT, TapeType}
     ctx isa ConstArgs && return nothing
     checked = checked_context(ctx)
+    args = _device_args(args)
     # XXX: TapeType and A2 as args to autodiff_deferred_thunk
     _, reverse = EnzymeCore.autodiff_deferred_thunk(
         mode,
@@ -138,6 +140,73 @@ function rev(
         reverse(Const(f), Const(checked), args..., tp)
     end
     return nothing
+end
+
+# Active arguments
+# A kernel cannot write to a host `Ref`, so it cannot accumulate the adjoint of an `Active`
+# argument into the shadow of a `MixedDuplicated`. Instead the shadow lives in a device
+# array with one element per lane of the batch, and the primal is passed by value. The host
+# passes both as a `DeviceMixed`, and the kernel turns it into
+# `MixedDuplicatedPtr(val, pointer(dval))` or
+# `BatchMixedDuplicatedPtr(val, ntuple(k -> pointer(dval, k), W))`. Enzyme updates shadows
+# atomically in device code, so all work-items can accumulate into the same element.
+struct DeviceMixed{W, T, D}
+    val::T
+    dval::D
+end
+DeviceMixed{W}(val::T, dval::D) where {W, T, D} = DeviceMixed{W, T, D}(val, dval)
+Adapt.adapt_structure(to, x::DeviceMixed{W}) where {W} =
+    DeviceMixed{W}(x.val, Adapt.adapt(to, x.dval))
+
+# The shadow of the `Active` argument `i` of `kernel`
+_active_ref(kernel, i, arg, width) = nothing
+function _active_ref(kernel::Kernel, i, arg::Active{T}, ::Val{W}) where {T, W}
+    if !isdefined(EnzymeCore, :MixedDuplicatedPtr) || !isbitstype(T)
+        error(
+            """
+            Active kernel arguments need an isbits type and EnzymeCore with `MixedDuplicatedPtr`, got
+            \n$(typeof(arg))
+            \nFor argument $i of kernel
+            \n$(kernel).
+            """
+        )
+    end
+    dval = allocate(backend(kernel), T, W)
+    copyto!(dval, fill(EnzymeCore.make_zero(arg.val), W))
+    return dval
+end
+
+_active_refs(kernel, args::NTuple{N, Any}, width) where {N} = ntuple(Val(N)) do i
+    Base.@_inline_meta
+    _active_ref(kernel, i, args[i], width)
+end
+
+_active_arg(arg, ::Nothing, ::Val) = arg
+_active_arg(arg, dval, ::Val{W}) where {W} = DeviceMixed{W}(arg.val, dval)
+
+_active_args(args::NTuple{N, Any}, arg_refs, width) where {N} = ntuple(Val(N)) do i
+    Base.@_inline_meta
+    _active_arg(args[i], arg_refs[i], width)
+end
+
+# The tape, and hence `arg_refs`, is not inferred. Dispatch on the argument annotation,
+# whose type is known, to assert the result type of each position.
+_active_result(arg, dval, width) = nothing
+_active_result(::Active{T}, dval, ::Val{1}) where {T} = only(Array(dval))::T
+_active_result(::Active{T}, dval, ::Val{W}) where {T, W} = NTuple{W, T}(Array(dval))::NTuple{W, T}
+_active_results(args::NTuple{N, Any}, arg_refs, width) where {N} =
+    map((arg, i) -> _active_result(arg, arg_refs[i], width), args, ntuple(identity, Val(N)))
+
+# In the kernel: the annotation with the shadow of a `DeviceMixed`. Also called on the host,
+# with the converted arguments, for the argument types of the kernel body.
+@inline _device_arg(arg) = arg
+@inline _device_arg(arg::DeviceMixed{1}) =
+    EnzymeCore.MixedDuplicatedPtr(arg.val, pointer(arg.dval))
+@inline _device_arg(arg::DeviceMixed{W}) where {W} =
+    EnzymeCore.BatchMixedDuplicatedPtr(arg.val, ntuple(k -> pointer(arg.dval, k), Val(W)))
+@inline _device_args(args::NTuple{N, Any}) where {N} = ntuple(Val(N)) do i
+    Base.@_inline_meta
+    _device_arg(args[i])
 end
 
 function EnzymeRules.augmented_primal(
@@ -160,29 +229,9 @@ function EnzymeRules.augmented_primal(
 
     FT = Const{Core.Typeof(f)}
 
-    arg_refs = ntuple(Val(N)) do i
-        Base.@_inline_meta
-        if args[i] isa Active
-            error(
-                """
-                Active kernel arguments not supported, got
-                \n$(typeof(args[i]))
-                \nFor argument $i of kernel
-                \n$(func.val).
-                """
-            )
-        else
-            nothing
-        end
-    end
-    args2 = ntuple(Val(N)) do i
-        Base.@_inline_meta
-        if args[i] isa Active
-            MixedDuplicated(args[i].val, arg_refs[i])
-        else
-            args[i]
-        end
-    end
+    width = Val(EnzymeRules.width(config))
+    arg_refs = _active_refs(kernel, args, width)
+    args2 = _active_args(args, arg_refs, width)
     Mode = split_mode(config, ModifiedBetween)
     TapeType, subtape, aug_kernel = _create_tape_kernel(
         kernel,
@@ -212,16 +261,9 @@ function EnzymeRules.reverse(
     ) where {N}
     subtape, arg_refs, tape_type = tape
 
-    args2 = ntuple(Val(N)) do i
-        Base.@_inline_meta
-        if args[i] isa Active
-            MixedDuplicated(args[i].val, arg_refs[i])
-        else
-            args[i]
-        end
-    end
-
     kernel = func.val
+    width = Val(EnzymeRules.width(config))
+    args2 = _active_args(args, arg_refs, width)
     f = kernel.f
 
     ModifiedBetween = Val((overwritten(config)[1], false, overwritten(config)[2:end]...))
@@ -236,15 +278,7 @@ function EnzymeRules.reverse(
         ndrange,
         workgroupsize,
     )
-    res = ntuple(Val(N)) do i
-        Base.@_inline_meta
-        if args[i] isa Active
-            arg_refs[i][]
-        else
-            nothing
-        end
-    end
     # Reverse synchronization right after the kernel launch
     synchronize(backend(kernel))
-    return res
+    return _active_results(args, arg_refs, width)
 end

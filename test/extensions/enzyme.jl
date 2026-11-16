@@ -65,13 +65,43 @@ function enzyme_testsuite(backend, ArrayT, supports_reverse = true)
             Enzyme.autodiff(Reverse, square_static_caller, Duplicated(A, dA), Const(backend()))
             @test all(dA .≈ (2:2:128))
 
-            # active arguments are not supported for kernels
             A .= (1:1:64)
             dA .= 1
 
-            @test_throws "Active kernel arguments not supported" Enzyme.autodiff(
-                Reverse, mul_caller, Duplicated(A, dA), Active(1.2), Const(backend())
-            )
+            # the shadow of an active argument is a pointer to device memory
+            if isdefined(Enzyme, :MixedDuplicatedPtr)
+                _, dB, _ = Enzyme.autodiff(Reverse, mul_caller, Duplicated(A, dA), Active(1.2), Const(backend()))[1]
+
+                @test all(dA .≈ 1.2)
+                @test dB ≈ sum(1:1:64)
+
+                # Batched reverse with an `Active` argument: one shadow per lane.
+                A .= (1:1:64)
+                dA1 = similar(A)
+                dA2 = similar(A)
+                dA1 .= 1
+                dA2 .= 2
+
+                _, dBs, _ = Enzyme.autodiff(Reverse, mul_caller, BatchDuplicated(A, (dA1, dA2)), Active(1.2), Const(backend()))[1]
+
+                @test dBs isa NTuple{2, Float64}
+                @test dBs[1] ≈ sum(1:1:64)
+                @test dBs[2] ≈ 2 * sum(1:1:64)
+                @test all(dA1 .≈ 1.2)
+                @test all(dA2 .≈ 2.4)
+
+                # every work-item accumulates into the shadow
+                C = ArrayT{Float64}(undef, 2^16)
+                dC = similar(C)
+                C .= 1
+                dC .= 1
+                _, dB, _ = Enzyme.autodiff(Reverse, mul_caller, Duplicated(C, dC), Active(1.2), Const(backend()))[1]
+                @test dB ≈ 2^16
+            else
+                @test_throws "Active kernel arguments need" Enzyme.autodiff(
+                    Reverse, mul_caller, Duplicated(A, dA), Active(1.2), Const(backend())
+                )
+            end
 
             # The strong zero setting is passed on to the kernel: the adjoint of `A[I] * B`
             # with `B = Inf` and a zero adjoint of the result is `0 * Inf = NaN` without it
