@@ -8,6 +8,8 @@ _rewrap_const_type(arg) = arg
 _rewrap_const_type(::Type{T}) where {T} = Const{Type{T}}(T)
 
 function fwd(ctx, config, f, args...)
+    # no argument is `@Const`: the kernel's own arguments are wrapped in annotations
+    ctx isa ConstArgs && return nothing
     args = map(_rewrap_const_type, args)
     EnzymeCore.autodiff_deferred(EnzymeRules.set_config(Forward, config), Const(f), Const{Nothing}, Const(ctx), args...)
     return nothing
@@ -31,8 +33,19 @@ function EnzymeRules.forward(
     return fwd_kernel(config, f, args...; ndrange, workgroupsize)
 end
 
-_enzyme_mkcontext(kernel::Kernel, ndrange, iterspace, dynamic) =
-    mkcontext(kernel, ndrange, iterspace)
+# The context that launching `aug_fwd` or `rev` on the backend of `kernel` creates, as the
+# kernel receives it (see `launch_tuple`). The tape type depends on its type.
+function _enzyme_mkcontext(kernel::Kernel, ndrange, workgroupsize, iterspace)
+    launch = select_launch(kernel, workgroupsize, iterspace)
+    return argconvert(kernel, mkcontext(kernel, ndrange, iterspace, launch))
+end
+
+# A launch whose workgroups cover the ndrange gets a context without the bounds check, which
+# only differs in its type. The kernel body is differentiated with the checked one, so that
+# the tape type doesn't depend on the launch.
+@inline checked_context(ctx::CompilerMetadata{NDRange, DynamicCheck}) where {NDRange} = ctx
+@inline checked_context(ctx::CompilerMetadata{NDRange}) where {NDRange} =
+    CompilerMetadata{NDRange, DynamicCheck}(ctx.ndrange, ctx.iterspace; ctx.launch, ctx.subgroups)
 
 _augmented_return(::Kernel, subtape, arg_refs, tape_type) =
     AugmentedReturn{Nothing, Nothing, Any}(nothing, nothing, (subtape, arg_refs, tape_type))
@@ -79,13 +92,15 @@ function aug_fwd(
         ::Val{TapeType},
         args...,
     ) where {Mode, FT, TapeType}
+    ctx isa ConstArgs && return nothing
+    checked = checked_context(ctx)
     # A2 = Const{Nothing} -- since f->Nothing
     forward, _ = EnzymeCore.autodiff_deferred_thunk(
         mode,
         TapeType,
         Const{Core.Typeof(f)},
         Const{Nothing},
-        Const{Core.Typeof(ctx)},
+        Const{Core.Typeof(checked)},
         map(Core.Typeof, args)...,
     )
 
@@ -93,7 +108,7 @@ function aug_fwd(
     # On the GPU: subtape::Vector
     if __validindex(ctx)
         I = __index_Global_Linear(ctx)
-        subtape[I] = forward(Const(f), Const(ctx), args...)[1]
+        subtape[I] = forward(Const(f), Const(checked), args...)[1]
     end
     return nothing
 end
@@ -106,19 +121,21 @@ function rev(
         ::Val{TapeType},
         args...,
     ) where {Mode, FT, TapeType}
+    ctx isa ConstArgs && return nothing
+    checked = checked_context(ctx)
     # XXX: TapeType and A2 as args to autodiff_deferred_thunk
     _, reverse = EnzymeCore.autodiff_deferred_thunk(
         mode,
         TapeType,
         Const{Core.Typeof(f)},
         Const{Nothing},
-        Const{Core.Typeof(ctx)},
+        Const{Core.Typeof(checked)},
         map(Core.Typeof, args)...,
     )
     if __validindex(ctx)
         I = __index_Global_Linear(ctx)
         tp = subtape[I]
-        reverse(Const(f), Const(ctx), args..., tp)
+        reverse(Const(f), Const(checked), args..., tp)
     end
     return nothing
 end
@@ -136,8 +153,8 @@ function EnzymeRules.augmented_primal(
 
     ndrange, workgroupsize, iterspace, dynamic =
         launch_config(kernel, ndrange, workgroupsize)
-    ctx = _enzyme_mkcontext(kernel, ndrange, iterspace, dynamic)
-    ctxTy = Core.Typeof(ctx) # CompilerMetadata{ndrange(kernel), Core.Typeof(dynamic)}
+    ctx = _enzyme_mkcontext(kernel, ndrange, workgroupsize, iterspace)
+    ctxTy = Core.Typeof(ctx)
     # TODO autodiff_deferred on the func.val
     ModifiedBetween = Val((overwritten(config)[1], false, overwritten(config)[2:end]...))
 

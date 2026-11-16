@@ -52,16 +52,13 @@ function enzyme_testsuite(backend, ArrayT, supports_reverse = true)
             Enzyme.autodiff(Reverse, square_caller, Duplicated(A, dA), Const(backend()))
             @test all(dA .≈ (2:2:128))
 
-            # active arguments not support for GPU kernels
-            if backend == CPU
-                A .= (1:1:64)
-                dA .= 1
+            # active arguments are not supported for kernels
+            A .= (1:1:64)
+            dA .= 1
 
-                _, dB, _ = Enzyme.autodiff(Reverse, mul_caller, Duplicated(A, dA), Active(1.2), Const(backend()))[1]
-
-                @test all(dA .≈ 1.2)
-                @test dB ≈ sum(1:1:64)
-            end
+            @test_throws "Active kernel arguments not supported" Enzyme.autodiff(
+                Reverse, mul_caller, Duplicated(A, dA), Active(1.2), Const(backend())
+            )
 
             # The strong zero setting is passed on to the kernel: the adjoint of `A[I] * B`
             # with `B = Inf` and a zero adjoint of the result is `0 * Inf = NaN` without it
