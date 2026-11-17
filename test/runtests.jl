@@ -1221,8 +1221,8 @@ end
     @test count() == n + 2
 end
 
-# PoCL's on-disk kernel cache misses when the SPIR-V differs, so compiling a kernel again,
-# which numbers Julia's functions anew, has to give the same SPIR-V
+# PoCL's on-disk kernel cache misses when the SPIR-V differs, so compiling a kernel again
+# has to give the same SPIR-V, although up to Julia 1.13 it numbers Julia's functions anew
 @testset "POCL reproducible SPIR-V" begin
     mod = @eval module $(gensym())
     @noinline child(x) = x + 1
