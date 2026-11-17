@@ -18,12 +18,11 @@ UnsafeAtomics = "013be700-e6cd-48c3-b4a1-df204f14c38f"
 pocl_standalone_jll = "54f56a70-6062-5590-a942-1226658f6c83"
 
 [sources]
-# LLVM.jl 10 support: https://github.com/EnzymeAD/Enzyme.jl/pull/3741
-Enzyme = {url = "https://github.com/maleadt/Enzyme.jl", rev = "llvm10"}
 KernelAbstractions = {path = ".."}
 KernelInterface = {path = "../lib/KernelInterface"}
 
 [compat]
 Aqua = "0.8"
 BFloat16s = "0.6"
+Enzyme = "0.13.221"
 FileCheck = "1.2"
