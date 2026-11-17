@@ -32,11 +32,15 @@ mutable struct OpenCLResults
     obj::Union{Nothing, Vector{UInt8}}                   # SPIR-V binary
     entry::Union{Nothing, String}
     device_rng::Bool
+    exception_sites::Vector{GPUCompiler.ExceptionSite}
     kernels::Vector{Tuple{cl.Context, cl.Kernel}}        # session-local; linear-scanned
-    OpenCLResults() = new(nothing, nothing, false, Tuple{cl.Context, cl.Kernel}[])
+    OpenCLResults() = new(
+        nothing, nothing, false, GPUCompiler.ExceptionSite[], Tuple{cl.Context, cl.Kernel}[]
+    )
 end
 
 GPUCompiler.runtime_module(::CompilerJob{<:Any, OpenCLCompilerParams}) = POCL
+GPUCompiler.uses_exception_sites(::CompilerJob{<:Any, OpenCLCompilerParams}) = true
 
 # SPIR-V doesn't support 128-bit integers, so keep 64-bit integer math (e.g. `Rational`
 # comparisons) that Base computes with them out of Int128. Some of Base's error paths format
@@ -282,7 +286,8 @@ const initialization_world = Ref{UInt}(typemax(UInt))
 
 invoke_frozen(f, args...) = Base.invoke_in_world(initialization_world[], f, args...)
 
-# run inference + LLVM codegen + SPIR-V emission. returns `(obj, entry, device_rng)`,
+# run inference + LLVM codegen + SPIR-V emission. returns `(obj, entry, device_rng,
+# exception_sites)`,
 # all session-portable so they survive precompilation when stored on a cached `CodeInstance`.
 const compilations = Threads.Atomic{Int}(0)
 function compile_to_obj(@nospecialize(job::CompilerJob))
@@ -295,13 +300,16 @@ function compile_to_obj(@nospecialize(job::CompilerJob))
         @dispose ir = meta.ir begin
             entry = meta.entry.name
             device_rng = haskey(meta.entry.function_attributes, "julia.opencl.rng")
-            (; obj, entry, device_rng)
+            (; obj, entry, device_rng, meta.exception_sites)
         end
     end
 end
 
 # link the SPIR-V bytes into a session-local `cl.Kernel` on the active context.
-function link_kernel(@nospecialize(job::CompilerJob), obj::Vector{UInt8}, entry::String)
+function link_kernel(
+        @nospecialize(job::CompilerJob), obj::Vector{UInt8}, entry::String,
+        exception_sites::Vector{GPUCompiler.ExceptionSite}
+    )
     prog = if "cl_khr_il_program" in device().extensions
         cl.Program(obj, context())
     else
@@ -312,5 +320,6 @@ function link_kernel(@nospecialize(job::CompilerJob), obj::Vector{UInt8}, entry:
     # cap tuned work-groups to avoid the queue fallback for excessive stack use; fitting to
     # the ndrange can only shrink them further
     kernel.tuned_work_group_size = min(kernel.work_group_size, host_kernel_max_items(kernel))
+    kernel.exception_sites = exception_sites
     return kernel
 end

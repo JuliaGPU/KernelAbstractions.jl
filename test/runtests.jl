@@ -864,7 +864,6 @@ end
         x = rand(Float32, n)
         launch!(y) = team_axpy!(CPU(), 256)(y, 2.0f0, x; ndrange = n)
         launch!(zeros(Float32, n))
-        quietly(f) = redirect_stdout(f, devnull)
 
         # nested parallel launches run serially (see `ThreadTeams.foreach_range`)
         ngroups = n ÷ 64
@@ -912,7 +911,7 @@ end
         # report exceptions from any thread without breaking later launches
         A = zeros(Float32, n)
         for i in (1, n ÷ 2, n)
-            @test_throws POCL.KernelException quietly(() -> team_exception!(CPU(), 256)(A, i; ndrange = n))
+            @test_throws POCL.KernelException team_exception!(CPU(), 256)(A, i; ndrange = n)
         end
         team_exception!(CPU(), 256)(A, 0; ndrange = n)
         y = zeros(Float32, n)
@@ -1029,13 +1028,11 @@ end
         A[I + 1] = 1
     end
     exception_opencl!(A) = (A[POCL.get_global_id() + 1] = 1; return)
-    # the device prints details about the exception
-    quietly(f) = redirect_stdout(f, devnull)
 
     A = zeros(Int, 4)
-    @test_throws POCL.KernelException quietly(() -> exception_kernel!(CPU())(A; ndrange = 4))
+    @test_throws POCL.KernelException exception_kernel!(CPU())(A; ndrange = 4)
     @test A == [0, 1, 1, 1]
-    @test_throws POCL.KernelException quietly(() -> @opencl global_size = 4 exception_opencl!(A))
+    @test_throws POCL.KernelException @opencl global_size = 4 exception_opencl!(A)
 
     # launches after it are fine
     exception_kernel!(CPU())(A; ndrange = 3)
@@ -1050,10 +1047,8 @@ end
             return true
         end
     end
-    failing, succeeding = quietly() do
-        tasks = (@async([launch(4) for _ in 1:10]), @async([launch(3) for _ in 1:10]))
-        fetch.(tasks)
-    end
+    tasks = (@async([launch(4) for _ in 1:10]), @async([launch(3) for _ in 1:10]))
+    failing, succeeding = fetch.(tasks)
     @test all(failing)
     @test !any(succeeding)
 
@@ -1067,34 +1062,61 @@ end
     # warm up: the first partial launch is entirely checked
     exception_at!(CPU(), 4)(A, 10; ndrange = 9)
     for i in (1, 9)
-        @test_throws POCL.KernelException quietly(() -> exception_at!(CPU(), 4)(A, i; ndrange = 9))
+        err = try
+            exception_at!(CPU(), 4)(A, i; ndrange = 9)
+        catch err
+            err
+        end
+        @test err isa POCL.KernelException
+        @test err.item == (i, 1, 1)
+        @test err.site.name == "BoundsError"
     end
     exception_at!(CPU(), 4)(A, 10; ndrange = 9)
-end
 
-@testset "POCL exception output" begin
-    exception_kernel!(A) = (A[POCL.get_global_id() + 4] = 1; return)
-    function output(debug_level)
-        return mktemp() do path, io
-            redirect_stdout(io) do
-                # in many work-groups, which all throw
-                @test_throws POCL.KernelException @opencl global_size = 64 local_size = 1 debug_level exception_kernel!(zeros(Int, 4))
-                Libc.flush_cstdio()
-            end
-            close(io)
-            read(path, String)
+    # both variants have tables of their own: the one that ran a work-group extending beyond
+    # the extent, or all of them if there is no full variant, is the partial one
+    full_variant() = return
+    partial_variant() = return
+    full = POCL.clfunction(full_variant).fun
+    partial = POCL.clfunction(partial_variant).fun
+    full.exception_sites = [POCL.GPUCompiler.ExceptionSite("full", "", [])]
+    partial.exception_sites = [POCL.GPUCompiler.ExceptionSite("partial", "", [])]
+    function reported(item; partial = partial, all_partial = false)
+        info = POCL.ExceptionInfo_st(1 % Int32, 1 % Int32, (item..., 0))
+        try
+            POCL.throw_host_exception(info, full, partial, all_partial, (4, 1, 1), (9, 1, 1))
+        catch err
+            return err.site.name
         end
     end
+    @test reported((1, 1, 1)) == "full"
+    @test reported((8, 1, 1)) == "full"
+    @test reported((9, 1, 1)) == "partial"
+    @test reported((1, 1, 1); all_partial = true) == "partial"
+    @test reported((9, 1, 1); partial = nothing) == "full"
+end
 
-    @test isempty(output(0))
-    # of all work-items that throw, only one reports the exception
-    out = output(1)
-    @test count("ERROR: ", out) == 1
-    @test occursin("BoundsError", out)
-    out = output(2)
-    @test count("ERROR: ", out) == 1
+@testset "POCL exception reports" begin
+    exception_kernel!(A) = (A[POCL.get_global_id() + 4] = 1; return)
+    function report(debug_level)
+        # in many work-groups, which all throw
+        err = try
+            @opencl global_size = 64 local_size = 1 debug_level exception_kernel!(zeros(Int, 4))
+        catch err
+            err
+        end
+        @test err isa POCL.KernelException
+        return sprint(showerror, err)
+    end
+
+    @test startswith(report(0), "KernelException: exception thrown during kernel execution on work-item")
+    out = report(1)
+    @test startswith(out, "KernelException: BoundsError during kernel execution on work-item")
+    @test occursin("Out-of-bounds array access", out)
+    out = report(2)
     @test occursin("Stacktrace:", out)
     @test occursin("throw_boundserror", out)
+    @test occursin("exception_kernel!", out)
 end
 
 # throw sites cost little or no stack per work-item. this kernel's largest work-group used to
@@ -1112,9 +1134,16 @@ end
     n = POCL.device_limits().max_work_group_size
     a = rand(n + 256)
     out = zeros(n)
+    expected = [sum(@view a[(i + 1):(i + 256)]) for i in 1:n]
     many_throw_sites!(CPU(), n)(out, a; ndrange = n)
     synchronize(CPU())
-    @test out ≈ [sum(@view a[(i + 1):(i + 256)]) for i in 1:n]
+    @test out ≈ expected
+
+    # PoCL's work-item loops used to keep an array per throw site for these
+    out .= 0
+    many_throw_sites!(CPU(), (n ÷ 2, 2))(out, a; ndrange = (n ÷ 2, 2))
+    synchronize(CPU())
+    @test out ≈ expected
 end
 
 # Julia 1.10 and 1.11 format the messages of some `Rational` errors at run time, which
@@ -1140,36 +1169,35 @@ end
 
     # the exceptions report their type and message like the back-end's own
     function output(f, args...)
-        return mktemp() do path, io
-            redirect_stdout(io) do
-                @test_throws POCL.KernelException @opencl global_size = 1 debug_level = 1 f(args...)
-                Libc.flush_cstdio()
-            end
-            close(io)
-            read(path, String)
+        err = try
+            @opencl global_size = 1 debug_level = 1 f(args...)
+        catch err
+            err
         end
+        @test err isa POCL.KernelException
+        return sprint(showerror, err)
     end
     rational!(A, n, d) = (A[1] = Rational(n, d); return)
     out = output(rational!, zeros(Rational{Int}, 1), 1, typemin(Int))
     if isdefined(Base, :__throw_rational_argerror_typemin)
-        @test occursin("ERROR: ArgumentError during kernel execution", out)
+        @test occursin("ArgumentError during kernel execution", out)
         @test occursin("denominator can't be typemin", out)
     else
-        @test occursin("ERROR: ", out)
+        @test occursin("during kernel execution", out)
     end
     neg!(A, x) = (A[1] = -x; return)
     out = output(neg!, zeros(Rational{Int}, 1), typemin(Int) // 1)
     if VERSION < v"1.12-"
-        @test occursin("ERROR: OverflowError during kernel execution", out)
+        @test occursin("OverflowError during kernel execution", out)
         @test occursin("rational numerator is typemin", out)
     else
-        @test occursin("ERROR: ", out)
+        @test occursin("during kernel execution", out)
     end
 
     # also on Julia versions where no shared override throws
     throwing() = (GPUToolbox.Overlays.device_throw(ArgumentError, Val(:var"100% shared reason")); return)
     out = output(throwing)
-    @test occursin("ERROR: ArgumentError during kernel execution", out)
+    @test occursin("ArgumentError during kernel execution", out)
     @test occursin("100% shared reason", out)
 end
 

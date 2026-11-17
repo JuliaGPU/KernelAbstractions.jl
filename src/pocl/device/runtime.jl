@@ -4,13 +4,14 @@
 # CPU device can access directly, and the task that launched the kernel checks it once the
 # kernel has completed.
 struct ExceptionInfo_st
-    # set when a work-item has thrown
+    # set by the first work-item that throws, which then records the rest
     status::Int32
-    # claimed by the work-item that reports the exception, see `claim_output`
-    output_lock::Int32
-    owner::NTuple{4, Int}   # padded: SPIR-V has no vectors of 6 elements, in case of merges
+    # the throw site, see `GPUCompiler.uses_exception_sites`
+    site::Int32
+    # the global id of the work-item that threw
+    item::NTuple{4, Int}    # padded: SPIR-V has no vectors of 6 elements, in case of merges
 
-    ExceptionInfo_st() = new(0, 0, (0, 0, 0, 0))
+    ExceptionInfo_st(status = 0 % Int32, site = 0 % Int32, item = (0, 0, 0, 0)) = new(status, site, item)
 end
 
 # a pointer to one of the fields of the launch's `ExceptionInfo_st`
@@ -24,86 +25,28 @@ end
 # host methods, and a sysimage that references device intrinsics fails to load
 # (JuliaGPU/GPUCompiler.jl#611).
 
-# the record is shared by all work-items on the device, so these need device scope, which
-# UnsafeAtomics' primitives emit as given (SPIRVIntrinsics' atomics are relaxed)
-@device_function @inline function atomic_store_device!(ptr::LLVMPtr{Int32, AS.CrossWorkgroup}, val::Int32)
-    UnsafeAtomics.Internal.llvm_store!(
-        ptr, val, Val(:release), Val(:device), Val(false), Val(sizeof(Int32)), Val(())
-    )
-    return
-end
-# not a compare-and-swap: PoCL's builtin for it returns the old value through a stack slot.
-# `claim_output` reads work-item ids, so PoCL inlines it into every throw site before forming
-# the work-item loops, which give each copy of the slot an array over the work-group. LLVM 22
-# can't forward stores across the cmpxchg, so these arrays stay: megabytes of stack for a
-# kernel with many bounds checks (JuliaGPU/KernelAbstractions.jl#974). LLVM 23 removes them
-# (llvm/llvm-project#193939).
+# the record is shared by all work-items on the device, so this needs device scope, which
+# UnsafeAtomics' primitives emit as given (SPIRVIntrinsics' atomics are relaxed). not a
+# compare-and-swap: PoCL's builtin for it returns the old value through a stack slot, which
+# PoCL's work-item loops can widen into an array over the work-group
+# (JuliaGPU/KernelAbstractions.jl#974).
 @device_function @inline function atomic_max_device!(ptr::LLVMPtr{Int32, AS.CrossWorkgroup}, val::Int32)
     return UnsafeAtomics.Internal.llvm_rmw!(
         ptr, Val(:max), val, Val(:acq_rel), Val(:device), Val(false), Val(sizeof(Int32)), Val(())
     )
 end
 
-# only one work-item reports the exception, or the output of all work-items that throw
-# would be interleaved. it can do so over several calls (e.g., a quirk printing the exception,
-# and GPUCompiler printing a backtrace). returns 1 when the output was just claimed, 2 when
-# it was claimed by an earlier call of this work-item, and 0 when it belongs to another.
+# the work-item that threw stops executing after this. the first one to throw records where;
+# the host knows what was thrown there.
 #
 # nothing reachable from the throw overrides may throw, not even a checked conversion like
 # `Int32(0)`: the resulting inference cycle through `throw_inexacterror` taints Base's
 # conversions on Julia 1.12+, which then can't be constant-folded (e.g. in `reinterpret`)
-@device_function @noinline function claim_output()
-    lock = exception_field(Val(:output_lock))
-    me = (get_global_id(1), get_global_id(2), get_global_id(3), 0)
-    # 0 → 1 claims the output; 1 and 2 stay
-    state = atomic_max_device!(lock, 1 % Int32)
-    if state == 0
-        unsafe_store!(exception_field(Val(:owner)), me)
-        # publish the owner before other work-items compare against it
-        atomic_store_device!(lock, 2 % Int32)
-        return 1
+@device_function function exception_site(site::Int32)
+    if atomic_max_device!(exception_field(Val(:status)), 1 % Int32) == 0
+        unsafe_store!(exception_field(Val(:site)), site)
+        unsafe_store!(exception_field(Val(:item)), (get_global_id(1), get_global_id(2), get_global_id(3), 0))
     end
-    # don't wait for the owner to be published: it may be a work-item that only executes
-    # after this one, e.g., in the same loop over a work-group
-    return state == 2 && unsafe_load(exception_field(Val(:owner))) == me ? 2 : 0
-end
-
-@device_function function report_exception(ex)
-    claim = claim_output()
-    if claim == 1
-        SPIRVIntrinsics.@printf(
-            "ERROR: %s during kernel execution on work-item (%ld, %ld, %ld).\n", ex, get_global_id(1), get_global_id(2), get_global_id(3)
-        )
-    end
-    if claim != 0
-        SPIRVIntrinsics.@printf("Run Julia on debug level 2 for a device stack trace.\n")
-    end
-    return
-end
-
-@device_function function report_exception_name(ex)
-    claim = claim_output()
-    if claim == 1
-        SPIRVIntrinsics.@printf(
-            "ERROR: %s during kernel execution on work-item (%ld, %ld, %ld).\n", ex, get_global_id(1), get_global_id(2), get_global_id(3)
-        )
-    end
-    if claim != 0
-        SPIRVIntrinsics.@printf("Stacktrace:\n")
-    end
-    return
-end
-
-@device_function function report_exception_frame(idx, func, file, line)
-    if claim_output() != 0
-        SPIRVIntrinsics.@printf(" [%d] %s at %s:%d\n", idx, func, file, line)
-    end
-    return
-end
-
-# the work-item that threw stops executing after this
-@device_function function signal_exception()
-    atomic_store_device!(exception_field(Val(:status)), 1 % Int32)
     return
 end
 

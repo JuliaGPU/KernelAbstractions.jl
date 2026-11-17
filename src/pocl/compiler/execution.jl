@@ -200,7 +200,7 @@ function launch_and_wait(
                 event = launch_queued(with_fun(kernel, partial), converted, info_ptr; kwargs...)
                 wait_for_kernel(event)
             end
-            check_exception(info)
+            info[].status == 0 || throw_kernel_exception(info[], something(partial, kernel.fun))
         else
             global_size = values(kwargs).global_size
             num_groups = something(groups, global_size .÷ hp.local_size)
@@ -211,8 +211,8 @@ function launch_and_wait(
                 info_ptr = Base.unsafe_convert(Ptr{ExceptionInfo_st}, info)
                 host_launch_converted(kernel, converted, info_ptr, hp, num_groups, h, extent)
             end
-            # passing the status avoids allocating `info`
-            check_exception(info[].status)
+            info[].status == 0 ||
+                throw_host_exception(info[], kernel.fun, partial, h === hp, hp.local_size, extent)
         end
     end
     return nothing
@@ -228,12 +228,26 @@ end
     return
 end
 
-check_exception(info::Base.RefValue{ExceptionInfo_st}) = check_exception(info[].status)
-@inline function check_exception(status::Int32)
-    status == 0 || throw_kernel_exception()
-    return
+# the exception that `fun` reported in `info`
+@noinline function throw_kernel_exception(info::ExceptionInfo_st, fun::cl.Kernel)
+    sites = fun.exception_sites
+    site = 1 <= info.site <= length(sites) ? sites[info.site] : nothing
+    throw(KernelException(device(), site, ntuple(d -> info.item[d], Val(3))))
 end
-@noinline throw_kernel_exception() = throw(KernelException(device()))
+
+# work-groups extending beyond `extent` ran `partial`, as did all of them if there was no
+# full variant (`all_partial`). each variant has throw sites of its own.
+@noinline function throw_host_exception(
+        info::ExceptionInfo_st, fun::cl.Kernel, partial::Union{Nothing, cl.Kernel},
+        all_partial::Bool, local_size::Dims{3}, extent::Dims{3}
+    )
+    if partial !== nothing
+        item = info.item
+        edge = any(d -> cld(item[d], local_size[d]) * local_size[d] > extent[d], 1:3)
+        (all_partial || edge) && (fun = partial)
+    end
+    throw_kernel_exception(info, fun)
+end
 
 @inline launch_tuple(
     kernel::AbstractKernel, args::Tuple, exception_info::Ptr;
@@ -302,15 +316,36 @@ end
 """
     KernelException
 
-An exception thrown during kernel execution on device `dev`. The kernel prints details about
-the exception when it occurs, depending on the debug level (see Julia's `-g` option).
+An exception thrown during kernel execution on device `dev`, by the work-item with global id
+`item`. If the debug level is 1 or higher (see Julia's `-g` option), `site` describes what was
+thrown: the exception's name, the reason, and at debug level 2 a backtrace.
 """
 struct KernelException <: Exception
     dev::cl.Device
+    site::Union{Nothing, GPUCompiler.ExceptionSite}
+    item::Dims{3}
 end
 
-Base.showerror(io::IO, err::KernelException) =
-    print(io, "KernelException: exception thrown during kernel execution on device ", err.dev.name)
+function Base.showerror(io::IO, err::KernelException)
+    site = err.site
+    if site === nothing
+        print(
+            io, "KernelException: exception thrown during kernel execution on work-item ",
+            err.item, " of device ", err.dev.name
+        )
+        return
+    end
+    print(io, "KernelException: ", site.name, " during kernel execution on work-item ", err.item)
+    isempty(site.reason) || print(io, ": ", site.reason)
+    return if isempty(site.frames)
+        print(io, "\nRun Julia on debug level 2 for a device stack trace.")
+    else
+        print(io, "\nStacktrace:")
+        for (i, frame) in enumerate(site.frames)
+            print(io, "\n [", i, "] ", frame.func, " at ", frame.file, ":", frame.line)
+        end
+    end
+end
 
 # queue-fallback exception storage is per task, since each task waits for its launches. it
 # must outlive the stack frame, as an interrupted wait leaves the kernel running.
@@ -387,7 +422,7 @@ end
             end
         end
         kernel = if cached === nothing
-            linked = link_kernel(job, res.obj::Vector{UInt8}, res.entry::String)
+            linked = link_kernel(job, res.obj::Vector{UInt8}, res.entry::String, res.exception_sites)
             # Don't cache session-local kernel handles while precompiling: the
             # results struct is serialized into the package image along with its
             # CodeInstance, and the handles would come back dangling.
@@ -428,6 +463,7 @@ end
         res.obj = compiled.obj
         res.entry = compiled.entry
         res.device_rng = compiled.device_rng
+        res.exception_sites = compiled.exception_sites
     end
     return res
 end
