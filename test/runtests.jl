@@ -1221,6 +1221,20 @@ end
     @test count() == n + 2
 end
 
+# PoCL's on-disk program cache misses when the SPIR-V differs, so compiling a kernel again,
+# which numbers Julia's functions anew, has to give the same SPIR-V
+@testset "POCL reproducible SPIR-V" begin
+    mod = @eval module $(gensym())
+    @noinline child(x) = x + 1
+    kernel(A) = (A[1] = child(A[1]); return)
+    end
+
+    tt = Tuple{POCL.CLDeviceArray{Int, 1, POCL.AS.CrossWorkgroup}}
+    config = POCL.compiler_config(POCL.device())
+    job = POCL.GPUCompiler.CompilerJob(POCL.methodinstance(typeof(mod.kernel), tt), config)
+    @test POCL.compile_to_obj(job).obj == POCL.compile_to_obj(job).obj
+end
+
 # `clfunction` reuses the kernel it returned last for a call site
 @testset "POCL kernel reuse" begin
     mod = @eval module $(gensym())
