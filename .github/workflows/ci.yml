@@ -59,10 +59,8 @@ jobs:
       # a stale release that need not have the features this repo's copy adds. Dev it
       # explicitly so 1.10 tests the copy in this repo, like 1.11+ already do.
       #
-      # Required on every platform. Windows runs its tests de-escalated below, but that
-      # applies to the test run only, not to `Pkg.develop`. Do this before building, which
-      # already resolves the environment (and fails if this repo requires an unregistered
-      # version of KernelInterface).
+      # Do this before building, which already resolves the environment (and fails if
+      # this repo requires an unregistered version of KernelInterface).
       - name: Dev KernelInterface
         shell: bash
         run: julia -e 'using Pkg; Pkg.activate("."); Pkg.develop(; path="lib/KernelInterface")'
@@ -70,33 +68,9 @@ jobs:
       - uses: julia-actions/julia-buildpkg@v1
         continue-on-error: ${{ matrix.version == 'nightly' }}
       - uses: julia-actions/julia-runtest@v1
-        if: runner.os != 'Windows'
         continue-on-error: ${{ matrix.version == 'nightly' }}
         with:
           annotate: true
-      - name: Setup BusyBox
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $attempts = 5
-          for ($i = 1; $i -le $attempts; $i++) {
-            try {
-              Invoke-WebRequest https://frippery.org/files/busybox/busybox64.exe -OutFile C:\Windows\drop.exe
-              break
-            } catch {
-              if ($i -eq $attempts) { throw }
-              Write-Host "Download failed (attempt $i/$attempts): $($_.Exception.Message). Retrying in 10s..."
-              Start-Sleep -Seconds 10
-            }
-          }
-      - name: Test KernelAbstractions.jl (de-escalated)
-        if: runner.os == 'Windows'
-        continue-on-error: ${{ matrix.version == 'nightly' }}
-        shell: drop -c "julia '{0}'"
-        run: |
-          using Pkg
-          Pkg.activate(".")
-          Pkg.test()
       - uses: julia-actions/julia-processcoverage@v1
       - uses: codecov/codecov-action@v7
         with:
