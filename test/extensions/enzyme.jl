@@ -46,10 +46,11 @@ function scale_typed_caller(A, ::Type{T}, backend) where {T}
     return
 end
 
-function enzyme_testsuite(backend, ArrayT, supports_reverse = true)
+# `T` is the element type of the arrays, for back ends without `Float64`
+function enzyme_testsuite(backend, ArrayT, supports_reverse = true, T = Float64)
     @testset "kernels" begin
-        A = ArrayT{Float64}(undef, 64)
-        dA = ArrayT{Float64}(undef, 64)
+        A = ArrayT{T}(undef, 64)
+        dA = ArrayT{T}(undef, 64)
 
         if supports_reverse
 
@@ -70,7 +71,7 @@ function enzyme_testsuite(backend, ArrayT, supports_reverse = true)
             dA .= 1
 
             @test_throws "Active kernel arguments not supported" Enzyme.autodiff(
-                Reverse, mul_caller, Duplicated(A, dA), Active(1.2), Const(backend())
+                Reverse, mul_caller, Duplicated(A, dA), Active(T(1.2)), Const(backend())
             )
 
             # The strong zero setting is passed on to the kernel: the adjoint of `A[I] * B`
@@ -79,14 +80,14 @@ function enzyme_testsuite(backend, ArrayT, supports_reverse = true)
             A .= 1
             dA .= 0
 
-            Enzyme.autodiff(Reverse, mul_caller, Duplicated(A, dA), Const(Inf), Const(backend()))
+            Enzyme.autodiff(Reverse, mul_caller, Duplicated(A, dA), Const(T(Inf)), Const(backend()))
             @test all(isnan, dA)
 
             if isdefined(Enzyme, :set_strong_zero)
                 A .= 1
                 dA .= 0
 
-                Enzyme.autodiff(Enzyme.set_strong_zero(Reverse), mul_caller, Duplicated(A, dA), Const(Inf), Const(backend()))
+                Enzyme.autodiff(Enzyme.set_strong_zero(Reverse), mul_caller, Duplicated(A, dA), Const(T(Inf)), Const(backend()))
                 @test all(iszero, dA)
             end
         end
@@ -102,7 +103,7 @@ function enzyme_testsuite(backend, ArrayT, supports_reverse = true)
         A .= (1:1:64)
         dA .= 1
 
-        Enzyme.autodiff(Forward, scale_typed_caller, Duplicated(A, dA), Const(Float64), Const(backend()))
+        Enzyme.autodiff(Forward, scale_typed_caller, Duplicated(A, dA), Const(T), Const(backend()))
         KernelAbstractions.synchronize(backend())
         @test all(dA .≈ 2)
         @test all(A .≈ 2:2:128)
@@ -112,7 +113,7 @@ function enzyme_testsuite(backend, ArrayT, supports_reverse = true)
         A .= 1
         dA .= 0
 
-        Enzyme.autodiff(Forward, mul_caller, Duplicated(A, dA), Const(Inf), Const(backend()))
+        Enzyme.autodiff(Forward, mul_caller, Duplicated(A, dA), Const(T(Inf)), Const(backend()))
         KernelAbstractions.synchronize(backend())
         @test all(isnan, dA)
 
@@ -121,7 +122,7 @@ function enzyme_testsuite(backend, ArrayT, supports_reverse = true)
             A .= 1
             dA .= 0
 
-            Enzyme.autodiff(Enzyme.set_strong_zero(Forward), mul_caller, Duplicated(A, dA), Const(Inf), Const(backend()))
+            Enzyme.autodiff(Enzyme.set_strong_zero(Forward), mul_caller, Duplicated(A, dA), Const(T(Inf)), Const(backend()))
             KernelAbstractions.synchronize(backend())
             @test all(iszero, dA)
         end

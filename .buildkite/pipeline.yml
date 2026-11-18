@@ -2,7 +2,7 @@
 # pull requests skip them, unless selected by name in the last commit message: `[only cuda]`,
 # `[only metal, oneapi]`, `[only tests]` for all tests, or `[only benchmarks]`. `[skip amdgpu]`
 # or `[skip tests]` does the opposite. (`opencl` selects the OpenCL.jl tests, on PoCL and on
-# CUDA hardware; `enzyme` selects the tests of the Enzyme extension on CUDA and AMDGPU.)
+# CUDA hardware; `enzyme` selects the tests of the Enzyme extension on the back ends.)
 #
 # Pull requests only test the oldest and newest supported Julia release; the releases in
 # between are tested on branch builds, or on pull requests when selected with `[only julia]`
@@ -61,9 +61,8 @@ steps:
       (build.message =~ /\[only [^\]]*(tests|cuda|julia)/ ||
        build.message !~ /\[only / && build.pull_request.id == null)
 
-  # The Enzyme extension on the GPU back ends that implement
-  # `EnzymeCore.compiler_job_from_backend` (the back ends' own test suites don't run
-  # test/extensions/enzyme.jl)
+  # The Enzyme extension on the GPU back ends, whose own test suites don't run
+  # test/extensions/enzyme.jl. The back ends implement `EnzymeCore.compiler_job_from_backend`.
   - &cuda_enzyme
     label: "CUDA Enzyme Julia {{matrix.version}}"
     matrix:
