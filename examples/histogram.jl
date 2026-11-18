@@ -33,7 +33,7 @@ function histogram_kernel!(histogram_output, input, ::Val{gs}) where {gs}
 
         # Setting shared_histogram to 0
         @inbounds shared_histogram[lid] = 0
-        KI.barrier()
+        KI.barrier(KI.LOCAL_MEM_FENCE)
 
         max_element = min_element + gs
         if max_element > N
@@ -47,7 +47,7 @@ function histogram_kernel!(histogram_output, input, ::Val{gs}) where {gs}
             @atomic shared_histogram[bin] += 1
         end
 
-        KI.barrier()
+        KI.barrier(KI.LOCAL_MEM_FENCE)
 
         if ((lid + min_element - 1) <= N)
             @atomic histogram_output[lid + min_element - 1] += shared_histogram[lid]
