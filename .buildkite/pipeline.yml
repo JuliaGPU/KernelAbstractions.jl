@@ -375,6 +375,62 @@ steps:
        build.message !~ /\[only / && build.pull_request.id == null)
 
   # the label determines the commit status context .github/workflows/Benchmark.yml reacts to
+  - &opencl_enzyme
+    label: "OpenCL Enzyme Julia {{matrix.version}}"
+    matrix:
+      setup:
+        version:
+          - "1.10"
+          - "1.13"
+    plugins:
+      - JuliaCI/julia#v1:
+          version: "{{matrix.version}}"
+      - JuliaCI/julia-coverage#v1:
+          codecov: true
+    command: |
+      julia -e 'println("--- :julia: Instantiating project")
+                using Pkg
+                Pkg.develop([PackageSpec(; name="KernelAbstractions", path=pwd()),
+                PackageSpec(; name="KernelInterface", path=joinpath(pwd(), "lib", "KernelInterface"))])' || exit 3
+      echo "--- :julia: Developing OpenCL"
+      julia .buildkite/develop_backend.jl https://github.com/JuliaGPU/OpenCL.jl main lib/intrinsics || exit 3
+      julia -e 'println("--- :julia: Adding Enzyme")
+                using Pkg
+                Pkg.add(["Enzyme", "Test", "pocl_jll"])' || exit 3
+
+      julia --code-coverage=@$(pwd) -e 'println("+++ :julia: Running tests")
+                include(joinpath(".buildkite", "check_sources.jl"))
+                using pocl_jll, OpenCL
+                # on PoCL
+                cl.platform!(only(filter(p -> occursin("portable", lowercase(p.name)), cl.platforms())))
+                include(joinpath("test", "extensions", "enzyme.jl"))
+                @testset "Enzyme" begin
+                    enzyme_testsuite(OpenCLBackend, CLArray, true)
+                end'
+    agents:
+      queue: "cuda"
+    if: |
+      build.message !~ /\[skip [^\]]*(tests|opencl|enzyme)/ &&
+      (build.message =~ /\[only [^\]]*(tests|opencl|enzyme)/ ||
+       build.message !~ /\[only / && !build.pull_request.draft)
+    timeout_in_minutes: 120
+    soft_fail:
+      - exit_status: 3
+    env:
+      JULIA_PROJECT: "@opencl_enzyme"
+
+  # intermediate releases, not tested on pull requests
+  - <<: *opencl_enzyme
+    matrix:
+      setup:
+        version:
+          - "1.11"
+          - "1.12"
+    if: |
+      build.message !~ /\[skip [^\]]*(tests|opencl|enzyme|julia)/ &&
+      (build.message =~ /\[only [^\]]*(tests|opencl|enzyme|julia)/ ||
+       build.message !~ /\[only / && build.pull_request.id == null)
+
   - label: ":racehorse: Benchmarks"
     plugins:
       - JuliaCI/julia#v1:
