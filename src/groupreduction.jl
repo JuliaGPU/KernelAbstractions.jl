@@ -211,20 +211,20 @@ end
         res = __groupreduce_tree(op, convert(T, val), storage, __index_Local_Linear(ctx), n)
     end
     # all work-items have to read the result before the storage can be reused
-    KI.barrier()
+    KI.barrier(KI.LOCAL_MEM_FENCE)
     return res
 end
 
 # Tree reduction in local memory, folding the upper half of the values onto the lower half.
 @inline function __groupreduce_tree(op, val, storage, lid, n)
     @inbounds storage[lid] = val
-    KI.barrier()
+    KI.barrier(KI.LOCAL_MEM_FENCE)
     s = __prevpow2(n)
     while s > 0
         if lid <= s && lid + s <= n
             @inbounds storage[lid] = op(storage[lid], storage[lid + s])
         end
-        KI.barrier()
+        KI.barrier(KI.LOCAL_MEM_FENCE)
         s >>= 1
     end
     return @inbounds storage[1]
@@ -242,7 +242,7 @@ end
     if lane == 1
         @inbounds storage[sg] = val
     end
-    KI.barrier()
+    KI.barrier(KI.LOCAL_MEM_FENCE)
 
     # every sub-group reduces the results of all sub-groups, which avoids running sub-group
     # operations in a branch that only some sub-groups take
@@ -254,12 +254,12 @@ end
         i += width
     end
     acc = KI.sub_group_reduce(op, acc)
-    KI.barrier()
+    KI.barrier(KI.LOCAL_MEM_FENCE)
     # the sub-groups can combine the values in different orders, so broadcast one result
     if sg == 1 && lane == 1
         @inbounds storage[1] = acc
     end
-    KI.barrier()
+    KI.barrier(KI.LOCAL_MEM_FENCE)
     return @inbounds storage[1]
 end
 
@@ -274,7 +274,7 @@ end
     # (up to) `2d` values ending at its own
     src = 0
     @inbounds storage[lid] = convert(T, val)
-    KI.barrier()
+    KI.barrier(KI.LOCAL_MEM_FENCE)
     d = 1
     while d < n
         x = @inbounds storage[src + lid]
@@ -282,7 +282,7 @@ end
             x = op(@inbounds(storage[src + lid - d]), x)
         end
         @inbounds storage[(N - src) + lid] = x
-        KI.barrier()
+        KI.barrier(KI.LOCAL_MEM_FENCE)
         src = N - src
         d <<= 1
     end
@@ -293,7 +293,7 @@ end
         res = lid == 1 ? neutral : @inbounds storage[src + lid - 1]
     end
     # all work-items have to read their result before the storage can be reused
-    KI.barrier()
+    KI.barrier(KI.LOCAL_MEM_FENCE)
     return res
 end
 
