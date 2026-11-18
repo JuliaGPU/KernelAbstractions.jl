@@ -1,0 +1,131 @@
+using Test
+using Enzyme
+using KernelAbstractions
+
+@kernel function square!(A)
+    I = @index(Global, Linear)
+    @inbounds A[I] *= A[I]
+end
+
+function square_caller(A, backend)
+    kernel = square!(backend)
+    kernel(A, ndrange = size(A))
+    KernelAbstractions.synchronize(backend)
+    return
+end
+
+# The ndrange is fixed when the kernel is constructed, so the launch does not pass one
+function square_static_caller(A, backend)
+    kernel = square!(backend, 32, size(A))
+    kernel(A)
+    KernelAbstractions.synchronize(backend)
+    return
+end
+
+@kernel function mul!(A, B)
+    I = @index(Global, Linear)
+    @inbounds A[I] *= B
+end
+
+function mul_caller(A, B, backend)
+    kernel = mul!(backend)
+    kernel(A, B, ndrange = size(A))
+    KernelAbstractions.synchronize(backend)
+    return
+end
+
+@kernel function scale_typed!(A, ::Type{T}) where {T}
+    I = @index(Global, Linear)
+    @inbounds A[I] *= T(2)
+end
+
+function scale_typed_caller(A, ::Type{T}, backend) where {T}
+    kernel = scale_typed!(backend)
+    kernel(A, T, ndrange = size(A))
+    KernelAbstractions.synchronize(backend)
+    return
+end
+
+# `T` is the element type of the arrays, for back ends without `Float64`
+function enzyme_testsuite(backend, ArrayT, supports_reverse = true, T = Float64)
+    @testset "kernels" begin
+        A = ArrayT{T}(undef, 64)
+        dA = ArrayT{T}(undef, 64)
+
+        if supports_reverse
+
+            A .= (1:1:64)
+            dA .= 1
+
+            Enzyme.autodiff(Reverse, square_caller, Duplicated(A, dA), Const(backend()))
+            @test all(dA .≈ (2:2:128))
+
+            A .= (1:1:64)
+            dA .= 1
+
+            Enzyme.autodiff(Reverse, square_static_caller, Duplicated(A, dA), Const(backend()))
+            @test all(dA .≈ (2:2:128))
+
+            # active arguments are not supported for kernels
+            A .= (1:1:64)
+            dA .= 1
+
+            @test_throws "Active kernel arguments not supported" Enzyme.autodiff(
+                Reverse, mul_caller, Duplicated(A, dA), Active(T(1.2)), Const(backend())
+            )
+
+            # The strong zero setting is passed on to the kernel: the adjoint of `A[I] * B`
+            # with `B = Inf` and a zero adjoint of the result is `0 * Inf = NaN` without it
+            # and zero with it
+            A .= 1
+            dA .= 0
+
+            Enzyme.autodiff(Reverse, mul_caller, Duplicated(A, dA), Const(T(Inf)), Const(backend()))
+            @test all(isnan, dA)
+
+            if isdefined(Enzyme, :set_strong_zero)
+                A .= 1
+                dA .= 0
+
+                Enzyme.autodiff(Enzyme.set_strong_zero(Reverse), mul_caller, Duplicated(A, dA), Const(T(Inf)), Const(backend()))
+                @test all(iszero, dA)
+            end
+        end
+
+        A .= (1:1:64)
+        dA .= 1
+
+        Enzyme.autodiff(Forward, square_caller, Duplicated(A, dA), Const(backend()))
+        KernelAbstractions.synchronize(backend())
+        @test all(dA .≈ 2:2:128)
+
+        # Type arguments of kernels
+        A .= (1:1:64)
+        dA .= 1
+
+        Enzyme.autodiff(Forward, scale_typed_caller, Duplicated(A, dA), Const(T), Const(backend()))
+        KernelAbstractions.synchronize(backend())
+        @test all(dA .≈ 2)
+        @test all(A .≈ 2:2:128)
+
+        # The strong zero setting is passed on to the kernel: the tangent of `A[I] * B` with
+        # `B = Inf` in direction zero is `0 * Inf = NaN` without it and zero with it
+        A .= 1
+        dA .= 0
+
+        Enzyme.autodiff(Forward, mul_caller, Duplicated(A, dA), Const(T(Inf)), Const(backend()))
+        KernelAbstractions.synchronize(backend())
+        @test all(isnan, dA)
+
+        # Strong zero is not available in the Enzyme versions for Julia < 1.10
+        if isdefined(Enzyme, :set_strong_zero)
+            A .= 1
+            dA .= 0
+
+            Enzyme.autodiff(Enzyme.set_strong_zero(Forward), mul_caller, Duplicated(A, dA), Const(T(Inf)), Const(backend()))
+            KernelAbstractions.synchronize(backend())
+            @test all(iszero, dA)
+        end
+    end
+    return
+end

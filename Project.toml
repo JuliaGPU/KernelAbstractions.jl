@@ -29,6 +29,7 @@ pocl_standalone_jll = "54f56a70-6062-5590-a942-1226658f6c83"
 
 [weakdeps]
 AMDGPU = "21141c5a-9bdb-4563-92ae-f87d6854732e"
+EnzymeCore = "f151be2c-9106-41f4-ab19-57ee4f262869"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 Metal = "dde4c033-4e86-420c-a63e-0dd931031962"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
@@ -40,6 +41,7 @@ KernelInterface = {path = "lib/KernelInterface"}
 
 [extensions]
 AMDGPUExt = "AMDGPU"
+EnzymeExt = "EnzymeCore"
 LinearAlgebraExt = "LinearAlgebra"
 MetalExt = "Metal"
 SparseArraysExt = "SparseArrays"
@@ -50,6 +52,7 @@ oneAPIExt = "oneAPI"
 AMDGPU = "2"
 Adapt = "0.4, 1.0, 2.0, 3.0, 4"
 Atomix = "1.5"
+EnzymeCore = "0.8.25"
 GPUCompiler = "2.20"
 GPUToolbox = "3.6"
 KernelInterface = "0.4"
@@ -75,5 +78,6 @@ oneAPI = "2"
 pocl_standalone_jll = "7.2.3"
 
 [extras]
+EnzymeCore = "f151be2c-9106-41f4-ab19-57ee4f262869"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"

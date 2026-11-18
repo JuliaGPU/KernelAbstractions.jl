@@ -1891,3 +1891,8 @@ end
     @test CPU() isa KernelAbstractions.GPU
     @test NewBackend <: KernelAbstractions.GPU
 end
+
+include("extensions/enzyme.jl")
+@testset "Enzyme" begin
+    enzyme_testsuite(CPU, Array)
+end

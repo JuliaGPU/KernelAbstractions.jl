@@ -2,7 +2,7 @@
 # pull requests skip them, unless selected by name in the last commit message: `[only cuda]`,
 # `[only metal, oneapi]`, `[only tests]` for all tests, or `[only benchmarks]`. `[skip amdgpu]`
 # or `[skip tests]` does the opposite. (`opencl` selects the OpenCL.jl tests, on PoCL and on
-# CUDA hardware.)
+# CUDA hardware; `enzyme` selects the tests of the Enzyme extension on the back ends.)
 #
 # Pull requests only test the oldest and newest supported Julia release; the releases in
 # between are tested on branch builds, or on pull requests when selected with `[only julia]`
@@ -59,6 +59,119 @@ steps:
     if: |
       build.message !~ /\[skip [^\]]*(tests|cuda|julia)/ &&
       (build.message =~ /\[only [^\]]*(tests|cuda|julia)/ ||
+       build.message !~ /\[only / && build.pull_request.id == null)
+
+  # The Enzyme extension on the GPU back ends, whose own test suites don't run
+  # test/extensions/enzyme.jl. The back ends implement `EnzymeCore.compiler_job_from_backend`.
+  - &cuda_enzyme
+    label: "CUDA Enzyme Julia {{matrix.version}}"
+    matrix:
+      setup:
+        version:
+          - "1.10"
+          - "1.13"
+    plugins:
+      - JuliaCI/julia#v1:
+          version: "{{matrix.version}}"
+      - JuliaCI/julia-coverage#v1:
+          codecov: true
+    command: |
+      julia -e 'println("--- :julia: Instantiating project")
+                using Pkg
+                Pkg.develop([PackageSpec(; name="KernelAbstractions", path=pwd()),
+                PackageSpec(; name="KernelInterface", path=joinpath(pwd(), "lib", "KernelInterface"))])' || exit 3
+      echo "--- :julia: Developing CUDA"
+      julia .buildkite/develop_backend.jl https://github.com/JuliaGPU/CUDA.jl main \
+            CUDACore CUDATools lib/cusolver lib/curand lib/cublas lib/cufft lib/cusparse lib/cupti lib/nvml lib/custatevec lib/cudnn lib/cutensor lib/cutensornet || exit 3
+      julia -e 'println("--- :julia: Adding Enzyme")
+                using Pkg
+                Pkg.add(["Enzyme", "Test"])' || exit 3
+
+      julia --code-coverage=@$(pwd) -e 'println("+++ :julia: Running tests")
+                include(joinpath(".buildkite", "check_sources.jl"))
+                using CUDA
+                include(joinpath("test", "extensions", "enzyme.jl"))
+                @testset "Enzyme" begin
+                    enzyme_testsuite(CUDABackend, CuArray, true)
+                end'
+    agents:
+      queue: "cuda"
+    if: |
+      build.message !~ /\[skip [^\]]*(tests|cuda|enzyme)/ &&
+      (build.message =~ /\[only [^\]]*(tests|cuda|enzyme)/ ||
+       build.message !~ /\[only / && !build.pull_request.draft)
+    timeout_in_minutes: 120
+    soft_fail:
+      - exit_status: 3
+    env:
+      JULIA_PROJECT: "@cuda_enzyme"
+
+  # intermediate releases, not tested on pull requests
+  - <<: *cuda_enzyme
+    matrix:
+      setup:
+        version:
+          - "1.11"
+          - "1.12"
+    if: |
+      build.message !~ /\[skip [^\]]*(tests|cuda|enzyme|julia)/ &&
+      (build.message =~ /\[only [^\]]*(tests|cuda|enzyme|julia)/ ||
+       build.message !~ /\[only / && build.pull_request.id == null)
+
+  - &amdgpu_enzyme
+    label: "AMDGPU Enzyme Julia {{matrix.version}}"
+    matrix:
+      setup:
+        version:
+          - "1.10"
+          - "1.13"
+    plugins:
+      - JuliaCI/julia#v1:
+          version: "{{matrix.version}}"
+      - JuliaCI/julia-coverage#v1:
+          codecov: true
+    command: |
+      julia -e 'println("--- :julia: Instantiating project")
+                using Pkg
+                Pkg.develop([PackageSpec(; name="KernelAbstractions", path=pwd()),
+                PackageSpec(; name="KernelInterface", path=joinpath(pwd(), "lib", "KernelInterface"))])' || exit 3
+      julia -e 'println("--- :julia: Developing AMDGPU")
+                using Pkg
+                Pkg.add(url="https://github.com/JuliaGPU/AcceleratedKernels.jl", rev="main")' || exit 3
+      julia .buildkite/develop_backend.jl https://github.com/JuliaGPU/AMDGPU.jl main || exit 3
+      julia -e 'println("--- :julia: Adding Enzyme")
+                using Pkg
+                Pkg.add(["Enzyme", "Test"])' || exit 3
+
+      julia --code-coverage=@$(pwd) -e 'println("+++ :julia: Running tests")
+                include(joinpath(".buildkite", "check_sources.jl"))
+                using AMDGPU
+                include(joinpath("test", "extensions", "enzyme.jl"))
+                @testset "Enzyme" begin
+                    enzyme_testsuite(ROCBackend, ROCArray, true)
+                end'
+    agents:
+      queue: "rocm"
+    if: |
+      build.message !~ /\[skip [^\]]*(tests|amdgpu|enzyme)/ &&
+      (build.message =~ /\[only [^\]]*(tests|amdgpu|enzyme)/ ||
+       build.message !~ /\[only / && !build.pull_request.draft)
+    timeout_in_minutes: 120
+    soft_fail:
+      - exit_status: 3
+    env:
+      JULIA_PROJECT: "@amdgpu_enzyme"
+
+  # intermediate releases, not tested on pull requests
+  - <<: *amdgpu_enzyme
+    matrix:
+      setup:
+        version:
+          - "1.11"
+          - "1.12"
+    if: |
+      build.message !~ /\[skip [^\]]*(tests|amdgpu|enzyme|julia)/ &&
+      (build.message =~ /\[only [^\]]*(tests|amdgpu|enzyme|julia)/ ||
        build.message !~ /\[only / && build.pull_request.id == null)
 
   - &metal

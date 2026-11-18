@@ -144,7 +144,9 @@ end
 function quality_assurance_testsuite()
     @testset "Aqua" begin
         Aqua.test_all(
-            KernelAbstractions
+            KernelAbstractions;
+            stale_deps = (; ignore = [:Enzyme, :EnzymeCore]),
+            deps_compat = (; ignore = [:Enzyme, :EnzymeCore]),
         )
     end
 
