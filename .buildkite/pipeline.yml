@@ -221,6 +221,61 @@ steps:
       (build.message =~ /\[only [^\]]*(tests|metal|julia)/ ||
        build.message !~ /\[only / && build.pull_request.id == null)
 
+  - &metal_enzyme
+    label: "Metal Enzyme Julia {{matrix.version}}"
+    matrix:
+      setup:
+        version:
+          - "1.10"
+          - "1.13"
+    plugins:
+      - JuliaCI/julia#v1:
+          version: "{{matrix.version}}"
+      - JuliaCI/julia-coverage#v1:
+          codecov: true
+    command: |
+      julia -e 'println("--- :julia: Instantiating project")
+                using Pkg
+                Pkg.develop([PackageSpec(; name="KernelAbstractions", path=pwd()),
+                PackageSpec(; name="KernelInterface", path=joinpath(pwd(), "lib", "KernelInterface"))])' || exit 3
+      echo "--- :julia: Developing Metal"
+      julia .buildkite/develop_backend.jl https://github.com/JuliaGPU/Metal.jl main || exit 3
+      julia -e 'println("--- :julia: Adding Enzyme")
+                using Pkg
+                Pkg.add(["Enzyme", "Test"])' || exit 3
+
+      julia --code-coverage=@$(pwd) -e 'println("+++ :julia: Running tests")
+                include(joinpath(".buildkite", "check_sources.jl"))
+                using Metal
+                include(joinpath("test", "extensions", "enzyme.jl"))
+                @testset "Enzyme" begin
+                    # Metal has no Float64
+                    enzyme_testsuite(MetalBackend, MtlArray, true, Float32)
+                end'
+    agents:
+      queue: "metal"
+    if: |
+      build.message !~ /\[skip [^\]]*(tests|metal|enzyme)/ &&
+      (build.message =~ /\[only [^\]]*(tests|metal|enzyme)/ ||
+       build.message !~ /\[only / && !build.pull_request.draft)
+    timeout_in_minutes: 120
+    soft_fail:
+      - exit_status: 3
+    env:
+      JULIA_PROJECT: "@metal_enzyme"
+
+  # intermediate releases, not tested on pull requests
+  - <<: *metal_enzyme
+    matrix:
+      setup:
+        version:
+          - "1.11"
+          - "1.12"
+    if: |
+      build.message !~ /\[skip [^\]]*(tests|metal|enzyme|julia)/ &&
+      (build.message =~ /\[only [^\]]*(tests|metal|enzyme|julia)/ ||
+       build.message !~ /\[only / && build.pull_request.id == null)
+
   - &oneapi
     label: "oneAPI Julia {{matrix.version}}"
     matrix:
