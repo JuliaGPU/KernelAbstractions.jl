@@ -271,6 +271,63 @@ steps:
       (build.message =~ /\[only [^\]]*(tests|oneapi|julia)/ ||
        build.message !~ /\[only / && build.pull_request.id == null)
 
+  - &oneapi_enzyme
+    label: "oneAPI Enzyme Julia {{matrix.version}}"
+    matrix:
+      setup:
+        version:
+          - "1.10"
+          - "1.13"
+    plugins:
+      - JuliaCI/julia#v1:
+          version: "{{matrix.version}}"
+      - JuliaCI/julia-coverage#v1:
+          codecov: true
+    command: |
+      julia -e 'println("--- :julia: Instantiating project")
+                using Pkg
+                Pkg.develop([PackageSpec(; name="KernelAbstractions", path=pwd()),
+                PackageSpec(; name="KernelInterface", path=joinpath(pwd(), "lib", "KernelInterface"))])' || exit 3
+      julia -e 'println("--- :julia: Developing oneAPI")
+                using Pkg
+                Pkg.add(url="https://github.com/JuliaGPU/AcceleratedKernels.jl", rev="main")' || exit 3
+      julia .buildkite/develop_backend.jl https://github.com/JuliaGPU/oneAPI.jl main || exit 3
+      julia -e 'println("--- :julia: Adding Enzyme")
+                using Pkg
+                Pkg.add(["Enzyme", "Test"])' || exit 3
+
+      julia --code-coverage=@$(pwd) -e 'println("+++ :julia: Running tests")
+                include(joinpath(".buildkite", "check_sources.jl"))
+                using oneAPI
+                include(joinpath("test", "extensions", "enzyme.jl"))
+                @testset "Enzyme" begin
+                    T = KernelAbstractions.supports_float64(oneAPIBackend()) ? Float64 : Float32
+                    enzyme_testsuite(oneAPIBackend, oneArray, true, T)
+                end'
+    agents:
+      queue: "oneapi"
+    if: |
+      build.message !~ /\[skip [^\]]*(tests|oneapi|enzyme)/ &&
+      (build.message =~ /\[only [^\]]*(tests|oneapi|enzyme)/ ||
+       build.message !~ /\[only / && !build.pull_request.draft)
+    timeout_in_minutes: 120
+    soft_fail:
+      - exit_status: 3
+    env:
+      JULIA_PROJECT: "@oneapi_enzyme"
+
+  # intermediate releases, not tested on pull requests
+  - <<: *oneapi_enzyme
+    matrix:
+      setup:
+        version:
+          - "1.11"
+          - "1.12"
+    if: |
+      build.message !~ /\[skip [^\]]*(tests|oneapi|enzyme|julia)/ &&
+      (build.message =~ /\[only [^\]]*(tests|oneapi|enzyme|julia)/ ||
+       build.message !~ /\[only / && build.pull_request.id == null)
+
   - &amdgpu
     label: "AMDGPU Julia {{matrix.version}}"
     matrix:
