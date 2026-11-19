@@ -126,8 +126,12 @@ end
 ## sub-groups
 
 # Sub-group support is optional, see `supports_subgroups`. A work-group is divided into
-# sub-groups of at most `sub_group_size(backend)` work-items. Which work-items form a
-# sub-group, how many sub-groups there are and which are partial is unspecified (unless
+# sub-groups of at most `get_max_sub_group_size()` work-items, the width of the kernel: the
+# width `W` it was compiled for with `kernel_function(...; sub_group_size = W)`, or else one
+# the backend chose for the launch. That one is the same for all work-items of a launch, but
+# can differ between kernels and between launches of a kernel, and isn't known on the host.
+# Which work-items form a sub-group, how
+# many sub-groups there are and which are partial is unspecified (unless
 # `supports_linear_subgroups`), except that `(get_sub_group_id(), get_sub_group_local_id())`
 # is unique within a work-group and doesn't change during the kernel's execution (see the
 # manual).
@@ -139,11 +143,10 @@ end
 """
     get_sub_group_size([::Type{T}=Int])::T
 
-The number of work-items in the sub-group, at most the sub-group width
+The number of work-items in the sub-group, between 1 and the sub-group width
 ([`get_max_sub_group_size`](@ref)). Which sub-groups have fewer work-items than the width
 is unspecified (unless the layout is linear, see [`supports_linear_subgroups`](@ref)): there
-can be more than one,
-e.g. one per row of a multi-dimensional work-group.
+can be more than one, e.g. one per row of a multi-dimensional work-group.
 
 See [`get_local_id`](@ref) for the supported types `T`.
 
@@ -159,21 +162,24 @@ See [`get_local_id`](@ref) for the supported types `T`.
 """
     get_max_sub_group_size([::Type{T}=Int])::T
 
-The sub-group width (the warp or wavefront size), [`sub_group_size(backend)`](@ref
-sub_group_size) on the host.
+The sub-group width of the kernel (the warp or wavefront size), the same for all work-items
+of a launch. It is only known on the host for kernels that requested a width; see
+[`sub_group_sizes`](@ref).
 
 Backends should make it a constant of the generated code, so that code depending on it, e.g.
 a loop over the lanes or a shuffle butterfly, is specialized for it; on some, it is only
 folded late in compilation, or not at all. Don't rely on it being known during type
 inference: to pick types or `Val` parameters from the width, e.g. the integer type of a mask
-with a bit per lane, pass [`sub_group_size(backend)`](@ref sub_group_size) from the host.
+with a bit per lane, request a width `W` from [`sub_group_sizes`](@ref) when compiling the
+kernel, and pass it from the host as well.
 
 See [`get_local_id`](@ref) for the supported types `T`.
 
 !!! note
-    Backend implementations that support sub-groups **must** implement this, and **should**
-    return the width the kernel is compiled for as a constant rather than query the device
-    at run time, so that code depending on it is specialized for the width:
+    Backend implementations that support sub-groups **must** implement this, returning the
+    requested width for kernels compiled with one. They **should** return the width the
+    kernel is compiled for as a constant rather than query the device at run time, so that
+    code depending on it is specialized for the width:
     ```
     @device_override get_max_sub_group_size(::Type{T})::T where {T}
     ```
@@ -689,13 +695,15 @@ sub-group get the same result. `count_ones(mask)` counts the work-items, and for
 mask, `trailing_zeros(mask) + 1` is the lane of the first one.
 
 All work-items of the sub-group have to execute `sub_group_ballot` together (not in a
-divergent branch); see [`shfl`](@ref). Only sub-groups of at most 64 work-items are supported.
+divergent branch); see [`shfl`](@ref). Only sub-groups of at most 64 work-items are
+supported: all widths in [`sub_group_sizes`](@ref) are, but a kernel compiled without a
+requested width has to check [`get_max_sub_group_size`](@ref) to be sure.
 
 It doesn't synchronize memory accesses, see [`sub_group_barrier`](@ref).
 
 !!! note
-    Backend implementations that support sub-groups with a width of at most 64 **must**
-    implement:
+    Backend implementations that support sub-groups with a width of at most 64, which
+    includes all that offer a width in [`sub_group_sizes`](@ref), **must** implement:
     ```
     @device_override sub_group_ballot(pred::Bool)::UInt64
     ```
@@ -714,6 +722,7 @@ relative to the segment: bit `i - 1` for the `i`-th lane of the segment. Lanes w
 work-item don't count.
 
 For a `width` smaller than the sub-group width, they need a sub-group width of at most 64.
+A kernel compiled without a requested width can check [`get_max_sub_group_size`](@ref).
 
 !!! note
     Backends **may** implement these. A backend that implements

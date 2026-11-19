@@ -339,24 +339,78 @@ dimension). The backend's validation at launch time is authoritative.
 function max_num_groups end
 
 """
-    sub_group_size(backend)::Int
+    sub_group_sizes(backend)::Tuple{Vararg{Int}}
 
-The sub-group width of kernels compiled for the active device of `backend`.
+The sub-group widths that a kernel can request for the active device of `backend`, the one
+the backend suggests first; the order of the others means nothing.
 
-Kernels compiled by [`kernel_function`](@ref) execute with exactly this width: on the device,
-[`get_max_sub_group_size`](@ref) returns it, and full sub-groups have this many work-items.
-Host code can rely on it, e.g. to pick a `Val(N)` for a warp-level reduction.
+A kernel compiled by [`kernel_function`](@ref) with `sub_group_size = W`, for a `W` in this
+list, executes with exactly width `W`: on the device, [`get_max_sub_group_size`](@ref)
+returns `W`, full sub-groups have `W` work-items, and the layout of
+[`supports_linear_subgroups`](@ref) is relative to `W`. A kernel compiled without a request
+(or with `sub_group_size = nothing`) runs at a width the backend chooses for each launch,
+the same for all work-items of the launch, which they read with `get_max_sub_group_size`.
+
+Code that needs the width on the host, e.g. to pick a `Val(W)` for a warp-level reduction
+or to size local memory, has to request one. If any width will do, take the first.
+Hardware that supports several widths can be faster at a narrower one
+for some kernels (e.g. because the kernel uses fewer registers per work-item) and at a wider
+one for others, so code that knows its kernel's needs can pick another:
+
+```julia
+sizes = KI.sub_group_sizes(backend)
+if isempty(sizes)
+    # no width can be requested: use a kernel that doesn't need to know it on the host
+    KI.@launch backend workgroupsize=64 generic_reduce_kernel(out, a)
+else
+    W = 16 in sizes ? 16 : first(sizes)
+    KI.@launch backend workgroupsize=4W sub_group_size=W reduce_kernel(out, a, Val(W))
+end
+```
+
+Only widths of at most 64 are offered, so that [`sub_group_ballot`](@ref) covers every lane.
+The list is empty without sub-groups, but can also be empty when
+[`supports_subgroups`](@ref) returns `true`: the device then has sub-groups, but can't
+guarantee a width. Kernels then have to read the width on the
+device, with [`get_max_sub_group_size`](@ref).
 
 !!! note
-    Backend implementations **must** implement this if [`supports_subgroups`](@ref) returns
-    `true`:
+    Backend implementations that let kernels request a width **must** implement this, and
+    the `sub_group_size` keyword of [`kernel_function`](@ref) for every width it returns:
     ```
-    sub_group_size(backend::NewBackend)::Int
+    sub_group_sizes(backend::NewBackend)::Tuple{Vararg{Int}}
     ```
-    A backend that cannot guarantee the width for every kernel has to report
-    `supports_subgroups(backend) = false`.
+    The fallback returns `()`: no width can be requested.
+
+!!! compat "KernelInterface 0.5"
+    This function, and the `sub_group_size` keyword of `kernel_function`, require at least
+    KernelInterface v0.5. Before, `sub_group_size(backend)` was the width of every kernel.
 """
-function sub_group_size end
+sub_group_sizes(::Backend) = ()
+
+"""
+    sub_group_size(backend)
+
+Removed in KernelInterface 0.5, and throws an error; the method itself will be removed in
+KernelInterface 1.0. Kernels no longer have a width that is known on the host, unless they
+request one. Pick a width from
+[`sub_group_sizes(backend)`](@ref sub_group_sizes) and pass it to [`kernel_function`](@ref)
+or [`@launch`](@ref KernelInterface.@launch) as `sub_group_size = W`, or read the width on
+the device with [`get_max_sub_group_size`](@ref).
+
+!!! compat "KernelInterface 0.5"
+    Up to KernelInterface 0.4, this returned the sub-group width of every kernel compiled for
+    `backend`.
+"""
+function sub_group_size(::Backend)
+    error(
+        "`KI.sub_group_size(backend)` was removed in KernelInterface 0.5: kernels no longer " *
+            "have a fixed width unless they request one. Pick a width from " *
+            "`KI.sub_group_sizes(backend)` and pass it to `kernel_function`/`@launch` as " *
+            "`sub_group_size = W`, or read the width on the device with `get_max_sub_group_size()`. " *
+            "This method will be removed in KernelInterface 1.0."
+    )
+end
 
 """
     multiprocessor_count(backend)::Int
@@ -405,6 +459,9 @@ pointers to.
 
 Keyword arguments:
 - `name`: override the name that the kernel will have in the generated code.
+- `sub_group_size`: the sub-group width to compile the kernel for, one of
+  [`sub_group_sizes(backend)`](@ref sub_group_sizes), which documents the guarantee. Other
+  widths throw an `ArgumentError`; `nothing`, like leaving the keyword out, requests none.
 
 Other keyword arguments are backend-specific compiler options (e.g. `maxthreads` for
 CUDA.jl); backends throw an error for options they don't support.
@@ -424,8 +481,13 @@ launch.
     every launch, as it does for the arguments.
 
     The returned `Kernel` stores `backend` itself (not a new default backend), so that
-    options it carries apply to the launch. Kernels must execute with sub-group width
-    [`sub_group_size(backend)`](@ref sub_group_size) if the backend supports sub-groups.
+    options it carries apply to the launch.
+
+    The `sub_group_size` keyword has to be accepted by every backend, with `nothing` meaning
+    no request. A width in [`sub_group_sizes(backend)`](@ref sub_group_sizes) has to give
+    the kernel exactly that width; any other width throws an `ArgumentError` (the backend
+    checks this itself, since callers reach its method directly). An offered width can still
+    fail to compile for a particular kernel, which then throws as well.
 
     Launching a kernel after [`device!`](@ref) switched to a device other than the one it
     was compiled for must either work, or throw an error: it may never run on the wrong
@@ -457,7 +519,8 @@ Other keyword arguments:
 - `launch`: whether to launch the kernel, defaults to `true`. With `launch=false`, the
   kernel is only compiled and returned, and the launch keywords can't be used: launch it by
   calling it with the arguments and the launch keywords.
-- `name` and any other keyword are passed to [`kernel_function`](@ref) as compiler options.
+- `name`, `sub_group_size` and any other keyword are passed to [`kernel_function`](@ref)
+  as compiler options.
 
 Launch options specific to a backend (such as a CUDA stream) can't be passed to
 `@launch`; use `launch=false` and pass them when calling the kernel.

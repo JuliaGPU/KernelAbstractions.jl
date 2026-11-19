@@ -36,7 +36,7 @@ KI.supports_shuffle(::WordShuffleBackend, ::Type{UInt32}) = true
     # them should get a MethodError rather than silently wrong behaviour.
     stubs = [
         KI.max_work_group_size, KI.max_work_group_dims, KI.max_num_groups,
-        KI.sub_group_size, KI.argconvert, KI.kernel_function, KI.launch,
+        KI.argconvert, KI.kernel_function, KI.launch,
         # Host-side stubs: required backend methods with no sensible fallback.
         KI.synchronize, KI.copyto!,
     ]
@@ -113,6 +113,10 @@ end
 
 struct StubBackend <: KI.Backend end
 
+# A backend with sub-groups, but no width that kernels can request.
+struct SubgroupBackend <: KI.Backend end
+KI.supports_subgroups(::SubgroupBackend) = true
+
 # A backend with two devices that forgot the other device functions.
 struct MultiDeviceBackend <: KI.Backend end
 KI.ndevices(::MultiDeviceBackend) = 2
@@ -143,6 +147,12 @@ end
     @test KI.multiprocessor_count(StubBackend()) == 0
     @test KI.supports_subgroups(StubBackend()) === false
     @test KI.supports_shuffle(StubBackend(), Float32) === false
+    # no width can be requested unless the backend says which
+    @test KI.sub_group_sizes(StubBackend()) === ()
+    @test KI.sub_group_sizes(SubgroupBackend()) === ()
+    # the host-side width is gone, and says so
+    @test_throws "was removed in KernelInterface 0.5" KI.sub_group_size(StubBackend())
+    @test_throws "was removed in KernelInterface 0.5" KI.sub_group_size(SubgroupBackend())
 
     # `localmemory` forwards the untyped `dims` to the `Val` form backends override.
     # Off-device that form is unimplemented, and must error rather than recurse
@@ -514,6 +524,10 @@ end
     named = KI.@launch backend launch = false name = "mykernel" maxthreads = 32 dummy(1, 2.0)
     @test named.kern.name == "mykernel"
     @test named.kern.options == Dict(:maxthreads => 32)
+    # including a requested sub-group width
+    W = 16
+    requested = KI.@launch backend launch = false sub_group_size = W dummy(1, 2.0)
+    @test requested.kern.options == Dict(:sub_group_size => 16)
     optioned = KI.@launch backend ndrange = 4 maxthreads = 32 dummy(1, 2.0)
     @test isempty(only(optioned.kern.launches).kwargs)
 

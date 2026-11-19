@@ -265,11 +265,13 @@ supports_float64(::Backend) = false
 """
     supports_subgroups(::Backend)::Bool
 
-Whether kernels on the active device support sub-groups with a fixed width
-[`sub_group_size`](@ref): the sub-group queries ([`get_sub_group_size`](@ref) etc.),
-[`sub_group_barrier`](@ref), and the votes [`sub_group_any`](@ref), [`sub_group_all`](@ref)
-and, for widths of at most 64, [`sub_group_ballot`](@ref). Which types the shuffles support
-is queried separately with [`supports_shuffle`](@ref).
+Whether kernels on the active device support sub-groups: the sub-group queries
+([`get_sub_group_size`](@ref) etc.), [`sub_group_barrier`](@ref), and the votes
+[`sub_group_any`](@ref), [`sub_group_all`](@ref) and, for widths of at most 64,
+[`sub_group_ballot`](@ref). Which types the shuffles support is queried separately with
+[`supports_shuffle`](@ref).
+
+This doesn't imply a width that is known on the host: see [`sub_group_sizes`](@ref).
 
 Which work-items form a sub-group is unspecified, unless
 [`supports_linear_subgroups`](@ref) returns `true`, and the communication functions have to
@@ -278,8 +280,13 @@ be executed in control flow that is uniform over the work-group, unless
 for the layout and participation guarantees.
 
 !!! note
-    Backend implementations **must** implement this function if they support sub-groups.
-    The fallback returns `false`.
+    Backend implementations **must** implement this function if they support sub-groups,
+    and [`sub_group_sizes`](@ref) if kernels can request a width. The fallback returns
+    `false`.
+
+!!! compat "KernelInterface 0.5"
+    Up to KernelInterface 0.4, sub-group support implied that every kernel had the same,
+    fixed width.
 """
 supports_subgroups(::Backend) = false
 
@@ -288,12 +295,16 @@ supports_subgroups(::Backend) = false
 
 Whether the active device forms sub-groups from consecutive work-items, for every kernel and
 launch with a 1-D work-group or one whose x extent is a multiple of the sub-group width `W`
-([`sub_group_size`](@ref)): then the work-item with the linear local index `lin` (x
-fastest, see [`get_local_id`](@ref)) is in sub-group `fld(lin - 1, W) + 1`, at lane
-`mod(lin - 1, W) + 1`, the sub-group ids are `1:cld(n, W)` for a work-group of `n`
+of the kernel, [`get_max_sub_group_size`](@ref): then the work-item with the linear local
+index `lin` (x fastest, see [`get_local_id`](@ref)) is in sub-group `fld(lin - 1, W) + 1`,
+at lane `mod(lin - 1, W) + 1`, the sub-group ids are `1:cld(n, W)` for a work-group of `n`
 work-items, and only the last sub-group can be partial. In particular, a 1-D work-group of at
 most `W` work-items is a single sub-group. It promises nothing about other work-group shapes.
 Implies [`supports_subgroups`](@ref).
+
+The host knows `W`, and so which multi-dimensional work-groups this covers, only for kernels
+compiled with a requested width (see [`sub_group_sizes`](@ref)). Other kernels can still rely
+on the layout of 1-D work-groups, computing it from the width they read on the device.
 
 Code needs this when it relates local ids to lanes: e.g. stencils that shuffle values between
 neighbouring work-items, transposes through shuffles, or work-group scans built from
