@@ -23,6 +23,8 @@ mutable struct Session
         compute_units::Int, preferred_work_group_size_multiple::Int,
         fp16::Bool, fp64::Bool,
     }
+    # the widths kernels can request; not one of `limits`, which would make it abstract
+    const sub_group_sizes::Tuple{Vararg{Int}}
     # duration threshold in cycle counter ticks for long launches (see `host_dispatch`)
     const host_kernel_long_ticks::UInt64
     # serial-duration threshold in ticks for small launches (see `host_schedule`)
@@ -54,13 +56,23 @@ function ticks_per_ns()
     return (c1 - c0) / (t1 - t0)
 end
 
-# the sub-group width kernels are compiled for, or `nothing` if the device has no sub-groups.
-# POCL can technically support any sub-group size; prefer the common GPU ones, and only
-# widths of up to 64, so that `KI.sub_group_ballot` (a `UInt64` mask) covers every lane.
-function default_sub_group_size(device::cl.Device)
+# the sub-group widths kernels can request: only those of up to 64, so that
+# `KI.sub_group_ballot` (a `UInt64` mask) covers every lane. PoCL can technically support any
+# sub-group size; the first, which kernels are compiled for without a request, is the most
+# common GPU one it supports.
+function supported_sub_group_sizes(device::cl.Device)
     sg_sizes = filter(<=(64), device.sub_group_sizes::Tuple{Vararg{Int}})
-    common = filter(in(sg_sizes), Int[32, 64, 16, sg_sizes...])
-    return isempty(common) ? nothing : first(common)
+    i = findfirst(in(sg_sizes), (32, 64, 16))
+    i === nothing && return sg_sizes
+    W = (32, 64, 16)[i]
+    return (W, filter(!=(W), sg_sizes)...)
+end
+
+# the sub-group width kernels are compiled for without a request, or `nothing` if the device
+# has no sub-groups
+function default_sub_group_size(device::cl.Device)
+    sg_sizes = supported_sub_group_sizes(device)
+    return isempty(sg_sizes) ? nothing : first(sg_sizes)
 end
 
 function Session()
@@ -106,8 +118,10 @@ function Session()
     # 1 µs, compared with tens of nanoseconds to time a launch
     host_kernel_short_ticks = round(UInt64, 1_000 * rate)
 
+    sub_group_sizes = supported_sub_group_sizes(device)
+
     return Session(
-        platform, device, context, limits, host_kernel_long_ticks,
+        platform, device, context, limits, sub_group_sizes, host_kernel_long_ticks,
         host_kernel_serial_ticks, host_kernel_short_ticks
     )
 end

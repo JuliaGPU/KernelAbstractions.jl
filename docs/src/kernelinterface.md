@@ -77,7 +77,7 @@ What a backend implements, at a glance. The docstrings below have the details.
 | **Capabilities** | | [`supports_float64`](@ref), [`supports_atomics`](@ref), [`supports_unified`](@ref), [`supports_subgroups`](@ref), [`supports_linear_subgroups`](@ref), [`supports_independent_subgroups`](@ref), [`supports_partitionable_subgroups`](@ref) (all `false`), [`supports_shuffle`](@ref) (`false` unless derived from the natively supported types, see its docstring) |
 | **Compilation** | [`argconvert`](@ref), [`kernel_function`](@ref), [`launch`](@ref) | |
 | **Device** | [`get_local_id`](@ref), [`get_group_id`](@ref), [`get_local_size`](@ref), [`get_num_groups`](@ref), [`localmemory`](@ref), [`barrier`](@ref) | [`get_global_id`](@ref), [`get_global_size`](@ref) (derived from the primitive queries), [`_print`](@ref KernelInterface._print) (host `print`) |
-| **Sub-groups** | if `supports_subgroups`: [`sub_group_size`](@ref), the sub-group queries, [`sub_group_barrier`](@ref), [`sub_group_any`](@ref), [`sub_group_all`](@ref), and [`sub_group_ballot`](@ref) for widths of at most 64; if `supports_shuffle(backend, T)`: [`shfl`](@ref), [`shfl_down`](@ref), [`shfl_up`](@ref), [`shfl_xor`](@ref) for the primitive `T` supported natively, including `UInt32` | [`sub_group_reduce`](@ref), [`sub_group_scan`](@ref), [`sub_group_exclusive_scan`](@ref) (built on the shuffles); the functions with a `width` (built on those without, or on the ballot); shuffles of other primitive types (as `UInt32` or `UInt64` words) and of structs (packed into `UInt32` words) |
+| **Sub-groups** | if `supports_subgroups`: the sub-group queries, [`sub_group_barrier`](@ref), [`sub_group_any`](@ref), [`sub_group_all`](@ref), and [`sub_group_ballot`](@ref) for widths of at most 64; if `supports_shuffle(backend, T)`: [`shfl`](@ref), [`shfl_down`](@ref), [`shfl_up`](@ref), [`shfl_xor`](@ref) for the primitive `T` supported natively, including `UInt32`; if kernels can request a width: [`sub_group_sizes`](@ref), and `kernel_function(...; sub_group_size = W)` for every `W` in it | [`sub_group_reduce`](@ref), [`sub_group_scan`](@ref), [`sub_group_exclusive_scan`](@ref) (built on the shuffles); the functions with a `width` (built on those without, or on the ballot); shuffles of other primitive types (as `UInt32` or `UInt64` words) and of structs (packed into `UInt32` words) |
 
 Everything else, such as [`zeros`](@ref KernelInterface.zeros), [`ones`](@ref KernelInterface.ones),
 the launch-keyword handling of [`Kernel`](@ref) and [`@launch`](@ref KernelInterface.@launch),
@@ -101,6 +101,26 @@ using Test
 include(joinpath(pkgdir(KernelInterface), "test", "testsuite.jl"))
 Testsuite.testsuite(MyBackend(), MyArray)
 ```
+
+### Upgrading from KernelInterface 0.4
+
+KernelInterface 0.5 no longer promises a sub-group width to kernels that don't request one,
+and removes `KI.sub_group_size(backend)`: it throws an error that explains how to migrate,
+until KernelInterface 1.0 removes the method too.
+
+- **Kernel authors**: code that read `W = KI.sub_group_size(backend)` on the host, e.g. for a
+  `Val(W)` or to size local memory, picks a width from
+  [`sub_group_sizes(backend)`](@ref sub_group_sizes) instead (`first` of it, if any width
+  will do), and compiles the kernel with it: `KI.@launch backend sub_group_size=W ...`. If
+  the list is empty, it needs a variant that reads the width on the device with
+  [`get_max_sub_group_size`](@ref), as code that only needs it there does anyway.
+- **Backend authors**: replace `sub_group_size(backend)` with
+  [`sub_group_sizes(backend)`](@ref sub_group_sizes), the widths of at most 64 that the
+  backend can guarantee, the one to suggest first, and implement `kernel_function`'s `sub_group_size`
+  keyword for them, throwing an `ArgumentError` for other widths. `sub_group_size = nothing`
+  has to be accepted as no request. Without a request, kernels may now run at a width the
+  backend chooses per launch. A device that has sub-groups but can't guarantee a width can
+  now report them, with an empty `sub_group_sizes`.
 
 ## Backend hierarchy
 
@@ -149,9 +169,12 @@ get_global_size
 ### [Sub-groups](@id ki_subgroups)
 
 Sub-groups are optional ([`supports_subgroups`](@ref)). A work-group is divided into
-sub-groups of at most `W = `[`sub_group_size(backend)`](@ref sub_group_size) work-items, the
-sub-group width. What KernelInterface guarantees, and backends that report sub-group support
-have to ensure:
+sub-groups of at most `W = `[`get_max_sub_group_size()`](@ref get_max_sub_group_size)
+work-items, the sub-group width of the kernel. It is the width the kernel requested when it
+was compiled (see [below](@ref ki_subgroup_width)), or else one that the backend chooses for
+each launch: the same for all work-items of the launch, but not known on the host, and not
+necessarily the same for different kernels or launches. What KernelInterface guarantees, and backends
+that report sub-group support have to ensure:
 
 - every work-item has a unique `(get_sub_group_id(), get_sub_group_local_id())` pair in its
   work-group, which doesn't change during the kernel;
@@ -207,6 +230,44 @@ the others: all its work-items have to execute them together, not in a branch th
 of its lanes take. Without independent sub-groups, all sub-groups of the work-group have to
 execute the same communication functions in the same order. The id and size queries can be
 used anywhere.
+
+#### [Choosing the width](@id ki_subgroup_width)
+
+A kernel compiled without a request runs at the width the backend picks for the launch, and
+reads it on the device with [`get_max_sub_group_size`](@ref). Code that needs the width on the host,
+e.g. to size local memory or to pick a `Val` parameter, has to request one.
+[`sub_group_sizes(backend)`](@ref sub_group_sizes) lists the widths a kernel can request,
+the backend's suggestion first, and `kernel_function`'s `sub_group_size` keyword (also accepted by
+[`KI.@launch`](@ref KernelInterface.@launch)) picks one:
+
+```julia
+sizes = KI.sub_group_sizes(backend)
+if isempty(sizes)
+    # no width can be guaranteed: use a kernel that reads it on the device
+    KI.@launch backend workgroupsize=64 generic_reduce_kernel(out, a)
+else
+    W = 16 in sizes ? 16 : first(sizes)
+    KI.@launch backend workgroupsize=4W sub_group_size=W reduce_kernel(out, a, Val(W))
+end
+```
+
+`sub_group_size = nothing` requests no width, on every backend, so a caller with an
+optional width needs only one call. The request is a guarantee: on the device, [`get_max_sub_group_size`](@ref) returns `W`, full
+sub-groups have `W` work-items, and the layout of [`supports_linear_subgroups`](@ref) is
+relative to `W`. A width that isn't in `sub_group_sizes(backend)` throws an `ArgumentError`.
+Code that doesn't care which width it gets takes the first one.
+
+Some hardware supports several widths: Intel GPUs run sub-groups of 8, 16 or 32 work-items,
+AMD's RDNA GPUs wavefronts of 32 or 64. Which one is fastest depends on the kernel and the
+device. A narrower sub-group gives each work-item more registers, so a register-heavy kernel
+that spills at 32 can be several times faster at 16, while a kernel that does little work per
+work-item can be faster at 32. Without a request, the backend is free to make that choice per
+kernel, or even per launch. `sub_group_sizes` can also be empty while sub-groups are
+supported, on devices that can't guarantee any width (e.g. OpenCL on NVIDIA GPUs); kernels then have to work with the
+width they read on the device.
+
+KernelAbstractions' `@kernel` has no way to request a width yet. Its collectives, such as
+[`@groupreduce`](@ref KernelAbstractions.@groupreduce), read the width on the device.
 
 !!! note "Kernel languages"
     The sub-group functions are meant for kernels written against KernelInterface, and for
@@ -331,7 +392,7 @@ max_work_group_size
 launch_configuration
 max_work_group_dims
 max_num_groups
-sub_group_size
+sub_group_sizes
 multiprocessor_count
 ```
 
@@ -375,10 +436,14 @@ optional methods where it can do better than the fallback. In particular:
    ```
 4. Compute the typed index queries with `% T`, not `T(x)`: a checked conversion leaves
    an error branch in every kernel.
-5. Sub-groups are optional. To support them, report [`supports_subgroups`](@ref) and
-   [`sub_group_size`](@ref), and implement the device functions the
-   [contract](@ref Contract) requires. If the backend has shuffles, implement them only for the
-   primitive types the hardware shuffles natively, including `UInt32`, and report those with
+5. Sub-groups are optional. To support them, report [`supports_subgroups`](@ref) and the
+   widths a kernel can request with [`sub_group_sizes`](@ref), and implement the device
+   functions the [contract](@ref Contract) requires. `kernel_function` has to compile a
+   kernel with exactly the width given by its `sub_group_size` keyword, and throw an
+   `ArgumentError` for widths that aren't offered. Kernels compiled without the keyword may
+   run at any width, chosen per launch; `sub_group_size = nothing` means no request. A
+   backend that can't guarantee a width keeps the fallback `sub_group_sizes` of `()`. If the
+   backend has shuffles, implement them only for the primitive types the hardware shuffles natively, including `UInt32`, and report those with
    [`supports_shuffle`](@ref); KernelInterface shuffles other types as words. It also
    provides the reductions, scans and functions with a `width`; override those where a
    native implementation helps, keeping their documented results.
