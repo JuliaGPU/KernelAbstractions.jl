@@ -272,6 +272,14 @@ kernel = my_kernel(backend, 32, size(A))
 kernel(A)
 ```
 
+The static sizes can also be given as keyword arguments, as at launch. This also allows a
+static `ndrange` with a workgroup size chosen at launch, without spelling out `DynamicSize()`:
+
+```julia
+kernel = my_kernel(backend; workgroupsize=32, ndrange=size(A))  # same as my_kernel(backend, 32, size(A))
+kernel = my_kernel(backend; ndrange=size(A))                    # workgroup size chosen at launch
+```
+
 ### Index ranges
 
 Each entry of `ndrange` is either an extent (indices `1:n`) or a range of indices, so a kernel
