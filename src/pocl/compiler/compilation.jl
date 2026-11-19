@@ -294,10 +294,17 @@ function compile_to_obj(@nospecialize(job::CompilerJob))
     compilations[] += 1
 
     return JuliaContext() do ctx
-        obj, meta = invoke_frozen(GPUCompiler.compile, :obj, job)
+        # compile to LLVM IR and emit the object ourselves, rather than compiling to `:obj`:
+        # the latter merges the metadata of both steps, which on Julia 1.12 drops
+        # `exception_sites`. GPUCompiler's precompiled `compile_unhooked` was inferred when
+        # `uses_exception_sites` was `false` for all jobs, and isn't invalidated by our method.
+        llvm_ir, meta = invoke_frozen(GPUCompiler.compile, :llvm, job)
 
         # we own the IR: inspect it, then dispose of it
-        @dispose ir = meta.ir begin
+        @dispose ir = llvm_ir begin
+            obj, _ = invoke_frozen(
+                GPUCompiler.emit_asm, job, ir, meta.relocations, LLVM.CodeGenFileType.Object
+            )
             entry = meta.entry.name
             device_rng = haskey(meta.entry.function_attributes, "julia.opencl.rng")
             (; obj, entry, device_rng, meta.exception_sites)
