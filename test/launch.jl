@@ -109,6 +109,10 @@ default_launcher(kernel, args...; ndrange, workgroupsize = nothing) =
 
 # Check every `@index` flavour against the layout KernelAbstractions defines: groups and
 # work-items are numbered column-major, and the global index is `(g-1)*groupsize + l`.
+@kernel function launch_sub_group_size!(out)
+    out[@index(Global)] = KI.get_max_sub_group_size()
+end
+
 function check_indices(launcher, backend, AT, kernel, ndrange; workgroupsize = nothing)
     ranges = map(r -> r isa Integer ? (1:r) : r, ndrange)
     N = length(ranges)
@@ -224,6 +228,38 @@ function launch_testsuite(backend, AT; launcher = default_launcher, skip_tests =
         launcher(similar(kernel, FixedGroups(kernel.f, 3)), A; ndrange = length(A))
         synchronize(backend())
         @test all(==(3), Array(A))
+    end
+
+    @testset "requested sub-group width" begin
+        out = AT(zeros(Int, 100))
+        sizes = KI.supports_subgroups(backend()) ? KI.sub_group_sizes(backend()) : ()
+        function widths(kernel; kwargs...)
+            fill!(out, 0)
+            kernel(out; kwargs...)
+            synchronize(backend())
+            return Array(out)
+        end
+        for W in sizes
+            kernel = launch_sub_group_size!(backend(); sub_group_size = W)
+            @test all(==(W), widths(kernel; ndrange = length(out)))
+            @test all(==(W), widths(similar(kernel, kernel.f); ndrange = length(out)))
+            # with static sizes and a partial workgroup, launched repeatedly, which some
+            # backends split into launches of differently compiled kernels
+            kernel = launch_sub_group_size!(backend(), 64, length(out); sub_group_size = W)
+            for _ in 1:3
+                @test all(==(W), widths(kernel))
+            end
+        end
+        # `nothing` requests no width
+        @test typeof(launch_sub_group_size!(backend(); sub_group_size = nothing)) ==
+            typeof(launch_sub_group_size!(backend()))
+        if KI.supports_subgroups(backend())
+            kernel = launch_sub_group_size!(backend(); sub_group_size = nothing)
+            @test all(>(0), widths(kernel; ndrange = length(out)))
+        end
+        # a width that isn't offered
+        W = 2 * maximum(sizes; init = 32)
+        @test_throws ArgumentError launch_sub_group_size!(backend(); sub_group_size = W)(out; ndrange = 1)
     end
 
     @testset "synchronize with padding lanes" begin
