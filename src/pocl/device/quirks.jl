@@ -1,14 +1,5 @@
-# throw a device-side exception of type `name`, reporting it with `reason`
-macro gputhrow(name::String, reason::String)
-    escape(str) = replace(str, "%" => "%%")
-    fmt = "ERROR: $(escape(name)) during kernel execution on work-item (%ld, %ld, %ld): $(escape(reason)).\n"
-    return quote
-        if GPUCompiler.kernel_debug_level() >= 1 && claim_output() == 1
-            SPIRVIntrinsics.@printf($fmt, get_global_id(1), get_global_id(2), get_global_id(3))
-        end
-        throw(nothing)
-    end
-end
+# throw a device-side exception of type `name`, reported with `reason`
+using GPUCompiler: @gputhrow
 
 # GPUToolbox's shared overrides throw through this function
 @device_override @generated function GPUToolbox.Overlays.device_throw(::Type{E}, ::Val{reason}) where {E <: Exception, reason}

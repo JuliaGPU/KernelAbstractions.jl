@@ -123,19 +123,18 @@ end
         end
     end
 
-    # Without `@inbounds` the kernel carries the out-of-bounds path: a printf of the error
-    # and the GPUCompiler exception signalling. `@inbounds` must remove all of it.
+    # Without `@inbounds` the kernel carries the out-of-bounds path, which records the throw
+    # site and work-item for the host, starting with an atomic max on the status.
+    # `@inbounds` must remove all of it.
     @testset "bounds checks" begin
         @test @filecheck begin
             @check "define spir_kernel void @{{.*}}gpu_codegen_mul2"
-            @check "@printf"
-            @check "gpu_report_exception"
-            @check "gpu_signal_exception"
+            @check "__spirv_AtomicSMax"
             @device_code_llvm debuginfo = :none codegen_mul2(backend)(A, ndrange = 64)
             KernelAbstractions.synchronize(backend)
         end
 
-        @test @filecheck implicit_check_not = ["gpu_report_exception", "@printf"] begin
+        @test @filecheck implicit_check_not = ["__spirv_AtomicSMax", "@printf"] begin
             @check "define spir_kernel void @{{.*}}gpu_codegen_mul2_inbounds"
             @check "ret void"
             @device_code_llvm debuginfo = :none codegen_mul2_inbounds(backend)(A, ndrange = 64)

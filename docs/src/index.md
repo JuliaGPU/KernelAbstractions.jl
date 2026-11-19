@@ -163,9 +163,9 @@ end
   concrete backend types, or on a capability such as `KernelAbstractions.supports_float64`.
 - An exception thrown in a kernel on the `CPU` backend is reported as a
   `KernelAbstractions.POCL.KernelException` when the kernel has completed, like on GPU
-  backends, and no longer as the original exception (e.g., a `BoundsError`). Depending on
-  the debug level (`julia -g`), the kernel prints which exception it threw, on which
-  work-item, and with `-g2` a backtrace.
+  backends, and no longer as the original exception (e.g., a `BoundsError`). It names the
+  work-item that threw, and depending on the debug level (`julia -g`) which exception it
+  threw, and with `-g2` a backtrace.
 - The `CPU` backend runs kernels on as many threads as Julia was started with (`julia -t`),
   like the thread-based `CPU` backend of 0.9 did, and no longer on one thread per hardware
   thread. Set `JULIA_KA_CPU_THREADS` to use a different number of threads; see [`CPU`](@ref).

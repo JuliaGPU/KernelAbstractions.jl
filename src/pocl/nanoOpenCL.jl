@@ -6,6 +6,7 @@ import pocl_standalone_jll
 
 using GPUToolbox: GPUToolbox, @gcsafe_ccall, cooperative_wait
 using KernelInterface: inline_body
+using GPUCompiler: ExceptionSite
 
 using Printf
 
@@ -1340,6 +1341,8 @@ mutable struct Kernel
     const private_mem_size::Int
     # the largest work-group of tuned launches (see `POCL.link_kernel`)
     tuned_work_group_size::Int
+    # the throw sites of its code, which the exceptions it reports refer to
+    exception_sites::Vector{ExceptionSite}
 
     function Kernel(k::cl_kernel)
         function get(param, T = Csize_t)
@@ -1352,7 +1355,7 @@ mutable struct Kernel
             new(
                 k, ReentrantLock(), HostKernelHandle[], nothing, false, work_group_size,
                 get(CL_KERNEL_PREFERRED_WORK_GROUP_SIZE_MULTIPLE),
-                get(CL_KERNEL_PRIVATE_MEM_SIZE, cl_ulong), work_group_size
+                get(CL_KERNEL_PRIVATE_MEM_SIZE, cl_ulong), work_group_size, ExceptionSite[]
             )
         catch
             clReleaseKernel(k)
