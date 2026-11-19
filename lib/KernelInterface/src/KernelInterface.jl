@@ -18,6 +18,7 @@ include("backend.jl")
 include("device.jl")
 include("launch.jl")
 include("host.jl")
+include("graph.jl")
 
 # the public API; nothing is exported, so that `KI.` prefixes the interface everywhere
 @static if VERSION >= v"1.11"
@@ -47,6 +48,9 @@ include("host.jl")
             :supports_unified, :supports_atomics, :supports_float64,
             :supports_subgroups, :supports_shuffle, :supports_linear_subgroups,
             :supports_independent_subgroups, :supports_partitionable_subgroups,
+            # graphs
+            :Graph, :GraphCaptureError, :capture, :update!, :is_captured, Symbol("@captured"),
+            :supports_graphs, :capture_graph, :launch_graph, :update_graph,
         )
     )
 end

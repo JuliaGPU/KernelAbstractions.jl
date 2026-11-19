@@ -72,6 +72,7 @@ What a backend implements, at a glance. The docstrings below have the details.
 | **Backend** | subtype [`Backend`](@ref); [`get_backend`](@ref) for its array type | |
 | **Memory** | [`allocate`](@ref), [`copyto!`](@ref) | `allocate(...; unified=true)` (throws), [`pagelock!`](@ref) (`missing`), [`unsafe_free!`](@ref) (no-op) |
 | **Execution** | [`synchronize`](@ref) (cooperative) | [`record_event`](@ref)/[`wait_event`](@ref) (synchronize), [`priority!`](@ref) (no-op) |
+| **Graphs** | | [`supports_graphs`](@ref) (`false`); if it returns `true`: [`capture_graph`](@ref), [`launch_graph`](@ref), and [`update_graph`](@ref) (records from scratch) |
 | **Devices** | with more than one device: [`ndevices`](@ref), [`device`](@ref), [`device!`](@ref), `device(backend, A)` | all four (a single device) |
 | **Queries** | [`max_work_group_size`](@ref) (for the backend and for a kernel), [`max_work_group_dims`](@ref), [`max_num_groups`](@ref) | [`launch_configuration`](@ref) (the limit), [`multiprocessor_count`](@ref) (0), [`functional`](@ref) (`missing`), [`versioninfo`](@ref) |
 | **Capabilities** | | [`supports_float64`](@ref), [`supports_atomics`](@ref), [`supports_unified`](@ref), [`supports_subgroups`](@ref), [`supports_linear_subgroups`](@ref), [`supports_independent_subgroups`](@ref), [`supports_partitionable_subgroups`](@ref) (all `false`), [`supports_shuffle`](@ref) (`false` unless derived from the natively supported types, see its docstring) |
@@ -292,6 +293,23 @@ synchronize
 record_event
 wait_event
 priority!
+```
+
+### Graphs
+
+A backend that supports graphs records the work of a function once and replays it with
+less host overhead, through [`capture`](@ref), [`update!`](@ref) and [`@captured`](@ref)
+(see the [API page](@ref api_graphs)). It implements these hooks; without them, those
+functions run the function eagerly instead.
+
+```@docs; canonical=false
+supports_graphs
+```
+
+```@docs
+capture_graph
+launch_graph
+update_graph
 ```
 
 ### Device management
