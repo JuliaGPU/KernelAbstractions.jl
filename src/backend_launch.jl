@@ -73,6 +73,17 @@ their backend type; the default is no options.
 """
 compiler_options(::Kernel) = (;)
 
+# `compile(args...)` with the options `kernel` is compiled with: the backend's, and the
+# sub-group width the kernel requested, which backends can't drop by implementing
+# `compiler_options`. the keyword is left out without a request, so that each call has
+# concrete keywords.
+@inline function with_kernel_options(compile::C, kernel::Kernel, args...) where {C}
+    options = compiler_options(kernel)
+    W = kernel.sub_group_size
+    return W === nothing ? compile(args...; options...) :
+        compile(args...; options..., sub_group_size = W)
+end
+
 static_ndrange(kernel::Kernel) = ndrange(kernel) <: StaticSize ? get(ndrange(kernel)) : nothing
 
 # the product of `dims`, saturated at `typemax(Int)`
@@ -171,10 +182,10 @@ function launch_kernel(
     kernel = if skip_bounds_check(b)
         # hide the check type from inference, so that the lookup compiles once for both
         compiled_tt = Base.compilerbarrier(:type, unchecked ? without_bounds_check(tt) : tt)::Type
-        kernel_function_as(b, obj.f, compiled_tt, tt; compiler_options(obj)...)
+        with_kernel_options(kernel_function_as, obj, b, obj.f, compiled_tt, tt)
     else
         # infer the kernel's type, avoiding dynamic dispatch in the rest of the launch
-        KI.kernel_function(b, obj.f, tt; compiler_options(obj)...)
+        with_kernel_options(KI.kernel_function, obj, b, obj.f, tt)
     end
 
     # tune the workgroup size, keeping the context type (and thus the kernel) the same
@@ -198,7 +209,7 @@ function launch_kernel(
         extent = split_extent(size(cartesian(range)), items)
         if extent !== nothing && split_launch(b, launch, kernel)
             full_tt = Base.compilerbarrier(:type, without_bounds_check(tt))::Type
-            full = kernel_function_as(b, obj.f, full_tt, tt; compiler_options(obj)...)
+            full = with_kernel_options(kernel_function_as, obj, b, obj.f, full_tt, tt)
             if prod(items) <= KI.max_work_group_size(full)
                 launch_split(full, kernel, extent, groups, items, prepend(ctx, kernel_args))
                 return nothing

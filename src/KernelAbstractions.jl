@@ -527,7 +527,9 @@ import .NDIteration: get
 """
     Kernel{Backend, WorkgroupSize, NDRange, Func}
 
-Host-side handle for a kernel specialized on a backend, workgroup size, and `ndrange`.
+Host-side handle for a kernel specialized on a backend, workgroup size, and `ndrange`. It
+also holds the sub-group width the kernel requested
+(`my_kernel(backend; sub_group_size = W)`), if any.
 
 Kernels are created by calling a [`@kernel`](@ref) function on a backend, for example
 `my_kernel(CUDABackend(), 256)`. The returned object is callable:
@@ -547,10 +549,13 @@ see the [notes for backend implementations](@ref implementations_notes).
 struct Kernel{Backend, WorkgroupSize <: _Size, NDRange <: _Size, Fun}
     backend::Backend
     f::Fun
+    # the sub-group width the kernel is compiled for, if it requested one
+    sub_group_size::Union{Nothing, Int}
 end
+Kernel{B, WS, ND, F}(backend, f) where {B, WS, ND, F} = Kernel{B, WS, ND, F}(backend, f, nothing)
 
 function Base.similar(kernel::Kernel{D, WS, ND}, f::F) where {D, WS, ND, F}
-    return Kernel{D, WS, ND, F}(kernel.backend, f)
+    return Kernel{D, WS, ND, F}(kernel.backend, f, kernel.sub_group_size)
 end
 
 """
@@ -654,8 +659,10 @@ last (possibly partial) workgroup. Primarily used by backend implementations and
     return iterspace, dynamic
 end
 
-function construct(backend::B, ::S, ::NDRange, xpu_name::XPUName) where {B <: Backend, S <: _Size, NDRange <: _Size, XPUName}
-    return Kernel{B, S, NDRange, XPUName}(backend, xpu_name)
+function construct(
+        backend::B, ::S, ::NDRange, xpu_name::XPUName; sub_group_size = nothing
+    ) where {B <: Backend, S <: _Size, NDRange <: _Size, XPUName}
+    return Kernel{B, S, NDRange, XPUName}(backend, xpu_name, sub_group_size)
 end
 
 ###

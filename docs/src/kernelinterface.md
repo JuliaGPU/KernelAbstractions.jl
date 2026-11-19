@@ -266,8 +266,9 @@ kernel, or even per launch. `sub_group_sizes` can also be empty while sub-groups
 supported, on devices that can't guarantee any width (e.g. OpenCL on NVIDIA GPUs); kernels then have to work with the
 width they read on the device.
 
-KernelAbstractions' `@kernel` has no way to request a width yet. Its collectives, such as
-[`@groupreduce`](@ref KernelAbstractions.@groupreduce), read the width on the device.
+A `@kernel` requests a width when it is constructed, `my_kernel(backend, 256; sub_group_size = W)`.
+KernelAbstractions' collectives, such as [`@groupreduce`](@ref KernelAbstractions.@groupreduce),
+read the width on the device, and work without a request.
 
 !!! note "Kernel languages"
     The sub-group functions are meant for kernels written against KernelInterface, and for

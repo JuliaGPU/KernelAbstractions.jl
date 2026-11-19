@@ -1,5 +1,11 @@
 import MacroTools: splitdef, combinedef, isexpr, postwalk
 
+# The static workgroup size and ndrange of a kernel constructed with the sizes `sizes`
+kernel_sizes() = (DynamicSize(), DynamicSize())
+kernel_sizes(size) = (StaticSize(size), DynamicSize())
+kernel_sizes(size, range) = (StaticSize(size), StaticSize(range))
+kernel_sizes(size::_Size, range::_Size) = (size, range)
+
 function find_return(stmt)
     result = Ref(false)
     postwalk(stmt) do expr
@@ -89,17 +95,13 @@ function __kernel(expr, __source__::LineNumberNode, __module__::Module, force_in
         push!(queries, :($gpu_name(::$CollectivesQuery) = true))
     end
 
-    # create constructor functions
-    _name = Symbol(:_, name)
+    # create constructor functions. a single method takes the sizes and the keywords: a local
+    # function with several keyword methods would box its keyword bodies. the varargs are
+    # typed, so that the method is specialized when called through dynamic dispatch too.
     constructors = quote
         if $(name isa Symbol ? :(!@isdefined($name)) : true)
-            function $_name(dev::Dev, sz::S, range::NDRange) where {Dev, S <: $_Size, NDRange <: $_Size}
-                return $construct(dev, sz, range, $gpu_name)
-            end
-            Core.@__doc__ $name(dev) = $_name(dev, $DynamicSize(), $DynamicSize())
-            $name(dev, size) = $_name(dev, $StaticSize(size), $DynamicSize())
-            $name(dev, size, range) = $_name(dev, $StaticSize(size), $StaticSize(range))
-            $name(dev, size::$_Size, range::$_Size) = $_name(dev, size, range)
+            Core.@__doc__ $name(dev, sizes::Vararg{Any, N}; sub_group_size::Union{Nothing, Integer} = nothing) where {N} =
+                $construct(dev, $kernel_sizes(sizes...)..., $gpu_name; sub_group_size)
             $(queries...)
         end
     end

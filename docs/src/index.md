@@ -241,6 +241,9 @@ end
   own collectives, such as `@groupreduce`, read the width on the device and need no change, but
   code that sizes anything in a `@kernel` from the host width has to request one. See
   [Upgrading from KernelInterface 0.4](@ref).
+- A kernel can be constructed with a `sub_group_size` keyword, e.g.
+  `my_kernel(backend, 256; sub_group_size = 16)`, to compile it for a sub-group width from
+  `KernelInterface.sub_group_sizes(backend)`. See [Launching kernels](@ref).
 
 ## Semantic differences
 
