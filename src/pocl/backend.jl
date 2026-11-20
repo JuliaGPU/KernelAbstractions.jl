@@ -452,6 +452,11 @@ end
     work_group_barrier(POCL.LOCAL_MEM_FENCE | POCL.GLOBAL_MEM_FENCE)
 end
 
+# `KI.LOCAL_MEM_FENCE` and `KI.GLOBAL_MEM_FENCE` have the bits of OpenCL's flags
+@device_override @inline function KI.barrier(flags::KI.MemFenceFlags)
+    work_group_barrier(flags.bits)
+end
+
 @device_override @inline function KI.sub_group_barrier()
     sub_group_barrier(POCL.LOCAL_MEM_FENCE | POCL.GLOBAL_MEM_FENCE)
 end

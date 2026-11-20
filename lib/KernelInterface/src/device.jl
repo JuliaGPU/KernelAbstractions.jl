@@ -935,6 +935,33 @@ end
 ## synchronization
 
 """
+    MemFenceFlags
+
+The memory that a [`barrier(flags)`](@ref barrier(::MemFenceFlags)) orders:
+[`LOCAL_MEM_FENCE`](@ref), [`GLOBAL_MEM_FENCE`](@ref), or both combined with `|`.
+"""
+struct MemFenceFlags
+    bits::UInt32
+end
+
+"""
+    LOCAL_MEM_FENCE
+
+Makes a [`barrier`](@ref barrier(::MemFenceFlags)) order accesses to local memory (see
+[`localmemory`](@ref)), also called shared or threadgroup memory.
+"""
+const LOCAL_MEM_FENCE = MemFenceFlags(0x00000001)
+
+"""
+    GLOBAL_MEM_FENCE
+
+Makes a [`barrier`](@ref barrier(::MemFenceFlags)) order accesses to global memory.
+"""
+const GLOBAL_MEM_FENCE = MemFenceFlags(0x00000002)
+
+@inline Base.:|(a::MemFenceFlags, b::MemFenceFlags) = MemFenceFlags(a.bits | b.bits)
+
+"""
     barrier()
 
 Wait until all work-items of the work-group have reached the barrier. Afterwards, the
@@ -954,6 +981,33 @@ All work-items of a work-group have to reach the same `barrier()` (not in a dive
 function barrier()
     error("Group barrier used outside kernel or not captured")
 end
+
+"""
+    barrier(flags::MemFenceFlags)
+
+Like [`barrier()`](@ref barrier), but only the memory in `flags` has to be visible to the
+work-group afterwards: the writes to local memory with [`LOCAL_MEM_FENCE`](@ref), and to
+global memory with [`GLOBAL_MEM_FENCE`](@ref). `barrier(LOCAL_MEM_FENCE)` suffices when the
+work-items only communicate through [`localmemory`](@ref), and can be cheaper than
+`barrier()`.
+
+```julia
+tile = KI.localmemory(Float32, 256)
+tile[i] = x
+KI.barrier(KI.LOCAL_MEM_FENCE)
+y = tile[257 - i]
+```
+
+`flags` are a minimum: a backend may order more memory than requested.
+
+!!! note
+    Backends **may** implement:
+    ```
+    @device_override barrier(flags::MemFenceFlags)
+    ```
+    The fallback is [`barrier()`](@ref barrier), which orders both.
+"""
+@inline barrier(flags::MemFenceFlags) = barrier()
 
 """
     sub_group_barrier()

@@ -48,7 +48,7 @@ function coalesced_matmul_kernel!(
         end
 
         # wait for all tiles to be loaded
-        KI.barrier()
+        KI.barrier(KI.LOCAL_MEM_FENCE)
 
         # calculate value of spot in output, use temporary value to allow for vectorization
         out = zero(eltype(output))
@@ -57,7 +57,7 @@ function coalesced_matmul_kernel!(
         end
         outval += out
 
-        KI.barrier()
+        KI.barrier(KI.LOCAL_MEM_FENCE)
     end
 
     # save if inbounds
