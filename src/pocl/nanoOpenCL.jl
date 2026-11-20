@@ -1343,6 +1343,8 @@ mutable struct Kernel
     tuned_work_group_size::Int
     # the throw sites of its code, which the exceptions it reports refer to
     exception_sites::Vector{ExceptionSite}
+    # whether its code allocates from the launch's heap (see `POCL.DeviceHeap`)
+    device_heap::Bool
 
     function Kernel(k::cl_kernel)
         function get(param, T = Csize_t)
@@ -1355,7 +1357,7 @@ mutable struct Kernel
             new(
                 k, ReentrantLock(), HostKernelHandle[], nothing, false, work_group_size,
                 get(CL_KERNEL_PREFERRED_WORK_GROUP_SIZE_MULTIPLE),
-                get(CL_KERNEL_PRIVATE_MEM_SIZE, cl_ulong), work_group_size, ExceptionSite[]
+                get(CL_KERNEL_PRIVATE_MEM_SIZE, cl_ulong), work_group_size, ExceptionSite[], false
             )
         catch
             clReleaseKernel(k)

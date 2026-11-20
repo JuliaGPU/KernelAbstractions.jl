@@ -15,7 +15,7 @@ const OpenCLCompilerJob = CompilerJob{SPIRVCompilerTarget, OpenCLCompilerParams}
 
 Cached compilation results for an OpenCL kernel job, managed by
 `GPUCompiler.cached_results`. Fields are populated through the compile pipeline:
-`obj` (SPIR-V bytes) + `entry` + `device_rng` after codegen, and `kernels` after the
+`obj` (SPIR-V bytes) + `entry` + `device_rng` + `device_heap` after codegen, and `kernels` after the
 session-local link onto an OpenCL context. The first three are session-portable
 (cached through precompilation, except when GPUCompiler marks the job
 session-dependent and wipes its entries before image serialization); `kernels` is
@@ -32,10 +32,11 @@ mutable struct OpenCLResults
     obj::Union{Nothing, Vector{UInt8}}                   # SPIR-V binary
     entry::Union{Nothing, String}
     device_rng::Bool
+    device_heap::Bool
     exception_sites::Vector{GPUCompiler.ExceptionSite}
     kernels::Vector{Tuple{cl.Context, cl.Kernel}}        # session-local; linear-scanned
     OpenCLResults() = new(
-        nothing, nothing, false, GPUCompiler.ExceptionSite[], Tuple{cl.Context, cl.Kernel}[]
+        nothing, nothing, false, false, GPUCompiler.ExceptionSite[], Tuple{cl.Context, cl.Kernel}[]
     )
 end
 
@@ -144,7 +145,72 @@ function GPUCompiler.finish_module!(
     return entry
 end
 
+# Enzyme caches values of loops with dynamic trip counts in memory it allocates with libc's
+# `malloc` and grows with `realloc`, which device code cannot call. allocate from the launch's
+# heap instead (see `malloc`), by calling the runtime's `malloc`: this runs before the runtime
+# is linked, which then provides it. blocks are released with the heap, not by `free`.
+function GPUCompiler.link_libraries!(@nospecialize(job::OpenCLCompilerJob), mod::LLVM.Module)
+    replace_allocator!(job, mod, "malloc", pocl_malloc!)
+    replace_allocator!(job, mod, "realloc", pocl_realloc!)
+    replace_allocator!(job, mod, "free", (job, mod, builder, f) -> ret!(builder))
+    return
+end
+
+# replace the declaration `name` with an internal definition, whose body `body!` emits
+function replace_allocator!(@nospecialize(job::CompilerJob), mod::LLVM.Module, name, body!)
+    decl = get(mod.functions, name, nothing)
+    (decl === nothing || !LLVM.isdeclaration(decl)) && return
+    f = LLVM.Function(mod, "pocl_$name", LLVM.function_type(decl))
+    LLVM.linkage!(f, LLVM.API.LLVMInternalLinkage)
+    push!(f.function_attributes, EnumAttribute("alwaysinline"))
+    @dispose builder = IRBuilder() begin
+        position!(builder, LLVM.at_end(BasicBlock(f, "entry")))
+        body!(job, mod, builder, f)
+    end
+    LLVM.replace_uses!(decl, f)
+    LLVM.erase!(decl)
+    return
+end
+
+# a block of the launch's heap, of the size that is the last parameter of `f`
+function heap_block!(@nospecialize(job::CompilerJob), builder::IRBuilder, f::LLVM.Function)
+    T_ptr = LLVM.return_type(LLVM.function_type(f))
+    block = call!(builder, GPUCompiler.Runtime.get(:malloc), [last(LLVM.parameters(f))]; job)
+    # (pointers are integers on Julia 1.11 and earlier)
+    return LLVM.value_type(block) == T_ptr ? block : inttoptr!(builder, block, T_ptr)
+end
+
+pocl_malloc!(job, mod, builder, f) = ret!(builder, heap_block!(job, builder, f))
+
+# blocks are preceded by their size (see `malloc`)
+function pocl_realloc!(@nospecialize(job::CompilerJob), mod::LLVM.Module, builder::IRBuilder, f::LLVM.Function)
+    old, sz = LLVM.parameters(f)
+    T_int = LLVM.value_type(sz)
+    new = heap_block!(job, builder, f)
+    copy = BasicBlock(f, "copy")
+    done = BasicBlock(f, "done")
+    br!(builder, icmp!(builder, LLVM.API.LLVMIntEQ, old, LLVM.null(LLVM.value_type(old))), done, copy)
+
+    position!(builder, LLVM.at_end(copy))
+    header = gep!(builder, LLVM.Int8Type(), old, [ConstantInt(T_int, -heap_alignment)])
+    old_sz = load!(builder, T_int, header)
+    len = select!(builder, icmp!(builder, LLVM.API.LLVMIntULT, old_sz, sz), old_sz, sz)
+    memcpy!(builder, new, heap_alignment, old, heap_alignment, len)
+    br!(builder, done)
+
+    position!(builder, LLVM.at_end(done))
+    ret!(builder, new)
+    return
+end
+
 function GPUCompiler.finish_linked_module!(@nospecialize(job::OpenCLCompilerJob), mod::LLVM.Module)
+    # note the use of the heap (see `malloc`), which the runtime is linked for
+    if haskey(mod.functions, GPUCompiler.Runtime.get(:malloc).llvm_name) && job.config.kernel
+        for f in GPUCompiler.kernels(mod)
+            push!(f.function_attributes, StringAttribute("julia.opencl.heap", ""))
+        end
+    end
+
     for f in GPUCompiler.kernels(mod)
         kernel_intrinsics = Dict(
             "julia.opencl.random_keys" => (; name = "random_keys", typ = LLVMPtr{UInt32, AS.Workgroup}),
@@ -287,7 +353,7 @@ const initialization_world = Ref{UInt}(typemax(UInt))
 invoke_frozen(f, args...) = Base.invoke_in_world(initialization_world[], f, args...)
 
 # run inference + LLVM codegen + SPIR-V emission. returns `(obj, entry, device_rng,
-# exception_sites)`,
+# device_heap, exception_sites)`,
 # all session-portable so they survive precompilation when stored on a cached `CodeInstance`.
 const compilations = Threads.Atomic{Int}(0)
 function compile_to_obj(@nospecialize(job::CompilerJob))
@@ -300,7 +366,8 @@ function compile_to_obj(@nospecialize(job::CompilerJob))
         @dispose ir = meta.ir begin
             entry = meta.entry.name
             device_rng = haskey(meta.entry.function_attributes, "julia.opencl.rng")
-            (; obj, entry, device_rng, meta.exception_sites)
+            device_heap = haskey(meta.entry.function_attributes, "julia.opencl.heap")
+            (; obj, entry, device_rng, device_heap, meta.exception_sites)
         end
     end
 end
@@ -308,7 +375,7 @@ end
 # link the SPIR-V bytes into a session-local `cl.Kernel` on the active context.
 function link_kernel(
         @nospecialize(job::CompilerJob), obj::Vector{UInt8}, entry::String,
-        exception_sites::Vector{GPUCompiler.ExceptionSite}
+        exception_sites::Vector{GPUCompiler.ExceptionSite}, device_heap::Bool
     )
     prog = if "cl_khr_il_program" in device().extensions
         cl.Program(obj, context())
@@ -321,5 +388,6 @@ function link_kernel(
     # the ndrange can only shrink them further
     kernel.tuned_work_group_size = min(kernel.work_group_size, host_kernel_max_items(kernel))
     kernel.exception_sites = exception_sites
+    kernel.device_heap = device_heap
     return kernel
 end

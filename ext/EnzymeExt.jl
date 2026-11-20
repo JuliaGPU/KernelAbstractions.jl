@@ -65,6 +65,20 @@ EnzymeRules.inactive(::Type{StaticSize}, x...) = nothing
         prod(ndrange)
 end
 
+# Enzyme caches the values of loops with dynamic trip counts in memory it allocates in device
+# code, which the tape points to. POCL kernels allocate from a heap of the launch (see
+# `POCL.DeviceHeap`), which has to outlive the reverse pass that reads the caches: allocate
+# one per augmented forward launch, sized for `nthreads`, and keep it in the tape. a tape
+# without pointers has no caches, and needs none.
+_tape_heap(::Backend, TapeType, nthreads) = nothing
+_tape_heap(::POCLBackend, TapeType, nthreads) =
+    _has_pointers(TapeType) ? POCL.DeviceHeap(POCL.enzyme_heap_size_per_item[] * nthreads) : nothing
+
+_has_pointers(T::Type) = T <: Union{Ptr, Core.LLVMPtr} || any(_has_pointers, fieldtypes(T))
+
+_with_tape_heap(f, ::Nothing) = f()
+_with_tape_heap(f, heap::POCL.DeviceHeap) = POCL.with_device_heap(f, heap)
+
 include("EnzymeCore08Ext.jl")
 
 # Synchronize rules
