@@ -170,6 +170,34 @@ function test_subgroup_kernel(results)
     return
 end
 
+# Checks the sub-groups of a work-group of shape `dims`, for a kernel of sub-group width
+# `sg_size`. Which work-items form a sub-group, and how many sub-groups there are, is
+# unspecified.
+function check_subgroups(backend, data, dims, sg_size)
+    items = prod(dims)
+    @test all(d -> d.max_sub_group_size == sg_size, data)
+    # all work-items agree on the number of sub-groups, which is at least what full
+    # sub-groups would need
+    n = first(data).num_sub_groups
+    @test all(d -> d.num_sub_groups == n, data)
+    @test cld(items, sg_size) <= n <= items
+    # the sub-group ids are 1:n
+    @test sort(unique(map(d -> d.sub_group_id, data))) == 1:n
+    # every sub-group has as many members as its size says, and they are its lanes
+    for id in 1:n
+        members = filter(d -> d.sub_group_id == id, data)
+        size = length(members)
+        @test 1 <= size <= sg_size
+        @test all(d -> d.sub_group_size == size, members)
+        @test sort(map(d -> d.sub_group_local_id, members)) == 1:size
+    end
+    # with the linear layout, a 1-D work-group that fits a sub-group is one
+    if KI.supports_linear_subgroups(backend) && length(dims) == 1 && items <= sg_size
+        @test n == 1
+    end
+    return
+end
+
 # Combine a value per sub-group through local memory, as reductions do: the first lane of
 # every sub-group stores its size, and the first work-item adds up `get_num_sub_groups()`
 # of them. `N` is the work-group size, which bounds the number of sub-groups.
@@ -211,30 +239,37 @@ function subgroup_typecheck_kernel(results, val::T) where {T}
     return
 end
 
-# the sub-group and lane of every work-item, by its linear index (x fastest)
-function sub_group_layout_kernel(out)
-    l = KI.get_local_id()
-    sz = KI.get_local_size()
-    lin = l.x + (l.y - 1) * sz.x + (l.z - 1) * sz.x * sz.y
-    @inbounds begin
-        out[1, lin] = KI.get_sub_group_id()
-        out[2, lin] = KI.get_sub_group_local_id()
-        out[3, lin] = KI.get_sub_group_size()
+# Compile `f(args...)` for `backend` with the sub-group width `W`, or without requesting a
+# width if `W === nothing`.
+function sub_group_kernel(backend, W, f, args...)
+    return if W === nothing
+        KI.@launch backend launch = false f(args...)
+    else
+        KI.@launch backend launch = false sub_group_size = W f(args...)
     end
-    return
 end
 
-# The tests of the communication functions below don't assume which work-items form a
-# sub-group (unless they are about `supports_linear_subgroups`): the kernels run in 1-D
-# work-groups, every work-item records its sub-group, lane and sub-group size at its local
-# index, and the expected results are computed on the host for the sub-groups that formed.
+# The tests of the sub-group functions below don't assume which work-items form a sub-group
+# (unless they are about `supports_linear_subgroups`), nor the width of kernels that don't
+# request one: every work-item records its sub-group, lane, sub-group size and width at its
+# local index, and the expected results are computed on the host for the sub-groups that
+# formed, at the width the kernel reported.
 
 @inline function record_sub_group!(ids, i)
     @inbounds begin
         ids[1, i] = KI.get_sub_group_id()
         ids[2, i] = KI.get_sub_group_local_id()
         ids[3, i] = KI.get_sub_group_size()
+        ids[4, i] = KI.get_max_sub_group_size()
     end
+    return
+end
+
+# the sub-group ids of every work-item, by its linear index (x fastest)
+function sub_group_layout_kernel(ids)
+    l = KI.get_local_id()
+    sz = KI.get_local_size()
+    record_sub_group!(ids, l.x + (l.y - 1) * sz.x + (l.z - 1) * sz.x * sz.y)
     return
 end
 
@@ -246,8 +281,17 @@ function sub_group_apply_kernel(ids, out, a, f)
     return
 end
 
+# the width all work-items of a launch reported, from the ids `record_sub_group!` wrote
+function observed_width(ids)
+    W = ids[4, 1]
+    @test all(==(W), ids[4, :])
+    return W
+end
+
 # the work-items of every sub-group by lane, from the ids `record_sub_group!` wrote
 function observed_sub_groups(ids)
+    W = observed_width(ids)
+    @test all(s -> 1 <= s <= W, ids[3, :])
     groups = [Int[] for _ in 1:maximum(ids[1, :])]
     for i in axes(ids, 2)
         push!(groups[ids[1, i]], i)
@@ -261,18 +305,21 @@ function observed_sub_groups(ids)
 end
 
 # Run `f` on the values `a` in a 1-D work-group of `length(a)` work-items, with results of
-# type `T`. Returns the results by local index and the work-items of each sub-group, or
+# type `T`, compiled for the sub-group width `W` (see `sub_group_kernel`). Returns the results
+# by local index, the work-items of each sub-group and the width the kernel reported, or
 # `nothing` if the work-group is too large for the kernel.
-function sub_group_apply(backend, AT, f, a, T = eltype(a))
+function sub_group_apply(backend, AT, W, f, a, T = eltype(a))
     n = length(a)
-    ids = AT(zeros(Int, 3, n))
+    ids = AT(zeros(Int, 4, n))
     out = AT(Vector{T}(undef, n))
     dev_a = AT(a)
-    kernel = KI.@launch backend launch = false sub_group_apply_kernel(ids, out, dev_a, f)
+    kernel = sub_group_kernel(backend, W, sub_group_apply_kernel, ids, out, dev_a, f)
     n <= KI.max_work_group_size(kernel) || return nothing
     kernel(ids, out, dev_a, f; workgroupsize = n)
     KI.synchronize(backend)
-    return Array(out), observed_sub_groups(Array(ids))
+    ids = Array(ids)
+    W === nothing || @test observed_width(ids) == W
+    return Array(out), observed_sub_groups(ids), observed_width(ids)
 end
 
 # work-group sizes that form full and partial sub-groups, several of them, and a single
@@ -331,10 +378,10 @@ end
 shuffle_source(r::Rotate, l, size, W) = mod1(l + r.shift, size)
 shuffle_source(s::AsType, l, size, W) = shuffle_source(s.f, l, size, W)
 
-function shuffle_testsuite(backend, AT, sg_size, f, a)
-    res = sub_group_apply(backend, AT, f, a)
+function shuffle_testsuite(backend, AT, W, f, a)
+    res = sub_group_apply(backend, AT, W, f, a)
     res === nothing && return
-    out, groups = res
+    out, groups, sg_size = res
     ok = true
     for g in groups, (l, i) in enumerate(g)
         src = shuffle_source(f, l, length(g), sg_size)
@@ -455,10 +502,10 @@ end
 collective_op(f) = f.op
 reassociable(f, ::Type{T}) where {T} = T <: AbstractFloat && collective_op(f) in (+, *)
 
-function collective_testsuite(backend, AT, f, a)
-    res = sub_group_apply(backend, AT, f, a)
+function collective_testsuite(backend, AT, W, f, a)
+    res = sub_group_apply(backend, AT, W, f, a)
     res === nothing && return
-    out, groups = res
+    out, groups, _ = res
     T = eltype(a)
     ok = true
     for g in groups
@@ -477,17 +524,21 @@ function collective_testsuite(backend, AT, f, a)
     return
 end
 
-function vote_testsuite(backend, AT, sg_size, pred)
-    for (vote, T) in ((KI.sub_group_any, Bool), (KI.sub_group_all, Bool), (KI.sub_group_ballot, UInt64))
-        vote === KI.sub_group_ballot && sg_size > 64 && continue
-        res = sub_group_apply(backend, AT, vote, pred, T)
+# `sub_group_ballot` for kernels without a requested width, which may be wider than 64
+narrow_ballot(p) = KI.get_max_sub_group_size() <= 64 ? KI.sub_group_ballot(p) : typemax(UInt64)
+
+function vote_testsuite(backend, AT, W, pred)
+    ballot = W === nothing ? narrow_ballot : KI.sub_group_ballot
+    for (vote, T) in ((KI.sub_group_any, Bool), (KI.sub_group_all, Bool), (ballot, UInt64))
+        res = sub_group_apply(backend, AT, W, vote, pred, T)
         res === nothing && continue
-        out, groups = res
+        out, groups, sg_size = res
         ok = true
         for g in groups
             p = pred[g]
             expected = vote === KI.sub_group_any ? any(p) :
                 vote === KI.sub_group_all ? all(p) :
+                sg_size > 64 ? typemax(UInt64) :
                 reduce(|, (UInt64(1) << (l - 1) for l in eachindex(p) if p[l]); init = UInt64(0))
             ok &= all(i -> out[i] == expected, g)
         end
@@ -505,11 +556,9 @@ end
 
 function width_vote_testsuite(backend, AT, sg_size, pred)
     for w in segment_widths(sg_size), (vote, T) in ((KI.sub_group_any, Bool), (KI.sub_group_all, Bool), (KI.sub_group_ballot, UInt64))
-        # the votes within segments narrower than the sub-group use its ballot
-        (vote === KI.sub_group_ballot || w < sg_size) && sg_size > 64 && continue
-        res = sub_group_apply(backend, AT, WidthVote(vote, w), pred, T)
+        res = sub_group_apply(backend, AT, sg_size, WidthVote(vote, w), pred, T)
         res === nothing && continue
-        out, groups = res
+        out, groups, _ = res
         ok = true
         for g in groups, (l, i) in enumerate(g)
             ok &= out[i] == vote_result(vote, pred[g[segment_lanes(l, w, length(g))]])
@@ -531,14 +580,14 @@ function reduce_divergent_kernel(ids, red, scan, a, m)
     return
 end
 
-function reduce_divergent_testsuite(backend, AT, sg_size, ::Type{T}) where {T}
-    n = sg_size
-    m = max(n - 5, 1)
+# `n` work-items, of which the first `m` have a value, in a kernel of sub-group width `W`
+function reduce_divergent_testsuite(backend, AT, W, ::Type{T}, n, m = max(n - 5, 1)) where {T}
     a = T.(rand(1:20, n))
-    ids = AT(zeros(Int, 3, n))
+    ids = AT(zeros(Int, 4, n))
     red = AT(zeros(T, n))
     scan = AT(zeros(T, n))
-    KI.@launch backend workgroupsize = n reduce_divergent_kernel(ids, red, scan, AT(a), m)
+    kernel = sub_group_kernel(backend, W, reduce_divergent_kernel, ids, red, scan, AT(a), m)
+    kernel(ids, red, scan, AT(a), m; workgroupsize = n)
     KI.synchronize(backend)
     red, scan = Array(red), Array(scan)
     vals = [i <= m ? a[i] : zero(T) for i in 1:n]
@@ -574,8 +623,8 @@ end
 function independent_sub_groups_testsuite(backend, AT, sg_size)
     n = 4 * sg_size
     a = Int32.(rand(1:2000, n))
-    ids, out = AT(zeros(Int, 3, n)), AT(zeros(Int32, n))
-    kernel = KI.@launch backend launch = false independent_sub_groups_kernel(ids, out, AT(a))
+    ids, out = AT(zeros(Int, 4, n)), AT(zeros(Int32, n))
+    kernel = sub_group_kernel(backend, sg_size, independent_sub_groups_kernel, ids, out, AT(a))
     n = min(n, KI.max_work_group_size(kernel))
     kernel(ids, out, AT(a); workgroupsize = n)
     KI.synchronize(backend)
@@ -692,8 +741,8 @@ function partitioned_subgroups_testsuite(backend, AT, sg_size)
         w < sg_size || continue
         n = 4 * sg_size
         a = Int32[rand(Bool) ? rand(501:2000) : rand(1:2000) for _ in 1:n]
-        ids, out = AT(zeros(Int, 3, n)), AT(zeros(Int32, 6, n))
-        kernel = KI.@launch backend launch = false partitioned_subgroups_kernel(ids, out, AT(a), w, Val(n))
+        ids, out = AT(zeros(Int, 4, n)), AT(zeros(Int32, 6, n))
+        kernel = sub_group_kernel(backend, sg_size, partitioned_subgroups_kernel, ids, out, AT(a), w, Val(n))
         m = min(n, fld(KI.max_work_group_size(kernel), sg_size) * sg_size)
         kernel(ids, out, AT(a), w, Val(n); workgroupsize = m)
         KI.synchronize(backend)
@@ -716,7 +765,7 @@ function partitioned_subgroups_testsuite(backend, AT, sg_size)
 
         groups = 64
         errors, scratch = AT(fill(Int32(-1), n * groups)), AT(zeros(Int32, n * groups))
-        kernel = KI.@launch backend launch = false segment_exchange_kernel(errors, scratch, w, Val(n))
+        kernel = sub_group_kernel(backend, sg_size, segment_exchange_kernel, errors, scratch, w, Val(n))
         m = min(n, fld(KI.max_work_group_size(kernel), sg_size) * sg_size)
         for _ in 1:10
             kernel(errors, scratch, w, Val(n); workgroupsize = m, numgroups = groups)
@@ -755,47 +804,253 @@ function captured_array_kernel(backend, AT, out)
     return kernel, WeakRef(a)
 end
 
+# Checks that the sub-groups of a work-group of shape `dims` are formed from consecutive
+# work-items, x fastest, at the width the kernel reported.
+function check_linear_layout(ids, dims)
+    n = prod(dims)
+    W = observed_width(ids)
+    @test ids[1, :] == [(lin - 1) ÷ W + 1 for lin in 1:n]
+    @test ids[2, :] == [(lin - 1) % W + 1 for lin in 1:n]
+    @test ids[3, :] == [min(W, n - (lin - 1) ÷ W * W) for lin in 1:n]
+    return
+end
+
 # 1-D work-groups and ones whose x extent is a multiple of the sub-group width form
-# sub-groups from consecutive work-items, x fastest
-function sub_group_layout_testsuite(backend, AT, sg_size, fits)
+# sub-groups from consecutive work-items, x fastest. `W` is the requested width; without
+# one, only 1-D work-groups are checked, as the host doesn't know the width.
+function sub_group_layout_testsuite(backend, AT, W, fits)
     # including one with a partial last sub-group past 256 work-items, which catches 8-bit
     # arithmetic in the index computations
-    shapes = (
-        (sg_size + 5,), (3 * sg_size,), (9 * sg_size + 5,),
-        (sg_size, 4), (2 * sg_size, 2), (sg_size, 2, 2),
-    )
+    shapes = if W === nothing
+        ((5,), (33,), (64,), (100,), (300,))
+    else
+        ((W + 5,), (3 * W,), (9 * W + 5,), (W, 4), (2 * W, 2), (W, 2, 2))
+    end
     for dims in shapes
-        n = prod(dims)
-        out = AT(zeros(Int, 3, n))
-        kernel = KI.@launch backend launch = false sub_group_layout_kernel(out)
+        ids = AT(zeros(Int, 4, prod(dims)))
+        kernel = sub_group_kernel(backend, W, sub_group_layout_kernel, ids)
         if !fits(kernel, dims)
             @test_skip "work-groups of $dims work-items"
             continue
         end
-        kernel(out; workgroupsize = dims)
+        kernel(ids; workgroupsize = dims)
         KI.synchronize(backend)
-        out = Array(out)
+        ids = Array(ids)
         @testset "$dims" begin
-            @test out[1, :] == [(lin - 1) ÷ sg_size + 1 for lin in 1:n]
-            @test out[2, :] == [(lin - 1) % sg_size + 1 for lin in 1:n]
-            @test out[3, :] == [min(sg_size, n - (lin - 1) ÷ sg_size * sg_size) for lin in 1:n]
+            W === nothing || @test observed_width(ids) == W
+            check_linear_layout(ids, dims)
         end
     end
     return
 end
 
-# The sub-group communication functions. A separate function, so that `interface_testsuite`
-# doesn't get too large to compile.
-function subgroup_communication_testsuite(backend::KI.Backend, AT, sg_size)
+# work-group shapes to check for a kernel of sub-group width `W`: 1-D ones around the width,
+# and multi-dimensional ones whose first dimension is or isn't a multiple of the width
+function subgroup_shapes(W)
+    shapes = unique(
+        [
+            (W - 1,), (W,), (W + 1,), (2 * W,), (2 * W + 1,),
+            (33, 2), (W, 2), (W + 1, 2), (7, 5), (5, 3, 2), (W, 2, 2),
+        ]
+    )
+    return filter(dims -> all(>(0), dims), shapes)
+end
+
+# the same, for kernels whose width the host doesn't know
+const unrequested_subgroup_shapes = [
+    (1,), (7,), (16,), (32,), (33,), (64,), (65,), (100,), (257,),
+    (33, 2), (16, 4), (7, 5), (5, 3, 2),
+]
+
+# Launches `test_subgroup_kernel` with work-groups of shape `dims`, compiled for the
+# sub-group width `W` (see `sub_group_kernel`; with `explicit`, `W` is passed as the keyword
+# even if it is `nothing`), and returns the data of every work-group, or
+# `nothing` if the kernel can't be launched with that shape.
+function subgroup_data(backend, AT, W, dims, fits; numgroups = 2, explicit = false)
+    items = prod(dims)
+    results = AT(Vector{SubgroupData}(undef, items * numgroups))
+    kernel = if explicit
+        KI.@launch backend launch = false sub_group_size = W test_subgroup_kernel(results)
+    else
+        sub_group_kernel(backend, W, test_subgroup_kernel, results)
+    end
+    fits(kernel, dims) || return nothing
+    kernel(results; workgroupsize = dims, numgroups)
+    KI.synchronize(backend)
+    return [collect(group) for group in Iterators.partition(Array(results), items)]
+end
+
+function subgroup_typecheck_testsuite(backend, AT, W, fits)
+    types = filter(T -> KI.supports_shuffle(backend, T), [Int32, Float32, Int64, UInt32])
+    isempty(types) && return
+    results = KI.zeros(backend, Bool, 11)
+    val = one(first(types))
+    kernel = sub_group_kernel(backend, W, subgroup_typecheck_kernel, results, val)
+    n = something(W, 32)
+    if fits(kernel, (n,))
+        kernel(results, val; workgroupsize = n)
+        KI.synchronize(backend)
+        @test all(Array(results))
+    else
+        @test_skip "work-groups of $n work-items"
+    end
+    return
+end
+
+# The sub-group queries and layout of kernels compiled with the sub-group width `W`.
+function requested_subgroup_testsuite(backend, AT, W, fits)
+    @testset "Sub-group layout" begin
+        if KI.supports_linear_subgroups(backend)
+            sub_group_layout_testsuite(backend, AT, W, fits)
+        end
+    end
+
+    @testset "Sub-group return types" begin
+        subgroup_typecheck_testsuite(backend, AT, W, fits)
+    end
+
+    @testset "Sub-group formation" begin
+        @testset "$dims" for dims in subgroup_shapes(W)
+            groups = subgroup_data(backend, AT, W, dims, fits)
+            if groups === nothing
+                @test_skip "work-groups of $dims work-items"
+                continue
+            end
+            for data in groups
+                check_subgroups(backend, data, dims, W)
+                # the requested width is used, not just bounded: with the linear layout,
+                # which covers these shapes, rows of at least `W` work-items form a full
+                # sub-group
+                KI.supports_linear_subgroups(backend) && dims[1] >= W &&
+                    (length(dims) == 1 || dims[1] % W == 0) &&
+                    @test any(d -> d.sub_group_size == W, data)
+            end
+        end
+    end
+
+    # a collective over a full and a partial sub-group, at widths whose communication
+    # functions aren't all tested
+    if KI.supports_shuffle(backend, UInt32)
+        @testset "sub_group_reduce" begin
+            a = Int32.(rand(1:100, W + 1))
+            res = sub_group_apply(backend, AT, W, Reduce(+), a)
+            if res === nothing
+                @test_skip "work-groups of $(W + 1) work-items"
+            else
+                out, groups, _ = res
+                KI.supports_linear_subgroups(backend) && @test maximum(length, groups) == W
+                @test all(g -> out[g] == fill(sum(a[g]), length(g)), groups)
+            end
+        end
+    end
+    return
+end
+
+# `shfl_xor` with the largest mask the width allows, computed on the device
+struct XorTop end
+function (::XorTop)(x)
+    W = KI.get_max_sub_group_size()
+    return KI.shfl_xor(x, ispow2(W) ? W - 1 : 0)
+end
+shuffle_source(::XorTop, l, size, W) = in_sub_group(((l - 1) ⊻ (ispow2(W) ? W - 1 : 0)) + 1, size)
+
+# Kernels compiled without a requested width run at a width the backend chooses for each
+# launch, which the host doesn't know: these check the sub-groups, and some of the
+# communication functions, against the width each launch reports.
+function unrequested_subgroup_testsuite(backend, AT, fits)
+    @testset "Sub-group formation$(explicit ? ", with sub_group_size = nothing" : "")" for explicit in (false, true)
+        @testset "$dims" for dims in unrequested_subgroup_shapes
+            groups = subgroup_data(backend, AT, nothing, dims, fits; explicit)
+            if groups === nothing
+                @test_skip "work-groups of $dims work-items"
+                continue
+            end
+            # all work-items of the launch agree on the width
+            W = first(first(groups)).max_sub_group_size
+            @test W >= 1
+            @test all(data -> all(d -> d.max_sub_group_size == W, data), groups)
+            for data in groups
+                check_subgroups(backend, data, dims, W)
+            end
+        end
+    end
+
+    @testset "Sub-group layout" begin
+        if KI.supports_linear_subgroups(backend)
+            sub_group_layout_testsuite(backend, AT, nothing, fits)
+        end
+    end
+
+    @testset "Sub-group return types" begin
+        subgroup_typecheck_testsuite(backend, AT, nothing, fits)
+    end
+
+    @testset "Combining a value per sub-group" begin
+        numgroups = 3
+        @testset "$dims" for dims in unrequested_subgroup_shapes
+            out = KI.zeros(backend, Int32, numgroups)
+            kernel = KI.@launch backend launch = false subgroup_combine_kernel(out, Val(prod(dims)))
+            if fits(kernel, dims)
+                kernel(out, Val(prod(dims)); workgroupsize = dims, numgroups)
+                KI.synchronize(backend)
+                @test all(==(prod(dims)), Array(out))
+            else
+                @test_skip "work-groups of $dims work-items"
+            end
+        end
+    end
+
+    sizes = (1, 7, 33, 100)
+    @testset "votes" begin
+        @testset "$n work-items" for n in sizes
+            for pred in (falses(n), trues(n), [i % 3 == 1 for i in 1:n], rand(Bool, n))
+                vote_testsuite(backend, AT, nothing, collect(pred))
+            end
+        end
+    end
+
+    KI.supports_shuffle(backend, UInt32) || return
+
+    @testset "shuffles" begin
+        @testset "$n work-items" for n in sizes
+            a = Int32.(1:n) .* Int32(10)
+            for f in Any[Rotate(1), Shuffle(KI.shfl, 1), Shuffle(KI.shfl_down, 1), Shuffle(KI.shfl_up, 1), XorTop()]
+                shuffle_testsuite(backend, AT, nothing, f, a)
+            end
+        end
+    end
+
+    @testset "sub_group_reduce and scans" begin
+        @testset "$n work-items" for n in sizes
+            affine = [(Int32(rand((-1, 1, 2))), Int32(rand(-5:5))) for _ in 1:n]
+            for (op, a) in Any[(+, Int32.(rand(1:100, n))), (max, Float32.(rand(1:100, n))), (compose_affine, affine)]
+                KI.supports_shuffle(backend, eltype(a)) || continue
+                collective_testsuite(backend, AT, nothing, Reduce(op), a)
+                collective_testsuite(backend, AT, nothing, Scan(op), a)
+            end
+            collective_testsuite(backend, AT, nothing, ExclusiveScan(+, Int32(7)), Int32.(rand(1:100, n)))
+        end
+        @testset "of divergent values, $n work-items" for n in (33, 100)
+            reduce_divergent_testsuite(backend, AT, nothing, Int32, n)
+        end
+    end
+    return
+end
+
+# The sub-group communication functions, for kernels compiled with the sub-group width
+# `sg_size`. A separate function, so that `interface_testsuite` doesn't get too large to
+# compile.
+function subgroup_communication_testsuite(backend::KI.Backend, AT, sg_size::Int)
     sizes = sub_group_test_sizes(sg_size)
     fp64 = KI.supports_float64(backend)
 
     @testset "sub_group_barrier" begin
         n = sg_size
-        ids = AT(zeros(Int, 3, n))
+        ids = AT(zeros(Int, 4, n))
         scratch = AT(zeros(Int32, n * sg_size))
         out = AT(zeros(Int32, n, 2))
-        KI.@launch backend workgroupsize = n sub_group_barrier_kernel(ids, scratch, out, Val(n * sg_size))
+        kernel = sub_group_kernel(backend, sg_size, sub_group_barrier_kernel, ids, scratch, out, Val(n * sg_size))
+        kernel(ids, scratch, out, Val(n * sg_size); workgroupsize = n)
         KI.synchronize(backend)
         out = Array(out)
         for g in observed_sub_groups(Array(ids)), (l, i) in enumerate(g)
@@ -804,10 +1059,11 @@ function subgroup_communication_testsuite(backend::KI.Backend, AT, sg_size)
         end
 
         @testset "with a width of $w" for w in segment_widths(sg_size)
-            ids = AT(zeros(Int, 3, n))
+            ids = AT(zeros(Int, 4, n))
             scratch = AT(zeros(Int32, n * sg_size))
             out = AT(zeros(Int32, n, 2))
-            KI.@launch backend workgroupsize = n segment_barrier_kernel(ids, scratch, out, w, Val(n * sg_size))
+            kernel = sub_group_kernel(backend, sg_size, segment_barrier_kernel, ids, scratch, out, w, Val(n * sg_size))
+            kernel(ids, scratch, out, w, Val(n * sg_size); workgroupsize = n)
             KI.synchronize(backend)
             out = Array(out)
             for g in observed_sub_groups(Array(ids)), (l, i) in enumerate(g)
@@ -920,22 +1176,22 @@ function subgroup_communication_testsuite(backend::KI.Backend, AT, sg_size)
             end
             for (op, a) in ops
                 KI.supports_shuffle(backend, eltype(a)) || continue
-                collective_testsuite(backend, AT, Reduce(op), a)
-                collective_testsuite(backend, AT, Scan(op), a)
+                collective_testsuite(backend, AT, sg_size, Reduce(op), a)
+                collective_testsuite(backend, AT, sg_size, Scan(op), a)
             end
 
             # exclusive scans with an `init` that isn't the identity
-            collective_testsuite(backend, AT, ExclusiveScan(+, Int32(7)), Int32.(rand(1:100, n)))
-            collective_testsuite(backend, AT, ExclusiveScan(+, UInt64(7)), UInt64.(rand(1:100, n)))
-            collective_testsuite(backend, AT, ExclusiveScan(max, Int32(50)), Int32.(rand(1:100, n)))
-            collective_testsuite(backend, AT, ExclusiveScan(+, 7.0f0), Float32.(rand(1:100, n)))
+            collective_testsuite(backend, AT, sg_size, ExclusiveScan(+, Int32(7)), Int32.(rand(1:100, n)))
+            collective_testsuite(backend, AT, sg_size, ExclusiveScan(+, UInt64(7)), UInt64.(rand(1:100, n)))
+            collective_testsuite(backend, AT, sg_size, ExclusiveScan(max, Int32(50)), Int32.(rand(1:100, n)))
+            collective_testsuite(backend, AT, sg_size, ExclusiveScan(+, 7.0f0), Float32.(rand(1:100, n)))
             collective_testsuite(
-                backend, AT, ExclusiveScan(compose_affine, (Int32(2), Int32(3))),
+                backend, AT, sg_size, ExclusiveScan(compose_affine, (Int32(2), Int32(3))),
                 [(Int32(rand((-1, 1, 2))), Int32(rand(-5:5))) for _ in 1:n]
             )
             # lane 1 gets `init` itself, not `init + 0.0`
-            collective_testsuite(backend, AT, ExclusiveScan(+, -0.0f0), Float32.(rand(1:100, n)))
-            collective_testsuite(backend, AT, ExclusiveScan(+, -0.0f0), fill(-0.0f0, n))
+            collective_testsuite(backend, AT, sg_size, ExclusiveScan(+, -0.0f0), Float32.(rand(1:100, n)))
+            collective_testsuite(backend, AT, sg_size, ExclusiveScan(+, -0.0f0), fill(-0.0f0, n))
         end
 
         @testset "with a width, $n work-items" for n in sizes
@@ -946,12 +1202,12 @@ function subgroup_communication_testsuite(backend::KI.Backend, AT, sg_size)
                     (compose_affine, [(Int32(rand((-1, 1, 2))), Int32(rand(-5:5))) for _ in 1:n]),
                 ]
                 for (op, a) in ops
-                    collective_testsuite(backend, AT, WidthReduce(op, w), a)
-                    collective_testsuite(backend, AT, WidthScan(op, w), a)
+                    collective_testsuite(backend, AT, sg_size, WidthReduce(op, w), a)
+                    collective_testsuite(backend, AT, sg_size, WidthScan(op, w), a)
                 end
-                collective_testsuite(backend, AT, WidthExclusiveScan(+, Int32(7), w), Int32.(rand(1:100, n)))
+                collective_testsuite(backend, AT, sg_size, WidthExclusiveScan(+, Int32(7), w), Int32.(rand(1:100, n)))
                 collective_testsuite(
-                    backend, AT, WidthExclusiveScan(compose_affine, (Int32(2), Int32(3)), w),
+                    backend, AT, sg_size, WidthExclusiveScan(compose_affine, (Int32(2), Int32(3)), w),
                     [(Int32(rand((-1, 1, 2))), Int32(rand(-5:5))) for _ in 1:n]
                 )
             end
@@ -959,8 +1215,8 @@ function subgroup_communication_testsuite(backend::KI.Backend, AT, sg_size)
     end
 
     @testset "sub_group_reduce and sub_group_scan of divergent values" begin
-        reduce_divergent_testsuite(backend, AT, sg_size, Int32)
-        reduce_divergent_testsuite(backend, AT, sg_size, Float32)
+        reduce_divergent_testsuite(backend, AT, sg_size, Int32, sg_size)
+        reduce_divergent_testsuite(backend, AT, sg_size, Float32, sg_size)
     end
 
     if KI.supports_independent_subgroups(backend)
@@ -991,6 +1247,13 @@ function interface_testsuite(backend::KI.Backend, AT)
         @test all(==(1), run((6, 1, 1); numgroups = (2,), workgroupsize = (3,)))
         @test all(==(1), run((6, 10, 1); numgroups = (2, 5), workgroupsize = (3, 2)))
         @test all(==(1), run((6, 10, 12); numgroups = (2, 5, 3), workgroupsize = (3, 2, 4)))
+
+        # every backend accepts `sub_group_size = nothing`, as no request
+        arr = KI.zeros(backend, Int32, (6, 1, 1))
+        kernel = KI.@launch backend launch = false sub_group_size = nothing launch_kernel(arr)
+        kernel(arr; numgroups = 3, workgroupsize = 2)
+        KI.synchronize(backend)
+        @test all(==(1), Array(arr))
 
         # `ndrange` rounds up to whole groups, and doesn't mask the padding
         @test all(==(1), run((7, 5, 3); ndrange = (7, 5, 3), workgroupsize = (2, 3, 2)))
@@ -1326,106 +1589,39 @@ function interface_testsuite(backend::KI.Backend, AT)
     end
 
     if KI.supports_subgroups(backend)
-        sg_size = KI.sub_group_size(backend)
         max_dims = KI.max_work_group_dims(backend)
         # whether `kernel` can be launched with work-groups of size `dims`
         fits(kernel, dims) = all(dims .<= max_dims[1:length(dims)]) && prod(dims) <= KI.max_work_group_size(kernel)
 
-        @testset "Sub-group layout" begin
-            if KI.supports_linear_subgroups(backend)
-                sub_group_layout_testsuite(backend, AT, sg_size, fits)
+        @testset "Sub-groups without a requested width" begin
+            unrequested_subgroup_testsuite(backend, AT, fits)
+        end
+
+        sizes = KI.sub_group_sizes(backend)
+        @test sizes isa Tuple{Vararg{Int}}
+        @test allunique(sizes) && all(W -> 1 <= W <= 64, sizes)
+        # The communication functions take most of the time, so they are only tested for the
+        # first width, which most kernels use, and for the narrowest and the widest.
+        communication_widths = isempty(sizes) ? () : unique((first(sizes), minimum(sizes), maximum(sizes)))
+        @testset "Sub-group width $W" for W in sizes
+            requested_subgroup_testsuite(backend, AT, W, fits)
+            if W in communication_widths
+                subgroup_communication_testsuite(backend, AT, W)
             end
         end
 
-        @testset "Sub-group return types" begin
-            @test sg_size isa Int && sg_size >= 1
+    else
+        @test KI.sub_group_sizes(backend) == ()
+    end
 
-            types = filter(T -> KI.supports_shuffle(backend, T), [Int32, Float32, Int64, UInt32])
-            if !isempty(types)
-                results = KI.zeros(backend, Bool, 11)
-                val = one(first(types))
-                kernel = KI.@launch backend launch = false subgroup_typecheck_kernel(results, val)
-                if fits(kernel, (sg_size,))
-                    kernel(results, val; workgroupsize = sg_size)
-                    KI.synchronize(backend)
-                    @test all(Array(results))
-                else
-                    @test_skip "work-groups of $sg_size work-items"
-                end
-            end
+    # widths the backend doesn't offer, including any if it offers none
+    @testset "Rejected sub-group widths" begin
+        sizes = KI.sub_group_sizes(backend)
+        tt = KI.argument_types(backend, (AT(zeros(Int, 4)),))
+        for W in (2 * maximum(sizes; init = 32), 3)
+            W in sizes && continue
+            @test_throws ArgumentError KI.kernel_function(backend, launch_kernel, tt; sub_group_size = W)
         end
-
-        # checks the sub-groups of a work-group of shape `dims`. Which work-items form a
-        # sub-group, and how many sub-groups there are, is unspecified.
-        function check_subgroups(data, dims)
-            items = prod(dims)
-            @test all(d -> d.max_sub_group_size == sg_size, data)
-            # all work-items agree on the number of sub-groups, which is at least what full
-            # sub-groups would need
-            n = first(data).num_sub_groups
-            @test all(d -> d.num_sub_groups == n, data)
-            @test cld(items, sg_size) <= n <= items
-            # the sub-group ids are 1:n
-            @test sort(unique(map(d -> d.sub_group_id, data))) == 1:n
-            # every sub-group has as many members as its size says, and they are its lanes
-            for id in 1:n
-                members = filter(d -> d.sub_group_id == id, data)
-                size = length(members)
-                @test 1 <= size <= sg_size
-                @test all(d -> d.sub_group_size == size, members)
-                @test sort(map(d -> d.sub_group_local_id, members)) == 1:size
-            end
-            # with the linear layout, a 1-D work-group that fits a sub-group is one
-            if KI.supports_linear_subgroups(backend) && length(dims) == 1 && items <= sg_size
-                @test n == 1
-            end
-            return
-        end
-
-        # work-group shapes to check: 1-D ones around the width, and multi-dimensional ones
-        # whose first dimension is or isn't a multiple of the width
-        subgroup_shapes = unique(
-            [
-                (sg_size - 1,), (sg_size,), (sg_size + 1,), (2 * sg_size,), (2 * sg_size + 1,),
-                (33, 2), (sg_size, 2), (sg_size + 1, 2), (7, 5), (5, 3, 2), (sg_size, 2, 2),
-            ]
-        )
-        filter!(dims -> all(>(0), dims), subgroup_shapes)
-
-        @testset "Sub-group formation" begin
-            numgroups = 2
-            @testset "$dims" for dims in subgroup_shapes
-                items = prod(dims)
-                results = AT(Vector{SubgroupData}(undef, items * numgroups))
-                kernel = KI.@launch backend launch = false test_subgroup_kernel(results)
-                if fits(kernel, dims)
-                    kernel(results; workgroupsize = dims, numgroups)
-                    KI.synchronize(backend)
-                    for group in Iterators.partition(Array(results), items)
-                        check_subgroups(collect(group), dims)
-                    end
-                else
-                    @test_skip "work-groups of $dims work-items"
-                end
-            end
-        end
-
-        @testset "Combining a value per sub-group" begin
-            numgroups = 3
-            @testset "$dims" for dims in subgroup_shapes
-                out = KI.zeros(backend, Int32, numgroups)
-                kernel = KI.@launch backend launch = false subgroup_combine_kernel(out, Val(prod(dims)))
-                if fits(kernel, dims)
-                    kernel(out, Val(prod(dims)); workgroupsize = dims, numgroups)
-                    KI.synchronize(backend)
-                    @test all(==(prod(dims)), Array(out))
-                else
-                    @test_skip "work-groups of $dims work-items"
-                end
-            end
-        end
-
-        subgroup_communication_testsuite(backend, AT, sg_size)
     end
     return nothing
 end
@@ -1442,10 +1638,7 @@ function contract_testsuite(backend::KI.Backend, AT)
     @test hasmethod(KI.max_work_group_size, Tuple{KI.Kernel{B}})
     @test hasmethod(KI.max_work_group_dims, Tuple{B})
     @test hasmethod(KI.max_num_groups, Tuple{B})
-    if KI.supports_subgroups(backend)
-        @test hasmethod(KI.sub_group_size, Tuple{B})
-        # the device functions are overlays, so they can't be checked here; the sub-group
-        # testsuite runs them
-    end
+    # removed in KernelInterface 0.5; a backend that still implements it hides the error
+    @test_throws ErrorException KI.sub_group_size(backend)
     return
 end

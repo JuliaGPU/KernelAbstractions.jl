@@ -352,7 +352,7 @@ end
 
 include("bfloat16.jl")
 
-# the sub-group width kernels are compiled for is the one `KI.sub_group_size` reports
+# kernels without a requested sub-group width are compiled for the preferred one
 # (PoCL folds `get_max_sub_group_size` to that constant itself, see pocl/pocl#2375)
 function max_sub_group_size_kernel(out)
     out[1] = KernelAbstractions.KernelInterface.get_max_sub_group_size()

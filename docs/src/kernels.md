@@ -272,6 +272,20 @@ kernel = my_kernel(backend, 32, size(A))
 kernel(A)
 ```
 
+Any of these also takes a `sub_group_size` keyword, which compiles the kernel for that
+sub-group width. It has to be one of the widths
+[`KernelInterface.sub_group_sizes(backend)`](@ref KernelInterface.sub_group_sizes) offers,
+and `nothing` (the default) requests none; other widths throw an `ArgumentError` when the
+kernel is compiled. Without a request, the backend chooses the width, possibly per
+launch. KernelAbstractions' collectives work at any width, so a width only needs
+to be requested for performance, e.g. a narrower one on Intel GPUs for a kernel that uses
+many registers, or by code that needs to know it on the host:
+
+```julia
+sizes = KernelInterface.sub_group_sizes(backend)
+kernel = my_kernel(backend, 256; sub_group_size = 16 in sizes ? 16 : nothing)
+```
+
 ### Index ranges
 
 Each entry of `ndrange` is either an extent (indices `1:n`) or a range of indices, so a kernel
