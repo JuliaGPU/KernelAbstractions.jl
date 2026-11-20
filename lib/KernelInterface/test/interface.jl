@@ -1301,7 +1301,7 @@ function interface_testsuite(backend::KI.Backend, AT)
     @testset "Local memory and barriers" begin
         N = 32
         groups = 3
-        local_flags = (nothing, Val(KI.LOCAL_MEM_FENCE), Val(KI.LOCAL_MEM_FENCE | KI.GLOBAL_MEM_FENCE))
+        local_flags = Any[nothing, Val(KI.LOCAL_MEM_FENCE), Val(KI.LOCAL_MEM_FENCE | KI.GLOBAL_MEM_FENCE)]
         @testset "barrier($(something(flags, Val(:default))))" for flags in local_flags
             out = KI.zeros(backend, Int32, N * groups, 4)
             KI.@launch backend numgroups = groups workgroupsize = N localmem_kernel(out, Val(N), flags)
@@ -1315,7 +1315,7 @@ function interface_testsuite(backend::KI.Backend, AT)
             @test out[:, 4] == 3 .* expected
         end
 
-        global_flags = (nothing, Val(KI.GLOBAL_MEM_FENCE), Val(KI.LOCAL_MEM_FENCE | KI.GLOBAL_MEM_FENCE))
+        global_flags = Any[nothing, Val(KI.GLOBAL_MEM_FENCE), Val(KI.LOCAL_MEM_FENCE | KI.GLOBAL_MEM_FENCE)]
         @testset "barrier($(something(flags, Val(:default))))" for flags in global_flags
             scratch = KI.zeros(backend, Int, N * groups)
             out = KI.zeros(backend, Int, N * groups)
