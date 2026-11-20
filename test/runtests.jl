@@ -1923,4 +1923,41 @@ end
 include("extensions/enzyme.jl")
 @testset "Enzyme" begin
     enzyme_testsuite(CPU, Array)
+
+    # the caches of loops with dynamic trip counts come from a heap of the launch, sized per
+    # work-item
+    @testset "device heap" begin
+        x = collect(1.0:4.0)
+        dx = zeros(4)
+        y = zeros(4)
+        dy = ones(4)
+        Enzyme.autodiff(Reverse, sum_squares_caller, Duplicated(y, dy), Duplicated(x, dx), Const(collect(1:4)), Const(CPU()))
+        @test dx ≈ 2 .* (1:4) .* (4:-1:1)
+
+        dx .= 0
+        dy .= 1
+        Enzyme.autodiff(Reverse, doubling_caller, Duplicated(y, dy), Duplicated(x, dx), Const(CPU()))
+        @test dx ≈ ddoubling.(1.0:4.0)
+
+        n = 1000
+        x = rand(n)
+        dx = zeros(n)
+        y = zeros(4)
+        dy = ones(4)
+        size_per_item = POCL.enzyme_heap_size_per_item[]
+        try
+            POCL.enzyme_heap_size_per_item[] = 64
+            @test_throws "device heap is exhausted" Enzyme.autodiff(
+                Reverse, sum_squares_caller, Duplicated(y, dy), Duplicated(x, dx), Const(fill(n, 4)), Const(CPU())
+            )
+
+            POCL.enzyme_heap_size_per_item[] = 16 * n
+            dx .= 0
+            dy .= 1
+            Enzyme.autodiff(Reverse, sum_squares_caller, Duplicated(y, dy), Duplicated(x, dx), Const(fill(n, 4)), Const(CPU()))
+            @test dx ≈ 8 .* x
+        finally
+            POCL.enzyme_heap_size_per_item[] = size_per_item
+        end
+    end
 end

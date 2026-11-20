@@ -47,8 +47,8 @@ end
 @inline checked_context(ctx::CompilerMetadata{NDRange}) where {NDRange} =
     CompilerMetadata{NDRange, DynamicCheck}(ctx.ndrange, ctx.iterspace; ctx.launch, ctx.subgroups)
 
-_augmented_return(::Kernel, subtape, arg_refs, tape_type) =
-    AugmentedReturn{Nothing, Nothing, Any}(nothing, nothing, (subtape, arg_refs, tape_type))
+_augmented_return(::Kernel, subtape, arg_refs, tape_type, heap) =
+    AugmentedReturn{Nothing, Nothing, Any}(nothing, nothing, (subtape, arg_refs, tape_type, heap))
 
 function _create_tape_kernel(
         kernel::Kernel,
@@ -78,10 +78,12 @@ function _create_tape_kernel(
     )
 
     # Allocate per thread
-    subtape = allocate(backend(kernel), TapeType, _ka_nthreads(ndrange, iterspace))
+    nthreads = _ka_nthreads(ndrange, iterspace)
+    subtape = allocate(backend(kernel), TapeType, nthreads)
+    heap = _tape_heap(backend(kernel), TapeType, nthreads)
 
     aug_kernel = similar(kernel, aug_fwd)
-    return TapeType, subtape, aug_kernel
+    return TapeType, subtape, heap, aug_kernel
 end
 
 function aug_fwd(
@@ -184,7 +186,7 @@ function EnzymeRules.augmented_primal(
         end
     end
     Mode = split_mode(config, ModifiedBetween)
-    TapeType, subtape, aug_kernel = _create_tape_kernel(
+    TapeType, subtape, heap, aug_kernel = _create_tape_kernel(
         kernel,
         Mode,
         FT,
@@ -193,12 +195,14 @@ function EnzymeRules.augmented_primal(
         iterspace,
         args2...,
     )
-    aug_kernel(f, Mode, subtape, Val(TapeType), args2...; ndrange, workgroupsize)
+    _with_tape_heap(heap) do
+        aug_kernel(f, Mode, subtape, Val(TapeType), args2...; ndrange, workgroupsize)
+    end
 
     # TODO the fact that ctxTy is type unstable means this is all type unstable.
     # Since custom rules require a fixed return type, explicitly cast to Any, rather
     # than returning a AugmentedReturn{Nothing, Nothing, T} where T.
-    return _augmented_return(kernel, subtape, arg_refs, TapeType)
+    return _augmented_return(kernel, subtape, arg_refs, TapeType, heap)
 end
 
 function EnzymeRules.reverse(
@@ -210,7 +214,7 @@ function EnzymeRules.reverse(
         ndrange = nothing,
         workgroupsize = nothing,
     ) where {N}
-    subtape, arg_refs, tape_type = tape
+    subtape, arg_refs, tape_type, heap = tape
 
     args2 = ntuple(Val(N)) do i
         Base.@_inline_meta
@@ -227,15 +231,17 @@ function EnzymeRules.reverse(
     ModifiedBetween = Val((overwritten(config)[1], false, overwritten(config)[2:end]...))
     Mode = split_mode(config, ModifiedBetween)
     rev_kernel = similar(kernel, rev)
-    rev_kernel(
-        f,
-        Mode,
-        subtape,
-        Val(tape_type),
-        args2...;
-        ndrange,
-        workgroupsize,
-    )
+    _with_tape_heap(heap) do
+        rev_kernel(
+            f,
+            Mode,
+            subtape,
+            Val(tape_type),
+            args2...;
+            ndrange,
+            workgroupsize,
+        )
+    end
     res = ntuple(Val(N)) do i
         Base.@_inline_meta
         if args[i] isa Active

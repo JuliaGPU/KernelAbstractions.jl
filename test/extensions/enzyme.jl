@@ -46,6 +46,54 @@ function scale_typed_caller(A, ::Type{T}, backend) where {T}
     return
 end
 
+# Enzyme caches the values of loops with dynamic trip counts in memory it allocates in the
+# kernel, growing it with `realloc` when the trip count isn't known when the loop starts
+# (JuliaGPU/KernelAbstractions.jl#988). not all back ends can allocate in kernels, so these
+# aren't part of `enzyme_testsuite`.
+@kernel function sum_squares!(y, @Const(x), @Const(n))
+    i = @index(Global, Linear)
+    s = zero(eltype(y))
+    for j in 1:n[i]
+        s += x[j]^2
+    end
+    y[i] = s
+end
+
+function sum_squares_caller(y, x, n, backend)
+    kernel = sum_squares!(backend)
+    kernel(y, x, n, ndrange = size(y))
+    KernelAbstractions.synchronize(backend)
+    return
+end
+
+@kernel function doubling!(y, @Const(x))
+    i = @index(Global, Linear)
+    s = zero(eltype(y))
+    v = x[i]
+    while v < 100
+        s += v * v
+        v = 2v + 1
+    end
+    y[i] = s
+end
+
+function doubling_caller(y, x, backend)
+    kernel = doubling!(backend)
+    kernel(y, x, ndrange = size(y))
+    KernelAbstractions.synchronize(backend)
+    return
+end
+
+# the derivative of `doubling!` for one element
+function ddoubling(x)
+    ds, v, dv = zero(x), x, one(x)
+    while v < 100
+        ds += 2v * dv
+        v, dv = 2v + 1, 2dv
+    end
+    return ds
+end
+
 # `T` is the element type of the arrays, for back ends without `Float64`
 function enzyme_testsuite(backend, ArrayT, supports_reverse = true, T = Float64)
     @testset "kernels" begin

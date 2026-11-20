@@ -50,10 +50,50 @@ end
     return
 end
 
-# these use no device intrinsics, so they can stay host methods. as overlays, inference could
-# constant-fold calls to them by running the host method, which throws.
-malloc(sz) = C_NULL
+## dynamic memory
 
+# the memory that device code allocates from: a region the host allocates before a launch
+# (see `DeviceHeap`), which work-items take blocks of until it is exhausted. blocks are
+# never freed, but the region is, along with its `DeviceHeap`.
+struct DeviceHeap_st
+    # the address of the region
+    base::UInt64
+    size::UInt64
+    # the bytes already taken, from the start of the region
+    offset::UInt64
+
+    DeviceHeap_st(base = 0 % UInt64, size = 0 % UInt64, offset = 0 % UInt64) = new(base, size, offset)
+end
+
+# the alignment of blocks, as that of `malloc`. each block is preceded by its size, padded
+# to keep that alignment (see `link_allocator!`, whose `realloc` reads it).
+const heap_alignment = 16
+
+@device_function @inline function atomic_add_device!(ptr::LLVMPtr{UInt64, AS.CrossWorkgroup}, val::UInt64)
+    return UnsafeAtomics.Internal.llvm_rmw!(
+        ptr, Val(:add), val, Val(:monotonic), Val(:device), Val(false), Val(sizeof(UInt64)), Val(())
+    )
+end
+
+# a block of `sz` bytes of the launch's heap. callers don't check for `C_NULL` (Enzyme marks
+# the result `nonnull`), so this throws when the heap is exhausted, or when the launch has
+# none.
+@device_function function malloc(sz::Csize_t)
+    heap = kernel_state().heap
+    heap == 0 && @gputhrow "OutOfMemoryError" "Kernel allocates memory, but was launched without a heap (see `POCL.with_device_heap`)"
+    total = (sz + 2 * heap_alignment - 1) & ~UInt64(heap_alignment - 1)
+    offset = reinterpret(LLVMPtr{UInt64, AS.CrossWorkgroup}, heap + fieldoffset(DeviceHeap_st, 3))
+    start = atomic_add_device!(offset, total)
+    size = unsafe_load(reinterpret(LLVMPtr{UInt64, AS.CrossWorkgroup}, heap + fieldoffset(DeviceHeap_st, 2)))
+    start + total <= size || @gputhrow "OutOfMemoryError" "The device heap is exhausted; for Enzyme, raise `POCL.enzyme_heap_size_per_item[]`"
+    base = unsafe_load(reinterpret(LLVMPtr{UInt64, AS.CrossWorkgroup}, heap))
+    block = base + start
+    unsafe_store!(reinterpret(LLVMPtr{UInt64, AS.CrossWorkgroup}, block), sz)
+    return reinterpret(Ptr{Cvoid}, block + heap_alignment)
+end
+
+# this uses no device intrinsics, so it can stay a host method. as an overlay, inference
+# could constant-fold calls to it by running the host method, which throws.
 report_oom(sz) = return
 
 ## kernel state
@@ -63,6 +103,8 @@ struct KernelState
     # the address of an `ExceptionInfo_st`. not a pointer, as SPIR-V doesn't allow those in
     # kernel arguments that are passed by value.
     exception_info::UInt64
+    # the address of the launch's `DeviceHeap_st`, or 0 if it has none
+    heap::UInt64
 end
 
 @device_function @inline @generated kernel_state() = GPUCompiler.kernel_state_value(KernelState)
