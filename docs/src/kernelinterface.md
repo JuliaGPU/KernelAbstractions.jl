@@ -74,9 +74,10 @@ What a backend implements, at a glance. The docstrings below have the details.
 | **Execution** | [`synchronize`](@ref) (cooperative) | [`record_event`](@ref)/[`wait_event`](@ref) (synchronize), [`priority!`](@ref) (no-op) |
 | **Devices** | with more than one device: [`ndevices`](@ref), [`device`](@ref), [`device!`](@ref), `device(backend, A)` | all four (a single device) |
 | **Queries** | [`max_work_group_size`](@ref) (for the backend and for a kernel), [`max_work_group_dims`](@ref), [`max_num_groups`](@ref) | [`launch_configuration`](@ref) (the limit), [`multiprocessor_count`](@ref) (0), [`functional`](@ref) (`missing`), [`versioninfo`](@ref) |
-| **Capabilities** | | [`supports_float64`](@ref), [`supports_atomics`](@ref), [`supports_unified`](@ref), [`supports_subgroups`](@ref), [`supports_linear_subgroups`](@ref), [`supports_independent_subgroups`](@ref), [`supports_partitionable_subgroups`](@ref) (all `false`), [`supports_shuffle`](@ref) (`false` unless derived from the natively supported types, see its docstring) |
+| **Capabilities** | | [`supports_float64`](@ref), [`supports_atomics`](@ref), [`supports_unified`](@ref), [`supports_subgroups`](@ref), [`supports_linear_subgroups`](@ref), [`supports_independent_subgroups`](@ref), [`supports_partitionable_subgroups`](@ref), [`supports_dynamic_localmemory`](@ref) (all `false`), [`supports_shuffle`](@ref) (`false` unless derived from the natively supported types, see its docstring) |
 | **Compilation** | [`argconvert`](@ref), [`kernel_function`](@ref), [`launch`](@ref) | |
 | **Device** | [`get_local_id`](@ref), [`get_group_id`](@ref), [`get_local_size`](@ref), [`get_num_groups`](@ref), [`localmemory`](@ref), [`barrier`](@ref) | [`get_global_id`](@ref), [`get_global_size`](@ref) (derived from the primitive queries), [`_print`](@ref KernelInterface._print) (host `print`) |
+| **Dynamic local memory** | if `supports_dynamic_localmemory`: [`dynamic_localmemory`](@ref), [`dynamic_localmemory_size`](@ref), [`max_dynamic_localmemory`](@ref), and the `localmem` keyword of [`launch`](@ref) and [`launch_configuration`](@ref) | the forms of `dynamic_localmemory` without an offset, or with other integer types; validation of `localmem` |
 | **Sub-groups** | if `supports_subgroups`: [`sub_group_size`](@ref), the sub-group queries, [`sub_group_barrier`](@ref), [`sub_group_any`](@ref), [`sub_group_all`](@ref), and [`sub_group_ballot`](@ref) for widths of at most 64; if `supports_shuffle(backend, T)`: [`shfl`](@ref), [`shfl_down`](@ref), [`shfl_up`](@ref), [`shfl_xor`](@ref) for the primitive `T` supported natively, including `UInt32` | [`sub_group_reduce`](@ref), [`sub_group_scan`](@ref), [`sub_group_exclusive_scan`](@ref) (built on the shuffles); the functions with a `width` (built on those without, or on the ballot); shuffles of other primitive types (as `UInt32` or `UInt64` words) and of structs (packed into `UInt32` words) |
 
 Everything else, such as [`zeros`](@ref KernelInterface.zeros), [`ones`](@ref KernelInterface.ones),
@@ -237,7 +238,34 @@ sub_group_barrier(::Integer)
 
 ```@docs
 localmemory
+dynamic_localmemory
+dynamic_localmemory_size
+KernelInterface.check_dynamic_localmemory
 ```
+
+[`localmemory`](@ref) arrays have a size that is known when the kernel is compiled.
+Backends that [`supports_dynamic_localmemory`](@ref) also give every work-group one block
+of memory whose size is chosen by the launch, which the kernel divides into arrays itself:
+
+```julia
+# reverse the values of each work-group, whatever its size
+function reverse_groups(out, a)
+    n = KI.get_local_size().x
+    i = KI.get_local_id().x
+    I = KI.get_global_id().x
+    tmp = KI.dynamic_localmemory(eltype(a), n)
+    @inbounds tmp[i] = a[I]
+    KI.barrier()
+    @inbounds out[I] = tmp[n - i + 1]
+    return
+end
+
+KI.@launch backend ndrange=length(a) localmem=(n -> n * sizeof(eltype(a))) reverse_groups(out, a)
+```
+
+A kernel that needs more than one array gives each a byte offset into the block, e.g.
+`KI.dynamic_localmemory(Float32, n, n * sizeof(Float32))` for a second array of `n` values
+behind the first one.
 
 ### Communication
 
@@ -313,6 +341,7 @@ supports_float64
 ```
 
 ```@docs
+supports_dynamic_localmemory
 supports_subgroups
 supports_linear_subgroups
 supports_independent_subgroups
@@ -329,6 +358,7 @@ max_work_group_dims
 max_num_groups
 sub_group_size
 multiprocessor_count
+max_dynamic_localmemory
 ```
 
 ### Compilation and launching
@@ -387,6 +417,16 @@ optional methods where it can do better than the fallback. In particular:
    lock-step, combined with a fence. Base these guarantees on the API or the hardware, not
    on the testsuite passing: it checks the layout and divergent control flow, but can't
    prove them.
+6. Dynamic local memory is optional too. To support it, report
+   [`supports_dynamic_localmemory`](@ref) and [`max_dynamic_localmemory`](@ref), accept the
+   `localmem` keyword in [`launch`](@ref) (a validated number of bytes) and in
+   [`launch_configuration`](@ref) (what the user passed, which can be a function of the
+   work-group size), and implement [`dynamic_localmemory`](@ref) and
+   [`dynamic_localmemory_size`](@ref) on the device. A work-group has one block, which is how
+   CUDA and HIP provide dynamic shared memory; backends whose local memory is a sized
+   kernel argument, like OpenCL and Metal, add one such argument to kernels that use it.
+   A kernel can use the block without a launch asking for any, so a launch has to set that
+   argument up even then.
 
 The PoCL backend in `src/pocl/backend.jl` is a complete worked example.
 

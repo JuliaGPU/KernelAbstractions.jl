@@ -1766,6 +1766,105 @@ end
     @inbounds D[i] = muladd(A[i], B[i], C[i])
 end
 
+# reverses the values of each work-group through dynamic local memory
+function dynamic_localmem_reverse!(out, a)
+    KI = KernelAbstractions.KernelInterface
+    n = KI.get_local_size().x
+    i = KI.get_local_id().x
+    I = KI.get_global_id().x
+    tmp = KI.dynamic_localmemory(eltype(a), n)
+    tmp[i] = a[I]
+    KI.barrier()
+    out[I] = tmp[n - i + 1]
+    return
+end
+# ... in a kernel that also has the local memory arguments of the RNG
+function dynamic_localmem_rand!(out, r, a)
+    @inbounds r[KernelAbstractions.KernelInterface.get_global_id().x] = rand(Float32)
+    dynamic_localmem_reverse!(out, a)
+    return
+end
+@kernel function dynamic_localmem_size!(out)
+    I = @index(Global, Linear)
+    KI = KernelAbstractions.KernelInterface
+    @inbounds out[I] = length(KI.dynamic_localmemory(Int32, 0)) + KI.dynamic_localmemory_size()
+end
+function no_dynamic_localmem!(out)
+    @inbounds out[KernelAbstractions.KernelInterface.get_global_id().x] = 1
+    return
+end
+
+@testset "POCL dynamic local memory" begin
+    KI = KernelAbstractions.KernelInterface
+    backend = POCL.POCLBackend()
+    reversed(a, n) = reduce(vcat, (reverse(a[i:(i + n - 1)]) for i in 1:n:length(a)))
+    a = collect(1.0f0:64.0f0)
+    out = zero(a)
+
+    kernel = KernelAbstractions.KernelInterface.@launch backend launch = false dynamic_localmem_reverse!(out, a)
+    fun = kernel.kern.kernel.fun
+    @test fun.dynamic_localmemory
+    limit = KI.max_dynamic_localmemory(kernel)
+    @test ispow2(limit)
+    @test limit <= POCL.device().local_mem_size
+
+    # host kernels are prepared for a work-group size and an allocation, a power of two
+    @testset "$n work-items, $bytes bytes" for (n, bytes) in
+        ((8, 32), (8, 33), (8, 64), (16, 64), (8, 32), (64, 256), (8, 100), (8, limit))
+        fill!(out, 0)
+        kernel(out, a; numgroups = 64 ÷ n, workgroupsize = n, localmem = bytes)
+        @test out == reversed(a, n)
+    end
+    handles = [(h.local_size[1], h.local_bytes) for h in fun.host_kernels]
+    @test sort(handles) == [(8, 32), (8, 64), (8, 128), (8, limit), (16, 64), (64, 256)]
+    @test all(h -> h.id != C_NULL, fun.host_kernels)
+
+    # arrays that don't fit in what the launch asked for are out of bounds, even if they
+    # fit in what was allocated
+    @test_throws POCL.KernelException kernel(out, a; numgroups = 8, workgroupsize = 8, localmem = 31)
+    @test_throws POCL.KernelException kernel(out, a; numgroups = 8, workgroupsize = 8)
+    @test_throws ArgumentError kernel(out, a; numgroups = 8, workgroupsize = 8, localmem = limit + 1)
+
+    # launches on PoCL's queue size the argument for every launch
+    queued = kernel.kern.kernel
+    fill!(out, 0)
+    queued(out, a; global_size = (64,), local_size = (16,), localmem = 64)
+    @test out == reversed(a, 16)
+    @test_throws POCL.KernelException queued(out, a; global_size = (64,), local_size = (16,), localmem = 60)
+    @test_throws POCL.KernelException queued(out, a; global_size = (64,), local_size = (16,))
+
+    # the argument comes after those of the RNG, which need local memory as well
+    r = zero(a)
+    fill!(out, 0)
+    random = KernelAbstractions.KernelInterface.@launch backend launch = false dynamic_localmem_rand!(out, r, a)
+    random(out, r, a; numgroups = 4, workgroupsize = 16, localmem = 64)
+    @test random.kern.kernel.rng_state
+    @test random.kern.kernel.fun.dynamic_localmemory
+    @test 0 < KI.max_dynamic_localmemory(random) < limit
+    @test out == reversed(a, 16)
+    @test all(x -> 0 <= x < 1, r)
+    @test length(unique(r)) > 32
+    fill!(out, 0)
+    fill!(r, -1)
+    random.kern.kernel(out, r, a; global_size = (64,), local_size = (16,), localmem = 64)
+    @test out == reversed(a, 16)
+    @test all(x -> 0 <= x < 1, r)
+
+    # `@kernel` launches don't take the keyword yet: their kernels get an empty block
+    sizes = fill(-1, 100)
+    dynamic_localmem_size!(backend, 16)(sizes; ndrange = length(sizes))
+    @test all(iszero, sizes)
+    fill!(sizes, -1)
+    dynamic_localmem_size!(backend)(sizes; ndrange = length(sizes))
+    @test all(iszero, sizes)
+
+    # kernels that don't use it have no argument for it, and ignore the keyword
+    ones_out = zeros(Int, 4)
+    plain = KernelAbstractions.KernelInterface.@launch backend numgroups = 4 localmem = 64 no_dynamic_localmem!(ones_out)
+    @test !plain.kern.kernel.fun.dynamic_localmemory
+    @test ones_out == ones(Int, 4)
+end
+
 @testset "POCL muladd" begin
     for T in (Float32, Float64)
         A, B, C = rand(T, 64), rand(T, 64), rand(T, 64)

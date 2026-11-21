@@ -65,6 +65,60 @@ function localmem_kernel(out, ::Val{N}) where {N}
 end
 
 # Every work-item writes global memory, and reads another work-item's write after a barrier.
+# Arrays in the dynamic local memory of the work-group, whose sizes depend on the work-group
+# size of the launch: `x`, and `y` behind it. Static local memory is separate from both.
+function dynamic_localmem_kernel(out, a)
+    n = KI.get_local_size().x
+    i = KI.get_local_id().x
+    I = KI.get_global_id().x
+    x = KI.dynamic_localmemory(eltype(a), n)
+    y = KI.dynamic_localmemory(Int32, (2, n), n * sizeof(eltype(a)))
+    s = KI.localmemory(Int64, 1)
+    @inbounds begin
+        x[i] = I <= length(a) ? a[I] : zero(eltype(a))
+        y[1, i] = i
+        y[2, i] = -i
+        if i == 1
+            s[1] = 42
+        end
+    end
+    KI.barrier()
+    j = n - i + 1
+    # the block is shared: the second row of `y`, as part of another array
+    z = KI.dynamic_localmemory(Int32, 2n, n * sizeof(eltype(a)))
+    if I <= size(out, 1)
+        @inbounds begin
+            out[I, 1] = x[j]
+            out[I, 2] = y[1, j]
+            out[I, 3] = z[2j]
+            out[I, 4] = s[1]
+            out[I, 5] = n
+            out[I, 6] = KI.dynamic_localmemory_size()
+            out[I, 7] = reinterpret(UInt, pointer(x)) % 16
+        end
+    end
+    return
+end
+
+# what `dynamic_localmem_kernel` writes for work-groups of `n` work-items
+function dynamic_localmem_expected(a, n, bytes)
+    out = zeros(Int64, length(a), 7)
+    for I in 1:length(a)
+        g, i = fldmod1(I, n)
+        j = n - i + 1
+        J = (g - 1) * n + j
+        out[I, :] .= (J <= length(a) ? a[J] : 0, j, -j, 42, n, bytes, 0)
+    end
+    return out
+end
+
+# an empty array needs no memory
+function empty_dynamic_localmem_kernel(out)
+    x = KI.dynamic_localmemory(Int32, 0)
+    @inbounds out[1] = length(x) + KI.dynamic_localmemory_size()
+    return
+end
+
 function global_barrier_kernel(scratch, out)
     n = KI.get_local_size().x
     base = (KI.get_group_id().x - 1) * n
@@ -1037,6 +1091,26 @@ function interface_testsuite(backend::KI.Backend, AT)
 
         # other keywords are passed to the backend, which rejects the ones it doesn't know
         @test_throws Exception kernel(arr; this_is_not_a_launch_option = 1)
+
+        # dynamic local memory is validated before the backend sees it
+        if KI.supports_dynamic_localmemory(backend)
+            limit = KI.max_dynamic_localmemory(kernel)
+            @test limit isa Int
+            @test limit >= 0
+            @test_throws ArgumentError kernel(arr; localmem = -1)
+            @test_throws ArgumentError kernel(arr; localmem = n -> -n)
+            @test_throws ArgumentError kernel(arr; localmem = n -> 1.5)
+            if limit < typemax(Int)
+                @test_throws ArgumentError kernel(arr; localmem = limit + 1)
+                @test_throws ArgumentError kernel(arr; localmem = n -> limit + n)
+            end
+        else
+            @test KI.max_dynamic_localmemory(kernel) == 0
+            @test_throws ArgumentError kernel(arr; localmem = 16)
+            @test_throws ArgumentError kernel(arr; localmem = n -> 16n)
+        end
+        KI.synchronize(backend)
+        @test Array(arr) == zeros(Int32, 1, 1, 1)
     end
 
     @testset "Launch limits" begin
@@ -1103,6 +1177,7 @@ function interface_testsuite(backend::KI.Backend, AT)
         @test KI.supports_linear_subgroups(b) isa Bool
         @test KI.supports_independent_subgroups(b) isa Bool
         @test KI.supports_partitionable_subgroups(b) isa Bool
+        @test KI.supports_dynamic_localmemory(b) isa Bool
         # all imply sub-group support
         KI.supports_linear_subgroups(b) && @test KI.supports_subgroups(b)
         KI.supports_independent_subgroups(b) && @test KI.supports_subgroups(b)
@@ -1313,6 +1388,58 @@ function interface_testsuite(backend::KI.Backend, AT)
         KI.@launch backend numgroups = groups workgroupsize = N global_barrier_kernel(scratch, out)
         KI.synchronize(backend)
         @test Array(out) == vcat([(g * N) .+ (N:-1:1) for g in 0:(groups - 1)]...)
+    end
+
+    if KI.supports_dynamic_localmemory(backend)
+        @testset "Dynamic local memory" begin
+            groups = 3
+            @testset "$N work-items" for N in (1, 7, 32)
+                a = collect(Int64, 1:(N * groups))
+                out = KI.zeros(backend, Int64, length(a), 7)
+                bytes = N * (sizeof(Int64) + 2 * sizeof(Int32))
+                kernel = KI.@launch backend launch = false dynamic_localmem_kernel(out, AT(a))
+                @test KI.max_dynamic_localmemory(kernel) >= bytes
+
+                # a size in bytes, or a function of the work-group size
+                for localmem in (bytes, n -> n * (sizeof(Int64) + 2 * sizeof(Int32)))
+                    out = KI.zeros(backend, Int64, length(a), 7)
+                    kernel(out, AT(a); numgroups = groups, workgroupsize = N, localmem)
+                    KI.synchronize(backend)
+                    result = Array(out)
+                    # backends may round the size up
+                    @test all(>=(bytes), result[:, 6])
+                    @test result[:, 1:5] == dynamic_localmem_expected(a, N, bytes)[:, 1:5]
+                    # the block is aligned to 16 bytes
+                    @test all(iszero, result[:, 7])
+                end
+            end
+
+            # the work-group size that the launch chooses sizes the block
+            @testset "tuned work-group size" begin
+                a = collect(Int64, 1:1000)
+                out = KI.zeros(backend, Int64, length(a), 7)
+                sizes = Int[]
+                localmem = n -> (push!(sizes, n); n * (sizeof(Int64) + 2 * sizeof(Int32)))
+                KI.@launch backend ndrange = length(a) max_work_group_size = 64 localmem = localmem dynamic_localmem_kernel(out, AT(a))
+                KI.synchronize(backend)
+                result = Array(out)
+                n = Int(result[1, 5])
+                @test 1 <= n <= 64
+                @test last(sizes) == n
+                @test result[:, 1:5] == dynamic_localmem_expected(a, n, 0)[:, 1:5]
+            end
+
+            # kernels can be launched without any, and get no less than they asked for
+            @testset "without localmem" begin
+                out = KI.ones(backend, Int64, 1)
+                kernel = KI.@launch backend empty_dynamic_localmem_kernel(out)
+                KI.synchronize(backend)
+                @test Array(out)[1] >= 0
+                kernel(out; localmem = 48)
+                KI.synchronize(backend)
+                @test Array(out)[1] >= 48
+            end
+        end
     end
 
     if KI.supports_subgroups(backend)

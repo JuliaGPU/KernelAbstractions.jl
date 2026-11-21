@@ -80,6 +80,21 @@ KI.supports_shuffle(::WordShuffleBackend, ::Type{UInt32}) = true
         @test count[] == 2 * nwords
     end
 
+    # dynamic local memory defaults to unsupported, and only exists on the device
+    @test !KI.supports_dynamic_localmemory(PlainBackend())
+    @test KI.max_dynamic_localmemory(KI.Kernel(PlainBackend(), nothing)) == 0
+    @test_throws "used outside kernel" KI.dynamic_localmemory(Float32, 4)
+    @test_throws "used outside kernel" KI.dynamic_localmemory(Float32, (2, 2))
+    @test_throws "used outside kernel" KI.dynamic_localmemory(Float32, (0x02, Int32(2)), 0x10)
+    @test_throws "used outside kernel" KI.dynamic_localmemory_size()
+    @test_throws "isbits" KI.check_dynamic_localmemory(Vector{Int}, (1,), 0)
+    @test_throws "isbits" KI.check_dynamic_localmemory(Union{Int, Nothing}, (1,), 0)
+    @test KI.checked_length((2, 3)) == (6, false)
+    @test KI.checked_length(()) == (1, false)
+    @test KI.checked_length((0, typemax(Int))) == (0, false)
+    @test KI.checked_length((4, -1))[2]
+    @test KI.checked_length((typemax(Int), 2))[2]
+
     # the sub-group capabilities default to unsupported
     @test !KI.supports_subgroups(PlainBackend())
     @test !KI.supports_linear_subgroups(PlainBackend())
@@ -326,6 +341,25 @@ end
 KI.launch(kernel::KI.Kernel{OccupancyBackend}, groups::Dims{3}, items::Dims{3}, args::Tuple) =
     push!(kernel.kern, (groups, items))
 
+# ... and one with dynamic local memory, recording what it was asked
+struct LocalMemBackend <: KI.Backend
+    queries::Vector{Any}
+end
+LocalMemBackend() = LocalMemBackend([])
+KI.supports_dynamic_localmemory(::LocalMemBackend) = true
+KI.max_dynamic_localmemory(::KI.Kernel{LocalMemBackend}) = 4096
+KI.max_work_group_size(::KI.Kernel{LocalMemBackend}) = 1024
+KI.max_work_group_dims(::LocalMemBackend) = (1024, 1024, 64)
+function KI.launch_configuration(
+        kernel::KI.Kernel{LocalMemBackend}; nitems = nothing,
+        max_work_group_size = typemax(Int), localmem = nothing
+    )
+    push!(kernel.backend.queries, localmem)
+    return (; workgroupsize = min(32, max_work_group_size))
+end
+KI.launch(kernel::KI.Kernel{LocalMemBackend}, groups::Dims{3}, items::Dims{3}, args::Tuple; kwargs...) =
+    push!(kernel.kern, (; groups, items, kwargs = NamedTuple(kwargs)))
+
 # a callable that KernelInterface mustn't convert: the backend does
 struct HostCallable end
 (::HostCallable)(x) = nothing
@@ -424,6 +458,74 @@ KI.launch(::KI.Kernel{NullBackend}, groups::Dims{3}, items::Dims{3}, args::Tuple
     # ... while explicit sizes can go up to the limit
     occupancy(; workgroupsize = 1024)
     @test last(occupancy.kern) == ((1, 1, 1), (1024, 1, 1))
+end
+
+@testset "localmem" begin
+    backend = LocalMemBackend()
+    kernel = KI.Kernel(backend, [])
+
+    # launches without it don't pass the keyword on
+    kernel(; workgroupsize = 8)
+    @test last(kernel.kern).kwargs === (;)
+    kernel(; workgroupsize = 8, localmem = 0)
+    @test last(kernel.kern).kwargs === (;)
+    kernel(; ndrange = 100)
+    @test backend.queries == [nothing]
+
+    # a number of bytes
+    kernel(; workgroupsize = 8, localmem = 64)
+    @test last(kernel.kern).kwargs === (; localmem = 64)
+    kernel(; workgroupsize = 8, localmem = 0x40, option = 1)
+    @test last(kernel.kern).kwargs === (; localmem = 64, option = 1)
+    kernel(; workgroupsize = 8, localmem = nothing)
+    @test last(kernel.kern).kwargs === (;)
+    kernel(; workgroupsize = 8, localmem = n -> 0)
+    @test last(kernel.kern).kwargs === (; localmem = 0)
+
+    # a function of the number of work-items per work-group
+    kernel(; workgroupsize = (4, 2, 3), localmem = n -> 4n)
+    @test last(kernel.kern).kwargs === (; localmem = 96)
+    kernel(; workgroupsize = 8, localmem = n -> UInt8(n))
+    @test last(kernel.kern).kwargs === (; localmem = 8)
+
+    # a launch that tunes the work-group size passes it to `launch_configuration`
+    empty!(backend.queries)
+    bytes = n -> 4n
+    kernel(; ndrange = 100, localmem = bytes)
+    @test backend.queries == [bytes]
+    @test last(kernel.kern) == (; groups = (4, 1, 1), items = (32, 1, 1), kwargs = (; localmem = 128))
+    kernel(; ndrange = 100, localmem = 16)
+    @test backend.queries == [bytes, 16]
+
+    # nothing is launched for an empty range, whatever the function would return
+    n = length(kernel.kern)
+    kernel(; ndrange = 0, localmem = n -> error("not called"))
+    @test length(kernel.kern) == n
+
+    @test_throws "must not be negative" kernel(; localmem = -1)
+    @test_throws "must not be negative" kernel(; workgroupsize = 8, localmem = n -> -n)
+    @test_throws "exceeds the 4096 bytes" kernel(; localmem = 4097)
+    @test_throws "exceeds the 4096 bytes" kernel(; workgroupsize = 1024, localmem = n -> 8n)
+    @test_throws "must return a number of bytes" kernel(; localmem = n -> 2.0)
+    @test_throws MethodError kernel(; localmem = "16")
+    @test length(kernel.kern) == n
+
+    # backends without dynamic local memory are never asked for any
+    mock = KI.kernel_function(MockBackend(), identity)
+    mock(; localmem = 0)
+    @test only(mock.kern.launches).kwargs == Dict()
+    occupancy = KI.Kernel(OccupancyBackend(), [])
+    occupancy(; ndrange = 100, localmem = 0)
+    @test last(occupancy.kern) == ((2, 1, 1), (96, 1, 1))
+    @test_throws "OccupancyBackend doesn't support" occupancy(; ndrange = 100, localmem = 16)
+    @test_throws "MockBackend doesn't support" mock(; localmem = 16)
+    @test_throws "MockBackend doesn't support" mock(; ndrange = 0, localmem = n -> 4n)
+    @test length(mock.kern.launches) == 1
+
+    # `@launch` knows the keyword
+    kernel = KI.@launch MockBackend() localmem = 0 identity(1)
+    @test only(kernel.kern.launches).kwargs == Dict()
+    @test isempty(kernel.kern.options)
 end
 
 @testset "launch_configuration" begin

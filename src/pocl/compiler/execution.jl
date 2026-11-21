@@ -180,15 +180,17 @@ Core.kwcall(kwargs::NamedTuple, kernel::AbstractKernel, args::Vararg{Any, N}) wh
 # work-groups extending beyond `extent` run `partial`, a bounds-checked variant with the
 # same argument layout. both variants share arguments and exception status. queue launches
 # use `partial` for all work-groups: separate queued kernels cannot share group ids.
-# `groups` is the work-group count, if known.
+# `groups` is the work-group count, if known. `localmem` is the size in bytes of the
+# dynamic local memory, for kernels that use it.
 function launch_and_wait(
         kernel::AbstractKernel, args::Tuple, partial = nothing, extent = nothing,
-        groups = nothing; kwargs...
+        groups = nothing; localmem::Int = 0, kwargs...
     )
+    local_bytes = dynamic_local_bytes(kernel.fun, localmem)
     GC.@preserve args begin
         # prepare both variants before running either; if the unchecked variant is
         # unavailable, run every work-group checked.
-        hp = host_kernel(with_fun(kernel, partial), values(kwargs), groups)
+        hp = host_kernel(with_fun(kernel, partial), values(kwargs), groups, local_bytes)
         h = hp === nothing ? nothing : full_host_kernel(kernel, partial, hp)
         # share conversion, the bulk of each path's per-kernel code
         converted = converted_arguments(kernel, args)
@@ -197,7 +199,10 @@ function launch_and_wait(
             info[] = ExceptionInfo_st()
             GC.@preserve info begin
                 info_ptr = Base.unsafe_convert(Ptr{ExceptionInfo_st}, info)
-                event = launch_queued(with_fun(kernel, partial), converted, info_ptr; kwargs...)
+                event = launch_queued(
+                    with_fun(kernel, partial), converted, info_ptr, localmem, local_bytes;
+                    kwargs...
+                )
                 wait_for_kernel(event)
             end
             info[].status == 0 || throw_kernel_exception(info[], something(partial, kernel.fun))
@@ -209,7 +214,7 @@ function launch_and_wait(
             info = Ref(ExceptionInfo_st())
             GC.@preserve info begin
                 info_ptr = Base.unsafe_convert(Ptr{ExceptionInfo_st}, info)
-                host_launch_converted(kernel, converted, info_ptr, hp, num_groups, h, extent)
+                host_launch_converted(kernel, converted, info_ptr, hp, num_groups, h, extent, localmem)
             end
             info[].status == 0 ||
                 throw_host_exception(info[], kernel.fun, partial, h === hp, hp.local_size, extent)
@@ -251,21 +256,56 @@ end
 
 @inline launch_tuple(
     kernel::AbstractKernel, args::Tuple, exception_info::Ptr;
-    global_size = (1,), local_size = nothing
+    global_size = (1,), local_size = nothing, localmem::Int = 0
 ) = GC.@preserve args launch_converted(
-    kernel, converted_arguments(kernel, args), exception_info, global_size, local_size
+    kernel, converted_arguments(kernel, args), exception_info, global_size, local_size,
+    localmem, dynamic_local_bytes(kernel.fun, localmem)
 )
 
-# `launch_tuple` for preconverted arguments
+# `launch_tuple` for preconverted arguments, and the bytes to allocate for `localmem`
 @inline launch_queued(
-    kernel::AbstractKernel, converted::Tuple, exception_info::Ptr;
-    global_size = (1,), local_size = nothing
-) = launch_converted(kernel, converted, exception_info, global_size, local_size)
+    kernel::AbstractKernel, converted::Tuple, exception_info::Ptr, localmem::Int = 0,
+    local_bytes::Int = 0; global_size = (1,), local_size = nothing
+) = launch_converted(
+    kernel, converted, exception_info, global_size, local_size, localmem, local_bytes
+)
 
 # kept out of the launches, which are compiled for every kernel: inlining `rand` makes them
 # several times as expensive to compile
-@inline kernel_state(rng_state::Bool, exception_info::Ptr) =
-    KernelState(rng_state ? rng_seed() : UInt32(0), UInt64(UInt(exception_info)))
+@inline kernel_state(rng_state::Bool, exception_info::Ptr, localmem::Int = 0) =
+    KernelState(rng_state ? rng_seed() : UInt32(0), localmem % UInt32, UInt64(UInt(exception_info)))
+
+## dynamic local memory
+#
+# a kernel that uses `KI.dynamic_localmemory` has a local memory argument for it, which
+# every launch has to size; the kernel state tells the kernel how much the launch asked for.
+
+# local memory arguments can't be empty, and host kernels are prepared for a size (see
+# `host_kernel`). allocating a power of two bounds how many of them a kernel gets.
+const min_local_bytes = 16
+
+# the bytes to allocate for a launch of `k` asking for `localmem` bytes of dynamic local
+# memory: 0 if `k` doesn't have the argument
+@inline dynamic_local_bytes(k::cl.Kernel, localmem::Int) =
+    k.dynamic_localmemory ? local_bytes_for(localmem) : 0
+@noinline function local_bytes_for(localmem::Int)
+    0 <= localmem <= typemax(UInt32) ||
+        throw(ArgumentError("Dynamic local memory must be between 0 and $(typemax(UInt32)) bytes, got $localmem"))
+    return nextpow(2, max(localmem, min_local_bytes))
+end
+
+# the most dynamic local memory a launch of `k` can ask for: what the device has, less what
+# the kernel allocates statically and for the RNG (a `UInt32` key and counter per
+# sub-group, of which there are at most as many as work-items), as a size that
+# `dynamic_local_bytes` doesn't round up. called before any local memory argument is set,
+# which the kernel would report as well.
+function max_local_bytes(k::cl.Kernel, device_rng::Bool)
+    dev = device()
+    available = Int(min(dev.local_mem_size, typemax(UInt32))) -
+        cl.KernelWorkGroupInfo(k, dev).local_mem_size
+    device_rng && (available -= 2 * sizeof(UInt32) * k.work_group_size)
+    return available < min_local_bytes ? 0 : prevpow(2, available)
+end
 @noinline rng_seed() = Base.rand(UInt32)
 
 # argument expressions for a kernel compiled for `F` and `TT`.
@@ -296,15 +336,17 @@ end
 kernel_argument_types(@nospecialize(converted::Type)) = Tuple{KernelState, converted.parameters...}
 
 @inline @generated function launch_converted(
-        kernel::AbstractKernel, converted::Tuple, exception_info, global_size, local_size
+        kernel::AbstractKernel, converted::Tuple, exception_info, global_size, local_size,
+        localmem::Int = 0, local_bytes::Int = 0
     )
     call_tt = kernel_argument_types(converted)
     vals = Expr[:(converted[$i]) for i in 1:fieldcount(converted)]
     return inline_body(
         quote
             $cl.clcall(
-                kernel.fun, $call_tt, (kernel_state(kernel.rng_state, exception_info), $(vals...));
-                global_size, local_size, kernel.rng_state
+                kernel.fun, $call_tt,
+                (kernel_state(kernel.rng_state, exception_info, localmem), $(vals...));
+                global_size, local_size, kernel.rng_state, local_bytes
             )
         end
     )
@@ -422,7 +464,10 @@ end
             end
         end
         kernel = if cached === nothing
-            linked = link_kernel(job, res.obj::Vector{UInt8}, res.entry::String, res.exception_sites)
+            linked = link_kernel(
+                job, res.obj::Vector{UInt8}, res.entry::String, res.exception_sites,
+                res.device_rng, res.dynamic_localmemory
+            )
             # Don't cache session-local kernel handles while precompiling: the
             # results struct is serialized into the package image along with its
             # CodeInstance, and the handles would come back dangling.
@@ -463,6 +508,7 @@ end
         res.obj = compiled.obj
         res.entry = compiled.entry
         res.device_rng = compiled.device_rng
+        res.dynamic_localmemory = compiled.dynamic_localmemory
         res.exception_sites = compiled.exception_sites
     end
     return res
@@ -501,35 +547,42 @@ function host_kernel_max_items(k::cl.Kernel)
     return prevpow(2, max(host_kernel_stack_limit ÷ k.private_mem_size, 1))
 end
 
-@inline function host_kernel(kernel::HostKernel, kwargs::NamedTuple, groups)
+@inline function host_kernel(kernel::HostKernel, kwargs::NamedTuple, groups, local_bytes::Int = 0)
     haskey(kwargs, :local_size) && haskey(kwargs, :global_size) || return nothing
     local_size, global_size = kwargs.local_size, kwargs.global_size
     local_size isa Dims{3} && global_size isa Dims{3} || return nothing
     # host kernels only run whole work-groups
     groups === nothing && global_size .% local_size != (0, 0, 0) && return nothing
-    return host_kernel(kernel.fun, local_size, kernel.rng_state)
+    return host_kernel(kernel.fun, local_size, kernel.rng_state, local_bytes)
 end
 
-# use the unchecked variant at `hp`'s work-group size, or keep `hp` if it is unavailable
+# use the unchecked variant at `hp`'s work-group size and local memory, or keep `hp` if it
+# is unavailable
 @inline function full_host_kernel(kernel::HostKernel, partial, hp::cl.HostKernelHandle)
     (partial === nothing || partial === kernel.fun) && return hp
-    return something(host_kernel(kernel.fun, hp.local_size, kernel.rng_state), hp)
+    return something(host_kernel(kernel.fun, hp.local_size, kernel.rng_state, hp.local_bytes), hp)
 end
 
 # kept out of `launch_and_wait`, which is compiled for every kernel
-@noinline function host_kernel(k::cl.Kernel, local_size::Dims{3}, rng_state::Bool)
+@noinline function host_kernel(
+        k::cl.Kernel, local_size::Dims{3}, rng_state::Bool, local_bytes::Int = 0
+    )
     h = Base.@atomic :acquire k.host_kernel
-    if h === nothing || h.local_size != local_size
-        h = host_kernel_slow(k, local_size, rng_state)
+    if h === nothing || h.local_size != local_size || h.local_bytes != local_bytes
+        h = host_kernel_slow(k, local_size, rng_state, local_bytes)
     end
     return h.id == C_NULL ? nothing : h
 end
 
-@noinline function host_kernel_slow(k::cl.Kernel, local_size::Dims{3}, rng_state::Bool)
+@noinline function host_kernel_slow(
+        k::cl.Kernel, local_size::Dims{3}, rng_state::Bool, local_bytes::Int
+    )
     h = @lock k.lock begin
-        i = findfirst(h -> h.local_size == local_size, k.host_kernels)
+        i = findfirst(k.host_kernels) do h
+            h.local_size == local_size && h.local_bytes == local_bytes
+        end
         if i === nothing
-            h = create_host_kernel(k, local_size, rng_state)
+            h = create_host_kernel(k, local_size, rng_state, local_bytes)
             push!(k.host_kernels, h)
             h
         else
@@ -541,10 +594,13 @@ end
 end
 
 # with `k.lock` held
-function create_host_kernel(k::cl.Kernel, local_size::Dims{3}, rng_state::Bool)
+function create_host_kernel(
+        k::cl.Kernel, local_size::Dims{3}, rng_state::Bool, local_bytes::Int = 0
+    )
     dev = device()
     stack = k.private_mem_size * prod(local_size)
-    stack > host_kernel_stack_limit && return cl.HostKernelHandle(C_NULL, local_size)
+    stack > host_kernel_stack_limit &&
+        return cl.HostKernelHandle(C_NULL, local_size, 0, 1, local_bytes)
 
     # the host kernel takes the sizes of local memory arguments from the kernel
     lsize = Csize_t[local_size...]
@@ -555,6 +611,8 @@ function create_host_kernel(k::cl.Kernel, local_size::Dims{3}, rng_state::Bool)
         cl.set_arg!(k, nargs + 1, cl.LocalMem(UInt32, num_sub_groups))
         cl.set_arg!(k, nargs + 2, cl.LocalMem(UInt32, num_sub_groups))
     end
+    # the dynamic local memory is the last argument
+    local_bytes == 0 || cl.set_arg!(k, cl.num_args(k), cl.LocalMem(UInt8, local_bytes))
 
     err = Ref{Int32}()
     id = cl.clCreateHostKernelPOCL(k, dev, 3, lsize, err)
@@ -563,7 +621,7 @@ function create_host_kernel(k::cl.Kernel, local_size::Dims{3}, rng_state::Bool)
     if err[] != cl.CL_SUCCESS
         # e.g. the kernel needs more local memory than a host kernel can have
         @debug "Kernel can't run on Julia's threads, using PoCL's" exception = cl.CLError(err[])
-        return cl.HostKernelHandle(C_NULL, local_size)
+        return cl.HostKernelHandle(C_NULL, local_size, 0, 1, local_bytes)
     end
     scratch_size, scratch_alignment = Ref{Csize_t}(), Ref{Csize_t}()
     cl.clGetHostKernelInfoPOCL(
@@ -572,7 +630,9 @@ function create_host_kernel(k::cl.Kernel, local_size::Dims{3}, rng_state::Bool)
     cl.clGetHostKernelInfoPOCL(
         id, cl.CL_HOST_KERNEL_SCRATCH_ALIGNMENT_POCL, sizeof(Csize_t), scratch_alignment, C_NULL
     )
-    return cl.HostKernelHandle(id, local_size, Int(scratch_size[]), Int(scratch_alignment[]))
+    return cl.HostKernelHandle(
+        id, local_size, Int(scratch_size[]), Int(scratch_alignment[]), local_bytes
+    )
 end
 
 # per-thread local memory and printf buffer. runs must not yield: they share scratch storage
@@ -967,22 +1027,24 @@ end
 
 # like `launch_converted`, but passes a pointer to each converted argument
 @inline @generated function host_launch_converted(
-        kernel::AbstractKernel, converted::Tuple, exception_info, h, num_groups, full, extent
+        kernel::AbstractKernel, converted::Tuple, exception_info, h, num_groups, full, extent,
+        localmem::Int = 0
     )
     call_tt = kernel_argument_types(converted)
     N = fieldcount(call_tt)
     vals = Expr[:(converted[$i]) for i in 1:fieldcount(converted)]
     arg_ptrs = Expr[:(base + $(fieldoffset(call_tt, i))) for i in 1:N]
 
-    # RNG local memory arguments are set on the host kernel; pass no values here
+    # local memory arguments (two of the RNG, and the dynamic local memory) are set on the
+    # host kernel; pass no values here
     return inline_body(
         quote
-            vals = Ref{$call_tt}((kernel_state(kernel.rng_state, exception_info), $(vals...)))
+            vals = Ref{$call_tt}((kernel_state(kernel.rng_state, exception_info, localmem), $(vals...)))
             GC.@preserve vals begin
                 base = Ptr{Cvoid}(Base.unsafe_convert(Ptr{$call_tt}, vals))
-                ptrs = Ref{NTuple{$(N + 2), Ptr{Cvoid}}}(($(arg_ptrs...), C_NULL, C_NULL))
+                ptrs = Ref{NTuple{$(N + 3), Ptr{Cvoid}}}(($(arg_ptrs...), C_NULL, C_NULL, C_NULL))
                 GC.@preserve ptrs begin
-                    arg_values = Ptr{Ptr{Cvoid}}(Base.unsafe_convert(Ptr{NTuple{$(N + 2), Ptr{Cvoid}}}, ptrs))
+                    arg_values = Ptr{Ptr{Cvoid}}(Base.unsafe_convert(Ptr{NTuple{$(N + 3), Ptr{Cvoid}}}, ptrs))
                     host_dispatch(h, arg_values, num_groups, exception_info, full, extent)
                 end
             end

@@ -165,8 +165,11 @@ A
 [`@localmem`](@ref) declares storage shared by all work items in a workgroup. Only **static**
 local memory is supported at the moment: the allocation size must be known at compile time
 (for example `@localmem Int (32,)` or `@localmem Int (N,)` where `N = prod(@groupsize())` and
-the workgroup size is fixed when the kernel is constructed). Reads and writes must be
-separated by [`@synchronize`](@ref) if they are performed by different work items:
+the workgroup size is fixed when the kernel is constructed). KernelInterface kernels can
+size local memory at launch on backends that support it, see
+[`KernelInterface.dynamic_localmemory`](@ref), but `@kernel` launches can't ask for any yet.
+Reads and writes must be separated by [`@synchronize`](@ref) if they are performed by
+different work items:
 
 ```jldoctest
 using KernelAbstractions

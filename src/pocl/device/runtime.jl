@@ -60,6 +60,8 @@ report_oom(sz) = return
 
 struct KernelState
     random_seed::UInt32
+    # the bytes of dynamic local memory the launch asked for (in the padding of the seed)
+    dynamic_localmemory_size::UInt32
     # the address of an `ExceptionInfo_st`. not a pointer, as SPIR-V doesn't allow those in
     # kernel arguments that are passed by value.
     exception_info::UInt64
@@ -92,3 +94,8 @@ end
 for name in [:random_keys, :random_counters]
     @eval @device_function @inline $name() = additional_arg_value(LLVMPtr{UInt32, AS.Workgroup}, Val($(QuoteNode(name))))
 end
+
+# The block of local memory whose size is chosen at launch (see `KI.dynamic_localmemory`):
+# another local memory argument, which the launch sizes.
+@device_function @inline dynamic_localmemory() =
+    additional_arg_value(LLVMPtr{UInt8, AS.Workgroup}, Val(:dynamic_localmemory))

@@ -213,7 +213,10 @@ Base.@nospecializeinfer function KA.kernel_function_as(
     return KI.Kernel{POCLBackend, typeof(kern)}(backend, kern)
 end
 
-function KI.launch(obj::KI.Kernel{POCLBackend}, groups::Dims{3}, items::Dims{3}, args::Tuple)
+function KI.launch(
+        obj::KI.Kernel{POCLBackend}, groups::Dims{3}, items::Dims{3}, args::Tuple;
+        localmem::Int = 0
+    )
     # POCL launches synchronously, see the implementation note on `synchronize`. the
     # compiled kernel only holds pointers to the arrays captured by `f`, so keep it alive
     # until the kernel completes.
@@ -221,7 +224,9 @@ function KI.launch(obj::KI.Kernel{POCLBackend}, groups::Dims{3}, items::Dims{3},
     k = obj.kern.kernel
     global_size = groups .* items
     # (see `KA.launch_split`, which shares this specialization)
-    GC.@preserve f POCL.launch_and_wait(k, args, k.fun, global_size, groups; local_size = items, global_size)
+    GC.@preserve f POCL.launch_and_wait(
+        k, args, k.fun, global_size, groups; localmem, local_size = items, global_size
+    )
     return nothing
 end
 
@@ -255,6 +260,9 @@ KI.max_work_group_dims(::POCLBackend)::NTuple{3, Int} = device_limits().max_work
 # the grid is only limited by the size of `size_t`
 KI.max_num_groups(::POCLBackend)::NTuple{3, Int} = (typemax(Int), typemax(Int), typemax(Int))
 KI.sub_group_size(::POCLBackend)::Int = device_limits().sub_group_size
+KI.supports_dynamic_localmemory(::POCLBackend) = true
+KI.max_dynamic_localmemory(kernel::KI.Kernel{<:POCLBackend})::Int =
+    kernel.kern.kernel.fun.max_dynamic_localmemory
 KI.multiprocessor_count(::POCLBackend)::Int = device_limits().compute_units
 
 # each work-group runs on one thread, which loops over (and vectorizes across) its
@@ -262,9 +270,10 @@ KI.multiprocessor_count(::POCLBackend)::Int = device_limits().compute_units
 # single thread, so split it into about as many work-groups as there are threads, as long as
 # the work-groups stay large enough to vectorize. this assumes that the work is balanced
 # across the work-items.
+# (local memory comes out of a per-thread buffer, so its amount doesn't change that)
 KI.launch_configuration(
     kernel::KI.Kernel{<:POCLBackend}; nitems::Union{Integer, Nothing} = nothing,
-    max_work_group_size::Integer = typemax(Int)
+    max_work_group_size::Integer = typemax(Int), localmem = nothing
 ) = (; workgroupsize = launch_workgroupsize(kernel.kern.kernel.fun, nitems, max_work_group_size))
 
 # kept out of `KI.launch_configuration`, which is compiled for every kernel
@@ -445,6 +454,18 @@ end
     CLDeviceArray(Dims, ptr)
 end
 
+
+# every array is in the one block that the launch sized (see `POCL.dynamic_localmemory`)
+@device_override Base.@propagate_inbounds function KI.dynamic_localmemory(
+        ::Type{T}, dims::Dims{N}, offset::Int
+    ) where {T, N}
+    KI.check_dynamic_localmemory(T, dims, offset)
+    ptr = reinterpret(Core.LLVMPtr{T, POCL.AS.Workgroup}, POCL.dynamic_localmemory() + offset)
+    return CLDeviceArray{T, N, POCL.AS.Workgroup}(dims, ptr)
+end
+
+@device_override @inline KI.dynamic_localmemory_size() =
+    POCL.kernel_state().dynamic_localmemory_size % Int
 
 ## Synchronization and Printing
 

@@ -263,6 +263,19 @@ Whether kernels on the active device support `Float64` values.
 supports_float64(::Backend) = false
 
 """
+    supports_dynamic_localmemory(::Backend)::Bool
+
+Whether kernels on the active device support local memory whose size is chosen at launch:
+[`dynamic_localmemory`](@ref) and [`dynamic_localmemory_size`](@ref) on the device, and the
+`localmem` keyword of a [`Kernel`](@ref) call.
+
+!!! note
+    Backend implementations **must** implement this function if they support dynamic local
+    memory. The fallback returns `false`.
+"""
+supports_dynamic_localmemory(::Backend) = false
+
+"""
     supports_subgroups(::Backend)::Bool
 
 Whether kernels on the active device support sub-groups with a fixed width

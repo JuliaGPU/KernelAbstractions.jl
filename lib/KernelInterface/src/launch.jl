@@ -10,7 +10,7 @@ kernel object `kern`. `kernel.backend` is the backend value that was passed to
 Calling a `Kernel` launches it:
 
     (kernel::Kernel)(args...; numgroups=(), workgroupsize=(), ndrange=(),
-                     max_work_group_size=typemax(Int), kwargs...)
+                     max_work_group_size=typemax(Int), localmem=nothing, kwargs...)
 
 `args` are the host-side arguments, e.g. a `CuArray` rather than a `CuDeviceArray`. The
 backend converts them with [`argconvert`](@ref), and the converted types have to match the
@@ -38,6 +38,16 @@ and the number of work-items in each dimension must fit an `Int`; anything else 
 `ArgumentError` before the backend sees it. The number of work-groups is validated by the
 backend.
 
+`localmem` is the size in bytes of the block of dynamic local memory that every work-group
+gets, for kernels using [`dynamic_localmemory`](@ref): an `Integer`, or a function that is
+called with the number of work-items per work-group and returns one. A function is how to
+size the block for a work-group size that is chosen by the launch, e.g.
+`localmem = n -> n * sizeof(Float32)`; with a tuned work-group size, it is also passed to
+[`launch_configuration`](@ref), which may call it for sizes it considers. `nothing` or 0
+asks for none. Anything else needs a backend that [`supports_dynamic_localmemory`](@ref),
+and must not exceed [`max_dynamic_localmemory`](@ref)`(kernel)`; otherwise, an
+`ArgumentError` is thrown.
+
 Other keyword arguments are passed to [`launch`](@ref) unchanged. They are
 backend-specific: a backend throws an error for keywords it doesn't support.
 
@@ -58,12 +68,57 @@ Core.kwcall(kwargs::NamedTuple, kernel::Kernel, args::Vararg{Any, N}) where {N} 
 
 function call_kernel(
         kernel::Kernel, args::Tuple; numgroups = (), workgroupsize = (), ndrange = (),
-        max_work_group_size::Integer = typemax(Int), kwargs...
+        max_work_group_size::Integer = typemax(Int), localmem = nothing, kwargs...
     )
-    groups, items = launch_geometry(kernel, numgroups, workgroupsize, ndrange, max_work_group_size)
+    # `nothing` is no dynamic local memory, like 0. as the default, it keeps the code
+    # for it out of launches without the keyword, which are known by its type.
+    localmem = requested_localmem(localmem)
+    localmem === nothing || check_localmem(kernel)
+    groups, items = launch_geometry(kernel, numgroups, workgroupsize, ndrange, max_work_group_size, localmem)
     any(iszero, groups) && return nothing
-    launch(kernel, groups, items, args; kwargs...)
+    if localmem === nothing
+        launch(kernel, groups, items, args; kwargs...)
+    else
+        launch(kernel, groups, items, args; localmem = localmem_bytes(kernel, localmem, items), kwargs...)
+    end
     return nothing
+end
+
+@inline requested_localmem(::Nothing) = nothing
+@inline requested_localmem(bytes::Integer) = iszero(bytes) ? nothing : bytes
+@inline requested_localmem(f) = f
+
+# The parts of the `localmem` handling that don't need the arguments are kept out of
+# `call_kernel`, which is compiled for every kernel.
+
+@noinline function check_localmem(kernel::Kernel)
+    supports_dynamic_localmemory(kernel.backend) ||
+        throw(ArgumentError("`localmem` needs dynamic local memory, which $(typeof(kernel.backend)) doesn't support"))
+    return
+end
+
+"""
+    localmem_bytes(kernel::Kernel, localmem, items::Dims{3})::Int
+
+The number of bytes of dynamic local memory that the `localmem` keyword of a
+[`Kernel`](@ref) call asks for, for work-groups of `items` work-items: `localmem` itself,
+or what it returns for the number of work-items if it is a function. Throws an
+`ArgumentError` if that isn't between 0 and [`max_dynamic_localmemory`](@ref)`(kernel)`.
+
+Not part of the public interface; used by KernelInterface's launch code.
+"""
+@inline function localmem_bytes(kernel::Kernel, localmem, items::Dims{3})
+    bytes = localmem isa Integer ? localmem : localmem(prod(items))
+    return checked_localmem_bytes(bytes, max_dynamic_localmemory(kernel))
+end
+
+@noinline function checked_localmem_bytes(bytes, limit::Int)
+    bytes isa Integer ||
+        throw(ArgumentError("`localmem` must return a number of bytes, got $(repr(bytes))"))
+    bytes >= 0 || throw(ArgumentError("`localmem` must not be negative, got $bytes"))
+    bytes <= limit ||
+        throw(ArgumentError("`localmem` of $bytes bytes exceeds the $limit bytes of dynamic local memory this kernel can use"))
+    return Int(bytes)
 end
 
 """
@@ -75,7 +130,9 @@ and normalizing the launch geometry; users call the kernel instead.
 
 `groups` and `items` are positive, `items` fits [`max_work_group_dims`](@ref) and
 [`max_work_group_size`](@ref)`(kernel)`, and `groups .* items` doesn't overflow `Int`.
-`kwargs` are the keyword arguments of the call that KernelInterface doesn't know.
+`kwargs` are the keyword arguments of the call that KernelInterface doesn't know. A launch
+with dynamic local memory also passes `localmem`, the validated size of the block in bytes
+as an `Int`; launches without don't pass the keyword.
 
 !!! note
     Backend implementations **must** implement:
@@ -86,7 +143,9 @@ and normalizing the launch geometry; users call the kernel instead.
     queues the launch on the calling task's queue; it doesn't have to wait for the kernel to
     complete. To keep launches with many arguments cheap, it should pass `args` on as a
     tuple rather than splatting it: Julia doesn't turn a splat of more than 32 elements into
-    a direct call. It must throw for keywords it does not support, and may throw for a
+    a direct call. A backend that [`supports_dynamic_localmemory`](@ref) has to accept
+    the `localmem::Int` keyword, and give every work-group a block of at least that many
+    bytes. It must throw for keywords it does not support, and may throw for a
     number of work-groups the device cannot launch, or for a geometry that
     backend-specific compiler options of the kernel don't allow.
 
@@ -138,12 +197,16 @@ end
 end
 
 """
-    launch_geometry(kernel, numgroups, workgroupsize, ndrange, max_work_group_size)::Tuple{Dims{3}, Dims{3}}
+    launch_geometry(kernel, numgroups, workgroupsize, ndrange, max_work_group_size, [localmem=nothing])::Tuple{Dims{3}, Dims{3}}
 
 Validate the launch keywords of a [`Kernel`](@ref) call and turn them into the number of
 work-groups and the work-group size. A zero number of work-groups means nothing is launched.
+`localmem`, unless it is `nothing`, is passed to [`launch_configuration`](@ref) if that
+chooses the work-group size.
 """
-@inline function launch_geometry(kernel::Kernel, numgroups, workgroupsize, ndrange, max_work_group_size)
+@inline function launch_geometry(
+        kernel::Kernel, numgroups, workgroupsize, ndrange, max_work_group_size, localmem = nothing
+    )
     check_launch(numgroups, workgroupsize, ndrange, max_work_group_size)
     items = if workgroupsize != ()
         wgsize = pad3(workgroupsize)
@@ -155,10 +218,14 @@ work-groups and the work-group size. A zero number of work-groups means nothing 
         return (0, 0, 0), (1, 1, 1)
     else
         wanted = pad3(ndrange)
-        config = launch_configuration(
-            kernel; nitems = capped_prod(wanted, typemax(Int)),
-            max_work_group_size = min(max_work_group_size, typemax(Int)) % Int
-        )
+        nitems = capped_prod(wanted, typemax(Int))
+        max_items = min(max_work_group_size, typemax(Int)) % Int
+        # backends without dynamic local memory don't take the keyword
+        config = if localmem === nothing
+            launch_configuration(kernel; nitems, max_work_group_size = max_items)
+        else
+            launch_configuration(kernel; nitems, max_work_group_size = max_items, localmem)
+        end
         threads_to_workgroupsize(config.workgroupsize, wanted, max_work_group_dims(kernel.backend))
     end
     return launch_groups(numgroups, ndrange, items), items
@@ -278,12 +345,33 @@ The work-group size that performs best is often smaller; see [`launch_configurat
 function max_work_group_size end
 
 """
-    launch_configuration(kernel::Kernel; nitems=nothing, max_work_group_size=typemax(Int))::@NamedTuple{workgroupsize::Int}
+    max_dynamic_localmemory(kernel::Kernel)::Int
+
+The largest `localmem` that `kernel` can be launched with. That is the number of bytes of
+dynamic local memory (see [`dynamic_localmemory`](@ref)) a work-group can have, besides the
+local memory the kernel allocates statically with [`localmemory`](@ref). 0 if the backend
+doesn't support dynamic local memory.
+
+!!! note
+    Backend implementations **must** implement this if
+    [`supports_dynamic_localmemory`](@ref) returns `true`:
+    ```
+    max_dynamic_localmemory(kernel::Kernel{<:NewBackend})::Int
+    ```
+"""
+max_dynamic_localmemory(::Kernel) = 0
+
+"""
+    launch_configuration(kernel::Kernel; nitems=nothing, max_work_group_size=typemax(Int), [localmem])::@NamedTuple{workgroupsize::Int}
 
 The recommended number of work-items per work-group for launching `kernel` over `nitems`
 work-items in total (`nothing` if unknown), at most `max_work_group_size`. This is what an
 `ndrange` launch without a `workgroupsize` uses, passing the number of work-items in the
 `ndrange` (saturated at `typemax(Int)`). `nitems` and `max_work_group_size` are positive.
+
+`localmem` is the `localmem` keyword of a [`Kernel`](@ref) call, if it asks for any: the
+bytes of dynamic local memory per work-group, or a function of the number of work-items per
+work-group that returns them.
 
 Unlike [`max_work_group_size`](@ref), this is advice: backends may base it on occupancy or
 on the size of the launch, e.g. to prefer more work-groups over larger ones.
@@ -297,10 +385,15 @@ on the size of the launch, e.g. to prefer more work-groups over larger ones.
     The result has to be positive and at most `max_work_group_size` and
     `max_work_group_size(kernel)`. The fallback recommends the largest legal work-group
     size.
+
+    A backend that [`supports_dynamic_localmemory`](@ref) has to accept the `localmem`
+    keyword as well: a positive `Integer`, or a callable. Only launches that ask for
+    dynamic local memory pass it. A backend whose work-group sizes don't depend on the
+    amount of local memory can ignore it.
 """
 function launch_configuration(
         kernel::Kernel; nitems::Union{Integer, Nothing} = nothing,
-        max_work_group_size::Integer = typemax(Int)
+        max_work_group_size::Integer = typemax(Int), localmem = nothing
     )
     return (; workgroupsize = Int(min(KernelInterface.max_work_group_size(kernel), max_work_group_size)))
 end
@@ -441,7 +534,7 @@ function kernel_function end
 end
 
 const MACRO_KWARGS = [:launch]
-const LAUNCH_KWARGS = [:numgroups, :workgroupsize, :ndrange, :max_work_group_size]
+const LAUNCH_KWARGS = [:numgroups, :workgroupsize, :ndrange, :max_work_group_size, :localmem]
 
 """
     KI.@launch backend [launch=true] [numgroups=...] [workgroupsize=...] [ndrange=...] [max_work_group_size=...] [kwargs...] f(args...)

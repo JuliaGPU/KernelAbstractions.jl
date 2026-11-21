@@ -15,7 +15,7 @@ const OpenCLCompilerJob = CompilerJob{SPIRVCompilerTarget, OpenCLCompilerParams}
 
 Cached compilation results for an OpenCL kernel job, managed by
 `GPUCompiler.cached_results`. Fields are populated through the compile pipeline:
-`obj` (SPIR-V bytes) + `entry` + `device_rng` after codegen, and `kernels` after the
+`obj` (SPIR-V bytes) + `entry` + `device_rng` + `dynamic_localmemory` after codegen, and `kernels` after the
 session-local link onto an OpenCL context. The first three are session-portable
 (cached through precompilation, except when GPUCompiler marks the job
 session-dependent and wipes its entries before image serialization); `kernels` is
@@ -32,10 +32,11 @@ mutable struct OpenCLResults
     obj::Union{Nothing, Vector{UInt8}}                   # SPIR-V binary
     entry::Union{Nothing, String}
     device_rng::Bool
+    dynamic_localmemory::Bool                            # has the argument for it
     exception_sites::Vector{GPUCompiler.ExceptionSite}
     kernels::Vector{Tuple{cl.Context, cl.Kernel}}        # session-local; linear-scanned
     OpenCLResults() = new(
-        nothing, nothing, false, GPUCompiler.ExceptionSite[], Tuple{cl.Context, cl.Kernel}[]
+        nothing, nothing, false, false, GPUCompiler.ExceptionSite[], Tuple{cl.Context, cl.Kernel}[]
     )
 end
 
@@ -150,7 +151,19 @@ function GPUCompiler.finish_linked_module!(@nospecialize(job::OpenCLCompilerJob)
             "julia.opencl.random_keys" => (; name = "random_keys", typ = LLVMPtr{UInt32, AS.Workgroup}),
             "julia.opencl.random_counters" => (; name = "random_counters", typ = LLVMPtr{UInt32, AS.Workgroup}),
         )
-        GPUCompiler.add_input_arguments!(job, mod, f, kernel_intrinsics)
+        f = GPUCompiler.add_input_arguments!(job, mod, f, kernel_intrinsics)
+
+        # the dynamic local memory is added separately, so that it is the last argument
+        # whether or not the kernel uses the RNG. launches have to size the argument, so
+        # note that the kernel has it.
+        if haskey(mod.functions, "julia.opencl.dynamic_localmemory")
+            kernel_intrinsics = Dict(
+                "julia.opencl.dynamic_localmemory" =>
+                    (; name = "dynamic_localmemory", typ = LLVMPtr{UInt8, AS.Workgroup}),
+            )
+            f = GPUCompiler.add_input_arguments!(job, mod, f, kernel_intrinsics)
+            push!(f.function_attributes, StringAttribute("julia.opencl.dynamic_localmemory", ""))
+        end
     end
     return
 end
@@ -287,7 +300,7 @@ const initialization_world = Ref{UInt}(typemax(UInt))
 invoke_frozen(f, args...) = Base.invoke_in_world(initialization_world[], f, args...)
 
 # run inference + LLVM codegen + SPIR-V emission. returns `(obj, entry, device_rng,
-# exception_sites)`,
+# dynamic_localmemory, exception_sites)`,
 # all session-portable so they survive precompilation when stored on a cached `CodeInstance`.
 const compilations = Threads.Atomic{Int}(0)
 function compile_to_obj(@nospecialize(job::CompilerJob))
@@ -300,7 +313,9 @@ function compile_to_obj(@nospecialize(job::CompilerJob))
         @dispose ir = meta.ir begin
             entry = meta.entry.name
             device_rng = haskey(meta.entry.function_attributes, "julia.opencl.rng")
-            (; obj, entry, device_rng, meta.exception_sites)
+            dynamic_localmemory =
+                haskey(meta.entry.function_attributes, "julia.opencl.dynamic_localmemory")
+            (; obj, entry, device_rng, dynamic_localmemory, meta.exception_sites)
         end
     end
 end
@@ -308,7 +323,8 @@ end
 # link the SPIR-V bytes into a session-local `cl.Kernel` on the active context.
 function link_kernel(
         @nospecialize(job::CompilerJob), obj::Vector{UInt8}, entry::String,
-        exception_sites::Vector{GPUCompiler.ExceptionSite}
+        exception_sites::Vector{GPUCompiler.ExceptionSite}, device_rng::Bool = false,
+        dynamic_localmemory::Bool = false
     )
     prog = if "cl_khr_il_program" in device().extensions
         cl.Program(obj, context())
@@ -321,5 +337,8 @@ function link_kernel(
     # the ndrange can only shrink them further
     kernel.tuned_work_group_size = min(kernel.work_group_size, host_kernel_max_items(kernel))
     kernel.exception_sites = exception_sites
+    # (a kernel without the argument ignores what launches ask for)
+    kernel.dynamic_localmemory = dynamic_localmemory
+    kernel.max_dynamic_localmemory = max_local_bytes(kernel, device_rng)
     return kernel
 end

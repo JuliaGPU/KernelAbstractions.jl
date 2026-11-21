@@ -1294,11 +1294,13 @@ function Base.getproperty(p::Program, s::Symbol)
     end
 end
 
-# a host kernel prepared for one work-group size; a NULL `id` caches an unsupported size
-# (see `host_kernel`)
+# a host kernel prepared for one work-group size and amount of dynamic local memory; a NULL
+# `id` caches an unsupported combination (see `host_kernel`)
 mutable struct HostKernelHandle
     const id::cl_host_kernel_pocl
     const local_size::NTuple{3, Int}
+    # the bytes of its dynamic local memory argument, 0 if the kernel has none
+    const local_bytes::Int
     const scratch_size::Int
     const scratch_alignment::Int
     # last sampled duration (counter ticks) and last launch's work-group count
@@ -1317,8 +1319,10 @@ mutable struct HostKernelHandle
     Base.@atomic serial_sample_b::UInt64
     Base.@atomic serial_duration_b::UInt64
 
-    function HostKernelHandle(id, local_size, scratch_size = 0, scratch_alignment = 1)
-        h = new(id, local_size, scratch_size, scratch_alignment, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+    function HostKernelHandle(
+            id, local_size, scratch_size = 0, scratch_alignment = 1, local_bytes = 0
+        )
+        h = new(id, local_size, local_bytes, scratch_size, scratch_alignment, 0, 0, 0, 0, 0, 0, 0, 0, 0)
         id == C_NULL || finalizer(h -> clReleaseHostKernelPOCL(h.id), h)
         return h
     end
@@ -1343,6 +1347,10 @@ mutable struct Kernel
     tuned_work_group_size::Int
     # the throw sites of its code, which the exceptions it reports refer to
     exception_sites::Vector{ExceptionSite}
+    # whether its last argument is the dynamic local memory, and how many bytes of it a
+    # launch can ask for (see `POCL.link_kernel`)
+    dynamic_localmemory::Bool
+    max_dynamic_localmemory::Int
 
     function Kernel(k::cl_kernel)
         function get(param, T = Csize_t)
@@ -1355,7 +1363,8 @@ mutable struct Kernel
             new(
                 k, ReentrantLock(), HostKernelHandle[], nothing, false, work_group_size,
                 get(CL_KERNEL_PREFERRED_WORK_GROUP_SIZE_MULTIPLE),
-                get(CL_KERNEL_PRIVATE_MEM_SIZE, cl_ulong), work_group_size, ExceptionSite[]
+                get(CL_KERNEL_PRIVATE_MEM_SIZE, cl_ulong), work_group_size, ExceptionSite[],
+                false, 0
             )
         catch
             clReleaseKernel(k)
@@ -1486,9 +1495,12 @@ const WorkSize = NTuple{3, Csize_t}
 
 function enqueue_kernel(
         k::Kernel, global_work_size, local_work_size = nothing;
-        global_work_offset = nothing, rng_state = false, nargs = nothing
+        global_work_offset = nothing, rng_state = false, nargs = nothing, local_bytes = 0
     )
     work_dim = length(global_work_size)
+
+    # the dynamic local memory is the last argument, after those of the RNG
+    local_bytes == 0 || set_arg!(k, num_args(k), LocalMem(UInt8, local_bytes))
 
     if global_work_offset === nothing && local_work_size !== nothing && !rng_state && work_dim <= 3
         if length(local_work_size) != work_dim
@@ -1577,7 +1589,7 @@ function call(
         k::Kernel, args::Tuple; global_size = (1,), local_size = nothing,
         global_work_offset = nothing,
         svm_pointers::Union{Nothing, Vector{Ptr{Cvoid}}} = nothing,
-        rng_state = false
+        rng_state = false, local_bytes = 0
     )
     return @lock k.lock begin
         set_args!(k, args)
@@ -1587,7 +1599,10 @@ function call(
                 sizeof(svm_pointers), svm_pointers
             )
         end
-        enqueue_kernel(k, global_size, local_size; global_work_offset, rng_state, nargs = length(args))
+        enqueue_kernel(
+            k, global_size, local_size; global_work_offset, rng_state, nargs = length(args),
+            local_bytes
+        )
     end
 end
 

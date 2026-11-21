@@ -269,6 +269,99 @@ localmemory(::Type{T}, dims) where {T} = localmemory(T, Val(dims))
 localmemory(::Type{T}, ::Val) where {T} =
     error("Local memory used outside kernel or not captured")
 
+"""
+    dynamic_localmemory(::Type{T}, dims, [offset::Integer=0])
+
+An array of element type `T` and size `dims` (an integer or a tuple of integers) in the
+dynamic local memory of the work-group, starting `offset` bytes into it. Unlike with
+[`localmemory`](@ref), `dims` doesn't have to be known at compile time.
+
+A work-group has a single block of dynamic local memory, whose size in bytes is chosen at
+launch with the `localmem` keyword of a [`Kernel`](@ref) call, and returned by
+[`dynamic_localmemory_size`](@ref). Every call returns an array in that same block: calls
+whose byte ranges overlap return aliasing arrays, wherever they are made from. Kernels that
+need several arrays place them at different offsets. The block is distinct from the memory
+of [`localmemory`](@ref) arrays, and both can be used by the same kernel.
+
+Like other local memory, it is uninitialized, shared by the work-items of a work-group, and
+lives until the work-group finishes. Use [`barrier`](@ref) to make writes visible to the
+other work-items.
+
+`T` has to be an `isbits` type (not a union of them). The block is aligned to at least 16
+bytes, and `offset` has to be a multiple of the alignment of `T`. An array that doesn't fit
+in the block throws a `BoundsError`, unless bounds checking is disabled with `@inbounds`.
+
+Only available if [`supports_dynamic_localmemory`](@ref).
+
+!!! note
+    Backend implementations that support dynamic local memory **must** implement:
+    ```
+    @device_override dynamic_localmemory(::Type{T}, dims::Dims{N}, offset::Int) where {T, N}
+    ```
+    It should call [`check_dynamic_localmemory`](@ref KernelInterface.check_dynamic_localmemory)`(T, dims, offset)`
+    before creating the array. The other forms forward to this one.
+"""
+Base.@propagate_inbounds dynamic_localmemory(::Type{T}, dims) where {T} =
+    dynamic_localmemory(T, dims, 0)
+Base.@propagate_inbounds dynamic_localmemory(::Type{T}, dims, offset::Integer) where {T} =
+    dynamic_localmemory(T, localmemory_dims(dims), Int(offset))
+
+@inline localmemory_dims(len::Integer) = (Int(len),)
+@inline localmemory_dims(dims::Tuple{Vararg{Integer}}) = map(Int, dims)
+
+# This form only exists in a backend's overlay method table, so off-device it would
+# otherwise fall back to the forwarding method above and recurse forever.
+dynamic_localmemory(::Type{T}, ::Dims, ::Int) where {T} =
+    error("Dynamic local memory used outside kernel, or not supported by the backend")
+
+"""
+    dynamic_localmemory_size()::Int
+
+The size in bytes of the work-group's block of dynamic local memory (see
+[`dynamic_localmemory`](@ref)). It is at least what the launch asked for with `localmem`:
+backends may round the size up.
+
+!!! note
+    Backend implementations that support dynamic local memory **must** implement:
+    ```
+    @device_override dynamic_localmemory_size()
+    ```
+"""
+dynamic_localmemory_size() =
+    error("Dynamic local memory used outside kernel, or not supported by the backend")
+
+"""
+    check_dynamic_localmemory(::Type{T}, dims::Dims, offset::Int)
+
+Check that `T` can be stored in dynamic local memory and, unless bounds checking is
+disabled, that an array of `T` and size `dims` at byte `offset` fits in the block of the
+work-group. For use by backends' [`dynamic_localmemory`](@ref) methods.
+"""
+Base.@propagate_inbounds function check_dynamic_localmemory(::Type{T}, dims::Dims, offset::Int) where {T}
+    isbitstype(T) ||
+        error("Dynamic local memory only supports `isbits` element types")
+    @boundscheck begin
+        # (written with a division, so that a huge array can't overflow the comparison)
+        len, overflow = checked_length(dims)
+        available = dynamic_localmemory_size() - offset
+        if overflow | (offset < 0) | (available < 0) | (len > available ÷ max(sizeof(T), 1))
+            throw(BoundsError())
+        end
+    end
+    return
+end
+
+# the number of elements of an array of size `dims`, and whether it is invalid: negative,
+# or not representable
+@inline function checked_length(dims::Dims)
+    len, invalid = 1, false
+    for d in dims
+        len, overflow = Base.mul_with_overflow(len, d)
+        invalid |= overflow | (d < 0)
+    end
+    return len, invalid
+end
+
 
 ## communication
 
