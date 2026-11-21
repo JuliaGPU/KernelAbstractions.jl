@@ -218,6 +218,15 @@ function Adapt.adapt_storage(to::KernelAdaptor, xs::Array{T, N}) where {T, N}
     return CLDeviceArray{T, N, AS.CrossWorkgroup}(size(xs), reinterpret(LLVMPtr{T, AS.CrossWorkgroup}, ptr), maxsize)
 end
 
+# VERSION >= v"1.11"
+@static if isdefined(Core, :Memory)
+    function Adapt.adapt_storage(to::KernelAdaptor, xs::Memory{T}) where {T}
+        # memory of isbits unions stores its selector bytes right after its data
+        maxsize = length(xs) * Base.elsize(xs)
+        return CLDeviceArray{T, 1, AS.CrossWorkgroup}((length(xs),), reinterpret(LLVMPtr{T, AS.CrossWorkgroup}, pointer(xs)), maxsize)
+    end
+end
+
 import KernelInterface
 include("backend.jl")
 import .POCLKernels: POCLBackend
