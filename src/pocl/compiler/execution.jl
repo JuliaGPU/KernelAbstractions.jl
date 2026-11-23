@@ -264,8 +264,11 @@ end
 
 # kept out of the launches, which are compiled for every kernel: inlining `rand` makes them
 # several times as expensive to compile
-@inline kernel_state(rng_state::Bool, exception_info::Ptr) =
-    KernelState(rng_state ? rng_seed() : UInt32(0), UInt64(UInt(exception_info)))
+@inline kernel_state(rng_state::Bool, exception_info::Ptr, device_heap::Bool = false) =
+    KernelState(
+    rng_state ? rng_seed() : UInt32(0), UInt64(UInt(exception_info)),
+    device_heap ? device_heap_address() : UInt64(0)
+)
 @noinline rng_seed() = Base.rand(UInt32)
 
 # argument expressions for a kernel compiled for `F` and `TT`.
@@ -303,7 +306,7 @@ kernel_argument_types(@nospecialize(converted::Type)) = Tuple{KernelState, conve
     return inline_body(
         quote
             $cl.clcall(
-                kernel.fun, $call_tt, (kernel_state(kernel.rng_state, exception_info), $(vals...));
+                kernel.fun, $call_tt, (kernel_state(kernel.rng_state, exception_info, kernel.fun.device_heap), $(vals...));
                 global_size, local_size, kernel.rng_state
             )
         end
@@ -352,6 +355,60 @@ end
 @noinline exception_info() = get!(task_local_storage(), :POCLExceptionInfo) do
     Ref(ExceptionInfo_st())
 end::Base.RefValue{ExceptionInfo_st}
+
+
+## device heap
+
+"""
+    DeviceHeap(size)
+
+A region of `size` bytes that kernels launched in [`with_device_heap`](@ref) allocate from,
+when their code calls `malloc` (e.g. Enzyme's caches of loops with dynamic trip counts).
+Allocations are never freed, but they stay valid as long as the heap does, also across
+launches. A kernel throws an `OutOfMemoryError` once it is exhausted.
+"""
+mutable struct DeviceHeap
+    const region::Vector{UInt8}
+    const info::Base.RefValue{DeviceHeap_st}
+    function DeviceHeap(size::Integer)
+        # (arrays are aligned to at least 16 bytes, as `malloc`)
+        region = Vector{UInt8}(undef, size)
+        info = Ref(DeviceHeap_st(UInt64(UInt(pointer(region))), UInt64(size)))
+        return new(region, info)
+    end
+end
+
+"""
+    enzyme_heap_size_per_item[]
+
+The bytes of the [`DeviceHeap`](@ref) that Enzyme's rules for kernels allocate per
+work-item, for the caches of loops with dynamic trip counts. Raise it when differentiating
+a kernel throws an `OutOfMemoryError`.
+"""
+const enzyme_heap_size_per_item = Ref(4096)
+
+"""
+    with_device_heap(f, heap::DeviceHeap)
+
+Call `f()`, and let the kernels it launches on this task allocate from `heap`.
+"""
+function with_device_heap(f, heap::DeviceHeap)
+    tls = task_local_storage()
+    old = get(tls, :POCLDeviceHeap, nothing)
+    tls[:POCLDeviceHeap] = heap
+    try
+        return f()
+    finally
+        tls[:POCLDeviceHeap] = old
+    end
+end
+
+# the address of the `DeviceHeap_st` of the current heap, or 0
+@noinline function device_heap_address()
+    heap = get(task_local_storage(), :POCLDeviceHeap, nothing)
+    heap === nothing && return UInt64(0)
+    return UInt64(UInt(Base.unsafe_convert(Ptr{DeviceHeap_st}, (heap::DeviceHeap).info)))
+end
 
 
 ## host-side kernels
@@ -422,7 +479,9 @@ end
             end
         end
         kernel = if cached === nothing
-            linked = link_kernel(job, res.obj::Vector{UInt8}, res.entry::String, res.exception_sites)
+            linked = link_kernel(
+                job, res.obj::Vector{UInt8}, res.entry::String, res.exception_sites, res.device_heap
+            )
             # Don't cache session-local kernel handles while precompiling: the
             # results struct is serialized into the package image along with its
             # CodeInstance, and the handles would come back dangling.
@@ -463,6 +522,7 @@ end
         res.obj = compiled.obj
         res.entry = compiled.entry
         res.device_rng = compiled.device_rng
+        res.device_heap = compiled.device_heap
         res.exception_sites = compiled.exception_sites
     end
     return res
@@ -977,7 +1037,7 @@ end
     # RNG local memory arguments are set on the host kernel; pass no values here
     return inline_body(
         quote
-            vals = Ref{$call_tt}((kernel_state(kernel.rng_state, exception_info), $(vals...)))
+            vals = Ref{$call_tt}((kernel_state(kernel.rng_state, exception_info, kernel.fun.device_heap), $(vals...)))
             GC.@preserve vals begin
                 base = Ptr{Cvoid}(Base.unsafe_convert(Ptr{$call_tt}, vals))
                 ptrs = Ref{NTuple{$(N + 2), Ptr{Cvoid}}}(($(arg_ptrs...), C_NULL, C_NULL))
