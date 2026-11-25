@@ -31,6 +31,7 @@ function main()
             "Home" => "index.md",
             "Quickstart" => "quickstart.md",
             "Writing kernels" => "kernels.md",
+            "Coming from CUDA.jl" => "cuda.md",
             "Examples" => [
                 "examples/memcopy.md",
                 "examples/memcopy_static.md",
