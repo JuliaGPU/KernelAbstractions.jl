@@ -17,5 +17,12 @@ function copyto_testsuite(Backend, ArrayT)
 
     @test isapprox(a, Array(A))
     @test isapprox(a, Array(B))
+
+    # between two device arrays (JuliaGPU/Metal.jl#336)
+    C = ArrayT(rand(ET, M))
+    D = ArrayT(zeros(ET, M))
+    copyto!(backend, D, C)
+    synchronize(backend)
+    @test Array(D) == Array(C)
     return
 end
