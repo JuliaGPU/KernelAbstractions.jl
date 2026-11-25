@@ -293,16 +293,12 @@ const compilations = Threads.Atomic{Int}(0)
 function compile_to_obj(@nospecialize(job::CompilerJob))
     compilations[] += 1
 
-    return JuliaContext() do ctx
-        obj, meta = invoke_frozen(GPUCompiler.compile, :obj, job)
-
-        # we own the IR: inspect it, then dispose of it
-        @dispose ir = meta.ir begin
-            entry = meta.entry.name
-            device_rng = haskey(meta.entry.function_attributes, "julia.opencl.rng")
-            (; obj, entry, device_rng, meta.exception_sites)
-        end
-    end
+    # (runs in the context of the IR, which GPUCompiler frees afterwards)
+    inspect(obj, meta) = (;
+        obj, entry = meta.entry.name, meta.exception_sites,
+        device_rng = haskey(meta.entry.function_attributes, "julia.opencl.rng"),
+    )
+    return invoke_frozen(GPUCompiler.compile, inspect, :obj, job)
 end
 
 # link the SPIR-V bytes into a session-local `cl.Kernel` on the active context.
