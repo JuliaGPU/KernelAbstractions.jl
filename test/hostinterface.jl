@@ -58,7 +58,7 @@ function hostinterface_testsuite(_backend, AT)
         @test KI.multiprocessor_count(backend) isa Int
         @test KI.supports_subgroups(backend) isa Bool
         if KI.supports_subgroups(backend)
-            @test KI.sub_group_size(backend) isa Int
+            @test KI.sub_group_sizes(backend) isa Tuple{Vararg{Int}}
         end
         @test KI.supports_shuffle(backend, Float32) isa Bool
 
