@@ -235,6 +235,15 @@ end
   compiled once). This lets PoCL vectorize kernels better: an axpy over 10⁵ elements on one
   thread took about 15% longer than a serial loop, rather than 3× (x86) to 7× (Apple M1) as
   long. `muladd` is computed with fused multiply-adds on CPUs that have them.
+- KernelAbstractions now requires KernelInterface 0.5, which only guarantees a sub-group
+  width to kernels that request one with `sub_group_size = W`, for a `W` in
+  `KI.sub_group_sizes(backend)`, and removes `KI.sub_group_size(backend)`. KernelAbstractions'
+  own collectives, such as `@groupreduce`, read the width on the device and need no change, but
+  code that sizes anything in a `@kernel` from the host width has to request one. See
+  [Upgrading from KernelInterface 0.4](@ref).
+- A kernel can be constructed with a `sub_group_size` keyword, e.g.
+  `my_kernel(backend, 256; sub_group_size = 16)`, to compile it for a sub-group width from
+  `KernelInterface.sub_group_sizes(backend)`. See [Launching kernels](@ref).
 
 ## Semantic differences
 

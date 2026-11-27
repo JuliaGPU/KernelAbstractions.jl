@@ -1,6 +1,6 @@
 name = "KernelAbstractions"
 uuid = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
-version = "0.10.9"
+version = "0.10.10"
 authors = ["Valentin Churavy <v.churavy@gmail.com> and contributors"]
 
 [workspace]
@@ -55,7 +55,7 @@ Atomix = "1.5"
 EnzymeCore = "0.8.25"
 GPUCompiler = "2.24"
 GPUToolbox = "3.6"
-KernelInterface = "0.4.7"
+KernelInterface = "0.5"
 LLVM = "10"
 LinearAlgebra = "1.6"
 MacroTools = "0.5"

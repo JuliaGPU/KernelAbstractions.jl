@@ -525,9 +525,11 @@ import .NDIteration: get
 ###
 
 """
-    Kernel{Backend, WorkgroupSize, NDRange, Func}
+    Kernel{Backend, WorkgroupSize, NDRange, Func, Options}
 
-Host-side handle for a kernel specialized on a backend, workgroup size, and `ndrange`.
+Host-side handle for a kernel specialized on a backend, workgroup size, and `ndrange`. It
+also holds the compiler options the kernel was constructed with, such as the sub-group width
+it requested (`my_kernel(backend; sub_group_size = W)`).
 
 Kernels are created by calling a [`@kernel`](@ref) function on a backend, for example
 `my_kernel(CUDABackend(), 256)`. The returned object is callable:
@@ -544,13 +546,18 @@ and [`backend`](@ref KernelAbstractions.backend) to inspect a kernel's static co
 Kernels are launched on any backend that implements [KernelInterface](@ref kernelinterface);
 see the [notes for backend implementations](@ref implementations_notes).
 """
-struct Kernel{Backend, WorkgroupSize <: _Size, NDRange <: _Size, Fun}
+struct Kernel{Backend, WorkgroupSize <: _Size, NDRange <: _Size, Fun, Options <: NamedTuple}
     backend::Backend
     f::Fun
+    # compiler options passed to `KI.kernel_function`. their names are part of the type, so
+    # that a kernel without a request doesn't compile the path for one.
+    options::Options
 end
+Kernel{B, WS, ND, F}(backend, f, options::O = (;)) where {B, WS, ND, F, O} =
+    Kernel{B, WS, ND, F, O}(backend, f, options)
 
 function Base.similar(kernel::Kernel{D, WS, ND}, f::F) where {D, WS, ND, F}
-    return Kernel{D, WS, ND, F}(kernel.backend, f)
+    return Kernel{D, WS, ND, F}(kernel.backend, f, kernel.options)
 end
 
 """
@@ -654,8 +661,12 @@ last (possibly partial) workgroup. Primarily used by backend implementations and
     return iterspace, dynamic
 end
 
-function construct(backend::B, ::S, ::NDRange, xpu_name::XPUName) where {B <: Backend, S <: _Size, NDRange <: _Size, XPUName}
-    return Kernel{B, S, NDRange, XPUName}(backend, xpu_name)
+function construct(
+        backend::B, ::S, ::NDRange, xpu_name::XPUName; sub_group_size = nothing
+    ) where {B <: Backend, S <: _Size, NDRange <: _Size, XPUName}
+    # passed on unconverted, so that the backend rejects widths it doesn't offer
+    options = sub_group_size === nothing ? (;) : (; sub_group_size)
+    return Kernel{B, S, NDRange, XPUName}(backend, xpu_name, options)
 end
 
 ###

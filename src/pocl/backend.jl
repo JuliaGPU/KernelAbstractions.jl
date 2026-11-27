@@ -203,12 +203,21 @@ function KI.kernel_function(backend::POCLBackend, f::F, tt::TT = Tuple{}; kwargs
 end
 
 Base.@nospecializeinfer function KA.kernel_function_as(
-        backend::POCLBackend, f::F, @nospecialize(compiled_tt::Type), tt::TT; name = nothing, kwargs...
+        backend::POCLBackend, f::F, @nospecialize(compiled_tt::Type), tt::TT;
+        name = nothing, sub_group_size = nothing, kwargs...
     ) where {F, TT}
-    # the sub-group width defaults to the one `KI.sub_group_size` reports. it is determined
-    # when creating the compiler configuration, since passing it here would make the keyword
-    # arguments' type depend on the device, and the call to `clfunction` dynamic.
-    kernel = clfunction(clconvert(f), tt, compiled_tt; name, kwargs...)
+    # without a request, kernels are compiled for the first of `KI.sub_group_sizes`. that
+    # width is determined when creating the compiler configuration, since passing it here
+    # would make the keyword arguments' type depend on the device, and the call to
+    # `clfunction` dynamic. a requested width is checked here: `clfunction` also accepts
+    # widths past 64, which don't keep the guarantees of `KI.sub_group_sizes`, and takes
+    # `nothing` to mean no `intel_reqd_sub_group_size`, which lets PoCL pick the width.
+    kernel = if sub_group_size === nothing
+        clfunction(clconvert(f), tt, compiled_tt; name, kwargs...)
+    else
+        check_sub_group_size(backend, sub_group_size)
+        clfunction(clconvert(f), tt, compiled_tt; name, sub_group_size = Int(sub_group_size), kwargs...)
+    end
     kern = POCLKernel(kernel, f)
     return KI.Kernel{POCLBackend, typeof(kern)}(backend, kern)
 end
@@ -254,7 +263,14 @@ KI.max_work_group_size(::POCLBackend)::Int = device_limits().max_work_group_size
 KI.max_work_group_dims(::POCLBackend)::NTuple{3, Int} = device_limits().max_work_group_dims
 # the grid is only limited by the size of `size_t`
 KI.max_num_groups(::POCLBackend)::NTuple{3, Int} = (typemax(Int), typemax(Int), typemax(Int))
-KI.sub_group_size(::POCLBackend)::Int = device_limits().sub_group_size
+KI.sub_group_sizes(::POCLBackend)::Tuple{Vararg{Int}} = POCL.session().sub_group_sizes
+
+@noinline function check_sub_group_size(backend::POCLBackend, width)
+    sizes = KI.sub_group_sizes(backend)
+    width in sizes ||
+        throw(ArgumentError("Sub-group size $(repr(width)) is not supported by this device, which supports $sizes"))
+    return
+end
 KI.multiprocessor_count(::POCLBackend)::Int = device_limits().compute_units
 
 # each work-group runs on one thread, which loops over (and vectorizes across) its
