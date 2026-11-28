@@ -63,23 +63,39 @@ function default_sub_group_size(device::cl.Device)
     return isempty(common) ? nothing : first(common)
 end
 
-function Session()
+supports_spirv(device::cl.Device) = any(startswith("SPIR-V_"), split(device.il_version))
+
+function try_init_session()
     cl.pocl_standalone_jll.is_available() ||
-        error("The CPU back-end needs PoCL, which is not available for $(Sys.MACHINE)")
-    idx = findfirst(p -> p.vendor == "The pocl project", cl.platforms())
-    idx === nothing && error("POCL not available")
-    platform = cl.platforms()[idx]
+        return ErrorException("The CPU back-end needs PoCL, which is not available for $(Sys.MACHINE)")
+    platforms = cl.platforms()
+    idx = findfirst(p -> p.vendor == "The pocl project", platforms)
+    idx === nothing && return ErrorException("POCL not available")
+    platform = platforms[idx]
     device = cl.default_device(platform)
+    device === nothing && return ErrorException("PoCL has no default device")
+    device.available || return cl.CLError(cl.CL_DEVICE_NOT_AVAILABLE)
     # PoCL's thread pool can only be sized with environment variables, so use a sub-device
     # with the requested number of compute units. its other threads stay asleep.
     threads = cl.cpu_threads()
     if threads !== nothing && threads < device.max_compute_units && device.max_sub_devices > 0
-        device = cl.sub_device(device, threads)
+        return cl.with_sub_device(device, threads) do sub
+            try_device_session(platform, sub)
+        end
     end
+    return try_device_session(platform, device)
+end
+
+function try_device_session(platform, device)
+    device.available || return cl.CLError(cl.CL_DEVICE_NOT_AVAILABLE)
+    extensions = device.extensions
+    "cl_pocl_host_kernel" in extensions ||
+        return ErrorException("The CPU back-end needs a PoCL build with the cl_pocl_host_kernel extension")
+    supports_spirv(device) ||
+        return ErrorException("Your device does not support SPIR-V, which is currently required for native execution.")
     context = cl.Context(device)
 
     sizes = device.max_work_item_size
-    extensions = device.extensions
     sub_group_size = default_sub_group_size(device)
     limits = (;
         max_work_group_size = Int(device.max_work_group_size),
@@ -94,9 +110,6 @@ function Session()
         fp16 = "cl_khr_fp16" in extensions,
         fp64 = "cl_khr_fp64" in extensions,
     )
-
-    "cl_pocl_host_kernel" in extensions ||
-        error("The CPU back-end needs a PoCL build with the cl_pocl_host_kernel extension")
 
     rate = ticks_per_ns()
     # 50 µs, which is long compared to the cost of letting other tasks run
@@ -114,12 +127,12 @@ end
 
 # created on first use, so that loading the package doesn't initialize PoCL
 mutable struct SessionCache
-    Base.@atomic session::Union{Nothing, Session}
+    Base.@atomic session::Union{Nothing, Session, ErrorException}
     const lock::ReentrantLock
 end
 const session_cache = SessionCache(nothing, ReentrantLock())
 
-@inline function session()
+@inline function cached_session()
     s = Base.@atomic :acquire session_cache.session
     s === nothing || return s
     return init_session()
@@ -128,11 +141,23 @@ end
     return @lock session_cache.lock begin
         s = Base.@atomic :acquire session_cache.session
         if s === nothing
-            s = Session()
+            s = try
+                try_init_session()
+            catch err
+                err isa cl.CLError && err.code == cl.CL_DEVICE_NOT_AVAILABLE || rethrow()
+                err
+            end
+            s isa cl.CLError && return s
             Base.@atomic :release session_cache.session = s
         end
         s
-    end::Session
+    end::Union{Session, ErrorException}
+end
+
+@inline function session()
+    s = cached_session()
+    s isa Session && return s
+    throw(s)
 end
 
 platform() = session().platform

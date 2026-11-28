@@ -8,6 +8,7 @@ include("linenumbers.jl")
 include("coverage.jl")
 include("testsuite.jl")
 include("codegen.jl")
+include("pocl_functional.jl")
 
 @testset "Quality assurance" begin
     quality_assurance_testsuite()
