@@ -2,6 +2,7 @@ using KernelAbstractions
 using KernelInterface
 using Adapt
 using Documenter
+using Documenter.Remotes: GitHub
 using DocumenterCodeBlocks: CodeBlocks
 
 function main()
@@ -10,7 +11,7 @@ function main()
     makedocs(;
         modules = [KernelAbstractions, KernelInterface],
         authors = "JuliaGPU and contributors",
-        repo = "https://github.com/JuliaGPU/KernelAbstractions.jl/blob/{commit}{path}#L{line}",
+        repo = GitHub("JuliaGPU/KernelAbstractions.jl"),
         sitename = "KernelAbstractions.jl",
         plugins = [
             CodeBlocks(; line_counter = :named),
