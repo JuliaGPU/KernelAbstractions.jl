@@ -3,6 +3,8 @@
 The `CPU` backend of KernelAbstractions.jl is implemented on top of
 [PoCL](https://portablecl.org/) (`POCLBackend`). Kernels are compiled to SPIR-V
 and then handed to PoCL, which JIT-compiles them for the host CPU using LLVM.
+[`functional(CPU())`](@ref KernelAbstractions.functional) reports whether the selected PoCL device
+accepts SPIR-V programs and supports the host kernels used by this backend.
 When a kernel fails to compile — or compiles but misbehaves — it can be useful
 to see what PoCL itself is doing.
 

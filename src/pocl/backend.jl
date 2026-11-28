@@ -65,7 +65,7 @@ function KI.versioninfo(io::IO, ::POCLBackend)
             if in("cl_khr_fp64", device.extensions)
                 push!(tags, "fp64")
             end
-            if in("cl_khr_il_program", device.extensions)
+            if POCL.supports_spirv(device)
                 push!(tags, "il")
             end
             ## render
@@ -164,7 +164,7 @@ function KI.copyto!(backend::POCLBackend, A, B)
     return A
 end
 
-KI.functional(::POCLBackend) = true
+KI.functional(::POCLBackend) = POCL.cached_session() isa POCL.Session
 KA.pagelock!(::POCLBackend, x) = nothing
 # its work-items are iterations of a loop, which is faster than dividing for any group size
 KA.fold_threshold(::POCLBackend) = 1

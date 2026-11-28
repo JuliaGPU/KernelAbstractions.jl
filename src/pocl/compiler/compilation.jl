@@ -306,11 +306,7 @@ function link_kernel(
         @nospecialize(job::CompilerJob), obj::Vector{UInt8}, entry::String,
         exception_sites::Vector{GPUCompiler.ExceptionSite}
     )
-    prog = if "cl_khr_il_program" in device().extensions
-        cl.Program(obj, context())
-    else
-        error("Your device does not support SPIR-V, which is currently required for native execution.")
-    end
+    prog = cl.Program(obj, context())
     cl.build!(prog)
     kernel = cl.Kernel(prog, entry)
     # cap tuned work-groups to avoid the queue fallback for excessive stack use; fitting to

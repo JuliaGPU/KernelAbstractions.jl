@@ -566,6 +566,10 @@ end
     )::cl_int
 end
 
+@checked function clReleaseDevice(device)
+    @gcsafe_ccall libopencl.POclReleaseDevice(device::cl_device_id)::cl_int
+end
+
 @checked function clGetDeviceInfo(
         device, param_name, param_value_size, param_value,
         param_value_size_ret
@@ -653,7 +657,7 @@ end
 
 # `cl_pocl_host_kernel` runs work-groups on the calling thread (PoCL's
 # `include/CL/cl_ext_pocl.h`). all supported pocl_standalone_jll builds provide it;
-# `Session()` rejects devices without it.
+# The CPU back-end requires this extension when initializing its session.
 
 const cl_host_kernel_pocl = Ptr{Cvoid}
 
@@ -959,12 +963,22 @@ function sub_device(d::Device, compute_units::Integer)
     return Device(sub[])
 end
 
+function with_sub_device(f, d::Device, compute_units::Integer)
+    device = sub_device(d, compute_units)
+    try
+        return f(device)
+    finally
+        clReleaseDevice(device)
+    end
+end
+
 @inline function Base.getproperty(d::Device, s::Symbol)
     # simple string properties
     version_re = r"OpenCL (?<major>\d+)\.(?<minor>\d+)(?<vendor>.+)"
     @inline function get_string(prop)
         sz = Ref{Csize_t}()
         clGetDeviceInfo(d, prop, 0, C_NULL, sz)
+        iszero(sz[]) && return ""
         chars = Vector{Cchar}(undef, sz[])
         clGetDeviceInfo(d, prop, sz[], chars, C_NULL)
         return GC.@preserve chars unsafe_string(pointer(chars))
@@ -989,6 +1003,8 @@ end
         return get_string(CL_DRIVER_VERSION)
     elseif s === :name
         return get_string(CL_DEVICE_NAME)
+    elseif s === :il_version
+        return get_string(CL_DEVICE_IL_VERSION)
     end
 
     # scalar values
@@ -1032,11 +1048,7 @@ end
     end
 
     # boolean properties
-    @inline function get_bool(prop)
-        bool = Ref{cl_bool}()
-        clGetDeviceInfo(d, prop, sizeof(cl_bool), bool, C_NULL)
-        return bool[] == CL_TRUE
-    end
+    @inline get_bool(prop) = isone(get_scalar(prop, cl_uint))
     if s === :has_image_support
         return get_bool(CL_DEVICE_IMAGE_SUPPORT)
     elseif s === :has_local_mem
